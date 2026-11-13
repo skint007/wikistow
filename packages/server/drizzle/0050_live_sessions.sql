@@ -53,6 +53,13 @@ CREATE TABLE "live_messages" (
 	CONSTRAINT "live_messages_session_id_position_pk" PRIMARY KEY("session_id","position")
 );
 --> statement-breakpoint
+CREATE TABLE "live_session_ids" (
+	"id" text PRIMARY KEY NOT NULL,
+	"version_id" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "live_session_ids_versionId_unique" UNIQUE("version_id")
+);
+--> statement-breakpoint
 CREATE TABLE "live_sessions" (
 	"id" text PRIMARY KEY NOT NULL,
 	"space_id" text NOT NULL,
@@ -61,6 +68,8 @@ CREATE TABLE "live_sessions" (
 	"revision_id" text NOT NULL,
 	"sealed" jsonb NOT NULL,
 	"payload_size" integer GENERATED ALWAYS AS (length(sealed -> 'payload' ->> 'ciphertext')) STORED NOT NULL,
+	"share_id" text,
+	"key_version" integer,
 	"starter_identity_id" text NOT NULL,
 	"starter_account_id" uuid,
 	"joins_made" integer DEFAULT 0 NOT NULL,
@@ -70,13 +79,13 @@ CREATE TABLE "live_sessions" (
 	"snapshot_position" bigint,
 	"snapshot_covers" bigint,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"active_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"ended_at" timestamp with time zone,
 	"ended_reason" text,
 	CONSTRAINT "live_sessions_versionId_unique" UNIQUE("version_id"),
 	CONSTRAINT "live_sessions_id_shape" CHECK ("live_sessions"."id" ~ '^[A-Za-z0-9_-]{1,64}$'),
 	CONSTRAINT "live_sessions_version_id_shape" CHECK ("live_sessions"."version_id" ~ '^[A-Za-z0-9_-]{1,64}$'),
-	CONSTRAINT "live_sessions_ended" CHECK (("live_sessions"."ended_at" is null) = ("live_sessions"."ended_reason" is null))
+	CONSTRAINT "live_sessions_ended" CHECK (("live_sessions"."ended_at" is null) = ("live_sessions"."ended_reason" is null)),
+	CONSTRAINT "live_sessions_region" CHECK (("live_sessions"."share_id" is null) = ("live_sessions"."key_version" is null))
 );
 --> statement-breakpoint
 CREATE TABLE "live_wraps" (
@@ -115,7 +124,7 @@ CREATE INDEX "live_wraps_share_idx" ON "live_wraps" USING btree ("share_id");-->
 -- then find the session ended, or this waits for them.
 CREATE FUNCTION "wikistow_live_end"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  UPDATE "live_sessions" SET "ended_at" = now(), "ended_reason" = 'access', "active_at" = now()
+  UPDATE "live_sessions" SET "ended_at" = now(), "ended_reason" = 'access'
     WHERE "page_id" = NEW."id" AND "ended_at" IS NULL;
   RETURN NULL;
 END $$;

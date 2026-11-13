@@ -2,6 +2,7 @@
 // served a session and may take part, how messages are numbered, relayed
 // and limited, how a session ends with the page's access, and when it goes.
 import {
+  endingOperations as ending,
   newId,
   pageOperations as pages,
   sharingOperations as sharing,
@@ -14,7 +15,14 @@ import {
   MetadataRevisionId,
   type RevisionId,
 } from '@wikistow/contracts';
-import { listenForTreeChanges, schema, sweepDrafts, sweepLive } from '@wikistow/server';
+import {
+  listenForTreeChanges,
+  schema,
+  storedAfter,
+  sweepDrafts,
+  sweepLive,
+  usedBytes,
+} from '@wikistow/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { asAgent, enrolledAgent } from './support/agents.ts';
@@ -25,6 +33,7 @@ import {
   headOf,
   liveOf,
   openStream,
+  send,
   sealMessage,
   sealStart,
   sendStart,
@@ -531,6 +540,61 @@ describe('messages', () => {
     expect(opened.done).toBe(true);
   });
 
+  it('keeps a starter’s join present 30 s until its stream opens, whatever it sends', async () => {
+    const { owner, editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    await me.send([me.message('presence')]);
+    await t.db.execute(sql`
+      update live_joins set stream_broke_at = now() - interval '31 seconds'
+      where session_id = ${session.sessionId}`);
+    expect(await rejection(me.send([me.message('presence')]))).toBe('not-found');
+    // Opened in time, the stream keeps it.
+    const other = await startSession(owner, lib.beside);
+    await stream(owner, other, other.joinId, 1);
+    await t.db.execute(sql`
+      update live_joins set last_message_at = now() - interval '20 seconds'
+      where session_id = ${other.sessionId}`);
+    const theirs = typist(owner, other, other.joinId);
+    theirs.started();
+    expect(await theirs.send([theirs.message('presence')])).toMatchObject({ positions: [null] });
+  });
+
+  it('lets a person make so many joins in one session, then refuses more', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const leave = (joinId: JoinId) =>
+      editor.ctx.api.call(liveRoutes.leave, {
+        params: { sessionId: session.sessionId },
+        body: { joinId },
+      });
+    // The starter's join is the first; further joins, made and left, count too.
+    for (let made = 1; made < liveRoutes.MAX_JOINS_MADE_PER_PERSON; made++) {
+      const copy = typist(editor, session);
+      await copy.send([copy.message('update')], { parent: session.joinId });
+      await leave(copy.joinId);
+    }
+    const one = typist(editor, session);
+    expect(await rejection(one.send([one.message('update')], { parent: session.joinId }))).toBe(
+      'rate-limited',
+    );
+    expect(await streamRefusal(editor, session, newId(JoinId), 1)).toBe('rate-limited');
+  });
+
+  it('reads stored messages for a stream 2 MiB at a time', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    const size = liveRoutes.MAX_UPDATE_BYTES - 128;
+    for (let i = 0; i < 6; i++) await me.send([me.message('update', { size })]);
+    const batch = await storedAfter(t.db, session.sessionId, 1);
+    // Four past the first make 2 MiB, so a fifth starts the next read.
+    expect(batch.map((m) => m.position)).toEqual([2, 3, 4, 5, 6]);
+    expect((await storedAfter(t.db, session.sessionId, 6)).map((m) => m.position)).toEqual([7]);
+  });
+
   it('opens no stream past the last position, nor from below what a snapshot covered', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);
@@ -642,13 +706,46 @@ describe('deleting a session', () => {
     const { open } = await liveOf(owner, lib.page.pageId);
     expect(open?.messages.map((m) => m.position)).toEqual([2, 3, 4]);
     expect(open?.joins.every((j) => !j.present)).toBe(true);
-    await sweepLive(t.db, { retentionMs: 60_000 });
+    // The retention counts from when its last join went.
+    await sweepLive(t.db, { retentionMs: 10 * 60_000 });
     expect(await sessionRow(session.sessionId)).toBeDefined();
-    await t.db.execute(sql`
-      update live_sessions set active_at = now() - interval '2 minutes'
-      where id = ${session.sessionId}`);
     await sweepLive(t.db, { retentionMs: 60_000 });
     expect(await sessionRow(session.sessionId)).toBeUndefined();
+  });
+
+  it('deletes an ended one past the draft retention from its end, whoever is still in it', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    await stream(editor, session, me.joinId, 1);
+    await me.send([me.message('update')]);
+    await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });
+    await t.db.execute(sql`
+      update live_sessions set ended_at = now() - interval '2 minutes'
+      where id = ${session.sessionId}`);
+    await sweepLive(t.db, RETENTION);
+    expect(await sessionRow(session.sessionId)).toBeDefined();
+    await sweepLive(t.db, { retentionMs: 60_000 });
+    expect(await sessionRow(session.sessionId)).toBeUndefined();
+  });
+
+  it('keeps nobody present in an ended session by requests that send nothing', async () => {
+    const { owner, editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    await me.send([me.message('update')]);
+    await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });
+    await t.db.execute(sql`
+      update live_joins set last_message_at = now() - interval '25 seconds',
+        stream_broke_at = null
+      where session_id = ${session.sessionId}`);
+    await me.send([]);
+    await t.db.execute(sql`
+      update live_joins set last_message_at = last_message_at - interval '10 seconds'
+      where session_id = ${session.sessionId}`);
+    expect((await liveOf(owner, lib.page.pageId)).ended?.sessionId).toBe(session.sessionId);
   });
 
   it('keeps an ended one with unsaved changes read-only, serves it once all have left, and lets one editor catch up from it', async () => {
@@ -677,9 +774,24 @@ describe('deleting a session', () => {
       lapsed: false,
       position: null,
     });
-    // Nobody else catches up while that join is there.
+    // Nobody else takes it while it holds, but once it lapses, another may.
     const rival = typist(editor, session);
-    expect(await rejection(rival.send([], { fold: session.sessionId }))).toBe('not-found');
+    expect((await rival.send([], { fold: session.sessionId })).grant?.holder.joinId).toBe(
+      catcher.joinId,
+    );
+    await t.db.execute(sql`
+      update live_grants set granted_at = now() - interval '11 minutes'
+      where session_id = ${session.sessionId}`);
+    expect((await rival.send([], { fold: session.sessionId })).grant).toMatchObject({
+      holder: { joinId: rival.joinId },
+      lapsed: false,
+    });
+    expect((await catcher.send([], { fold: session.sessionId })).grant?.holder.joinId).toBe(
+      rival.joinId,
+    );
+    await t.db.execute(sql`
+      update live_grants set granted_at = now() - interval '11 minutes'
+      where session_id = ${session.sessionId} and join_id = ${rival.joinId}`);
     expect(
       await rejection(catcher.send([catcher.message('update')], { fold: session.sessionId })),
     ).toBe('forbidden');
@@ -708,6 +820,46 @@ describe('deleting a session', () => {
     await everyoneLeft(session.sessionId, '1 second');
     await sweepLive(t.db, RETENTION);
     expect(await sessionRow(session.sessionId)).toBeUndefined();
+
+    // Unsaved typing, then the share ends: its wrap goes with it, and so does the session.
+    const last = await startSession(editor, lib.page);
+    const typing = typist(editor, last, last.joinId);
+    typing.started();
+    await typing.send([typing.message('update')]);
+    await ending.endShare(owner.ctx, {
+      preview: await ending.previewEnding(owner.ctx, { spaceId: lib.spaceId, shareId }),
+    });
+    expect(await sessionRow(last.sessionId)).toMatchObject({ endedReason: 'access' });
+    await everyoneLeft(last.sessionId, '1 second');
+    expect((await liveOf(owner, lib.page.pageId)).ended).toBeNull();
+    await sweepLive(t.db, RETENTION);
+    expect(await sessionRow(last.sessionId)).toBeUndefined();
+  });
+
+  it('keeps session IDs and their version IDs taken after the session goes', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });
+    await everyoneLeft(session.sessionId);
+    await sweepLive(t.db, RETENTION);
+    expect(await sessionRow(session.sessionId)).toBeUndefined();
+    const revisionId = await headOf(editor, lib.page);
+    const { body } = await sealStart(editor.ctx, lib.page, {
+      revisionId,
+      sessionId: session.sessionId,
+    });
+    expect(await rejection(sendStart(editor.ctx, lib.page.pageId, body))).toBe('duplicate');
+    const { body: version } = await sealStart(editor.ctx, lib.page, {
+      revisionId,
+      versionId: session.versionId,
+    });
+    expect(await rejection(sendStart(editor.ctx, lib.page.pageId, version))).toBe('duplicate');
+    const comment = await sealComment(editor.ctx, lib.page, {
+      audience: 'draft',
+      text: 'later',
+      versionId: session.versionId,
+    });
+    expect(await rejection(sendComment(editor.ctx, lib.page.pageId, comment))).toBe('duplicate');
   });
 });
 
@@ -841,14 +993,16 @@ describe('fold grants', () => {
         }),
       ),
     ).toBe('invalid-request');
-    const placed = await copy.send([copy.message('update')], {
-      parent: saver.joinId,
-      fold: outsider,
-    });
+    const placing = copy.message('update');
+    const placed = await copy.send([placing], { parent: saver.joinId, fold: outsider });
     expect(placed.grant).toMatchObject({
       holder: { joinId: saver.joinId },
       position: placed.positions[0],
     });
+    // Sent again byte for byte after a lost answer, it is answered as before.
+    expect(
+      await send(editor, session, copy.joinId, [placing], { parent: saver.joinId, fold: outsider }),
+    ).toEqual(placed);
     // None again for a revision whose fold was placed.
     expect((await other.send([], { fold: outsider })).grant).toMatchObject({
       holder: { joinId: saver.joinId },
@@ -908,10 +1062,25 @@ describe('limits', () => {
     const session = await startSession(editor, lib.page);
     const me = typist(editor, session, session.joinId);
     me.started();
-    const size = 128 * 1024;
+    // A message that fits what is left lands, counted once.
+    const before = await usedBytes(app.db, editor.id);
+    const room = 300_000 - before;
+    const size = 128 * Math.floor(((room * 2) / 3 - 16) / 128);
+    expect(size + 16).toBeLessThan(room);
+    expect(2 * (size + 16)).toBeGreaterThan(room);
     await me.send([me.message('update', { size })]);
-    const twice = me.message('update', { size: 2 * size });
-    expect(await rejection(me.send([twice]))).toBe('storage-full');
+    expect(await usedBytes(app.db, editor.id)).toBe(before + size + 16);
+    expect(await rejection(me.send([me.message('update', { size })]))).toBe('storage-full');
+    // And it stops counting once the session goes.
+    await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: session.sessionId } });
+    await app.db.execute(sql`
+      update live_joins set left_at = now() - interval '2 minutes'
+      where session_id = ${session.sessionId}`);
+    await app.db.execute(sql`
+      update live_sessions set ended_at = now() - interval '2 minutes'
+      where id = ${session.sessionId}`);
+    await sweepLive(app.db, { retentionMs: 60_000 });
+    expect(await usedBytes(app.db, editor.id)).toBeLessThan(before);
   });
 
   it('takes at most 16 MiB of stored messages a minute from a person', async () => {

@@ -1,5 +1,5 @@
 {
-  "id": "77cd236b-2626-468b-8afb-d4b7d1907eb1",
+  "id": "a39eef07-e571-40fb-bdf5-3b29dd86255c",
   "prevId": "094bd786-6e17-4d1e-85b0-349c41faa8bb",
   "version": "7",
   "dialect": "postgresql",
@@ -5092,6 +5092,46 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.live_session_ids": {
+      "name": "live_session_ids",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "live_session_ids_versionId_unique": {
+          "name": "live_session_ids_versionId_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "version_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.live_sessions": {
       "name": "live_sessions",
       "schema": "",
@@ -5141,6 +5181,18 @@
             "as": "length(sealed -> 'payload' ->> 'ciphertext')",
             "type": "stored"
           }
+        },
+        "share_id": {
+          "name": "share_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "key_version": {
+          "name": "key_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "starter_identity_id": {
           "name": "starter_identity_id",
@@ -5195,13 +5247,6 @@
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "active_at": {
-          "name": "active_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
@@ -5334,6 +5379,10 @@
         "live_sessions_ended": {
           "name": "live_sessions_ended",
           "value": "(\"live_sessions\".\"ended_at\" is null) = (\"live_sessions\".\"ended_reason\" is null)"
+        },
+        "live_sessions_region": {
+          "name": "live_sessions_region",
+          "value": "(\"live_sessions\".\"share_id\" is null) = (\"live_sessions\".\"key_version\" is null)"
         }
       },
       "isRLSEnabled": false

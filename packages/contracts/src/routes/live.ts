@@ -35,6 +35,15 @@ export const STORED_BYTES_PER_MINUTE = 16 * 1024 * 1024;
 /** Joins a person may have present in one session, further joins included (`rate-limited`). */
 export const MAX_JOINS_PER_PERSON = 8;
 
+/**
+ * Joins one person may make in one session, and joins a session may have
+ * in all, past ones included (`rate-limited`): every join is listed to
+ * everyone, and its latest change is kept, so a session past them starts
+ * again.
+ */
+export const MAX_JOINS_MADE_PER_PERSON = 64;
+export const MAX_JOINS_PER_SESSION = 512;
+
 /** Further joins one join may have present at a time (`rate-limited`). */
 export const MAX_FURTHER_JOINS = 2;
 
@@ -106,7 +115,8 @@ export type Join = z.infer<typeof Join>;
  * (`subject` that session's ID), held by one join at a time. `position`
  * is its `update`'s once placed, or for a catch-up its `saved`'s.
  * `lapsed` once its join went, or once 30 s passed with neither the draft
- * head moved on nor its `update` placed.
+ * head moved on nor its `update` placed; a catch-up's, once 10 minutes
+ * passed unplaced.
  */
 export const Grant = z.strictObject({
   subject: z.union([RevisionId, LiveSessionId]),
@@ -228,8 +238,10 @@ export type StreamLine = z.infer<typeof StreamLine>;
 /**
  * The session's stream, in NDJSON. Opening it joins the session as
  * `joinId`: a new join, or one of the caller's still present, which it
- * resumes; a join of the caller's that has gone is `duplicate`, and a
- * person's ninth present join `rate-limited`. `after` is the position the
+ * resumes; a join of the caller's that has gone, or a further join, is
+ * `not-found`, and a person's ninth present join `rate-limited`, as is a
+ * join past `MAX_JOINS_MADE_PER_PERSON` or `MAX_JOINS_PER_SESSION`, or a
+ * person's stream past the server's limit of open streams. `after` is the position the
  * app holds; if messages after it have since gone with a snapshot, it is
  * `stale-head`, and the app joins again as a newcomer. An ended session's
  * stream sends `ended` and closes, making no join.
@@ -257,6 +269,8 @@ export const Outgoing = z.strictObject({ message: LiveMessage, covers: Position.
  * stored; another at its `seq` is `duplicate`. `parent` makes `joinId` a
  * further join of the caller's present join `parent` (at most two present,
  * `rate-limited`), which keeps no presence and goes when `parent` goes.
+ * A join that has gone is `not-found`; the app joins afresh. A starter's
+ * join is present for 30 s until its stream opens, whatever it sends.
  * Snapshots go to `postSnapshot`. Over the limits: `payload-too-large`,
  * `rate-limited` (16 MiB of stored messages a minute per person) or
  * `storage-full`. An ended session takes only `saved` (`forbidden`).
@@ -267,7 +281,8 @@ export const Outgoing = z.strictObject({ message: LiveMessage, covers: Position.
  * grant's holder places the grant: its one `update` is the grant's. In an
  * ended session every join of which has left, `fold` is the session's own
  * ID and asks to catch up from it: `joinId` becomes the caller's join for
- * that, whose `saved` then lets the server delete the session.
+ * that, whose `saved` then lets the server delete the session. A
+ * catch-up's grant lasts 10 minutes unplaced.
  * `grant` is that revision's grant as it stands, someone else's included.
  */
 export const sendMessages = {
@@ -281,7 +296,10 @@ export const sendMessages = {
     fold: z.union([RevisionId, LiveSessionId]).optional(),
   }),
   response: z.strictObject({
-    /** Each message's position, in order; null for a presence. */
+    /**
+     * Each message's position, in order; null for a presence, and for a
+     * message sent again whose first sending a snapshot has since covered.
+     */
     positions: z.array(Position.nullable()),
     grant: Grant.nullable(),
   }),

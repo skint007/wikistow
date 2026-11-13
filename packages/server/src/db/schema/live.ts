@@ -48,6 +48,13 @@ export const liveSessions = pgTable(
     payloadSize: integer()
       .notNull()
       .generatedAlwaysAs(sql`length(sealed -> 'payload' ->> 'ciphertext')`),
+    /**
+     * Its region when it started: the share its wrap is under and the wrap's
+     * key version, or null for the owner region. Kept here, not only by the
+     * wrap, which goes with its share when the share ends.
+     */
+    shareId: text(),
+    keyVersion: integer(),
     starterIdentityId: text().notNull(),
     starterAccountId: uuid().references(() => users.id, { onDelete: 'set null' }),
     /** Joins made so far, which numbers them in the order they were made. */
@@ -62,8 +69,6 @@ export const liveSessions = pgTable(
     snapshotPosition: position(),
     snapshotCovers: position(),
     createdAt: timestamptz().notNull().defaultNow(),
-    /** When anything last happened in it: a message, or a join coming or going. */
-    activeAt: timestamptz().notNull().defaultNow(),
     endedAt: timestamptz(),
     endedReason: text({ enum: ['access', 'ended'] }),
   },
@@ -71,6 +76,7 @@ export const liveSessions = pgTable(
     check('live_sessions_id_shape', sql`${table.id} ~ '^[A-Za-z0-9_-]{1,64}$'`),
     check('live_sessions_version_id_shape', sql`${table.versionId} ~ '^[A-Za-z0-9_-]{1,64}$'`),
     check('live_sessions_ended', sql`(${table.endedAt} is null) = (${table.endedReason} is null)`),
+    check('live_sessions_region', sql`(${table.shareId} is null) = (${table.keyVersion} is null)`),
     // A page has at most one open session.
     uniqueIndex('live_sessions_open_page_idx')
       .on(table.pageId)
@@ -80,6 +86,18 @@ export const liveSessions = pgTable(
     index('live_sessions_starter_account_idx').on(table.starterAccountId),
   ],
 );
+
+/**
+ * Every session ID and record version ID ever taken, kept when the session
+ * goes, so the server keeps session IDs unique across the installation and
+ * no later metadata, comment or session version takes a session's version
+ * ID (protocol section 5.10). A few bytes a session.
+ */
+export const liveSessionIds = pgTable('live_session_ids', {
+  id: text().primaryKey(),
+  versionId: text().notNull().unique(),
+  createdAt: timestamptz().notNull().defaultNow(),
+});
 
 /**
  * A session's key wrap in a share (section 5.10, **The session record**),

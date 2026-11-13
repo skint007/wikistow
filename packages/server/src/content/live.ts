@@ -19,7 +19,7 @@ import {
   sealedBytes,
   verifySignature,
 } from '@wikistow/client';
-import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import {
   appRateLimits,
@@ -28,6 +28,7 @@ import {
   liveGrants,
   liveJoins,
   liveMessages,
+  liveSessionIds,
   liveSessions,
   liveWraps,
   metadataRevisions,
@@ -55,6 +56,12 @@ type Heads = typeof pageHeads.$inferSelect;
 const GRACE_MS = liveRoutes.JOIN_GRACE_MS;
 /** How long an open session nobody is in waits before it goes, if everything in it is saved. */
 const EMPTY_MS = 60_000;
+/**
+ * How long a catch-up's grant lasts unplaced (section 5.10, **Ending**):
+ * long enough to fetch and fold a large session, and no longer, so one
+ * editor can't keep everyone else from catching up.
+ */
+const CATCH_UP_GRANT_MS = 10 * 60_000;
 
 /** Bytes of a base64url text, decoded (unpadded: three bytes in every four characters). */
 const decodedLength = (text: string) => Math.floor((text.length * 3) / 4);
@@ -197,12 +204,15 @@ async function headsOf(tx: Database, pageId: string): Promise<Heads> {
 
 // --- Version IDs -----------------------------------------------------------
 
-/** Whether a session's record takes `versionId`, for names' and comments' versions to refuse it. */
+/**
+ * Whether a session's record took `versionId`, kept or not, for names' and
+ * comments' versions to refuse it.
+ */
 export async function isLiveVersion(tx: Database, versionId: string) {
   const [taken] = await tx
-    .select({ id: liveSessions.id })
-    .from(liveSessions)
-    .where(eq(liveSessions.versionId, versionId));
+    .select({ id: liveSessionIds.id })
+    .from(liveSessionIds)
+    .where(eq(liveSessionIds.versionId, versionId));
   return taken !== undefined;
 }
 
@@ -295,16 +305,21 @@ async function spendStoredBytes(
   }
 }
 
-/** Charge stored messages to their sender's storage (`storage-full`) and minute (`rate-limited`). */
+/**
+ * Charge stored messages to their sender's minute (`rate-limited`) and
+ * storage (`storage-full`). With `stored`, the rows are in already, so
+ * the storage they take counts once, as `usedBytes` sums it.
+ */
 async function chargeStored(
   tx: Database,
   caller: Caller,
   bytes: number,
   limits: { storageBytes: number; storedBytesPerMinute: number | null },
+  { stored }: { stored: boolean },
 ) {
   if (bytes === 0) return;
   await spendStoredBytes(tx, caller.accountId, bytes, limits.storedBytesPerMinute);
-  await charge(tx, caller.accountId, bytes, limits.storageBytes);
+  await charge(tx, caller.accountId, stored ? 0 : bytes, limits.storageBytes);
 }
 
 function servedMessage(row: MessageRow, report: ReportUnreadable) {
@@ -329,7 +344,7 @@ const ignore: ReportUnreadable = () => {};
 /**
  * Whether a grant has lapsed (section 5.10, **Saving**): its join went,
  * or, unplaced, 30 s passed while its revision is the draft head. A
- * catch-up's grant lapses only with its join.
+ * catch-up's grant lapses with its join, or unplaced after 10 minutes.
  */
 function lapsed(
   grant: GrantRow,
@@ -343,7 +358,9 @@ function lapsed(
   if (grant.lapsedAt !== null) return true;
   if (grant.position !== null) return false;
   if (!present.has(joinKey(grant.identityId, grant.joinId))) return true;
-  if (grant.subject === sessionId) return false;
+  if (grant.subject === sessionId) {
+    return grant.grantedAt.getTime() + CATCH_UP_GRANT_MS <= now.getTime();
+  }
   return heads.draftHead === grant.subject && grant.grantedAt.getTime() + GRACE_MS <= now.getTime();
 }
 
@@ -494,7 +511,8 @@ async function servedSession(
           )
           .orderBy(asc(liveMessages.position));
   const messages: liveRoutes.StoredMessage[] = [];
-  let bytes = 0;
+  // Each join's latest kept change counts toward what one fetch serves.
+  let bytes = latestRows.reduce((total, r) => total + r.size, 0);
   let position = base;
   let complete = true;
   for (let after = base; complete;) {
@@ -511,7 +529,7 @@ async function servedSession(
         position = message.position;
         continue;
       }
-      if (bytes + message.size > SERVED_MESSAGE_BYTES && messages.length > 0) {
+      if (bytes + message.size > SERVED_MESSAGE_BYTES) {
         complete = false;
         break;
       }
@@ -579,17 +597,29 @@ export async function getLive(
     const { caller, page } = await editorOfPage(tx, actor, pageId);
     const heads = await headsOf(tx, page.id);
     const now = await dbNow(tx);
-    const sessions = await tx
+    const [openRow] = await tx
       .select()
       .from(liveSessions)
-      .where(eq(liveSessions.pageId, page.id))
-      .orderBy(desc(liveSessions.createdAt));
+      .where(and(eq(liveSessions.pageId, page.id), isNull(liveSessions.endedAt)));
+    // Ended ones kept with unsaved changes, newest first, a few at most.
+    const endedRows = await tx
+      .select()
+      .from(liveSessions)
+      .where(
+        and(
+          eq(liveSessions.pageId, page.id),
+          isNotNull(liveSessions.endedAt),
+          sql`${liveSessions.lastUpdatePosition} > coalesce(${liveSessions.savedCovers}, 0)`,
+        ),
+      )
+      .orderBy(desc(liveSessions.endedAt))
+      .limit(10);
     const at = { identity: caller.identity, heads, now, report };
-    const openRow = sessions.find((s) => s.endedAt === null);
     let ended: liveRoutes.ServedSession | null = null;
-    for (const session of sessions) {
-      if (session.endedAt === null || !unsaved(session)) continue;
+    for (const session of endedRows) {
       if (presentSet(await joinsOf(tx, session.id), now).size > 0) continue;
+      // Once nobody's keys count for it, it is about to go, and nobody can catch up from it.
+      if (!(await keysCount(tx, session))) continue;
       ended = await servedSession(tx, session, at);
       break;
     }
@@ -650,6 +680,12 @@ export async function startLive(db: Database, input: StartLive) {
       }
       throw new ContentError('duplicate', 'That session ID is taken');
     }
+    // Taken by a session that has gone: IDs stay unique across the installation.
+    const [used] = await tx
+      .select({ id: liveSessionIds.id })
+      .from(liveSessionIds)
+      .where(eq(liveSessionIds.id, input.sessionId));
+    if (used) throw new ContentError('duplicate', 'That session ID is taken');
     if (page.permissionVersion !== input.permissionVersion) {
       throw new ContentError('permission-version', 'Access changed; reload and try again');
     }
@@ -706,7 +742,10 @@ export async function startLive(db: Database, input: StartLive) {
       .from(liveSessions)
       .where(and(eq(liveSessions.pageId, page.id), isNull(liveSessions.endedAt)));
     if (open) throw new ContentError('duplicate', 'The page has an open session');
-    await chargeStored(tx, caller, size + payload.ciphertext.length, input);
+    await chargeStored(tx, caller, size + payload.ciphertext.length, input, { stored: false });
+    await tx
+      .insert(liveSessionIds)
+      .values({ id: input.sessionId, versionId: record.metadataRevisionId });
     await tx.insert(liveSessions).values({
       id: input.sessionId,
       spaceId: page.spaceId,
@@ -714,6 +753,8 @@ export async function startLive(db: Database, input: StartLive) {
       versionId: record.metadataRevisionId,
       revisionId: input.revisionId,
       sealed: input.metadata,
+      shareId: input.wrap?.shareId ?? null,
+      keyVersion: input.wrap?.keyVersion ?? null,
       starterIdentityId: caller.identity.id,
       starterAccountId: caller.accountId,
       joinsMade: 1,
@@ -745,6 +786,8 @@ export async function startLive(db: Database, input: StartLive) {
       accountId: caller.accountId,
       ordinal: 1,
       lastSeq: 1,
+      // Present for 30 s until its stream opens, whatever it sends meanwhile.
+      streamBrokeAt: sql`now()`,
     });
     await tx.insert(liveMessages).values({
       sessionId: input.sessionId,
@@ -803,7 +846,9 @@ export type Joined =
       joinId: string;
       joins: liveRoutes.Join[];
       draftHead: string | null;
+      draftCount: number;
       lastPosition: number;
+      snapshotCovers: number;
     };
 
 /**
@@ -879,7 +924,6 @@ export async function joinLive(
         .set({ joinsMade: session.joinsMade + 1 })
         .where(eq(liveSessions.id, session.id));
     }
-    await tx.update(liveSessions).set({ activeAt: now }).where(eq(liveSessions.id, session.id));
     return {
       ended: null,
       pageId: page.id,
@@ -887,18 +931,32 @@ export async function joinLive(
       joinId: input.joinId,
       joins: servedJoins(await joinsOf(tx, session.id), now),
       draftHead: heads.draftHead,
+      draftCount: heads.draftCount,
       lastPosition: session.lastPosition,
+      snapshotCovers: session.snapshotCovers ?? 0,
     };
   });
 }
 
-/** A person's ninth present join of one session is refused (`rate-limited`). */
+/**
+ * Room for one more join of the person's (`rate-limited` otherwise): at
+ * most eight present at once, and, since every join the session keeps is
+ * listed to everyone and keeps its latest change, at most so many made by
+ * one person and in all.
+ */
 function requireRoomForJoin(joins: readonly JoinRow[], present: Set<string>, identityId: string) {
-  const mine = joins.filter(
-    (j) => j.identityId === identityId && present.has(joinKey(j.identityId, j.joinId)),
-  );
-  if (mine.length >= liveRoutes.MAX_JOINS_PER_PERSON) {
+  const mine = joins.filter((j) => j.identityId === identityId);
+  if (
+    mine.filter((j) => present.has(joinKey(j.identityId, j.joinId))).length >=
+    liveRoutes.MAX_JOINS_PER_PERSON
+  ) {
     throw new ContentError('busy', 'You are in this session too many times at once');
+  }
+  if (
+    mine.length >= liveRoutes.MAX_JOINS_MADE_PER_PERSON ||
+    joins.length >= liveRoutes.MAX_JOINS_PER_SESSION
+  ) {
+    throw new ContentError('busy', 'This session has had too many joins; start another');
   }
 }
 
@@ -1011,8 +1069,11 @@ async function catchUpJoin(
     }
     return { join: mine, joins, made: false };
   }
-  // Served, and so caught up from, only once every join has left (section 5.10, **Ending**).
-  if (present.size > 0) throw new ContentError('not-found');
+  // Served, and so caught up from, only once every join has left (section 5.10,
+  // **Ending**); other catch-up joins wait on the grant instead.
+  const others = joins.filter((j) => !j.catchUp && present.has(joinKey(j.identityId, j.joinId)));
+  if (others.length > 0) throw new ContentError('not-found');
+  requireRoomForJoin(joins, present, caller.identity.id);
   const ordinal = session.joinsMade + 1;
   const [made] = await tx
     .insert(liveJoins)
@@ -1043,7 +1104,11 @@ export type Relay = {
   joinsChanged: boolean;
   /** The session went with this request: a catch-up finished. */
   deleted: boolean;
+  /** The session has ended: its streams end, and hear nothing more. */
+  ended: boolean;
+  /** The page's draft head as the request saw it, and how many drafts it had then. */
   draftHead: string | null;
+  draftCount: number;
 };
 
 type StoreInput = {
@@ -1120,7 +1185,19 @@ async function storeMessage(
   return { position, row };
 }
 
-async function saveCounters(tx: Database, session: SessionRow, join: JoinRow, now: Date) {
+/**
+ * Store what a request moved on. `touch` keeps its join present: any
+ * request of a join in an open session, and of a catch-up join, but in an
+ * ended session only one that stored a message, so nobody keeps an ended
+ * session from going by sending nothing.
+ */
+async function saveCounters(
+  tx: Database,
+  session: SessionRow,
+  join: JoinRow,
+  now: Date,
+  { touch }: { touch: boolean },
+) {
   await tx
     .update(liveSessions)
     .set({
@@ -1129,12 +1206,11 @@ async function saveCounters(tx: Database, session: SessionRow, join: JoinRow, no
       savedCovers: session.savedCovers,
       snapshotPosition: session.snapshotPosition,
       snapshotCovers: session.snapshotCovers,
-      activeAt: now,
     })
     .where(eq(liveSessions.id, session.id));
   await tx
     .update(liveJoins)
-    .set({ lastSeq: join.lastSeq, lastMessageAt: now })
+    .set(touch ? { lastSeq: join.lastSeq, lastMessageAt: now } : { lastSeq: join.lastSeq })
     .where(
       and(
         eq(liveJoins.sessionId, session.id),
@@ -1180,10 +1256,13 @@ export async function sendLive(db: Database, input: SendLive) {
       grants: [],
       joinsChanged: made,
       deleted: false,
+      ended,
       draftHead: null,
+      draftCount: 0,
     };
     const positions: (number | null)[] = [];
     const updates: number[] = [];
+    const resent: number[] = [];
     let savedAt: number | null = null;
     let bytes = 0;
     for (const { message, covers } of input.messages) {
@@ -1224,17 +1303,21 @@ export async function sendLive(db: Database, input: SendLive) {
         size,
       });
       positions.push(stored.position);
-      if (!stored.row) continue;
+      if (!stored.row) {
+        if (message.kind === 'update' && stored.position !== null) resent.push(stored.position);
+        continue;
+      }
       bytes += size;
       const served = servedMessage(stored.row, ignore);
       if (served) relay.stored.push(served);
       if (message.kind === 'update') updates.push(stored.row.position);
       if (message.kind === 'saved') savedAt = stored.row.position;
     }
-    await chargeStored(tx, caller, bytes, input);
-    await saveCounters(tx, session, join, now);
+    await chargeStored(tx, caller, bytes, input, { stored: true });
+    await saveCounters(tx, session, join, now, { touch: !ended || join.catchUp || bytes > 0 });
     const heads = await headsOf(tx, page.id);
     relay.draftHead = heads.draftHead;
+    relay.draftCount = heads.draftCount;
     let grant: liveRoutes.Grant | null = null;
     if (input.fold !== undefined) {
       grant = await foldFor(tx, {
@@ -1246,6 +1329,7 @@ export async function sendLive(db: Database, input: SendLive) {
         fold: input.fold,
         catchingUp,
         updates,
+        resent,
         savedAt,
         relay,
       });
@@ -1271,6 +1355,7 @@ async function foldFor(
     fold,
     catchingUp,
     updates,
+    resent,
     savedAt,
     relay,
   }: {
@@ -1282,6 +1367,8 @@ async function foldFor(
     fold: string;
     catchingUp: boolean;
     updates: number[];
+    /** Positions of `update`s this request sent again, stored before. */
+    resent: number[];
     savedAt: number | null;
     relay: Relay;
   },
@@ -1338,6 +1425,22 @@ async function foldFor(
     )
     .orderBy(desc(liveGrants.id))
     .limit(1);
+  if (!held && resent.length === 1) {
+    // The request that placed it, sent again after a lost answer: answered as before.
+    const [placed] = await tx
+      .select()
+      .from(liveGrants)
+      .where(
+        and(
+          eq(liveGrants.sessionId, session.id),
+          eq(liveGrants.subject, fold),
+          eq(liveGrants.identityId, join.identityId),
+          eq(liveGrants.joinId, join.parentJoinId),
+          inArray(liveGrants.position, resent),
+        ),
+      );
+    if (placed && updates.length === 0) return servedGrant(placed, false);
+  }
   if (!held || lapsed(held, at)) {
     throw new ContentError('forbidden', 'Your join holds no grant to fold that draft');
   }
@@ -1421,7 +1524,7 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       if (stored.position === null) throw new ContentError('duplicate', 'That snapshot is gone');
       return { position: stored.position, relay: null };
     }
-    await chargeStored(tx, caller, size, input);
+    await chargeStored(tx, caller, size, input, { stored: true });
     const position = stored.row.position;
     // What it covers goes, but the first snapshot and each join's latest kept change.
     await tx.execute(sql`
@@ -1438,7 +1541,7 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
         and position < ${position}`);
     session.snapshotPosition = position;
     session.snapshotCovers = input.covers;
-    await saveCounters(tx, session, join, now);
+    await saveCounters(tx, session, join, now, { touch: true });
     const served = servedMessage(stored.row, ignore);
     const relay: Relay = {
       sessionId: session.id,
@@ -1448,7 +1551,9 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       grants: [],
       joinsChanged: made,
       deleted: false,
+      ended: false,
       draftHead: heads.draftHead,
+      draftCount: heads.draftCount,
     };
     return { position, relay };
   });
@@ -1475,12 +1580,6 @@ export async function leaveLive(
         ),
       )
       .returning({ joinId: liveJoins.joinId });
-    if (left.length > 0) {
-      await tx
-        .update(liveSessions)
-        .set({ activeAt: sql`now()` })
-        .where(eq(liveSessions.id, session.id));
-    }
     return { left: left.length > 0, sessionId: session.id };
   });
 }
@@ -1492,7 +1591,7 @@ export async function endLive(db: Database, input: { actor: Actor; sessionId: st
     if (session.endedReason !== null) return { ended: false };
     await tx
       .update(liveSessions)
-      .set({ endedAt: sql`now()`, endedReason: 'ended', activeAt: sql`now()` })
+      .set({ endedAt: sql`now()`, endedReason: 'ended' })
       .where(eq(liveSessions.id, session.id));
     return { ended: true };
   });
@@ -1530,6 +1629,7 @@ export async function liveState(db: Database, sessionId: string) {
       lastPosition: session.lastPosition,
       snapshotCovers: session.snapshotCovers ?? 0,
       draftHead: heads?.draftHead ?? null,
+      draftCount: heads?.draftCount ?? 0,
       joins: servedJoins(joins, now),
       grants: heads
         ? grants.map((g) =>
@@ -1540,27 +1640,48 @@ export async function liveState(db: Database, sessionId: string) {
   });
 }
 
-/** Stored messages of a session after `after`, oldest first, at most `limit`. */
+/** Bytes of stored messages one read for a stream holds at most, past its first message. */
+const STREAM_BATCH_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Stored messages of a session after `after`, up to `upTo`, oldest first:
+ * at most 200, and no more than 2 MiB of ciphertext past the first, so a
+ * stream that isn't read holds little.
+ */
 export async function storedAfter(
   db: Database,
   sessionId: string,
   after: number,
-  { limit = 200, upTo }: { limit?: number; upTo?: number } = {},
+  { upTo }: { upTo?: number } = {},
 ) {
-  const rows = await db
-    .select()
-    .from(liveMessages)
-    .where(
-      and(
-        eq(liveMessages.sessionId, sessionId),
-        gt(liveMessages.position, after),
-        upTo === undefined ? undefined : lte(liveMessages.position, upTo),
-      ),
-    )
-    .orderBy(asc(liveMessages.position))
-    .limit(limit);
+  const rows = await db.execute<{
+    position: number | string;
+    message: unknown;
+    covers: number | string | null;
+    revision_id: string | null;
+  }>(sql`
+    select position, message, covers, revision_id from (
+      select position, message, covers, revision_id, size,
+        sum(size) over (order by position) as running
+      from ${liveMessages}
+      where session_id = ${sessionId} and position > ${after}
+        ${upTo === undefined ? sql`` : sql`and position <= ${upTo}`}
+      order by position limit 200
+    ) batch
+    where running - size < ${STREAM_BATCH_BYTES}
+    order by position`);
   return rows.flatMap((row) => {
-    const served = servedMessage(row, ignore);
+    const served = readStored(
+      liveRoutes.StoredMessage,
+      {
+        position: Number(row.position),
+        message: row.message,
+        covers: row.covers === null ? null : Number(row.covers),
+        revisionId: row.revision_id,
+      },
+      { table: 'live_messages', id: `${sessionId} ${row.position}` },
+      ignore,
+    );
     return served ? [served] : [];
   });
 }
@@ -1583,20 +1704,20 @@ export async function canStillEdit(db: Database, actor: Actor, sessionId: string
 
 /**
  * Whether the keys a session's record is under still count: in a share,
- * its wrap is the page's share's at the current key version; in the owner
- * region, the page is still there and every envelope is to an owner now.
- * After a rotation or a move to another region nobody's do.
+ * the page is still in the share it started in, at the key version it
+ * started under; in the owner region, the page is still there and every
+ * envelope is to an owner now. After a rotation, a move to another region
+ * or the ending of its share nobody's do.
  */
 async function keysCount(tx: Database, session: SessionRow) {
   const share = await shareAt(tx, session.spaceId, session.pageId);
-  const [wrap] = await tx.select().from(liveWraps).where(eq(liveWraps.sessionId, session.id));
-  if (wrap) {
-    if (!share || share.id !== wrap.shareId) return false;
+  if (session.shareId !== null) {
+    if (!share || share.id !== session.shareId) return false;
     const [current] = await tx
       .select({ keyVersion: shares.currentKeyVersion })
       .from(shares)
       .where(eq(shares.id, share.id));
-    return current?.keyVersion === wrap.keyVersion;
+    return current?.keyVersion === session.keyVersion;
   }
   if (share) return false;
   const recipients = await tx
@@ -1611,17 +1732,23 @@ async function keysCount(tx: Database, session: SessionRow) {
         .where(and(eq(spaceOwners.spaceId, session.spaceId), isNull(spaceOwners.removedAt)))
     ).map((o) => o.id),
   );
-  return recipients.every((r) => owners.has(r.id));
+  return recipients.length > 0 && recipients.every((r) => owners.has(r.id));
 }
 
-/** Why a session should go now, if it should (section 5.10, **Ending**). */
+/**
+ * Why a session should go now, if it should (section 5.10, **Ending**). An
+ * ended one goes after the draft retention from its end whoever is still
+ * there; an open one, from when its last join went.
+ */
 async function dueToGo(tx: Database, session: SessionRow, now: Date, retentionMs: number) {
+  const at = now.getTime();
+  if (session.endedAt && session.endedAt.getTime() + retentionMs <= at) return 'retention';
   const joins = await joinsOf(tx, session.id);
   if (presentSet(joins, now).size > 0) return null;
-  if (session.activeAt.getTime() + retentionMs <= now.getTime()) return 'retention';
   if (session.endedReason === null) {
     const lastGone = Math.max(0, ...joins.map(goneAt));
-    if (lastGone + EMPTY_MS > now.getTime()) return null;
+    if (lastGone + retentionMs <= at) return 'retention';
+    if (lastGone + EMPTY_MS > at) return null;
     return unsaved(session) ? null : 'saved';
   }
   if (!unsaved(session)) return 'saved';
@@ -1633,23 +1760,55 @@ async function dueToGo(tx: Database, session: SessionRow, now: Date, retentionMs
  * Delete sessions whose time is up (section 5.10, **Ending**): an open one
  * a minute after its last join left, if no `update` came after what its
  * latest `saved` covers; an ended one once every join has left, unless an
- * `update` came after it and its keys still count; and any kept past the
- * draft retention since anything last happened in it. Each is checked
- * again under the locks a message takes. Returns how many went.
+ * `update` came after it and its keys still count; an ended one past the
+ * draft retention from its end; and an open one past it from when its
+ * last join went. Each is checked again under the locks a message takes.
+ * Returns how many went.
  */
 export async function sweepLive(
   db: Database,
   { retentionMs }: { retentionMs: number },
 ): Promise<number> {
-  const candidates = await db.execute<{ id: string; page_id: string; space_id: string }>(sql`
-    select s.id, s.page_id, s.space_id from ${liveSessions} s
-    where not exists (select 1 from ${liveJoins} j
-      where j.session_id = s.id and j.parent_join_id is null and j.left_at is null
-        and j.last_message_at > now() - interval '30 seconds'
-        and (j.stream_broke_at is null or j.stream_broke_at > now() - interval '30 seconds'))
-    order by s.id limit 1000`);
+  let removed = 0;
+  const retention = sql`${`${retentionMs} milliseconds`}::interval`;
+  // Each session that may be due, a batch at a time: ended past the
+  // retention, or nobody in it and either ended, saved, or left alone past
+  // the retention. An open one with unsaved changes isn't read until then.
+  for (let after = ''; ;) {
+    const candidates = await db.execute<{ id: string; page_id: string; space_id: string }>(sql`
+      select s.id, s.page_id, s.space_id from ${liveSessions} s
+      where s.id > ${after} and (
+        (s.ended_at is not null and s.ended_at <= now() - ${retention})
+        or (not exists (select 1 from ${liveJoins} j
+          where j.session_id = s.id and j.parent_join_id is null and j.left_at is null
+            and j.last_message_at > now() - interval '30 seconds'
+            and (j.stream_broke_at is null or j.stream_broke_at > now() - interval '30 seconds'))
+          and (s.ended_at is not null
+            or s.last_update_position <= coalesce(s.saved_covers, 0)
+            or not exists (select 1 from ${liveJoins} j
+              where j.session_id = s.id and least(coalesce(j.left_at, 'infinity'),
+                j.last_message_at + interval '30 seconds') > now() - ${retention}))))
+      order by s.id limit 500`);
+    const last = candidates.at(-1);
+    if (!last) return removed;
+    after = last.id;
+    removed += await sweepSome(db, candidates, retentionMs);
+  }
+}
+
+async function sweepSome(
+  db: Database,
+  candidates: readonly { id: string; page_id: string; space_id: string }[],
+  retentionMs: number,
+) {
   let removed = 0;
   for (const { id, page_id: pageId, space_id: spaceId } of candidates) {
+    // Read first; only one that is due takes the locks, and is checked again under them.
+    const due = await readSnapshot(db, async (tx) => {
+      const [session] = await tx.select().from(liveSessions).where(eq(liveSessions.id, id));
+      return session ? dueToGo(tx, session, await dbNow(tx), retentionMs) : null;
+    });
+    if (!due) continue;
     const gone = await db.transaction(async (tx) => {
       await lockSpace(tx, spaceId).catch(() => {});
       await requirePage(tx, pageId, { lock: true }).catch(() => {});

@@ -85,21 +85,27 @@ type Options = {
   rateLimitKey?: string;
 };
 
-/** Large bodies read and handled at once in each pool, by one account and in all. */
+/**
+ * Large bodies read and handled at once in each pool, by one account and in
+ * all. Live sessions' snapshots are smaller and more often, one each time a
+ * draft is opened alone, so their pool has more room.
+ */
 const BULK_PER_ACCOUNT = 1;
 const BULK_AT_ONCE = 4;
+const LIVE_PER_ACCOUNT = 2;
+const LIVE_AT_ONCE = 16;
 
 /** The large-body pools: `live` takes sessions' snapshots, so typing never waits on a share being made. */
 export type BodyPool = 'bulk' | 'rotation' | 'staging' | 'live';
 
 // A pool's large bodies being read or handled now, in all and by account:
 // a slot for `accountId`, or `rate-limited` if none is free.
-function bodySlots() {
+function bodySlots(perAccount = BULK_PER_ACCOUNT, atOnce = BULK_AT_ONCE) {
   let inFlight = 0;
   const byAccount = new Map<string, number>();
   return (accountId: string): (() => void) => {
     const mine = byAccount.get(accountId) ?? 0;
-    if (mine >= BULK_PER_ACCOUNT || inFlight >= BULK_AT_ONCE) {
+    if (mine >= perAccount || inFlight >= atOnce) {
       throw new ApiError('rate-limited', 'Too many large requests at once; try again shortly');
     }
     inFlight++;
@@ -153,7 +159,7 @@ export function createRoutes({
     bulk: bodySlots(),
     rotation: bodySlots(),
     staging: bodySlots(),
-    live: bodySlots(),
+    live: bodySlots(LIVE_PER_ACCOUNT, LIVE_AT_ONCE),
   };
 
   // Signed-in routes check the session, and count toward the account's rate
