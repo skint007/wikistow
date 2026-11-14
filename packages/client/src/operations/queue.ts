@@ -572,9 +572,12 @@ export class OfflineQueue {
       this.#landedOn.delete(page.pageId);
       const landed =
         went?.base === basedOn && Date.now() - went.at < LANDING_MS ? went.landed : undefined;
+      // The person put theirs on top of the base it stopped on (Merge…, Save mine on top): settled.
+      const settled = onTop && before?.failure?.kind === 'conflict' && before.basedOn === basedOn;
       const entry: QueuedPage = before
         ? {
             ...before,
+            ...(settled && { failure: null }),
             payload,
             picks,
             version: before.version + 1,

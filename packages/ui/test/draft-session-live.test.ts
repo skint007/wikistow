@@ -213,12 +213,15 @@ function session(
     waiting = false,
     entry,
     seen = entry?.version,
+    claimed = false,
   }: {
     waiting?: boolean;
     /** The page's change waiting here, which a join puts in. */
     entry?: QueuedPage;
     /** The version of that change this view last saw. */
-    seen?: number;
+    seen?: number | null;
+    /** Another tab holds that change: putting it in, or keeping it for its session. */
+    claimed?: boolean;
   } = {},
 ) {
   const surface = new FakeSurface(payload.markdown);
@@ -287,6 +290,7 @@ function session(
       },
       head: async () => ({ revisionId: R0, payload: shared, region: OWNER_REGION }),
       descends: async () => true,
+      claim: async () => (claimed ? null : () => {}),
       async join() {
         const participant = new FakeParticipant(shared);
         joins.push(participant);
@@ -693,5 +697,32 @@ describe('putting a waiting change in, carefully', () => {
     draft.close();
     await settle();
     expect(withdrawn).toEqual([5]);
+  });
+});
+
+describe('a change another tab keeps for its live session', () => {
+  it('waits while this view shows that change', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins } = session(opened, page('A\n\nB\n\nC'), { entry, claimed: true });
+    await draft.joinLive();
+    expect(joins).toHaveLength(0);
+  });
+
+  it('joins without it when this view opened the draft', async () => {
+    const opened = page('A\n\nB');
+    const entry = waitingEntry(page('A\n\nB, mine'), page('A\n\nB'));
+    const { draft, joins } = session(opened, opened, { entry, claimed: true, seen: null });
+    await draft.joinLive();
+    expect(joins[0]?.document.text('body').toJSON()).toBe('A\n\nB');
+    expect(draft.participant).not.toBeNull();
+  });
+
+  it('puts it in, as it waits, once no tab holds it and this view changed nothing', async () => {
+    const opened = page('A\n\nB');
+    const entry = waitingEntry(page('A\n\nB, mine'), page('A\n\nB'));
+    const { draft, joins } = session(opened, page('A\n\nB\n\nC'), { entry, seen: null });
+    await draft.joinLive();
+    expect(joins[0]?.document.text('body').toJSON()).toBe('A\n\nB, mine\n\nC');
   });
 });

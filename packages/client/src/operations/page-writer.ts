@@ -359,7 +359,7 @@ export function createPageWriter({
             return asTyped(input);
           }
         },
-        async keep({ basedOn, region, payload, live, stopped = false }) {
+        async keep({ basedOn, region, payload, live, stopped }) {
           if (!queue) throw new Error('This device keeps no changes');
           // As any save into it: one another tab or window saved into since is theirs (`stale-head`).
           seen = await queue.saveDraft({
@@ -370,7 +370,7 @@ export function createPageWriter({
             seen,
             onTop: true,
             live,
-            stopped,
+            ...(stopped !== undefined && { stopped }),
           });
           return seen;
         },

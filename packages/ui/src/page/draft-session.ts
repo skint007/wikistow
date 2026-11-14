@@ -1150,10 +1150,13 @@ export class DraftSession {
     let joined: LiveParticipant | NotJoined;
     try {
       const waiting = await this.#ports.waitingChange?.().catch(() => null);
-      if (waiting) {
-        // Another tab or window of this app is putting it in: not now.
-        claim = live.claim ? await live.claim() : () => {};
-        if (!claim) throw new Error('claimed');
+      // Another tab or window of this app holds the change, putting it in or
+      // keeping it for its session: a view showing that change waits; one
+      // that opened the draft instead joins without it.
+      claim = waiting ? (live.claim ? await live.claim() : () => {}) : null;
+      const theirs = waiting && !claim;
+      if (theirs && this.#ports.seen?.() === waiting.version) throw new Error('claimed');
+      if (waiting && !theirs) {
         // The page's change waiting here goes into the session as the person's own.
         entry = (await this.#ports.entryNow?.().catch(() => null)) ?? null;
         // Being sent, made offline or stopped: it lands, and the saver folds
@@ -1314,11 +1317,15 @@ export class DraftSession {
     basedOn: PagePayload | null,
   ): 'in' | 'overlap' | 'send' | 'failed' {
     if (this.#theirs || this.#autosave.isStopped() || this.#autosave.isSaving()) return 'failed';
-    // The view must hold the change as it waits: one saved into from elsewhere since is theirs.
-    if (this.#ports.seen && this.#ports.seen() !== entry.version) return 'failed';
     this.#pull();
+    // The view must hold the change as it waits: one saved into from elsewhere
+    // since is theirs. A view that opened the draft instead, and changed
+    // nothing, puts in the change as it waits (a tab that kept it went).
+    const seen = this.#ports.seen?.();
+    const holds = seen === undefined || seen === entry.version;
+    if (!holds && !(seen === null && this.#untouched())) return 'failed';
     // The person's text: the change as it waits, and whatever they typed since the view opened.
-    const ours = this.#current();
+    const ours = holds ? this.#current() : entry.payload;
     let current: PagePayload;
     try {
       current = participant.currentPayload();
@@ -1485,6 +1492,19 @@ export class DraftSession {
     return release;
   }
 
+  // Whether this view holds just the draft it opened: nothing typed or changed.
+  #untouched(): boolean {
+    const { title, markdown, attachments } = this.#payload;
+    return (
+      this.#autosave.unsaved() === null &&
+      !this.#unreported &&
+      this.#content.title === title &&
+      this.#content.markdown === markdown &&
+      this.#content.attachments.length === attachments.length &&
+      Object.keys(this.#extensions).length === 0
+    );
+  }
+
   // A change kept on this device, or put in, that a saved draft holds: it goes.
   // Only once a compared draft holds the document as it was kept or put in
   // (section 5.10, **Saving**), or the head's text is that change's
@@ -1529,6 +1549,13 @@ export class DraftSession {
         });
         this.#kept = { version, participant, state };
         this.#keptFresh = this.#participant === participant;
+        // Kept for this session: no other tab puts it in, or opens it as its own, while it's in.
+        if (this.#participant === participant && !this.#claimed && this.#ports.live?.claim) {
+          const claimed = await this.#ports.live.claim().catch(() => null);
+          if (claimed && this.#participant === participant && !this.#claimed)
+            this.#claimed = claimed;
+          else claimed?.();
+        }
         return true;
       } catch {
         return false;
