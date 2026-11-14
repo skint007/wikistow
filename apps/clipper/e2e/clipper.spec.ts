@@ -474,18 +474,34 @@ async function pixels(page: Page, base64: string, points: [number, number][]) {
 test('a screenshot of the visible area is the tab as shown, scrolled, in its device pixels', async () => {
   const { worker, got } = await launch({ stable: ready }, { scale: 2 });
   const origin = await serve();
-  const { page, popup } = await popupFor(worker, origin, undefined, '/shot');
+  const first = await popupFor(worker, origin, undefined, '/shot');
+  const { page, tabId } = first;
   await page.evaluate(() => scrollTo(0, 1000));
+  // Choosing an area first, then the visible area instead: the overlay is
+  // gone from the screenshot.
+  await expect(first.popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await first.popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const closed = first.popup.waitForEvent('close');
+  await first.popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+
+  const popup = await reopen(tabId);
   await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
   await popup.getByRole('radio', { name: 'Visible area' }).check();
   await expect(popup.getByLabel('Note')).toBeVisible();
   await popup.getByLabel('Note').fill('The boxes');
-  if (SCREENSHOTS)
+  if (SCREENSHOTS) {
+    await popup.getByText('Drag over the page to choose the area. Esc cancels.').waitFor();
+    await popup.evaluate(() => (document.getElementById('result')!.hidden = true));
     await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-screenshot.png') });
+  }
   // The toolbar's popup opens over the tab it clips, which stays the one shown.
   await page.bringToFront();
   await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
   await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
 
   const [clip] = await got('stable', 'clip');
   expect(clip).toMatchObject({

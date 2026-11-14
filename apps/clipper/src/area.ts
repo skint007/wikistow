@@ -35,7 +35,14 @@ const SCROLL_KEYS = new Set([
   'End',
 ]);
 
-let stop: (() => void) | null = null;
+/**
+ * The overlay shown, kept on this world's global: the background injects
+ * this script again for each choice, and each run must find the overlay
+ * an earlier one showed, to take it off. `telling`: one that's gone from
+ * the page, whose area is on its way to the background.
+ */
+type Shown = { stop: (() => void) | null; telling: boolean };
+const shown: Shown = (globalThis.wikistowAreaShown ??= { stop: null, telling: false });
 
 /** Styles that win over the page's, even its `!important` ones. */
 function style(element: HTMLElement, rules: Record<string, string>) {
@@ -56,7 +63,7 @@ const drawn = () =>
  * cut to match.
  */
 function choose(nonce: string): 'choosing' | 'zoomed' {
-  stop?.();
+  shown.stop?.();
   if (visualViewport && Math.abs(visualViewport.scale - 1) > 0.001) return 'zoomed';
 
   const frame = document.createElement('dialog');
@@ -195,17 +202,22 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     clearTimeout(timer);
     removeEventListener('keydown', key, true);
     frame.remove();
-    if (stop === remove) stop = null;
+    if (shown.stop === remove) shown.stop = null;
   }
   async function finish(chosen: Area | null) {
-    if (stop !== remove) return;
+    if (shown.stop !== remove) return;
     const view = { width: innerWidth, height: innerHeight };
-    remove();
-    await drawn();
-    const message: AreaMessage = { type: 'wikistow-area', nonce, area: chosen, view };
-    await api.runtime.sendMessage(message).catch(() => {});
+    shown.telling = true;
+    try {
+      remove();
+      await drawn();
+      const message: AreaMessage = { type: 'wikistow-area', nonce, area: chosen, view };
+      await api.runtime.sendMessage(message).catch(() => {});
+    } finally {
+      shown.telling = false;
+    }
   }
-  stop = remove;
+  shown.stop = remove;
 
   document.documentElement.append(frame);
   // The top layer, above the page's own dialogs and full-screen elements,
@@ -218,14 +230,20 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   return 'choosing';
 }
 
+/** Take the overlay off, once the page is drawn again without it, so a screenshot after doesn't show it. */
+async function stopChoosing() {
+  if (!shown.stop) return;
+  shown.stop();
+  await drawn();
+}
+
 declare global {
   var wikistowArea: typeof choose | undefined;
-  var wikistowAreaStop: (() => void) | undefined;
-  var wikistowAreaShown: (() => boolean) | undefined;
+  var wikistowAreaStop: typeof stopChoosing | undefined;
+  var wikistowAreaShown: Shown | undefined;
 }
 
 // Reached through a second injection (background.ts), in this extension's
 // own world: the page's scripts can't see them.
 globalThis.wikistowArea = choose;
-globalThis.wikistowAreaStop = () => stop?.();
-globalThis.wikistowAreaShown = () => stop !== null;
+globalThis.wikistowAreaStop = stopChoosing;

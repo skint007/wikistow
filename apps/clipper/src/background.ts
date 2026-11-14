@@ -253,7 +253,10 @@ async function overlayShown(tabId: number): Promise<boolean> {
   try {
     const [ran] = await api.scripting.executeScript({
       target: { tabId },
-      func: () => globalThis.wikistowAreaShown?.() ?? false,
+      func: () => {
+        const shown = globalThis.wikistowAreaShown;
+        return shown ? shown.stop !== null || shown.telling : false;
+      },
     });
     return ran?.result === true;
   } catch {
@@ -261,7 +264,7 @@ async function overlayShown(tabId: number): Promise<boolean> {
   }
 }
 
-/** Stop choosing an area, taking the overlay off its page. */
+/** Stop choosing an area, taking the overlay off its page, which is drawn again without it once this is done. */
 async function stopChoosing() {
   const was = await choosing();
   if (!was) return;
