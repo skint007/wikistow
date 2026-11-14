@@ -186,10 +186,9 @@ const keptFolders = {
 };
 const keptAccountFile = keptFile(join(app.getPath('userData'), 'kept-account'));
 const place = windowPlace(app.getPath('userData'));
-// The web clipper's socket and host manifests (ADR 0017). Main knows only
-// whether the page has loaded and whether there is a session; the pages
-// tell it the vault's state in a later step, so until then a signed-in app
-// answers `locked`.
+// The web clipper's socket and host manifests, and its clips (ADR 0017).
+// Main knows whether the page has loaded and whether there is a session;
+// the page tells it the vault's state (`setClipState`).
 const clipping = desktopClipping({
   which,
   platform: process.platform,
@@ -202,13 +201,15 @@ const clipping = desktopClipping({
   execPath: process.execPath,
   version: app.getVersion(),
   argv: process.argv,
-  state: () =>
-    !window || window.webContents.isLoading()
-      ? 'starting'
-      : server && cookie
-        ? 'locked'
-        : 'signed-out',
+  // Signed out is known before the window loads: the session is read first.
+  session: () =>
+    !(server && cookie)
+      ? 'signed-out'
+      : !window || window.webContents.isLoading()
+        ? 'starting'
+        : 'signed-in',
   show: () => bringForward(),
+  userAgent: app.userAgentFallback,
 });
 
 /**
@@ -271,6 +272,7 @@ async function saveConfig() {
 // The server's answer to signing out already cleared the session cookie;
 // its other cookies stay, as a browser's would. The unlock goes with it.
 async function signedOut() {
+  clipping.desk.signedOut();
   forget();
   await persist();
   await removeAllKept();
@@ -444,7 +446,9 @@ async function linkArrived(link: string) {
   cookie = cookieChange(kept, [redeemed]) ?? kept;
   // A new sign-in starts with no unlock, search index or marks kept, whoever
   // it is for. Pages kept for offline wait for the pages to learn whose it is.
+  // Clips held from before go, as they may have been someone else's.
   forget();
+  clipping.desk.signedOut();
   server = waiting.origin;
   waiting.done({ ok: true, value: undefined });
   // Signed in either way; a failed write only means signing in again next time.
@@ -523,10 +527,12 @@ function openWindow() {
     clearTimeout(stuck);
   });
   // Emitted before the page's beforeunload, so the handler below can tell
-  // a close from a reload.
-  window.on('close', () => {
+  // a close from a reload. A clip still to save asks first (ADR 0017).
+  window.on('close', (event) => {
+    if (window && !keepClips(window)) return event.preventDefault();
     closing = true;
   });
+  clipping.desk.attach(window.webContents);
   // A draft with changes still to save asks before it is left. Electron
   // refuses that silently, so main asks the person instead: for a close,
   // whether to close once they're saved, and for a reload, whether to lose
@@ -610,6 +616,32 @@ async function askAfterCrash() {
   else window?.close();
 }
 
+/** The clips the person chose to close without, so the close's retries don't ask again. */
+const clipsLetGo = new Set<string>();
+
+/** Whether to close with clips still to save, which only memory holds: true unless the person stays. */
+function keepClips(window: BrowserWindow) {
+  const held = clipping.desk.holding();
+  if (held.every((id) => clipsLetGo.has(id))) return true;
+  const count = held.length;
+  const answer = dialog.showMessageBoxSync(window, {
+    type: 'question',
+    buttons: ['Close', 'Stay'],
+    defaultId: 1,
+    cancelId: 1,
+    message: count === 1 ? 'A clip isn’t saved yet' : `${count} clips aren’t saved yet`,
+    detail: 'It came from your browser and is kept only until it’s saved. Closing now loses it.',
+  });
+  if (answer !== 0) {
+    // Staying is staying: a "Close when saved" waiting to close again stops too.
+    clearInterval(closeRetry);
+    closeBy = null;
+    return false;
+  }
+  for (const id of held) clipsLetGo.add(id);
+  return true;
+}
+
 /** How long "Close when saved" waits for the save before asking again. */
 const CLOSE_WAIT_MS = 10_000;
 /** The window is closing, for the page's beforeunload that follows. */
@@ -689,7 +721,8 @@ function askToClose(window: BrowserWindow, event: { preventDefault(): void }) {
       : 'Your latest changes to this page aren’t saved yet. They save in a moment.',
   });
   if (answer === 1) return event.preventDefault();
-  if (answer !== 0) return;
+  // Staying: clips the person let go for this close are theirs to be asked about again.
+  if (answer !== 0) return clipsLetGo.clear();
   closeBy = Date.now() + CLOSE_WAIT_MS;
   closeRetry = setInterval(() => window.close(), 500);
 }
@@ -965,6 +998,14 @@ void app.whenReady().then(async () => {
   );
   handle('clipping', () => clipping.state());
   handle('setClipping', async (on) => clipping.set(z.boolean().parse(on)));
+  handle('setClipState', async (state) => clipping.desk.setPageState(state));
+  handle('waitingClips', async () => clipping.desk.waiting());
+  handle('clipMade', async (clipId, page) => clipping.desk.made(clipId, page));
+  handle('clipDone', async (clipId, outcome) => clipping.desk.done(clipId, outcome));
+  handle('clipFolders', async (requestId, folders) =>
+    clipping.desk.answerFolders(requestId, folders),
+  );
+  handle('clipImage', (clipId, url) => clipping.desk.image(clipId, url));
   // Listening before the window loads, as a helper may be waiting to connect.
   if (firstInstance) await clipping.start();
   openWindow();

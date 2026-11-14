@@ -16,6 +16,8 @@ export type Notice = {
   /** Takes it back. Its error is said in the notice, in this app's words. */
   undo?: () => Promise<void>;
   undoMessage?: (error: unknown) => string;
+  /** Something to do next, such as opening what was made, which closes the notice. */
+  action?: { label: string; run: () => void };
   /** While it runs, the notice stays. */
   running?: boolean;
   failed?: boolean;
@@ -58,8 +60,9 @@ const SHOWN_MS = 10_000;
 
 /**
  * The notice in the bottom corner after a delete, a move or a copy: what
- * happened, and Undo. It goes after 10 seconds, or when the vault session it
- * was made in ends; one that says something is running stays until it's done.
+ * happened, and Undo; or after a clip from the browser, and Open. It goes
+ * after 10 seconds, or when the vault session it was made in ends; one
+ * that says something is running stays until it's done.
  */
 export function UndoNotice({ ctx }: { ctx: ClientContext }) {
   const notice = useSyncExternalStore(subscribe, () => shown);
@@ -92,7 +95,7 @@ export function UndoNotice({ ctx }: { ctx: ClientContext }) {
       else setUndoing((now) => (now?.of === item ? { of: item, busy: false, error } : now));
     }
   }
-  const { undo: takeBack } = notice;
+  const { undo: takeBack, action } = notice;
   return (
     <div
       role={notice.failed || error ? 'alert' : 'status'}
@@ -106,6 +109,18 @@ export function UndoNotice({ ctx }: { ctx: ClientContext }) {
           <div className="text-muted-foreground">{notice.notes}</div>
         )}
       </div>
+      {action && !busy && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            show(null);
+            action.run();
+          }}
+        >
+          {action.label}
+        </Button>
+      )}
       {takeBack && (
         <Button
           variant="outline"
