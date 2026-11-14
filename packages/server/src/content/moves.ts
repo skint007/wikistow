@@ -39,6 +39,7 @@ import {
   type ShareRow,
 } from './access.ts';
 import { ContentError } from './errors.ts';
+import { loseLiveKeys } from './live.ts';
 import { placeAtEnd } from './order.ts';
 import {
   bumpPermissions,
@@ -209,6 +210,7 @@ export async function moveNode(
           .where(and(eq(agentGrants.shareId, from.id), inArray(agentGrants.folderId, subtree)));
       }
     }
+    if (crossing) await loseLiveKeys(tx, spaceId, subtree);
     await bumpPermissions(tx, spaceId, subtree);
     if (rewrapped) {
       // Its public links and copies whose people can't publish it where it

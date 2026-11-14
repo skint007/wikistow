@@ -51,6 +51,7 @@ import { placeAtEnd } from './order.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { currentIdentity, requireCaller, type Actor } from './identities.ts';
 import { isCommentVersion } from './comments.ts';
+import { isLiveVersion } from './live.ts';
 import { checkKeyMaterial } from './key-material.ts';
 import { latestAgentEdit, listPages, requirePublished } from './pages.ts';
 import { charge } from './quota.ts';
@@ -142,8 +143,11 @@ export async function storeMetadata(
   { accountId, storageBytes }: { accountId: string; storageBytes: number | null },
 ) {
   const { record } = metadata;
-  // Comment versions and metadata versions are one set of IDs (section 5.9).
-  if (await isCommentVersion(tx, record.metadataRevisionId)) {
+  // Comment, session and metadata versions are one set of IDs (sections 5.9 and 5.10).
+  if (
+    (await isCommentVersion(tx, record.metadataRevisionId)) ||
+    (await isLiveVersion(tx, record.metadataRevisionId))
+  ) {
     throw new ContentError('duplicate', 'That version ID is taken');
   }
   if (storageBytes !== null) {

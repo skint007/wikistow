@@ -4,14 +4,16 @@ const HOUR_MS = 60 * 60 * 1000;
 
 /**
  * Run `sweep` now and then every `intervalMs`, logging what it removed as
- * `event`, or `<event>-failed`. A run still going when the next is due is
- * left to finish instead. Returns the timer, for shutdown.
+ * `event`, or `<event>-failed`; when `quiet`, only a run that removed
+ * something. A run still going when the next is due is left to finish
+ * instead. Returns the timer, for shutdown.
  */
 export function scheduleSweep(
   log: Log,
   event: string,
   sweep: () => Promise<Record<string, number>>,
   intervalMs = HOUR_MS,
+  { quiet = false }: { quiet?: boolean } = {},
 ) {
   let running = false;
   const run = () => {
@@ -19,7 +21,10 @@ export function scheduleSweep(
     running = true;
     sweep()
       .then(
-        (removed) => log({ level: 'info', event, ...removed }),
+        (removed) => {
+          if (quiet && Object.values(removed).every((count) => count === 0)) return;
+          log({ level: 'info', event, ...removed });
+        },
         (error: unknown) =>
           log({
             level: 'error',

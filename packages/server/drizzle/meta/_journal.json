@@ -351,6 +351,13 @@
       "when": 1794544973828,
       "tag": "0049_node_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794620183028,
+      "tag": "0050_live_sessions",
+      "breakpoints": true
     }
   ]
 }
