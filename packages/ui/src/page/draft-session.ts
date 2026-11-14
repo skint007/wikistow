@@ -591,6 +591,7 @@ export class DraftSession {
     this.#base = revisionId;
     this.#region = null;
     // The change waiting on this device is sent: the session can be joined now.
+    this.#joinTries = 0;
     this.#joinSoon();
   }
 
@@ -1092,6 +1093,9 @@ export class DraftSession {
    * it, as before a restore, which is written from outside the session.
    */
   async leaveLive(): Promise<void> {
+    // The view opens again on what comes next, and joins from there.
+    this.#liveOff = true;
+    if (this.#rejoin) clearTimeout(this.#rejoin);
     const participant = this.#participant;
     if (!participant) return;
     this.#detach();
