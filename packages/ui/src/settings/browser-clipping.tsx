@@ -4,6 +4,7 @@ import type { ClipBrowser, ClippingState, DesktopBridge } from '@wikistow/contra
 import { FormMessage } from '@/components/layout/auth-card';
 import { Switch } from '@/components/ui/switch';
 import { errorMessage } from '../errors';
+import { useVault } from '../vault/store';
 import { SettingRow, THIS_DEVICE } from './rows';
 
 const BROWSER_NAMES: Record<ClipBrowser, string> = {
@@ -48,16 +49,20 @@ function clippingState(state: ClippingState | undefined) {
  */
 export function BrowserClipping({ desktop }: { desktop: DesktopBridge }) {
   const queryClient = useQueryClient();
+  // The clips' titles and paths are the vault's: shown only while it's
+  // open, and asked for again as it opens or locks.
+  const unlocked = useVault().status === 'unlocked';
+  const key = [...clippingKey, unlocked];
   // Read again on each visit, as clips land meanwhile.
   const { data } = useQuery({
-    queryKey: clippingKey,
+    queryKey: key,
     queryFn: () => desktop.clipping(),
     staleTime: 0,
     refetchOnMount: 'always',
   });
   const change = useMutation({
     mutationFn: (on: boolean) => desktop.setClipping(on),
-    onSuccess: (state) => queryClient.setQueryData(clippingKey, state),
+    onSuccess: (state) => queryClient.setQueryData(key, state),
   });
   return (
     <SettingRow
@@ -74,7 +79,7 @@ export function BrowserClipping({ desktop }: { desktop: DesktopBridge }) {
       }
     >
       {change.error && <FormMessage>{errorMessage(change.error)}</FormMessage>}
-      {data && data.recent.length > 0 && (
+      {unlocked && data && data.recent.length > 0 && (
         <div className="grid gap-1">
           <h4 className="text-[13px] font-bold text-muted-foreground">
             Clipped since WikiStow opened
