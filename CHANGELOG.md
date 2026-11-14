@@ -32,7 +32,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Plugins' page rows, from `host.pages.index()` and `host.pages.query()`, say when the version they show was saved, as `updated`: the server's time for it, which its author didn't sign, or this device's clock for a version saved here. The search index, the versions kept on the device and the kept index hold it too. A version kept before times were is asked for again once online, and kept with its time. (#426)
 - Search and the command palette open when opened again right after Escape closed them. On a busy computer, a key or click just then could open nothing: Escape closed the dialog at once, but the app heard of it a moment later, after the key or click. (#433)
 
-- A line given to the visual editor under a table, where the blank line after it went, shows as the table's last row, as reading the page does, from Split or a change the app makes. It showed as a second table, with an empty header and row, which the next edit wrote out in the editor's style. (#415)
+- A line given to the visual editor under a table, where the blank line after it went, shows as the table's last row, as reading the page does, from Split or a change the app makes. It showed as a second table, with an empty header and row, which the next edit wrote out in the editor's style. (#436)
 
 #### Desktop
 
