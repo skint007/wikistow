@@ -24,6 +24,7 @@ export * as commentRoutes from './routes/comments.ts';
 export * as contactsRoutes from './routes/contacts.ts';
 export * as copyRoutes from './routes/copies.ts';
 export * as groupRoutes from './routes/groups.ts';
+export * as importRoutes from './routes/imports.ts';
 export * as liveRoutes from './routes/live.ts';
 export * as desktopRoutes from './routes/desktop.ts';
 export * as ownerRoutes from './routes/owners.ts';

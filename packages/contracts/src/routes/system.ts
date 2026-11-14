@@ -37,5 +37,11 @@ export const installation = {
       .object({ restoredAt: z.iso.datetime(), backupTakenAt: z.iso.datetime().nullable() })
       .nullable()
       .optional(),
+    /**
+     * True when the server takes imports in batches (`importRoutes.batch`).
+     * Missing from servers older than it, which an import then writes to a
+     * request a change.
+     */
+    importBatches: z.boolean().optional(),
   }),
 } as const satisfies RouteDef;

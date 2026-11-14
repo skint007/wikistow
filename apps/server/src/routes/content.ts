@@ -3,6 +3,7 @@ import {
   contactsRoutes,
   copyRoutes,
   groupRoutes,
+  importRoutes,
   ownerRoutes,
   PageId,
   pageRoutes,
@@ -25,6 +26,7 @@ import {
   CryptoError,
   createFolder,
   createPage,
+  importBatch,
   deleteSpace,
   emptyTrash,
   listTrash,
@@ -846,6 +848,25 @@ export function mountContentRoutes(
         once,
       }).catch(toApiError),
     { rateLimit: WRITE_LIMIT, idempotent: true },
+  );
+
+  // Imports, in batches (wikistow.md, Import): each folder and page step
+  // checked as its own route checks it, all in one transaction, counted as
+  // one write. No check comes before the body: anyone can send one as large
+  // to a space of their own.
+  routes.content(
+    importRoutes.batch,
+    async ({ params, body }, { actor, once }) =>
+      importBatch(db, {
+        actor,
+        spaceId: params.spaceId,
+        storageBytes: limits.storageBytes,
+        maxPages: contentLimits.pages,
+        maxFolders: contentLimits.folders,
+        ...body,
+        once,
+      }).catch(toApiError),
+    { rateLimit: WRITE_LIMIT, idempotent: true, bodyLimit: importRoutes.MAX_BATCH_BODY },
   );
 
   // Copies, and moves between spaces (section 10). Agents copy within their
