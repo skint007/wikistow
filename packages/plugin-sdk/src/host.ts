@@ -94,9 +94,16 @@ export type PageQuery = {
   spaceId: string;
   /** A folder's path, such as `Recipes/Soups`, taking the folders under it too, or one `#tag`. The whole space if left out. */
   from?: string | undefined;
-  /** Conditions joined by commas, all of which must hold: `tried = true, servings >= 2`. */
+  /**
+   * Conditions joined by commas, all of which must hold: `tried = true, servings >= 2`.
+   * `saved` (or Dataview's `file.mtime`) is when the version was saved, `PageRow.updated`, compared as a date: `saved > 2026-01-01`.
+   * `updated` is a property like any other.
+   */
   where?: string | undefined;
-  /** A property name or `title`, then `asc` or `desc`: `cook_time desc`. As they come if left out. */
+  /**
+   * A property name, `title` or `saved` (or `file.mtime`), then `asc` or `desc`: `cook_time desc`, `saved desc`.
+   * `saved` sorts by `PageRow.updated`, as a date, a page whose time isn't known last. As they come if left out.
+   */
   sort?: string | undefined;
   /** From 1 to `QUERY_LIMIT`; 100 if left out. */
   limit?: number | undefined;

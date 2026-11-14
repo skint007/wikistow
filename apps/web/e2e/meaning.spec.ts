@@ -1,8 +1,18 @@
 import { CSP } from '@wikistow/contracts';
 import type { Page } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 import { expect, pick, test } from './fixtures';
-import { adminTab, fillSource, memberWithVault, newPage, waitForSave } from './vault';
+import { adminTab, fillSource, memberWithVault, newPage, PASSPHRASE, waitForSave } from './vault';
 import { embedIn, embedWorker, PASSAGES, QUERY, type Run } from './meaning';
+
+/** With E2E_SHOTS set, a screenshot for the pull request, in docs/screenshots/324. */
+async function shot(page: Page, name: string) {
+  if (!process.env['E2E_SHOTS']) return;
+  // The theme's colours settle before the picture is taken.
+  await page.waitForTimeout(300);
+  const path = fileURLToPath(new URL(`../../../docs/screenshots/324/${name}.png`, import.meta.url));
+  await page.screenshot({ path });
+}
 
 /** Each run's times, beside the test's result (`--reporter=json`), for ADR 0016's measurements. */
 function note(name: string, run: Run) {
@@ -254,5 +264,90 @@ test('indexes by meaning in the background, typing and searching staying respons
         ),
       )
       .toEqual([]);
+  });
+});
+
+/**
+ * The search dialog lists pages close in meaning below the word matches
+ * (ADR 0016, step 5): a page about a beach holiday is found by "trip to the
+ * coast", which it holds none of the words of. In a second tab, which the
+ * queue doesn't run in, it is found from the vectors the first one kept.
+ */
+test('finds a page by meaning in search, in another tab too', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newPage(page, 'Summer holiday in Cornwall');
+  await fillSource(
+    page,
+    'We rented a cottage in St Ives for a week in August. The kids swam every morning, built sandcastles and we ate fish and chips on the harbour wall. Book the same cottage next year, it fills up by February.',
+  );
+  await waitForSave(page);
+  await newPage(page, 'Boiler service');
+  await fillSource(
+    page,
+    'The Worcester boiler is serviced every October by Dave from HeatRight. Last pressure reading 1.4 bar. If it drops below 1, top it up with the filling loop under the sink.',
+  );
+  await waitForSave(page);
+  const pageUrl = page.url();
+
+  const row = page.getByRole('heading', { level: 3, name: /^Search by meaning/ });
+  await page.getByRole('link', { name: 'Settings' }).click();
+  await pick(page.getByLabel(/^Keep for offline: /), 'Every page');
+  await page.getByRole('switch', { name: 'Search by meaning' }).click();
+  await expect(row).toHaveAccessibleDescription(/^All 2 pages indexed\./, { timeout: 120_000 });
+  await page.goBack();
+
+  /** Search `tab` for "trip to the coast", and open what it finds by meaning. */
+  async function findByMeaning(tab: Page, { shoot = false } = {}) {
+    await tab.getByRole('button', { name: 'Search', exact: true }).click();
+    const search = tab.getByRole('dialog', { name: 'Search' });
+    await search.getByRole('combobox', { name: 'Search pages' }).fill('trip to the coast');
+    const meaning = search.getByRole('group', { name: 'By meaning' });
+    await expect(meaning.getByRole('option').first()).toContainText('Summer holiday in Cornwall', {
+      timeout: 30_000,
+    });
+    // Its snippet is the start of its text, with no word marked.
+    await expect(meaning.getByRole('option').first()).toContainText('We rented a cottage');
+    await expect(meaning.locator('mark')).toHaveCount(0);
+    await expect(search.getByRole('status')).toHaveText(
+      /^No pages with these words · \d by meaning$/,
+    );
+    if (shoot) {
+      for (const colorScheme of ['light', 'dark'] as const) {
+        await tab.emulateMedia({ colorScheme });
+        await shot(tab, `by-meaning-${colorScheme}`);
+      }
+      await tab.emulateMedia({ colorScheme: null });
+    }
+    // The first row is chosen, and Enter opens it.
+    await tab.keyboard.press('Enter');
+    await expect(search).toBeHidden();
+    await expect(tab.locator('#page-title')).toHaveValue('Summer holiday in Cornwall');
+  }
+
+  await test.step('found by meaning in the tab running the queue', () =>
+    findByMeaning(page, { shoot: true }));
+
+  await test.step('and in another tab, from the vectors kept', async () => {
+    await expect.poll(() => keptVectors(page), { timeout: 30_000 }).toBeGreaterThan(0);
+    const other = await page.context().newPage();
+    await other.goto(pageUrl);
+    await other.getByLabel('Vault passphrase').fill(PASSPHRASE);
+    await other.getByRole('button', { name: 'Unlock' }).click();
+    await expect(other.locator('#page-title')).toHaveValue('Boiler service');
+    // The first tab holds the queue; this one waits for it, with no vectors of its own.
+    const queue = () =>
+      other.evaluate(async () => {
+        const { held = [], pending = [] } = await navigator.locks.query();
+        const named = (lock: { name?: string }) => lock.name === 'wikistow-meaning-queue';
+        return { held: held.filter(named).length, pending: pending.filter(named).length };
+      });
+    await expect.poll(queue).toEqual({ held: 1, pending: 1 });
+    await findByMeaning(other);
+    expect(await queue()).toEqual({ held: 1, pending: 1 });
   });
 });

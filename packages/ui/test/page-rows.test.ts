@@ -187,6 +187,28 @@ describe('a query', () => {
     expect(run({ spaceId }).total).toBe(3);
   });
 
+  it('sorts and filters by when each version was saved, as saved or Dataview’s file.mtime (#427)', () => {
+    const [bread, soup, tart] = PAGES as [Page, Page, Page];
+    // Saved at SAVED, later, and at a time not known.
+    const untimed = new searchOperations.PageIndex();
+    for (const [page, updated] of [
+      [bread, SAVED],
+      [soup, '2026-11-14T08:00:00.000Z'],
+      [tart, null],
+    ] as const)
+      untimed.addText(docOf(page), { title: page[1], text: '', updated });
+    const space = readableSpace(untimed.list({ spaceId }), TREE, grantedTo([recipes]));
+    const titles = (query: Omit<Parameters<typeof readPluginQuery>[0], 'spaceId'>) =>
+      run({ spaceId, ...query }, space).rows.map(({ title }) => title);
+    expect(titles({ sort: 'saved desc' })).toEqual(['Tomato soup', 'Garlic bread', 'Lemon tart']);
+    expect(titles({ sort: 'file.mtime desc' })).toEqual(titles({ sort: 'saved desc' }));
+    expect(titles({ sort: 'File.mtime' })).toEqual(['Garlic bread', 'Tomato soup', 'Lemon tart']);
+    expect(titles({ where: 'file.mtime > 2026-11-14' })).toEqual(['Tomato soup']);
+    expect(titles({ where: 'saved < 2026-11-14' })).toEqual(['Garlic bread']);
+    // A property named updated is like any other: none has one.
+    expect(titles({ where: 'updated < 2026-11-14' })).toEqual([]);
+  });
+
   it('finds a folder only among those the plugin can read', () => {
     expect(() => run({ spaceId, from: 'Diary' })).toThrow('No folder here is at Diary.');
     // Its granted folder is the top of what it sees.

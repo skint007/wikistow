@@ -1,9 +1,11 @@
-// The web clipper's path through the desktop app (ADR 0017, steps 2 and
-// 4): a test extension in Chromium starts wikistow-clip-host through the
+// The web clipper's path through the desktop app (ADR 0017, steps 2, 4
+// and 5): an extension in Chromium starts wikistow-clip-host through the
 // manifest the app wrote, the helper reaches the running app on its
 // socket, and a clip sent through it becomes a draft, its image fetched
 // from the clipped site and attached, at once or once the vault unlocks.
-import { chromium, type BrowserContext, type Worker } from '@playwright/test';
+// The first test speaks the protocol from a stand-in extension; the
+// second clips with the real one (apps/clipper), through its popup.
+import { chromium, type BrowserContext, type Page, type Worker } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, stat } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
@@ -13,14 +15,17 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '../../web/e2e/fixtures';
 import { adminTab, memberWithVault, PASSPHRASE, PNG, sourceOf } from '../../web/e2e/vault';
+import { TEST_ID } from '../../clipper/e2e/test-key';
 import { accountMenu, launch, signInThroughBrowser, type Desktop } from './desktop';
 
 const APP_DIR = fileURLToPath(new URL('..', import.meta.url));
 // scripts/clip-host.sh builds it; CI's build job does, for this job too.
 const HELPER = join(APP_DIR, 'out', 'clip-host', 'linux-amd64', 'wikistow-clip-host');
 const EXTENSION = join(APP_DIR, 'e2e', 'clip-extension');
-// The ID its manifest's key gives it.
-const ORIGIN = 'chrome-extension://mnoeboefdgcplmejicllacedgejajmdo/';
+// The real extension's tests' build (`pnpm -C apps/clipper build`), with the same key.
+const CLIPPER = join(APP_DIR, '..', 'clipper', 'dist', 'chrome-test');
+// The ID both manifests' key gives them.
+const ORIGIN = `chrome-extension://${TEST_ID}/`;
 const HOST = 'io.github.skint007.wikistow';
 const { version } = JSON.parse(await readFile(join(APP_DIR, 'package.json'), 'utf8')) as {
   version: string;
@@ -49,7 +54,14 @@ test.afterEach(async () => {
   site = null;
 });
 
-/** A site to clip from, on this computer, serving one image, and every request it got. */
+const WORDS = 'Some words about the cat, who sat on the warm mat all afternoon. ';
+/** A page Readability takes as an article, with an image. */
+const STORY = `<!doctype html><html><head><title>A clipped story</title></head><body>
+<nav><a href="/">Home</a></nav><article><h1>The story</h1>
+${Array.from({ length: 4 }, () => `<p>${WORDS.repeat(3)}</p>`).join('')}
+<p><img src="/cat.png" alt="A cat"></p></article></body></html>`;
+
+/** A site to clip from, on this computer, serving a page and its image, and every request it got. */
 async function clippedSite() {
   const requests: IncomingMessage[] = [];
   site = createServer((request, response) => {
@@ -57,6 +69,10 @@ async function clippedSite() {
     if (request.url === '/cat.png') {
       response.writeHead(200, { 'content-type': 'image/png' });
       return response.end(PNG);
+    }
+    if (request.url === '/story') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return response.end(STORY);
     }
     response.writeHead(404);
     response.end();
@@ -77,6 +93,37 @@ const converse = (worker: Worker, messages: object[], count = 1) =>
     [HOST, messages, count] as const,
   );
 
+/**
+ * The app, clipping: in a home and config folder of the test's own, which
+ * the app writes the manifests into and the helper finds the app's
+ * clip-host.json through. The browser's profile is its folder there, as a
+ * person's Chromium is.
+ */
+async function clippingApp() {
+  const root = await mkdtemp(join(tmpdir(), 'wikistow-clip-'));
+  const home = join(root, 'home');
+  const config = join(root, 'config');
+  await mkdir(join(config, 'chromium'), { recursive: true });
+  await mkdir(join(home, '.mozilla'), { recursive: true });
+  const env = { ...definedEnv(), HOME: home, XDG_CONFIG_HOME: config };
+  const profile = join(config, 'WikiStow');
+  const app = await launch(
+    profile,
+    ['--clip-manifests', `--clip-extension=${ORIGIN}`],
+    undefined,
+    env,
+  );
+  return { app, home, config, env, profile };
+}
+
+/** Sign the app in through the browser, and unlock its vault. */
+async function signInAndUnlock(app: Desktop, page: Page, baseURL: string) {
+  await signInThroughBrowser(app, page, baseURL);
+  await app.window.getByLabel('Vault passphrase').fill(PASSPHRASE);
+  await app.window.getByRole('button', { name: 'Unlock' }).click();
+  await expect(app.window.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
+}
+
 test('an extension reaches the app through the helper', async ({
   page,
   freshPage,
@@ -88,22 +135,8 @@ test('an extension reaches the app through the helper', async ({
   expect(existsSync(HELPER), 'Build the helper first: scripts/clip-host.sh').toBe(true);
   await memberWithVault(page, await adminTab(freshPage, admin.email));
 
-  // A home and config folder of the test's own, which the app writes the
-  // manifests into and the helper finds the app's clip-host.json through.
-  // The browser's profile is its folder there, as a person's Chromium is.
-  const root = await mkdtemp(join(tmpdir(), 'wikistow-clip-'));
-  const home = join(root, 'home');
-  const config = join(root, 'config');
-  await mkdir(join(config, 'chromium'), { recursive: true });
-  await mkdir(join(home, '.mozilla'), { recursive: true });
-  const env = { ...definedEnv(), HOME: home, XDG_CONFIG_HOME: config };
-  const profile = join(config, 'WikiStow');
-  desktop = await launch(
-    profile,
-    ['--clip-manifests', `--clip-extension=${ORIGIN}`],
-    undefined,
-    env,
-  );
+  const { app, home, config, env, profile } = await clippingApp();
+  desktop = app;
   await expect(desktop.window.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 
   const chromiumManifest = join(config, 'chromium', 'NativeMessagingHosts', `${HOST}.json`);
@@ -156,10 +189,7 @@ test('an extension reaches the app through the helper', async ({
     (await converse(worker, [{ v: 1, id: 'f', type: 'folders', query: 'Per' }])).received,
   ).toMatchObject([{ id: 'f', type: 'error', code: 'signed-out' }]);
 
-  await signInThroughBrowser(desktop, page, baseURL ?? '');
-  await desktop.window.getByLabel('Vault passphrase').fill(PASSPHRASE);
-  await desktop.window.getByRole('button', { name: 'Unlock' }).click();
-  await expect(desktop.window.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
+  await signInAndUnlock(desktop, page, baseURL ?? '');
   // Signed in and unlocked, as the page tells main.
   await expect
     .poll(async () => (await converse(worker, [hello])).received)
@@ -317,4 +347,51 @@ test('an extension reaches the app through the helper', async ({
   expect((await converse(worker, [{ v: 1, id: 'd', type: 'open' }])).received).toMatchObject([
     { id: 'd', type: 'error', code: 'failed' },
   ]);
+});
+
+test('the extension clips a page into the app from its popup', async ({
+  page,
+  freshPage,
+  admin,
+  baseURL,
+}) => {
+  test.skip(process.platform !== 'linux', 'The helper is built for Linux here');
+  test.setTimeout(180_000);
+  expect(existsSync(HELPER), 'Build the helper first: scripts/clip-host.sh').toBe(true);
+  expect(existsSync(CLIPPER), 'Build the extension first: pnpm -C apps/clipper build').toBe(true);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  const { app, config, env } = await clippingApp();
+  desktop = app;
+  await signInAndUnlock(desktop, page, baseURL ?? '');
+
+  const { origin } = await clippedSite();
+  browser = await chromium.launchPersistentContext(join(config, 'chromium'), {
+    channel: 'chromium',
+    args: [`--disable-extensions-except=${CLIPPER}`, `--load-extension=${CLIPPER}`],
+    env,
+  });
+  const worker = browser.serviceWorkers()[0] ?? (await browser.waitForEvent('serviceworker'));
+  const story = await browser.newPage();
+  await story.goto(`${origin}/story`);
+  const tabId = await worker.evaluate(async (url) => {
+    type Tabs = { query(query: object): Promise<{ id?: number; url?: string }[]> };
+    const { tabs } = (globalThis as unknown as { chrome: { tabs: Tabs } }).chrome;
+    return (await tabs.query({})).find((tab) => tab.url === url)?.id;
+  }, `${origin}/story`);
+  // The popup, in a tab of its own, for the story's tab, as its toolbar button opens it.
+  const popup = await browser.newPage();
+  await popup.goto(`${ORIGIN}popup.html?tab=${tabId}`);
+  await expect(popup.getByRole('radio', { name: 'Article' })).toBeChecked();
+  await popup.getByLabel('Find a folder').fill('perso');
+  await popup.getByRole('radio', { name: 'Personal' }).check();
+  await popup.getByLabel('Tags').fill('clipped');
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal')).toBeVisible();
+  await expect(desktop.window.getByText('Saved “A clipped story” to Personal')).toBeVisible();
+
+  await popup.getByRole('button', { name: 'Open in WikiStow' }).click();
+  await expect(desktop.window.locator('#page-title')).toHaveValue('A clipped story');
+  await expect
+    .poll(() => sourceOf(desktop!.window))
+    .toMatch(/^## The story\n\n(Some words[^\n]+\n\n){4}!\[A cat\]\(attachment:[\w-]{22}\)\n$/);
 });

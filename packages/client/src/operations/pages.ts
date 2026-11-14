@@ -744,22 +744,24 @@ export const publicationsFor =
  * Each page's current publication, opened through the revision cache, in
  * as few requests as `fetchRevisions` makes: those that don't open, are in
  * a newer format, or bind another page are left out, and every one when
- * they can't be fetched, unless `strict`, which throws then instead.
+ * they can't be fetched, unless `strict`, which throws then instead. Each
+ * with when the server took it (`OpenedRevision.createdAt`), asked for
+ * where one is held without it with `timed`.
  */
 export async function openPublications(
   ctx: ClientContext,
   spaceId: SpaceId,
   pages: readonly { id: PageId; publishedHead: RevisionId }[],
-  { strict = false }: { strict?: boolean } = {},
-): Promise<Map<PageId, PagePayload>> {
-  const opened = new Map<PageId, PagePayload>();
+  { strict = false, timed = false }: { strict?: boolean; timed?: boolean } = {},
+): Promise<Map<PageId, { payload: PagePayload; createdAt: string | null }>> {
+  const opened = new Map<PageId, { payload: PagePayload; createdAt: string | null }>();
   if (pages.length === 0) return opened;
   const wanted = new Map<RevisionId, Wanted>(
     pages.map((page) => [page.publishedHead, { pageId: page.id, audience: 'published' }]),
   );
   let fetched: Map<RevisionId, () => OpenedRevision>;
   try {
-    fetched = await fetchRevisions(ctx, spaceId, wanted);
+    fetched = await fetchRevisions(ctx, spaceId, wanted, { timed });
   } catch (error) {
     if (!strict && (error instanceof ApiError || error instanceof CryptoError)) return opened;
     throw error;
@@ -767,7 +769,9 @@ export async function openPublications(
   for (const page of pages) {
     const found = fetched.get(page.publishedHead);
     const checked = found && checkedFor(found, { spaceId, pageId: page.id, audience: 'published' });
-    if (checked?.opened.kind === 'current') opened.set(page.id, checked.opened.payload);
+    if (checked?.opened.kind === 'current') {
+      opened.set(page.id, { payload: checked.opened.payload, createdAt: checked.createdAt });
+    }
   }
   return opened;
 }

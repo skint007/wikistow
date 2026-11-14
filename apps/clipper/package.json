@@ -1,0 +1,20 @@
+{
+  "name": "@wikistow/clipper",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "vp pack && node scripts/assemble.ts",
+    "e2e": "playwright test",
+    "lint:firefox": "web-ext lint --source-dir dist/firefox --self-hosted"
+  },
+  "devDependencies": {
+    "@mozilla/readability": "0.6.0",
+    "@playwright/test": "1.63.0",
+    "@types/chrome": "0.3.7",
+    "@types/node": "^26.0.0",
+    "fflate": "0.8.3",
+    "web-ext": "10.8.0"
+  }
+}

@@ -10,6 +10,8 @@ import { dropMeaningIndex, meaningIndexFile } from './meaning-file';
 import { MeaningIndexer, type MeaningStatus } from './meaning-index';
 import { MEANING_MODEL } from './model';
 import { oneTabAtATime } from './one-tab';
+import { meaningIndexer, meaningReader, setReader, setRunning, subscribeRunning } from './running';
+import { MeaningReader } from './search';
 import { dropsKeptVectors, searchByMeaning, useMeaningPlace } from './setting';
 
 // Search by meaning in the app (ADR 0016, step 4): the background queue
@@ -76,22 +78,25 @@ export function startMeaningIndex(queryClient: QueryClient, ctx: ClientContext) 
   };
 }
 
-/** The open session's queue, or null while search by meaning isn't running. */
-let running: MeaningIndexer | null = null;
-const listeners = new Set<() => void>();
-function setRunning(indexer: MeaningIndexer | null) {
-  running = indexer;
-  for (const listener of listeners) listener();
-}
-const subscribeRunning = (listener: () => void) => {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-};
+export { meaningIndexer } from './running';
 
-/** The queue running for the open session, for the search dialog, if search by meaning is on here. */
-export const meaningIndexer = (): MeaningIndexer | null => running;
+/**
+ * A reader of the vectors kept for `ctx`, for the search dialog of a tab
+ * without the queue, which another tab holds (`oneTabAtATime`): it reads
+ * them when search opens, and embeds queries in a worker of its own.
+ */
+export function startMeaningReader(ctx: ClientContext): MeaningReader {
+  const epoch = vaultStore.epoch();
+  return new MeaningReader({
+    embedder: new Embedder({ keep: !desktop }),
+    file: () => meaningIndexFile().catch(() => null),
+    open: (sealed) => {
+      if (vaultStore.epoch() !== epoch) throw new Error('The vault locked');
+      return openMeaningIndex(ctx, sealed, MODEL_HASH);
+    },
+    idle,
+  });
+}
 
 /**
  * How far the vectors have got ("By meaning: 340 of 1,200 pages so far",
@@ -132,11 +137,21 @@ export function useMeaningIndex(ctx: ClientContext | null) {
         flush: () => started.indexer.flush(),
         stop() {
           started.stop();
-          if (running === started.indexer) setRunning(null);
+          if (meaningIndexer() === started.indexer) setRunning(null);
         },
       };
     });
   }, [ctx, on, queryClient]);
+  // In every tab, for its search dialog while another tab holds the queue.
+  useEffect(() => {
+    if (!ctx || !on) return;
+    const reader = startMeaningReader(ctx);
+    setReader(reader);
+    return () => {
+      reader.stop();
+      if (meaningReader() === reader) setReader(null);
+    };
+  }, [ctx, on]);
   // A phone's layout may be a narrow window, which widens again: kept.
   // In every tab, after its own queue stopped above, so none puts back
   // what goes: the vectors, and when it is off, the model's files.
