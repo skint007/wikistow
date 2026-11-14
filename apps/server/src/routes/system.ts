@@ -21,6 +21,7 @@ export function mountSystemRoutes(
       setup: await setupOpen(db),
       origin: publicOrigin,
       restore,
+      importBatches: true,
     };
   });
 }
