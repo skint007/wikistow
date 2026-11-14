@@ -667,7 +667,7 @@ describe('a public page holding a query table (ADR 0006, decision 9)', () => {
     await pages.editDraft(owner.ctx, first, { markdown: 'later draft' });
     const notes = await create(
       'Notes',
-      '```wikistow-query\nshow: updated\nsort: updated desc\nwhere: updated > 2000-01-01\n```\n',
+      '```wikistow-query\nshow: saved\nsort: saved desc\nwhere: saved > 2000-01-01\n```\n',
     );
     const id = await links.turnOn(owner.ctx, notes.pageId);
     await links.shareCopy(owner.ctx, notes);

@@ -7,7 +7,7 @@
 //     sort: cook_time desc     a key or `title`, then `asc` or `desc`
 //     limit: 20                at most 500, 100 if left out
 //
-// `updated`, in `where`, `show` and `sort`, is when the version listed was
+// `saved`, in `where`, `show` and `sort`, is when the version listed was
 // saved (`QueryPage.updated`), as a date, rather than a property so named.
 //
 // `parsePageQuery` reads a block's text, or says in one line why it can't.
@@ -67,11 +67,13 @@ type Line = (typeof LINES)[number];
 const fail = (error: string): ParsedQuery => ({ ok: false, error });
 
 /**
- * The name for when the version a query lists was saved (`QueryPage.updated`),
- * in `where`, `show` and `sort`, whatever its case: a page's own property
- * of that name is out of their reach, as one named `title` is in `sort`.
+ * The name for when the version a query lists was saved (`QueryPage.updated`,
+ * which plugins' rows give as `updated`), in `where`, `show` and `sort`,
+ * whatever its case: a page's own property named `saved` is out of their
+ * reach, as one named `title` is in `sort`. A property named `updated` is
+ * like any other.
  */
-export const SAVED_TIME = 'updated';
+export const SAVED_TIME = 'saved';
 
 /** Whether `name` names when each version was saved (`SAVED_TIME`), not a property. */
 export const isSavedTime = (name: string) => foldPropertyName(name) === SAVED_TIME;
@@ -79,13 +81,13 @@ export const isSavedTime = (name: string) => foldPropertyName(name) === SAVED_TI
 /** How a query block's text is read. */
 export type QueryReading = {
   /**
-   * Also read Dataview's `file.mtime`, whatever its case, as `updated`
+   * Also read Dataview's `file.mtime`, whatever its case, as `saved`
    * (`SAVED_TIME`): for plugins' queries, which Dataview's blocks become.
    */
   fileMtime?: boolean;
 };
 
-/** `name` as written, or `updated` for Dataview's `file.mtime` where `reading` takes it. */
+/** `name` as written, or `saved` for Dataview's `file.mtime` where `reading` takes it. */
 const nameIn = (name: string, { fileMtime = false }: QueryReading) =>
   fileMtime && name.toLowerCase() === 'file.mtime' ? SAVED_TIME : name;
 
@@ -324,12 +326,6 @@ export type QueryResult<P> =
       rows: QueryRow<P>[];
       /** How many pages it found, its limit aside. */
       total: number;
-      /**
-       * The query names `updated` (`SAVED_TIME`), and a page it found has a
-       * property of that name too, which the query doesn't read: for the
-       * table to say so.
-       */
-      shadowed: boolean;
     }
   | { ok: false; error: string };
 
@@ -367,18 +363,11 @@ export function runPageQuery<P extends QueryPage>(
       ),
     })),
     total: meets.length,
-    shadowed: namesSaved(query) && listed.some((page) => findProperty(page.properties, SAVED_TIME)),
   };
 }
 
-/** Whether `query` names `updated` (`SAVED_TIME`) anywhere. */
-const namesSaved = (query: PageQuery) =>
-  query.where.some(({ name }) => isSavedTime(name)) ||
-  query.show.some(isSavedTime) ||
-  (query.sort !== null && query.sort.by !== 'title' && isSavedTime(query.sort.by.name));
-
 /**
- * `page`'s value named `name`: its property, or for `updated` (`SAVED_TIME`)
+ * `page`'s value named `name`: its property, or for `saved` (`SAVED_TIME`)
  * when its version was saved, as a date property.
  */
 function valueOf(page: QueryPage, name: string): Readonly<PropertyData> | undefined {

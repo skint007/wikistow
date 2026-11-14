@@ -187,7 +187,7 @@ describe('a query', () => {
     expect(run({ spaceId }).total).toBe(3);
   });
 
-  it('sorts and filters by when each version was saved, as updated or Dataview’s file.mtime (#427)', () => {
+  it('sorts and filters by when each version was saved, as saved or Dataview’s file.mtime (#427)', () => {
     const [bread, soup, tart] = PAGES as [Page, Page, Page];
     // Saved at SAVED, later, and at a time not known.
     const untimed = new searchOperations.PageIndex();
@@ -200,11 +200,13 @@ describe('a query', () => {
     const space = readableSpace(untimed.list({ spaceId }), TREE, grantedTo([recipes]));
     const titles = (query: Omit<Parameters<typeof readPluginQuery>[0], 'spaceId'>) =>
       run({ spaceId, ...query }, space).rows.map(({ title }) => title);
-    expect(titles({ sort: 'updated desc' })).toEqual(['Tomato soup', 'Garlic bread', 'Lemon tart']);
-    expect(titles({ sort: 'file.mtime desc' })).toEqual(titles({ sort: 'updated desc' }));
+    expect(titles({ sort: 'saved desc' })).toEqual(['Tomato soup', 'Garlic bread', 'Lemon tart']);
+    expect(titles({ sort: 'file.mtime desc' })).toEqual(titles({ sort: 'saved desc' }));
     expect(titles({ sort: 'File.mtime' })).toEqual(['Garlic bread', 'Tomato soup', 'Lemon tart']);
     expect(titles({ where: 'file.mtime > 2026-11-14' })).toEqual(['Tomato soup']);
-    expect(titles({ where: 'updated < 2026-11-14' })).toEqual(['Garlic bread']);
+    expect(titles({ where: 'saved < 2026-11-14' })).toEqual(['Garlic bread']);
+    // A property named updated is like any other: none has one.
+    expect(titles({ where: 'updated < 2026-11-14' })).toEqual([]);
   });
 
   it('finds a folder only among those the plugin can read', () => {

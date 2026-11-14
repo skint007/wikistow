@@ -108,7 +108,7 @@ export function QueryTable({
       </p>
     );
   }
-  const { columns, total, shadowed } = result;
+  const { columns, total } = result;
   return (
     <figure className="query-table">
       <div className="overflow-x-auto rounded-control">
@@ -150,8 +150,6 @@ export function QueryTable({
             : total === 1
               ? '1 page.'
               : `${total} pages.`}
-        {shadowed &&
-          ' Here updated is when each page was saved, not the updated property some pages here have.'}
       </figcaption>
     </figure>
   );

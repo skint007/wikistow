@@ -412,7 +412,7 @@ function audienceOf(loaded: LoadedTree, page: PageRef) {
  * cell is `[[Title]]` where `linked` says it may link, else its title. A
  * value is written as the rows show it, a date as written, a list
  * comma-separated; a missing one leaves its cell empty. When a page was
- * saved (`updated`) is written as the moment in UTC, `2026-11-13 09:30 UTC`,
+ * saved (`saved`) is written as the moment in UTC, `2026-11-13 09:30 UTC`,
  * as a copy's reader may be anywhere.
  */
 export function queryTableMarkdown<P extends { title: string }>(
@@ -463,7 +463,7 @@ function queryBlocks(body: string): string[] {
  * Each query block of the copied version as its public copy writes it
  * (ADR 0006, decision 9): the table as it stands now, run over the
  * published versions of the pages the copy may show (`audienceOf`), opened
- * here, never a draft, each with when it was saved (`updated`). A page links only to a public page: one with a link
+ * here, never a draft, each with when it was saved (`saved`). A page links only to a public page: one with a link
  * of its own, named by its published title alone, which the server is
  * told as a target (`targets`), as for the body's wikilinks, unless the
  * body or another row writes that text for another page. Any other is its

@@ -9,10 +9,10 @@
 //     LIMIT 10
 //
 // Anything else, such as FROM with OR, file.* fields but file.name and
-// file.mtime, WHERE or SORT on a property named updated, which the host
-// reads as when the page was saved, or expressions, gives a line saying
-// what isn't read, and the block shows its text. The host reads file.mtime as `updated` in a
-// plugin's query; an app from before it did refuses the query.
+// file.mtime, WHERE or SORT on a property named saved, which the host reads
+// as when the page was saved, or expressions, gives a line saying what
+// isn't read, and the block shows its text. The host reads file.mtime as
+// `saved` in a plugin's query; an app from before it did refuses the query.
 
 import type { PageQuery } from '@wikistow/plugin-sdk';
 
@@ -69,12 +69,12 @@ function fieldName(field: string): string | null {
 
 /**
  * A field as the host's query reads it, or null for a property named
- * `updated`, which the host reads as when the page was saved: in Dataview
- * it is the property, so it would filter or sort by the wrong thing.
+ * `saved`, which the host reads as when the page was saved: in Dataview it
+ * is the property, so it would filter or sort by the wrong thing.
  */
 function queriedName(field: string): string | null {
   const name = fieldName(field);
-  return name !== null && name.toLowerCase().replace(/[_\s-]+/g, ' ') === 'updated' ? null : name;
+  return name !== null && name.toLowerCase().replace(/[_\s-]+/g, ' ') === 'saved' ? null : name;
 }
 
 /** A value as wikistow-query writes it: a quoted text, a number, true or false, or a date. */

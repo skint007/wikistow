@@ -373,10 +373,13 @@ describe('running a query', () => {
 });
 
 describe('when each page was saved (#427)', () => {
-  // `updated` as the index holds it: the server's time, this device's clock, or not known.
+  // When each was saved, as the index holds it (`updated`): the server's time, this device's clock, or not known.
   const timed: Page[] = [
     {
-      ...page('a', 'Apple', [{ key: 'updated', type: 'text', value: 'by hand' }]),
+      ...page('a', 'Apple', [
+        { key: 'updated', type: 'text', value: 'by hand' },
+        { key: 'saved', type: 'text', value: 'kept' },
+      ]),
       updated: '2026-11-13T09:30:41.123Z',
     },
     { ...page('b', 'Bread', []), updated: '2026-01-02T00:00:00.000Z' },
@@ -385,26 +388,20 @@ describe('when each page was saved (#427)', () => {
     { ...page('e', 'Eggs', []), updated: '2026-06-30T23:59:59.000Z' },
   ];
 
-  it('reads updated in sort, show and where, whatever its case', () => {
-    expect(parsed('sort: Updated desc').sort).toEqual({
-      by: { name: 'Updated' },
+  it('reads saved in sort, show and where, whatever its case', () => {
+    expect(parsed('sort: Saved desc').sort).toEqual({
+      by: { name: 'Saved' },
       descending: true,
     });
-    expect(parsed('show: updated, servings').show).toEqual(['updated', 'servings']);
-    expect(parsed('where: updated > 2026-01-01').where).toEqual([
-      { name: 'updated', operator: '>', value: { kind: 'date', value: Date.UTC(2026, 0, 1) } },
+    expect(parsed('show: saved, servings').show).toEqual(['saved', 'servings']);
+    expect(parsed('where: saved > 2026-01-01').where).toEqual([
+      { name: 'saved', operator: '>', value: { kind: 'date', value: Date.UTC(2026, 0, 1) } },
     ]);
   });
 
   it('sorts as a date, missing values last either way', () => {
-    expect(titles('sort: updated', timed)).toEqual(['Bread', 'Eggs', 'Apple', 'Cake', 'Dates']);
-    expect(titles('sort: updated desc', timed)).toEqual([
-      'Apple',
-      'Eggs',
-      'Bread',
-      'Cake',
-      'Dates',
-    ]);
+    expect(titles('sort: saved', timed)).toEqual(['Bread', 'Eggs', 'Apple', 'Cake', 'Dates']);
+    expect(titles('sort: saved desc', timed)).toEqual(['Apple', 'Eggs', 'Bread', 'Cake', 'Dates']);
   });
 
   it('sorts times saved a moment apart apart', () => {
@@ -412,45 +409,36 @@ describe('when each page was saved (#427)', () => {
       ...page(`m${i}`, `M${i}`, []),
       updated: `2026-11-14T03:53:02${ms}Z`,
     }));
-    expect(titles('sort: updated desc', close)).toEqual(['M1', 'M2', 'M0']);
+    expect(titles('sort: saved desc', close)).toEqual(['M1', 'M2', 'M0']);
   });
 
   it('compares as a date, and never holds for a time not known', () => {
-    expect(titles('where: updated > 2026-01-02', timed)).toEqual(['Apple', 'Eggs']);
-    expect(titles('where: updated >= 2026-01-02', timed)).toEqual(['Apple', 'Bread', 'Eggs']);
-    expect(titles('where: updated < 2026-07-01T00:00Z', timed)).toEqual(['Bread', 'Eggs']);
-    expect(titles('where: updated != 2026-01-02', timed)).toEqual([
-      'Apple',
-      'Cake',
-      'Dates',
-      'Eggs',
-    ]);
+    expect(titles('where: saved > 2026-01-02', timed)).toEqual(['Apple', 'Eggs']);
+    expect(titles('where: saved >= 2026-01-02', timed)).toEqual(['Apple', 'Bread', 'Eggs']);
+    expect(titles('where: saved < 2026-07-01T00:00Z', timed)).toEqual(['Bread', 'Eggs']);
+    expect(titles('where: saved != 2026-01-02', timed)).toEqual(['Apple', 'Cake', 'Dates', 'Eggs']);
   });
 
   it('shows as a date with its time to the minute, in UTC, or nothing when not known', () => {
-    const result = run('show: updated\nsort: title', timed);
+    const result = run('show: saved\nsort: title', timed);
     if (!result.ok) throw new Error(result.error);
     expect(result.rows.map(({ values: [value] }) => value)).toEqual([
-      { key: 'updated', type: 'date', value: '2026-11-13T09:30Z' },
-      { key: 'updated', type: 'date', value: '2026-01-02T00:00Z' },
+      { key: 'saved', type: 'date', value: '2026-11-13T09:30Z' },
+      { key: 'saved', type: 'date', value: '2026-01-02T00:00Z' },
       undefined,
       undefined,
-      { key: 'updated', type: 'date', value: '2026-06-30T23:59Z' },
+      { key: 'saved', type: 'date', value: '2026-06-30T23:59Z' },
     ]);
   });
 
-  it('stands for the time saved, not a property of that name, and says so', () => {
-    expect(titles('where: updated = "by hand"', timed)).toEqual([]);
-    const shadows = (source: string, pages = timed) => {
-      const result = run(source, pages);
-      return result.ok && result.shadowed;
-    };
-    // Apple has a property named updated.
-    expect(shadows('sort: updated')).toBe(true);
-    expect(shadows('show: Updated')).toBe(true);
-    expect(shadows('where: updated > 2026-01-01')).toBe(true);
-    expect(shadows('sort: title')).toBe(false);
-    expect(shadows('sort: updated', timed.slice(1))).toBe(false);
+  it('stands for the time saved, not a property named saved; updated is a property like any other', () => {
+    expect(titles('where: updated = "by hand"', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = "kept"', timed)).toEqual([]);
+    const result = run('show: updated, saved\nlimit: 1', timed);
+    expect(result.ok && result.rows[0]?.values).toEqual([
+      { key: 'updated', type: 'text', value: 'by hand' },
+      { key: 'saved', type: 'date', value: '2026-11-13T09:30Z' },
+    ]);
   });
 
   it('takes Dataview’s file.mtime for it only where asked, as plugins’ queries do', () => {
@@ -459,12 +447,12 @@ describe('when each page was saved (#427)', () => {
       fileMtime: true,
     });
     if (!read.ok) throw new Error(read.error);
-    expect(read.query.sort).toEqual({ by: { name: 'updated' }, descending: true });
-    expect(read.query.where[0]?.name).toBe('updated');
+    expect(read.query.sort).toEqual({ by: { name: 'saved' }, descending: true });
+    expect(read.query.where[0]?.name).toBe('saved');
   });
 
   it('writes the time in a public copy’s table as the moment, in UTC', () => {
-    const result = run('show: updated\nsort: title\nlimit: 3', timed);
+    const result = run('show: saved\nsort: title\nlimit: 3', timed);
     if (!result.ok) throw new Error(result.error);
     const table = publicLinkOperations.queryTableMarkdown(result, () => false);
     expect(table.slice(2)).toEqual([

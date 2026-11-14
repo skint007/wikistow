@@ -210,7 +210,7 @@ describe('a query table in the reader', () => {
       ]);
   });
 
-  it('shows when each page was saved in the viewer’s zone, and says when updated hides a property (#427)', async () => {
+  it('shows when each page was saved in the viewer’s zone, beside a property named updated (#427)', async () => {
     const index = new searchOperations.PageIndex();
     for (const [id, title, updated, properties] of [
       [
@@ -235,19 +235,17 @@ describe('a query table in the reader', () => {
         },
         { title, text: '', properties: [...properties], updated },
       );
-    const source = '```wikistow-query\nshow: updated\nsort: updated desc\n```\n';
+    const source = '```wikistow-query\nshow: saved, updated\nsort: saved desc\n```\n';
     const container = await read(source, client(index));
     await expect.poll(() => cells(container).length).toBe(4);
     const shown = (iso: string) => propertyText({ type: 'date', value: `${iso.slice(0, 16)}Z` });
     expect(cells(container)).toEqual([
-      ['Page', 'Updated'],
-      ['Bread', shown('2026-11-14T08:05')],
-      ['Apple', shown('2026-11-13T09:30')],
-      ['Cake', ''],
+      ['Page', 'Saved', 'Updated'],
+      ['Bread', shown('2026-11-14T08:05'), ''],
+      ['Apple', shown('2026-11-13T09:30'), 'by hand'],
+      ['Cake', '', ''],
     ]);
-    expect(container.querySelector('.query-table figcaption')?.textContent).toBe(
-      '3 pages. Here updated is when each page was saved, not the updated property some pages here have.',
-    );
+    expect(container.querySelector('.query-table figcaption')?.textContent).toBe('3 pages.');
   });
 
   it('says so while the index is building', async () => {
