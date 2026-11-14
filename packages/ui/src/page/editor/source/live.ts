@@ -267,6 +267,7 @@ export function liveBinding(source: LiveSource): Extension {
     class {
       readonly #view: EditorView;
       readonly #stop: (() => void)[] = [];
+      #destroyed = false;
       #cursorTimer: ReturnType<typeof setTimeout> | null = null;
 
       constructor(view: EditorView) {
@@ -278,9 +279,12 @@ export function liveBinding(source: LiveSource): Extension {
         source.text.observe(observer);
         this.#stop.push(() => source.text.unobserve(observer));
         this.#stop.push(source.onCarets(() => this.#drawCarets()));
-        // The binding starts from the text `body` holds.
-        this.resync();
-        queueMicrotask(() => this.#drawCarets());
+        // The binding starts from the text `body` holds: once CodeMirror has
+        // finished making or reconfiguring the view, which takes no dispatch.
+        queueMicrotask(() => {
+          this.resync();
+          this.#drawCarets();
+        });
       }
 
       update(update: ViewUpdate) {
@@ -288,10 +292,12 @@ export function liveBinding(source: LiveSource): Extension {
           (transaction) => transaction.docChanged && !transaction.annotation(remoteChange),
         );
         if (update.docChanged) queueMicrotask(() => this.#drawCarets());
-        if (update.selectionSet || local) this.#reportCursor();
+        // Leaving the text says so too, so others don't see a caret nobody is at.
+        if (update.selectionSet || local || update.focusChanged) this.#reportCursor();
       }
 
       destroy() {
+        this.#destroyed = true;
         for (const stop of this.#stop) stop();
         if (this.#cursorTimer) clearTimeout(this.#cursorTimer);
         source.cursor(null);
@@ -314,6 +320,7 @@ export function liveBinding(source: LiveSource): Extension {
 
       /** Make CodeMirror hold exactly what `body` does, by the smallest change. */
       resync() {
+        if (this.#destroyed) return;
         const view = this.#view;
         const now = view.state.sliceDoc();
         const wanted = source.text.toJSON();
@@ -348,6 +355,7 @@ export function liveBinding(source: LiveSource): Extension {
         if (this.#cursorTimer) return;
         this.#cursorTimer = setTimeout(() => {
           this.#cursorTimer = null;
+          if (this.#destroyed) return;
           const { state } = this.#view;
           const breakLength = state.lineBreak.length;
           const { anchor, head } = state.selection.main;
@@ -363,6 +371,7 @@ export function liveBinding(source: LiveSource): Extension {
       }
 
       #drawCarets() {
+        if (this.#destroyed) return;
         const view = this.#view;
         const { state } = view;
         const breakLength = state.lineBreak.length;
@@ -398,7 +407,7 @@ export function liveBinding(source: LiveSource): Extension {
         try {
           view.dispatch({ effects: setCarets.of(builder.finish()) });
         } catch {
-          queueMicrotask(() => this.#drawCarets());
+          if (!this.#destroyed) queueMicrotask(() => this.#drawCarets());
         }
       }
     },
