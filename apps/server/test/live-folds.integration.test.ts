@@ -2,7 +2,7 @@
 // saved from outside while people edit is folded into the session by its
 // saver, through the server's fold grant, with the session's text kept
 // where both changed one part and a note for Review.
-import { pageOperations as pages } from '@wikistow/client';
+import { agentTools, pageOperations as pages } from '@wikistow/client';
 import {
   changeText,
   joinLive,
@@ -276,5 +276,43 @@ describe('a live session’s saves', () => {
     setBody(mine, 'Version one, and more.\n');
     await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
     expect(theirs.status().state).toEqual({ kind: 'live' });
+  });
+});
+
+describe('an approved chat edit', () => {
+  const proposal = async (person: Person, page: Page, markdown: (now: string) => string) => {
+    const head = await draftOf(person, page);
+    return {
+      kind: 'edit-page' as const,
+      spaceId: page.spaceId,
+      pageId: page.pageId,
+      base: head.revisionId,
+      shareId: head.region.kind === 'share' ? head.region.shareId : null,
+      before: { title: head.payload.title, markdown: head.payload.markdown },
+      title: head.payload.title,
+      markdown: markdown(head.payload.markdown),
+    };
+  };
+
+  it('is merged onto a head that moved on since it was proposed', async () => {
+    const { owner, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n\nTwo.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n\nTwo.\n');
+    await saveOutside(owner, page, () => 'One.\n\nTwo, typed meanwhile.\n');
+    const applied = await agentTools.applyProposal(owner.ctx, edit);
+    expect(applied.status).toBe('done');
+    expect((await draftOf(owner, page)).payload.markdown).toBe(
+      'One, edited.\n\nTwo, typed meanwhile.\n',
+    );
+  });
+
+  it('is refused as stale where it overlaps what changed meanwhile', async () => {
+    const { owner, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n');
+    await saveOutside(owner, page, () => 'One, typed meanwhile.\n');
+    const applied = await agentTools.applyProposal(owner.ctx, edit);
+    expect(applied.status).toBe('stale');
+    expect((await draftOf(owner, page)).payload.markdown).toBe('One, typed meanwhile.\n');
   });
 });
