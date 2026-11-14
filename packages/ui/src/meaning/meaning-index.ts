@@ -159,6 +159,10 @@ export class MeaningIndexer {
   #wakeAt: { at: number; cancel: () => void } | null = null;
   /** The word index shown is partial (`indexChanged`): nothing is let go of. */
   #partial = false;
+  /** Whether the index last given was partial, followed or not yet. */
+  #indexPartial = false;
+  /** Each page's version when the word index went, until a whole one comes. */
+  #lastVersions: Map<string, RevisionId> | null = null;
   /** Since the word index went (`indexGone`), no whole one has come: what a lost grant took may still be here. */
   #unsure = false;
   /** Reading the kept file failed: this session writes nothing over it. */
@@ -208,11 +212,13 @@ export class MeaningIndexer {
    * that are still there: it lets go of nothing, until a whole one does.
    */
   indexChanged(index: searchOperations.PageIndex, { partial = false }: { partial?: boolean } = {}) {
-    if (this.#stopped || index === this.#index) return;
+    // The same index once partial may come again whole, updated online with nothing changed.
+    if (this.#stopped || (index === this.#index && partial === this.#indexPartial)) return;
     this.#index = index;
+    this.#indexPartial = partial;
     if (!this.#isOpen) {
       void this.#opened.then(() => {
-        if (this.#index === index) this.#follow(index, partial);
+        if (this.#index === index && this.#indexPartial === partial) this.#follow(index, partial);
       });
       return;
     }
@@ -224,6 +230,10 @@ export class MeaningIndexer {
     this.#partial = partial;
     if (!partial) this.#unsure = false;
     const before = this.#shown;
+    // Each page's version before, or before the index went (`indexGone`).
+    const lastVersions = this.#lastVersions;
+    const oldOf = (key: string) => before.get(key)?.doc.revisionId ?? lastVersions?.get(key);
+    if (!partial) this.#lastVersions = null;
     const shown = new Map<string, IndexedPage>();
     for (const page of index.pages()) shown.set(keyOf(page.doc.spaceId, page.doc.pageId), page);
     this.#shown = shown;
@@ -233,7 +243,7 @@ export class MeaningIndexer {
     // version, nothing does.
     const now = this.#clock.now();
     for (const [key, page] of shown) {
-      const old = before.get(key)?.doc.revisionId;
+      const old = oldOf(key);
       if (!old || old === page.doc.revisionId) continue;
       this.#reuse(key, this.#kept.get(old));
       const draft = page.doc.draft || this.#ownVersions.has(page.doc.revisionId);
@@ -271,6 +281,10 @@ export class MeaningIndexer {
     if (this.#stopped || !this.#index) return;
     this.#index = null;
     this.#unsure = true;
+    // Only versions, not text, kept to tell the next index what changed.
+    this.#lastVersions ??= new Map(
+      [...this.#shown].map(([key, page]) => [key, page.doc.revisionId] as const),
+    );
     this.#shown = new Map();
     this.#todo = [];
     this.#cursor = 0;
@@ -366,6 +380,7 @@ export class MeaningIndexer {
     this.#madeFrom.clear();
     this.#held.clear();
     this.#reusable.clear();
+    this.#lastVersions = null;
     this.#shown = new Map();
     this.#todo = [];
     this.#index = null;

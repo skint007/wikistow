@@ -386,6 +386,9 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
             onProgress,
             readLinks: readIndexLinks,
           });
+          // Listed from the server again, every space as one built from
+          // what's kept asks (`putBack`): whole now, if unchanged.
+          fromKept.delete(index);
         } else {
           // What an index read before stands in for the versions it read: the
           // one shown, going offline, else the one this device kept.

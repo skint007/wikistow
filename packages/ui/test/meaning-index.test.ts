@@ -522,6 +522,44 @@ describe('MeaningIndexer', () => {
     expect(indexer.status()).toBeNull();
   });
 
+  it('a draft saved while the word index is built afresh still waits, the version before standing in', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([soupBook]));
+    await settle();
+    expect(fake.embedded).toHaveLength(2);
+    indexer.indexGone();
+    const draft = {
+      ...soupBook,
+      revisionId: 'soups-d1',
+      draft: true,
+      text: [section('Bean soup', 'soup', 180), section('Pea soup', 'soup', 180)].join('\n'),
+    };
+    indexer.indexChanged(wordIndex([draft]));
+    await vi.advanceTimersByTimeAsync(DRAFT_PAUSE_MS - 1_000);
+    expect(fake.embedded).toHaveLength(2);
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+    await settle(1);
+    // Only the section that changed.
+    expect(fake.embedded).toHaveLength(3);
+  });
+
+  it('the same index, no longer partial once updated online, lets go as a whole one', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    const offline = wordIndex([boiler]);
+    indexer.indexChanged(offline, { partial: true });
+    await settle(1);
+    const writes = fake.writes.length;
+    // Back online, the update found nothing changed: the same index, whole.
+    indexer.indexChanged(offline);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.writes).toHaveLength(writes + 1);
+    expect([...fake.writes.at(-1)!.keys()]).toEqual([rev('boiler-1')]);
+  });
+
   it('while the word index is built afresh, as access changes, nothing is found or kept', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);
