@@ -9,6 +9,7 @@ import type { ReactNode, Ref } from 'react';
 import type { OtherPages } from '../other-pages';
 import type { Findable } from '../find/findable';
 import type { Passages } from '../../comments/passages';
+import type { LiveSource } from './source/live';
 
 // An editor surface is one way of editing a page's Markdown body: the
 // source editor or the visual one. The draft session around it owns
@@ -140,6 +141,11 @@ export type EditorSurfaceProps = {
    * shows only while it has any.
    */
   toolbar?: ReactNode;
+  /**
+   * The page's body in its live session, which the source editor binds to
+   * (ADR 0015 decision 3); none outside one, or in the visual editor.
+   */
+  live?: LiveSource | null | undefined;
   ref?: Ref<EditorSurfaceHandle>;
 };
 

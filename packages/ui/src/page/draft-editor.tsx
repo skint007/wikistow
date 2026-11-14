@@ -49,6 +49,8 @@ import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession, type Queued } from './use-draft-session';
 import type { DraftSnapshot } from './draft-session';
+import { useLiveSource } from './live/use-live-source';
+import { peopleQuery } from '../sharing/people';
 import { MergeView } from './merge/merge-view';
 import { openOnlineMerge, openWindowMerge, type OpenedMerge } from './merge/open-merge';
 import { useNotKept } from '../data/connection';
@@ -176,6 +178,7 @@ export function DraftEditor({
   const { data: entries } = useQuery(queueQuery(ctx));
   const draftWaiting = pageChange(entries, page.pageId) !== null;
   const links = useLinkAssist({ ctx, page, table: snapshot.links, session });
+  const live = useLiveSource(ctx, page.pageId, session, snapshot.live);
   const propertyKeys = usePropertyKeys(ctx, page);
   const others = useOtherPages(ctx, page, links.assist, snapshot.markdown);
   const { pages } = links.assist;
@@ -362,6 +365,7 @@ export function DraftEditor({
           otherPages={others}
           queryTable={queryTable}
           toolbar={toolbar}
+          live={live}
           othersEditing={snapshot.live?.kind === 'live' && snapshot.live.status.people.length > 0}
           onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
           status={
@@ -372,7 +376,7 @@ export function DraftEditor({
             </span>
           }
         />
-        <LiveNote live={snapshot.live} />
+        <LiveNote ctx={ctx} live={snapshot.live} />
         {links.error && (
           <p role="alert" className="text-sm text-destructive">
             {links.error}
@@ -438,13 +442,30 @@ export function DraftEditor({
 }
 
 /** What the draft view says of its live session, when there is something to say. */
-function LiveNote({ live }: { live: DraftSnapshot['live'] }) {
-  const text =
-    live?.kind === 'left'
-      ? `${live.why} Your changes save as they did before.`
-      : live?.kind === 'not-joined' && live.why.kind === 'update-app'
-        ? 'Update the app to edit with others. Your changes save as they did before.'
-        : null;
+function LiveNote({ ctx, live }: { ctx: ClientContext; live: DraftSnapshot['live'] }) {
+  const status = live?.kind === 'live' ? live.status : null;
+  const failing = status?.failing ?? null;
+  const saver = status?.saver;
+  const ids = [failing?.id, typeof saver === 'string' && saver !== 'me' ? saver : undefined].filter(
+    (id): id is NonNullable<typeof id> => id !== undefined,
+  );
+  const { data: named } = useQuery({ ...peopleQuery(ctx, ids), enabled: ids.length > 0 });
+  const nameOf = (id: string) => named?.get(id)?.name ?? 'Someone';
+  let text: string | null = null;
+  if (live?.kind === 'left') text = `${live.why} Your changes save as they did before.`;
+  else if (live?.kind === 'not-joined' && live.why.kind === 'update-app') {
+    text = 'Update the app to edit with others. Your changes save as they did before.';
+  } else if (failing && status) {
+    // Said in this app's words, never the reason as sent (section 5.10, **`presence`**).
+    const whose = failing.id === ctx.identity.public.id ? 'Your' : `${nameOf(failing.id)}’s`;
+    const instead =
+      saver === 'me'
+        ? 'this app is saving'
+        : saver
+          ? `${nameOf(saver)}’s app is saving`
+          : 'nobody else can save yet';
+    text = `${whose} saves are failing; ${instead}.`;
+  }
   if (!text) return null;
   return (
     <p role="note" className="rounded-control bg-muted px-3 py-2 text-sm">

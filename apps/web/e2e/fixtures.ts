@@ -7,6 +7,23 @@ import {
 } from '@playwright/test';
 
 const CONTROL = `http://127.0.0.1:${Number(process.env['E2E_PORT'] ?? 3100) + 1}`;
+
+/**
+ * The control port of the server this test runs against: a project with a
+ * server of its own names it (`metadata.control` in playwright.config.ts).
+ */
+function control(metadata?: unknown): string {
+  let project = metadata;
+  if (project === undefined) {
+    try {
+      project = base.info().project.metadata;
+    } catch {
+      // Outside a test: the default server.
+    }
+  }
+  const named = (project as { control?: unknown } | undefined)?.control;
+  return typeof named === 'string' ? named : CONTROL;
+}
 export const PASSWORD = 'a long enough password for tests';
 
 type Violation = { directive: string; blocked: string; source: string };
@@ -52,8 +69,9 @@ export const test = base.extend<
 >({
   // The installation's first administrator, made once per run on its setup page.
   admin: [
-    async ({ browser }, use) => {
-      const existing: { email: string | null } = await (await fetch(`${CONTROL}/owner`)).json();
+    async ({ browser }, use, workerInfo) => {
+      const at = control(workerInfo.project.metadata);
+      const existing: { email: string | null } = await (await fetch(`${at}/owner`)).json();
       if (existing.email) return use({ email: existing.email });
       const email = uniqueEmail('owner');
       const context = await browser.newContext();
@@ -116,7 +134,7 @@ export async function serverSnapshot(): Promise<{
   logs: unknown[];
   mails: Mail[];
 }> {
-  return (await fetch(`${CONTROL}/snapshot`)).json();
+  return (await fetch(`${control()}/snapshot`)).json();
 }
 
 /**
@@ -156,7 +174,7 @@ export async function secretsOnServer(secrets: string[]): Promise<string[]> {
 
 /** Messages received over SMTP, with headers and text decoded as a mail client sees them. */
 export async function mailsTo(to: string): Promise<Mail[]> {
-  const res = await fetch(`${CONTROL}/mails`);
+  const res = await fetch(`${control()}/mails`);
   const all: Mail[] = await res.json();
   return all.filter((mail) => mail.to === to);
 }
@@ -177,7 +195,7 @@ export async function linkFor(to: string, subject: RegExp): Promise<string> {
 
 /** Give the account's person new keys at the next key version, as a recovery or a hostile server would. */
 export async function swapKey(email: string): Promise<void> {
-  const res = await fetch(`${CONTROL}/swap-key?email=${encodeURIComponent(email)}`, {
+  const res = await fetch(`${control()}/swap-key?email=${encodeURIComponent(email)}`, {
     method: 'POST',
   });
   if (!res.ok) throw new Error(`swap-key: ${await res.text()}`);
@@ -185,7 +203,7 @@ export async function swapKey(email: string): Promise<void> {
 
 /** The test server's blob folder, where library plugins' files are kept too (`plugins/<hash>/`). */
 export async function serverBlobDir(): Promise<string> {
-  const { blobDir }: { blobDir: string } = await (await fetch(`${CONTROL}/blob-dir`)).json();
+  const { blobDir }: { blobDir: string } = await (await fetch(`${control()}/blob-dir`)).json();
   return blobDir;
 }
 

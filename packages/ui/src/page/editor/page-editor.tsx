@@ -448,8 +448,11 @@ export function PageEditor({
    * meanwhile go after the text (`onFiles`).
    */
   const give = (text: string, atOnce: boolean) => {
-    // As the frontmatter alone changes.
-    if (text === bodyNow()) return;
+    // As the frontmatter alone changes, or a live session's binding put it in already.
+    if (text === bodyNow()) {
+      body.current = text;
+      return;
+    }
     // A cursor kept for the next editor was in other text.
     focusAt.current = null;
     body.current = text;
@@ -641,6 +644,8 @@ export function PageEditor({
   }, [properties]);
   const surfaceProps: EditorSurfaceProps = {
     ...assist,
+    // Only source mode edits a live session's text as it's typed (step 7 brings the visual editor).
+    live: mode === 'source' ? assist.live : null,
     ref: attach,
     initial: body.current,
     // Not while text it was given is held: that has what it reports.
@@ -657,7 +662,7 @@ export function PageEditor({
   };
   // The source beside the visual editor: its edits go there once typing pauses.
   // Plugins' buttons are in the visual editor's toolbar only.
-  const { toolbar: _toolbar, ...mirrored } = assist;
+  const { toolbar: _toolbar, live: _live, ...mirrored } = assist;
   const mirrorProps: EditorSurfaceProps = {
     ...mirrored,
     ref: attachMirror,
