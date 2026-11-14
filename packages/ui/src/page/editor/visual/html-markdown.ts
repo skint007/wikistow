@@ -73,23 +73,33 @@ async function prepared(writer: Writer, doc: Node) {
  * `html` as the Markdown pasting it, with `text` as its plain text, into
  * an empty page in the visual editor writes, with a final line break, and
  * whether that reads back as what the paste showed. HTML that gives
- * nothing, as when it can't be read (`unstyled`), gives `text`, as a
- * paste does. Empty if neither gives anything.
+ * nothing, as when it can't be read (`unstyled`), gives `text` as plain
+ * text, as a paste does; so does no HTML at all, which a paste would read
+ * as Markdown instead. Empty if neither gives anything. Whatever goes wrong
+ * in the paste is thrown, not saved as a page short of it.
  */
 export async function htmlMarkdown(html: string, text = ''): Promise<Written> {
   if (!html && !text) return { markdown: '', faithful: true };
   const { view, empty, writer } = await paster();
-  view.updateState(empty);
   const data = new DataTransfer();
   data.setData('text/html', html);
   data.setData('text/plain', text);
-  // As the browser hands ProseMirror a paste.
-  view.dom.dispatchEvent(
-    new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
-  );
-  const { doc } = view.state;
-  // Not holding on to the clip.
-  view.updateState(empty);
+  // As the browser hands ProseMirror a paste, through the calls it makes
+  // of it, which throw. With HTML, the text matters only once the HTML
+  // gives nothing, when the paste's own handling reads it from the event
+  // and pastes it as plain text (`view.pasteText`, with no event), as is
+  // done here with no HTML.
+  const event = new ClipboardEvent('paste', { clipboardData: data });
+  let doc: Node;
+  try {
+    view.updateState(empty);
+    if (html) view.pasteHTML(html, event);
+    else view.pasteText(text);
+    doc = view.state.doc;
+  } finally {
+    // Not holding on to the clip.
+    view.updateState(empty);
+  }
   await prepared(writer, doc);
   return writer.write(doc, true);
 }

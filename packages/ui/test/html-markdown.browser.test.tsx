@@ -216,6 +216,15 @@ describe('HTML to Markdown without an editor', () => {
     expect(markdown).toBe('Odd text\n\nOn two lines\n');
   });
 
+  it('gives long text with no HTML as plain text, at once', async () => {
+    // Long enough that a paste would check it as Markdown in a worker first.
+    const text = `${'*Beans* '.repeat(200)}\nNext line`;
+    const { markdown } = await htmlMarkdown('', text);
+    expect(markdown).toBe(`${'\\*Beans\\* '.repeat(200)}\n\nNext line\n`);
+    // As long text in HTML that can't be read is pasted.
+    expect((await bothWays('\uFDD0', text)).markdown).toBe(markdown);
+  });
+
   it('gives nothing for HTML that shows nothing, with no text', async () => {
     const { markdown } = await bothWays('<p hidden>Gone</p>');
     expect(markdown).toBe('');
