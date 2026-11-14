@@ -42,6 +42,7 @@
 export { blocksOf, type Block, type BlockKind, type Container } from './blocks.ts';
 export {
   mergeBlocks,
+  addsOverlap,
   MergeTooLarge,
   withinTime,
   writeBody,

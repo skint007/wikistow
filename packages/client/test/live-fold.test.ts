@@ -100,6 +100,29 @@ describe('folding a draft from outside', () => {
   });
 });
 
+describe('two sides adding at one place', () => {
+  it('takes the longer when it goes on from the other, putting nothing in twice', () => {
+    const folded = foldPayloads(page('A.\n'), page('A.\n\nB.\n'), page('A.\n\nB.\n\nC.\n'));
+    expect(folded.target.body).toBe('A.\n\nB.\n\nC.\n');
+    expect(folded.parts).toEqual([]);
+  });
+});
+
+describe('folding a gone join’s session draft', () => {
+  it('never keeps both where the page and the draft added at one place', () => {
+    // The draft holds the session's typing as it was; the page has gone on with it since.
+    const folded = foldPayloads(
+      page('Intro.\n'),
+      page('Intro.\n\nHello world, typed on.\n'),
+      page('Intro.\n\nHello\n', { title: 'Renamed' }),
+      { gone: true },
+    );
+    expect(folded.target.body).toBe('Intro.\n\nHello world, typed on.\n');
+    expect(folded.target.title).toBe('Renamed');
+    expect(folded.parts).toEqual(['body:2-3']);
+  });
+});
+
 describe('a fold too large to make in time', () => {
   it('is refused within about a second, not worked on for minutes', () => {
     const lines = (tag: string) =>

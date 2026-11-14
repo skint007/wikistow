@@ -11,6 +11,7 @@
 import { COVER_NAMESPACE } from '../cover.ts';
 import { readProperties, splitFrontmatter } from '../markdown/index.ts';
 import {
+  addsOverlap,
   checkTime,
   edges,
   withinTime,
@@ -75,9 +76,16 @@ export const targetOf = (payload: PagePayload): FoldTarget => {
  * from `base`: theirs' changes where ours didn't change the same part, and
  * ours where both did, each such part named by its place in theirs.
  */
-export function foldPayloads(base: PagePayload, ours: PagePayload, theirs: PagePayload): Folded {
+export function foldPayloads(
+  base: PagePayload,
+  ours: PagePayload,
+  theirs: PagePayload,
+  /** Theirs is a gone join's session draft: blocks both added at one place overlap. */
+  { gone = false }: { gone?: boolean } = {},
+): Folded {
   // Made on its own for every draft from outside: within a second, or not at all.
-  return withinTime(FOLD_MS, () => foldWithin(base, ours, theirs));
+  const fold = () => withinTime(FOLD_MS, () => foldWithin(base, ours, theirs));
+  return gone ? addsOverlap(fold) : fold();
 }
 
 /** How long a fold's or Review's merge may take before it is `MergeTooLarge`. */
@@ -240,6 +248,19 @@ function namer(noted: readonly string[]): (part: string) => boolean {
  * one side or the other, aren't overlaps any more, so aren't offered.
  */
 export function reviewMerge(
+  base: PagePayload,
+  ours: PagePayload,
+  theirs: PagePayload,
+  parts: readonly string[],
+  /** As the fold cut it: theirs a gone join's session draft. */
+  { gone = false }: { gone?: boolean } = {},
+): Merge {
+  return gone
+    ? addsOverlap(() => reviewMergeOf(base, ours, theirs, parts))
+    : reviewMergeOf(base, ours, theirs, parts);
+}
+
+function reviewMergeOf(
   base: PagePayload,
   ours: PagePayload,
   theirs: PagePayload,

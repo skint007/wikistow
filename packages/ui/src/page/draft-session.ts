@@ -429,9 +429,17 @@ export class DraftSession {
     const current = this.#current();
     const strip = (payload: PagePayload) => ({ ...payload, extensions: held(payload.extensions) });
     const yours = revisePayload({ kind: 'current', payload: base }, changes);
-    const merge = pageMerge.mergePayloads(strip(base), strip(yours), strip(current));
-    if (merge.overlaps.length > 0) return false;
-    const resolved = pageMerge.resolve(merge, {});
+    // Within a second, as a fold's: one too large to merge here is refused.
+    let resolved: pageMerge.Resolved;
+    try {
+      resolved = pageMerge.withinTime(1_000, () => {
+        const merge = pageMerge.mergePayloads(strip(base), strip(yours), strip(current));
+        if (merge.overlaps.length > 0) return { ok: false, merge } as const;
+        return pageMerge.resolve(merge, {}, { review: false });
+      });
+    } catch {
+      return false;
+    }
     if (!resolved.ok) return false;
     const { title, markdown, attachments } = resolved.payload;
     this.#reviseLive(

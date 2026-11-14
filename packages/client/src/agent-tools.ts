@@ -16,6 +16,7 @@ import * as pages from './operations/pages.ts';
 import { indexSpaces, nameOf, readableSpaces } from './operations/search.ts';
 import type { ClientContext } from './operations/session.ts';
 import * as spaces from './operations/spaces.ts';
+import { withinTime } from './merge/body.ts';
 import { mergePayloads, resolve } from './merge/payload.ts';
 import { checkPayloadSize, newPayload, revisePayload, type PagePayload } from './payload.ts';
 import { shownTitle, treeInOrder } from './tree.ts';
@@ -572,10 +573,19 @@ async function mergedOnto(
   if (at !== from || !theirs) return 'changed';
   const base = await pages.openRevisionOf(ctx, page, 'draft', from);
   if (base.opened.kind !== 'current') return 'changed';
-  const merge = mergePayloads(base.opened.payload, edit, theirs);
-  if (merge.overlaps.length > 0) return 'changed';
-  const resolved = resolve(merge, {});
-  return resolved.ok ? { payload: resolved.payload } : 'changed';
+  const was = base.opened.payload;
+  const onto = theirs;
+  // Within a second, as a fold's: one too large to merge here is proposed again.
+  try {
+    return withinTime(1_000, () => {
+      const merge = mergePayloads(was, edit, onto);
+      if (merge.overlaps.length > 0) return 'changed' as const;
+      const resolved = resolve(merge, {}, { review: false });
+      return resolved.ok ? { payload: resolved.payload } : ('changed' as const);
+    });
+  } catch {
+    return 'changed';
+  }
 }
 
 const CHANGED: Applied = {

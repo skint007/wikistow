@@ -216,6 +216,8 @@ export type OpenedNote = {
   ours: PagePayload;
   parts: readonly string[];
   by: IdentityId;
+  /** Theirs is a gone join's session draft, which its fold cut so that adds overlap. */
+  gone: boolean;
 };
 
 /** The origin of this app's own changes to the document. */
@@ -1739,8 +1741,23 @@ export class LiveParticipant {
       senderId: held.opened.senderId,
       joinId: held.opened.joinId,
     });
-    if (client !== undefined && (this.#ignoring.has(client) || this.#foldedGone.has(client))) {
-      return this.#taken(held.stored.position);
+    const range =
+      client === undefined
+        ? undefined
+        : (this.#ignoring.get(client) ?? this.#foldedGone.get(client));
+    if (range && held.opened.kind === 'update') {
+      const own = (held.decoded?.structs ?? []).filter((structs) => structs.client === client);
+      const start = Math.min(...own.map((structs) => structs.start));
+      const end = Math.max(...own.map((structs) => structs.end));
+      // What it sent before it went goes in as any message does; what the fold put in is dropped.
+      if (own.length > 0 && end > range.from) {
+        if (start >= range.from && end <= range.to) return this.#taken(held.stored.position);
+        return this.#stop(
+          'a join whose changes were folded in after it went sent more',
+          null,
+          false,
+        );
+      }
     }
     const verdict = this.#joins.check(held.opened, held.decoded);
     switch (verdict.kind) {
@@ -2143,13 +2160,15 @@ export class LiveParticipant {
 
   // Joins whose changes a draft claims but that went without sending them, by that draft.
   readonly #goneJoins = new Map<RevisionId, number[]>();
-  // Gone joins' clients whose changes this app's fold is putting in now.
-  readonly #ignoring = new Set<number>();
+  // Gone joins' clients whose changes this app's fold is putting in now, and
+  // the range of each client's clocks it puts in: what it lacked of the draft's claims.
+  readonly #ignoring = new Map<number, GoneRange>();
+  readonly #goneRanges = new Map<RevisionId, Map<number, GoneRange>>();
   // The clients of gone joins whose changes a fold put in: once is all (A2),
   // for every join of this app in the session, so joining again forgets nothing.
-  get #foldedGone(): Set<number> {
+  get #foldedGone(): Map<number, GoneRange> {
     let clients = foldedGone.get(this.sessionId);
-    if (!clients) foldedGone.set(this.sessionId, (clients = new Set()));
+    if (!clients) foldedGone.set(this.sessionId, (clients = new Map()));
     return clients;
   }
 
@@ -2159,6 +2178,18 @@ export class LiveParticipant {
     this.#outsiders.add(draft.revisionId);
     this.#outsiderDrafts.set(draft.revisionId, opened);
     this.#goneJoins.set(draft.revisionId, gone);
+    this.#goneRanges.set(
+      draft.revisionId,
+      new Map(
+        gone.map((client) => [
+          client,
+          {
+            from: Y.getState(this.document.doc.store, client),
+            to: draft.state.vector.get(client) ?? Y.getState(this.document.doc.store, client),
+          },
+        ]),
+      ),
+    );
     if (this.#lastHead?.revisionId === draft.revisionId) {
       const before = opened.basedOn;
       const parent = before ? this.#drafts.get(before) : undefined;
@@ -2433,19 +2464,21 @@ export class LiveParticipant {
     ) {
       return this.#armFold();
     }
-    // A gone join's changes are about to go in: its messages are dropped from here on.
-    const goneNow: number[] = [];
+    // A gone join's changes about to go in, and the clocks of each that the fold puts in.
+    const goneNow = new Map<number, GoneRange>();
     for (const [revision, clients] of this.#goneJoins) {
       if (revision !== head && !this.#chainHas(head, revision)) continue;
       for (const client of clients) {
-        goneNow.push(client);
-        this.#ignoring.add(client);
+        const range = this.#goneRanges.get(revision)?.get(client);
+        if (range) goneNow.set(client, range);
       }
     }
     const before = this.document.state();
     let folded: Folded;
     try {
-      folded = foldPayloads(base.payload, this.#payload(base.payload), draft.payload);
+      folded = foldPayloads(base.payload, this.#payload(base.payload), draft.payload, {
+        gone: goneNow.size > 0,
+      });
     } catch {
       return this.#stop(
         'this app couldn’t merge a change made outside the live session',
@@ -2552,6 +2585,8 @@ export class LiveParticipant {
           carried: false,
         });
       }
+      // From here, what the server relays of a gone join within what this puts in is dropped.
+      for (const [client, range] of goneNow) this.#ignoring.set(client, range);
       this.document.apply(update, COPY_ORIGIN);
       await send(placing, { fold: head });
       const revisionId = saved?.revisionId ?? head;
@@ -2567,7 +2602,7 @@ export class LiveParticipant {
       });
       this.#outsiders.delete(head);
       // In once: never again, for any join of this app in the session.
-      for (const client of goneNow) this.#foldedGone.add(client);
+      for (const [client, range] of goneNow) this.#foldedGone.set(client, range);
       if (saved && this.#head === head) this.#head = saved.revisionId;
       if (saved) this.#basedOn.set(saved.revisionId, head);
       if (this.#drafts.get(revisionId)?.compared) this.#checked = revisionId;
@@ -2847,6 +2882,7 @@ export class LiveParticipant {
       ours: this.#payload(),
       parts,
       by: theirs.authorId,
+      gone: claimed !== null,
     };
   }
 
@@ -2862,7 +2898,9 @@ export class LiveParticipant {
 
   /** The merge Review shows for an opened note: only the overlaps its parts name. */
   reviewMerge(opened: OpenedNote): Merge {
-    return reviewMerge(opened.base, opened.ours, opened.theirs, opened.parts);
+    return reviewMerge(opened.base, opened.ours, opened.theirs, opened.parts, {
+      gone: opened.gone,
+    });
   }
 
   /**
@@ -2887,7 +2925,7 @@ export class LiveParticipant {
     const { merge: now, choices: carried } = carryInto(
       chosen,
       choices,
-      reviewMerge(opened.base, page, opened.theirs, opened.parts),
+      reviewMerge(opened.base, page, opened.theirs, opened.parts, { gone: opened.gone }),
     );
     // A choice of theirs at a part someone changed meanwhile is asked again, never dropped.
     const changing = (picked: Readonly<Record<string, Choice>>) =>
@@ -3723,6 +3761,9 @@ function ofAnotherSession(draft: OpenedDraft, sessionId: string): boolean {
 
 // Gone joins' clients whose changes a fold put in, by session: kept across
 // this app's joins of a session, so joining again never folds them twice.
-const foldedGone = new Map<string, Set<number>>();
+const foldedGone = new Map<string, Map<number, GoneRange>>();
+
+/** The clocks of a gone join's client a fold put in, from what the folding app held to what the draft claimed. */
+type GoneRange = { from: number; to: number };
 // Sessions this app left once because it couldn't catch up with the others.
 const cantCatchUp = new Set<string>();

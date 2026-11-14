@@ -181,7 +181,10 @@ describe('a draft saved from outside a live session', () => {
     await expect.poll(() => mine.status().people.length).toBe(1);
     // A save of the session first, so the draft the crash builds on is one of its own.
     setBody(mine, `${body(mine)}\n\nSaved first.\n`);
-    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    await expect
+      .poll(async () => (await draftOf(editor, page)).payload.markdown, { timeout: 30_000 })
+      .toContain('Saved first.');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
     crash = () => mine.close();
     await mine.commitOwn({ texts: { body: `${body(mine)}\n\nNever sent.\n` } });
     await expect.poll(() => body(theirs), { timeout: 60_000 }).toContain('Never sent.');
