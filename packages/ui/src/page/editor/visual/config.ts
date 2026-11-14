@@ -156,6 +156,36 @@ const text: Handle = (node: Text, parent, state, info) => {
   return safe;
 };
 
+// An `=` in an image's alt to be written escaped (`image`), which remark's
+// own escaping leaves be.
+const HELD_EQUALS = '\uE003';
+
+// Two `=` with only spaces on both sides, which can neither open nor close.
+const inert = (before: string | undefined, after: string | undefined) =>
+  /^\s$/.test(before ?? '') && /^\s$/.test(after ?? '');
+
+/**
+ * An image, its alt's `=` escaped as text's are (`escapeEquals`): Markdown
+ * reads highlights in an alt before it takes their text as the alt, so
+ * `![a==b==](u)` is the alt `ab`. Every run of two that could open or close
+ * is escaped, and kept so only if its block reads otherwise without
+ * (`whole`); a run of three or more is never a highlight's.
+ */
+type ImageArgs = Parameters<typeof defaultHandlers.image>;
+function image(...[node, parent, state, info]: ImageArgs) {
+  const block = state.indexStack[0] ?? -1;
+  const alt = equals.bare.has(block)
+    ? node.alt
+    : node.alt?.replace(/=+/g, (run, at: number, all: string) =>
+        run.length === 2 && !inert(all[at - 1], all[at + 2]) ? HELD_EQUALS.repeat(2) : run,
+      );
+  if (!alt || alt === node.alt) return defaultHandlers.image(node, parent, state, info);
+  equals.escaped.add(block);
+  return defaultHandlers
+    .image({ ...node, alt }, parent, state, info)
+    .replaceAll(HELD_EQUALS, '\\=');
+}
+
 // The top-level blocks whose text `text` is to leave each `=` in as it is,
 // and those it escaped one in (`whole`).
 const equals = { bare: new Set<number>(), escaped: new Set<number>() };
@@ -608,7 +638,7 @@ export function visualEditor({
         return {
           ...prev,
           ...STRINGIFY,
-          handlers: { ...kept, text, link, blockquote, root: whole },
+          handlers: { ...kept, text, link, image, blockquote, root: whole },
         };
       });
       if (view) ctx.update(editorViewOptionsCtx, (prev) => ({ ...prev, ...view }));
