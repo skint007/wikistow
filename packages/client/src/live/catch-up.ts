@@ -8,6 +8,7 @@
 // what the head doesn't hold, and sends a Saved notice, so the server
 // deletes it.
 import {
+  IdentityId,
   JoinId,
   LIVE_NAMESPACE,
   LiveExtension,
@@ -564,7 +565,10 @@ async function saveAndNotice(
           revision: latest.revisionId,
           session: sessionId,
           state: document.stateBytes(),
-          with: [],
+          // Who edited, as the session's latest draft says, and who typed in it.
+          with: [...new Set([...withOf(latest.payload), ...built.signers])].filter(
+            (id) => IdentityId.safeParse(id).success,
+          ) as IdentityId[],
         }),
         linkChoices: linkChoices(document),
       });
@@ -650,6 +654,7 @@ async function targetOn(
     return { kind: 'cant', why: 'the page’s draft is under other keys now', lasting: true };
   }
   // The latest draft of the ended session in the head's signed chain.
+  const whole = document.state();
   let base: { payload: PagePayload; state: LiveState } | null = null;
   let at: OpenedDraft | null = headDraft;
   for (let steps = 0; at && steps < CHAIN_STEPS; steps++) {
@@ -657,7 +662,18 @@ async function targetOn(
     // marked save included: it is in already. Never a base, as a catch-up's
     // text is the document merged onto a head, not the document.
     const marked = markedState(at.payload, sessionId);
-    if (marked && sameState(marked, document.state())) return { kind: 'held' };
+    if (marked && sameState(marked, whole)) return { kind: 'held' };
+    // A catch-up that put part of it in, from the session served cut back:
+    // merged from an older draft, what was deleted since that went in would
+    // come back. An older app's copy of a session draft's mark holds no more
+    // than its latest draft, and is walked past.
+    if (
+      marked &&
+      !holdsState(latest.state, marked) &&
+      !sessionState(at.payload, at.revisionId, sessionId)
+    ) {
+      return { kind: 'cant', why: 'part of it was put in already', lasting: true };
+    }
     if (at.revisionId === latest.revisionId) {
       base = latest;
       break;
@@ -690,7 +706,7 @@ async function targetOn(
   if (!base)
     return { kind: 'cant', why: 'the page’s drafts since don’t come from it', lasting: true };
   // Served cut back: its document lacks what a draft of it holds.
-  if (!holdsState(document.state(), base.state)) {
+  if (!holdsState(whole, base.state)) {
     return { kind: 'cant', why: 'it holds less than a draft of it', lasting: true };
   }
   // Within a time, as a fold's merge is: past it, it fails the same for anyone.
@@ -724,6 +740,12 @@ async function targetOn(
   });
   if (samePayload(heldPayload(payload), heldPayload(headDraft.payload))) return { kind: 'held' };
   return { kind: 'save', payload, overlapped };
+}
+
+// Who a draft's `wikistow.live` says edited it.
+function withOf(payload: PagePayload): string[] {
+  const parsed = LiveExtension.safeParse(payload.extensions[LIVE_NAMESPACE]);
+  return parsed.success ? parsed.data.with : [];
 }
 
 // The state a draft's `wikistow.live` says it holds of `sessionId`, whatever
