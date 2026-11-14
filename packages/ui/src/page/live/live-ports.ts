@@ -121,7 +121,12 @@ export function livePorts(
       // Marks, keys and owners another tab changed, or this one.
       if (ctx.kept) stops.push(ctx.kept.onChange(() => void participant.recheck()));
       // Offline: a stream may hang rather than break, so it is taken as broken at once.
-      let online = connection.get().online;
+      // From joining: a drop before this watch began counts too.
+      let online = true;
+      if (!connection.get().online) {
+        online = false;
+        participant.offline();
+      }
       stops.push(
         connection.subscribe(() => {
           const now = connection.get().online;

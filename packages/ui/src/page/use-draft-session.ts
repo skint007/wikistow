@@ -223,7 +223,8 @@ function appPorts(
       const choices = queueChoices(ctx);
       const entries = (await queueOf(ctx)?.waiting(page.pageId)) ?? [];
       const publish = entries.find((entry) => entry.kind === 'publish');
-      if (!publish || !choices) return false;
+      // One on its way is the server's to take or refuse.
+      if (!publish || publish.sending || !choices) return false;
       await choices.discard({ kind: 'publish', id: page.pageId });
       return true;
     },

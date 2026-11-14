@@ -95,6 +95,8 @@ export type DraftPorts = {
     region: Region | null;
     payload: PagePayload;
     live: KeptLive;
+    /** Kept stopped as a conflict, sent only once the person merges it. */
+    stopped?: boolean;
   }): Promise<number>;
   /** The page's draft change waiting here as it is now, read in turn with the queue's sending. */
   entryNow?(): Promise<QueuedPage | null>;
@@ -1510,14 +1512,17 @@ export class DraftSession {
     const run = (async () => {
       const putBack = participant.putBack();
       if (!putBack.ours || !putBack.outside) return false;
+      // Nothing of the person's, typed or put in: nothing to keep.
+      const own = putBack.seq > 0 || putBack.unsealed || this.#kept?.participant === participant;
+      if (!own) return false;
       try {
         const { provisional, checked } = participant.status();
         const state = participant.document.state();
         const version = await ports.keep!({
           // Never whole over a draft it hasn't compared (section 5.10): a
-          // provisional document goes on the draft the session started from,
-          // so a send meets the conflict, and Merge… counts only the person's typing.
+          // provisional document is kept stopped, for Merge…, which counts only the person's typing.
           basedOn: provisional ? participant.startedFrom : checked,
+          stopped: provisional,
           region: this.#tableRegion,
           payload: putBack.ours,
           live: liveKept(putBack, putBack.ours, putBack.outside),
@@ -1700,8 +1705,10 @@ export class DraftSession {
           this.#content = back.content;
           this.#extensions = back.extensions;
           this.#region = null;
-          // Nothing of the person's: a change kept or put in that the head holds goes.
+          // Nothing of the person's: a change kept or put in that the head holds goes;
+          // one it doesn't goes back in on the next join, the queue held till then.
           this.#withdrawKept();
+          if (this.#kept && this.#rejoinHold) this.#rejoinKept = true;
           if (this.#live) this.#surface.current?.replace(this.#content.markdown);
           this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
           return true;
@@ -1712,12 +1719,19 @@ export class DraftSession {
       // What putting the person's typing back takes: kept beside it from
       // here on, and in memory for joining the same session again.
       const putBack = participant.putBack();
-      this.#putBack = putBack;
+      // Saved over a draft that differed, it joins afresh: nothing in memory to put back.
+      this.#putBack = saveOver ? null : putBack;
       this.#keptLive =
         putBack.outside && putBack.ours && !saveOver
           ? liveKept(putBack, putBack.ours, putBack.outside)
           : null;
-      if (state.kind === 'stopped' && state.rejoin && !saveOver && settled.mine) {
+      if (
+        state.kind === 'stopped' &&
+        state.rejoin &&
+        !saveOver &&
+        settled.mine &&
+        !settled.provisional
+      ) {
         // Its join went, as offline: what the session didn't take waits on
         // this device, held back, and goes in when it joins again (ADR 0015
         // decision 10), never as a save from outside the session meanwhile.
@@ -1816,6 +1830,7 @@ export class DraftSession {
     this.#base = head.revisionId;
     // Its text grows from the head now, as does a change waiting here.
     this.#keptLive = null;
+    this.#putBack = null;
     this.#ports.onTopOf?.(head.revisionId);
     const { title, markdown, attachments } = merged;
     this.#content = { title, markdown, attachments };

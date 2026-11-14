@@ -393,6 +393,8 @@ export class OfflineQueue {
   readonly #landedOn = new Map<PageId, { base: RevisionId; landed: RevisionId; at: number }>();
   #closed = false;
   #last = 0;
+  // While a send runs: whether a tab is in a page's live session.
+  #held: ((pageId: PageId) => Promise<boolean>) | undefined;
 
   constructor(store: KeptStore, sealer: KeptSealer, installationId: InstallationId) {
     this.#store = store;
@@ -534,6 +536,7 @@ export class OfflineQueue {
     onTop = false,
     linkChoices,
     live,
+    stopped = false,
   }: {
     page: PageRef;
     basedOn: RevisionId;
@@ -544,6 +547,8 @@ export class OfflineQueue {
     linkChoices?: ReadonlyMap<string, PageId>;
     /** Made from a live session's document: what is kept beside it; left as it was when absent. */
     live?: KeptLive | null;
+    /** Kept stopped as a conflict, never sent until the person merges it (a provisional document). */
+    stopped?: boolean;
   }): Promise<number> {
     const picks = Object.fromEntries(linkChoices ?? []);
     const { entry, made } = await this.#store.queueExclusive(async () => {
@@ -604,8 +609,9 @@ export class OfflineQueue {
             at: this.#at(),
             live: live ?? null,
           };
-      await this.#write(entry);
-      return { entry, made: !before || rebased };
+      const kept: QueuedPage = stopped ? { ...entry, failure: { kind: 'conflict' } } : entry;
+      await this.#write(kept);
+      return { entry: kept, made: !before || rebased || stopped };
     });
     this.#emit({ kind: 'saved', entry });
     if (made) this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
@@ -1275,14 +1281,24 @@ export class OfflineQueue {
         break;
       }
       if (!next) return 'sent';
-      if (next.kind === 'page' && !next.newPage && !next.sending && held) {
-        const isHeld = await held(next.id).catch(() => false);
+      // A page's draft change, or its publish, which would send a draft of it too.
+      const holdable =
+        (next.kind === 'page' && !next.newPage && !next.sending) ||
+        (next.kind === 'publish' && next.draft !== null && !next.sending);
+      if (holdable && held) {
+        const isHeld = await held(next.id as PageId).catch(() => false);
         if (isHeld) {
           holding.add(next.id);
           continue;
         }
       }
-      const sent = await this.#sendOne(ctx, next, entries, read, held);
+      this.#held = held;
+      let sent: Awaited<ReturnType<OfflineQueue['send']>> | 'held' | void;
+      try {
+        sent = await this.#sendOne(ctx, next, entries, read, held);
+      } finally {
+        this.#held = undefined;
+      }
       if (sent === 'offline') return 'offline';
       if (sent === 'held') holding.add(next.id);
     }
@@ -1682,12 +1698,15 @@ export class OfflineQueue {
     this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
   }
 
-  // Record what the next publish request sends, before it is sent.
+  // Record what the next publish request sends, before it is sent; one that
+  // saves a draft first waits while a tab is in the page's live session.
   async #recordPublish(entry: QueuedPublish): Promise<QueuedPublish['sending']> {
+    const held = this.#held;
     return this.#store.queueExclusive(async () => {
       const current = await this.#publish(entry.id);
       if (!current || current.failure) return null;
       if (current.sending) return current.sending;
+      if (current.draft && held && (await held(current.id).catch(() => false))) return null;
       const sending = { revisionId: newId(RevisionId) };
       await this.#write({ ...current, sending });
       return sending;

@@ -102,6 +102,8 @@ export type DraftWriter = {
     region: Region | null;
     payload: PagePayload;
     live: KeptLive;
+    /** Kept stopped as a conflict, sent only once the person merges it. */
+    stopped?: boolean;
   }): Promise<number>;
   /** A file for the draft, as `PageWriter.attach` takes it; to the server at once with `server`. */
   attach(file: File, options?: { server?: boolean }): Promise<AttachmentRef>;
@@ -357,10 +359,19 @@ export function createPageWriter({
             return asTyped(input);
           }
         },
-        async keep({ basedOn, region, payload, live }) {
+        async keep({ basedOn, region, payload, live, stopped = false }) {
           if (!queue) throw new Error('This device keeps no changes');
           // As any save into it: one another tab or window saved into since is theirs (`stale-head`).
-          seen = await queue.saveDraft({ page, basedOn, region, payload, seen, onTop: true, live });
+          seen = await queue.saveDraft({
+            page,
+            basedOn,
+            region,
+            payload,
+            seen,
+            onTop: true,
+            live,
+            stopped,
+          });
           return seen;
         },
         attach: (file, options) =>

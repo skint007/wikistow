@@ -377,6 +377,46 @@ describe('changes waiting for a page in a live session', () => {
     expect((await draft()).markdown).toBe('mine');
   });
 
+  it('hold back a publish waiting with the change, and what was typed after it', async () => {
+    const { ctx, queue, page, based, draft, payload } = await device();
+    const version = await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('abc'),
+      seen: null,
+      live: live(payload('first words'), payload('abc')),
+    });
+    await queue.publish({ page, title: 'Plan', draftHead: based });
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('abc def'),
+      seen: version,
+    });
+    expect(await queue.send(ctx, { held: async (id) => id === page.pageId })).toBe('sent');
+    expect((await queue.entries()).map((entry) => entry.kind).sort()).toEqual(['page', 'publish']);
+    expect((await draft()).markdown).toBe('first words');
+  });
+
+  it('keep a change stopped, to be merged, when asked to', async () => {
+    const { ctx, queue, page, based, draft, payload } = await device();
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('whole document'),
+      seen: null,
+      live: live(payload('first words'), payload('whole document')),
+      stopped: true,
+    });
+    expect(await queue.send(ctx)).toBe('sent');
+    const [kept] = await queue.entries();
+    expect(kept?.failure).toEqual({ kind: 'conflict' });
+    expect((await draft()).markdown).toBe('first words');
+  });
+
   it('are withdrawn once in a session draft, unless saved into since, and put in once, the mark becoming the base', async () => {
     const { queue, page, based, payload } = await device();
     const version = await queue.saveDraft({
