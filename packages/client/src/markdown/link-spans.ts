@@ -27,6 +27,10 @@ export type LinkSpans = {
     /** Where it is written: its `(`, its definition, or its autolink. */
     at: number;
     image?: true;
+    /** An image's whole text, from its `!` to its `)`, as a clip rewrites it (ADR 0017). */
+    imageSpan?: Span;
+    /** An image in a link's text, which can't hold another link. */
+    inLink?: true;
     destination: Span | null;
     autolink?: Span & { before?: string };
   }[];
@@ -56,17 +60,21 @@ export function linkSpans(markdown: string): LinkSpans {
   const tables: Span[] = [];
   const urls: LinkSpans['urls'] = [];
   const open: string[] = [];
+  // Where each token in `open` starts.
+  const starts: number[] = [];
   let inert = 0;
   let inImageText = 0;
   let escapedTo = -1;
   for (const [kind, token, context] of events) {
     if (kind === 'exit') {
       open.pop();
+      starts.pop();
       if (token.type === 'label' && open.at(-1) === 'image') inImageText--;
       continue;
     }
     if (token.type === 'label' && open.at(-1) === 'image') inImageText++;
     open.push(token.type);
+    starts.push(offset + token.start.offset);
     if (inImageText > 0) continue;
     const span = { start: offset + token.start.offset, end: offset + token.end.offset };
     if (token.type === 'characterEscape') escapedTo = token.end.offset;
@@ -98,7 +106,11 @@ export function linkSpans(markdown: string): LinkSpans {
           url: '',
           at: span.start,
           destination: null,
-          ...(open.at(-2) === 'image' && { image: true }),
+          ...(open.at(-2) === 'image' && {
+            image: true,
+            imageSpan: { start: starts.at(-2)!, end: span.end },
+            ...(open.slice(0, -2).includes('label') && { inLink: true }),
+          }),
         });
         break;
       case 'definition':

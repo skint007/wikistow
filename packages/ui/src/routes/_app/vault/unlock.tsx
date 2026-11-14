@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { safeRedirect } from '@/lib/redirect';
 import { meQuery } from '../../../api';
+import { useWaitingClips } from '../../../clip/clip-receiver';
 import { desktop } from '../../../desktop';
 import { tabSafeMode } from '../../../plugins/safe-mode';
 import { isApple } from '../../../shell/search-model';
@@ -50,6 +51,8 @@ function Unlock() {
   // Once per page: React may run the effect twice, and two unlocks at once
   // would trip over each other's staged keys.
   const tried = useRef(false);
+  // Clips from the browser save once it's unlocked (ADR 0017, decision 7).
+  const clips = useWaitingClips();
 
   // At launch, a remembered unlock opens the vault without asking.
   useEffect(() => {
@@ -120,6 +123,11 @@ function Unlock() {
           required
           autoFocus
         />
+        {clips > 0 && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {clips === 1 ? '1 clip waits' : `${clips} clips wait`} to be saved from your browser.
+          </p>
+        )}
         {canRemember && (
           <div className="grid gap-1.5">
             <div className="flex items-center gap-3">
