@@ -1361,6 +1361,26 @@ describe('snapshots', () => {
     expect(await post(first.joinId, firstSnapshot, 2)).toEqual({ position: null });
   });
 
+  it('takes a later snapshot only from a further join', async () => {
+    const { editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    await me.send([me.message('update')]);
+    const main = typist(editor, session);
+    await expect(
+      editor.ctx.api.call(liveRoutes.postSnapshot, {
+        params: { sessionId: session.sessionId },
+        body: {
+          joinId: main.joinId,
+          message: main.message('snapshot'),
+          covers: 2,
+          revisionId: session.revisionId,
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+  });
+
   it('keeps the drafts a kept session names past draft retention, and lets them go after', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);

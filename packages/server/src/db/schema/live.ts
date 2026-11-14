@@ -73,6 +73,8 @@ export const liveSessions = pgTable(
     endedReason: text({ enum: ['access', 'ended'] }),
     /** Its last position as it ended: streams send everything up to it before the end. */
     endedPosition: position(),
+    /** The page's draft head as it ended, which the end line carries. */
+    endedDraftHead: text(),
     /**
      * When the sweep last chose to keep it, ended, so it reads it again
      * only now and then; cleared when a `saved` lands in it.

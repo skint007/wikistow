@@ -1882,6 +1882,10 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
     // Every lock a charge takes, before any row is written (a join's included).
     await lockCharges(tx, caller.accountId, input.storedBytesPerMinute);
     const { join, made } = await joinFor(tx, ctx, input, now);
+    // A later snapshot comes from a save's own join (section 5.10), never a main join.
+    if (join.parentJoinId === null) {
+      throw new ContentError('invalid-request', 'A snapshot is posted from a further join');
+    }
     // Once it has ended, only a snapshot stored before, sent again, is answered.
     if (session.endedReason !== null && input.message.seq > join.lastSeq) {
       throw new ContentError('forbidden', 'This session has ended');
@@ -1999,7 +2003,12 @@ export async function endLive(db: Database, input: { actor: Actor; sessionId: st
     if (session.endedReason !== null) return { ended: false };
     await tx
       .update(liveSessions)
-      .set({ endedAt: sql`now()`, endedReason: 'ended', endedPosition: session.lastPosition })
+      .set({
+        endedAt: sql`now()`,
+        endedReason: 'ended',
+        endedPosition: session.lastPosition,
+        endedDraftHead: (await headsOf(tx, session.pageId)).draftHead,
+      })
       .where(eq(liveSessions.id, session.id));
     return { ended: true };
   });
@@ -2021,6 +2030,7 @@ export async function liveState(db: Database, sessionId: string) {
     return {
       ended: session.endedReason,
       endedPosition: session.endedPosition,
+      endedDraftHead: session.endedReason === null ? undefined : session.endedDraftHead,
       pageId: session.pageId,
       lastPosition: session.lastPosition,
       snapshotCovers: session.snapshotCovers ?? 0,

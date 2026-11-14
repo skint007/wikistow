@@ -85,6 +85,7 @@ CREATE TABLE "live_sessions" (
 	"ended_at" timestamp with time zone,
 	"ended_reason" text,
 	"ended_position" bigint,
+	"ended_draft_head" text,
 	"kept_at" timestamp with time zone,
 	"keys_lost" boolean DEFAULT false NOT NULL,
 	CONSTRAINT "live_sessions_versionId_unique" UNIQUE("version_id"),
@@ -141,7 +142,8 @@ CREATE INDEX "live_wraps_share_idx" ON "live_wraps" USING btree ("share_id");-->
 CREATE FUNCTION "wikistow_live_end"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   UPDATE "live_sessions" SET "ended_at" = now(), "ended_reason" = 'access',
-      "ended_position" = "last_position"
+      "ended_position" = "last_position",
+      "ended_draft_head" = (SELECT "draft_head" FROM "page_heads" WHERE "page_id" = NEW."id")
     WHERE "page_id" = NEW."id" AND "ended_at" IS NULL;
   RETURN NULL;
 END $$;

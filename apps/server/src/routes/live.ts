@@ -112,7 +112,9 @@ type Followed = {
   /** The page's draft head, and how many drafts it had then, which only grows. */
   draftHead: string | null;
   draftCount: number;
+  /** The joins list streams were last sent, and when it was set. */
   joins: string;
+  joinsAt: number;
   grants: Map<string, string>;
   snapshotCovers: number;
   /** Ended or gone: its head and what it holds stand as they were then. */
@@ -271,16 +273,23 @@ export function mountLiveRoutes(
       for (const stream of session.streams) {
         stream.known = Math.max(stream.known, state.endedPosition ?? stream.known);
       }
+      // The end carries the draft head as it stood then, never one saved after.
+      if (state.endedDraftHead !== undefined) session.draftHead = state.endedDraftHead;
       endAll(session, state.ended);
       forget(sessionId, session);
       return;
     }
     setHead(session, state.draftHead, state.draftCount);
     session.snapshotCovers = Math.max(session.snapshotCovers, state.snapshotCovers);
-    const joins = JSON.stringify(state.joins);
-    if (joins !== session.joins) {
-      session.joins = joins;
-      pushAll(session, { joins: state.joins });
+    // A list set since this read began is newer: this one waits for the next.
+    if (session.joinsAt <= startedAt) {
+      const joins = JSON.stringify(state.joins);
+      if (joins !== session.joins) {
+        session.joins = joins;
+        session.joinsAt = startedAt;
+        pushAll(session, { joins: state.joins });
+      }
+      // Whoever has gone, however the list came to say so.
       const present = new Set(
         state.joins.filter((j) => j.present).map((j) => joinKey(j.senderId, j.joinId)),
       );
@@ -393,6 +402,7 @@ export function mountLiveRoutes(
         draftHead: change.draftHead,
         draftCount: change.draftCount,
         joins: '',
+        joinsAt: 0,
         grants: new Map(),
         snapshotCovers: 0,
         over: false,
@@ -414,6 +424,7 @@ export function mountLiveRoutes(
     // A join this request made is listed before anything it sent.
     if (change.joins) {
       session.joins = JSON.stringify(change.joins);
+      session.joinsAt = Date.now();
       pushAll(session, { joins: change.joins });
     }
     // In the order the request sent them, presence among the rest.
@@ -689,6 +700,7 @@ export function mountLiveRoutes(
           draftHead: joined.draftHead,
           draftCount: joined.draftCount,
           joins: JSON.stringify(joined.joins),
+          joinsAt: Date.now(),
           grants: new Map(),
           snapshotCovers: joined.snapshotCovers,
           over: false,
@@ -730,6 +742,7 @@ export function mountLiveRoutes(
       ended.addEventListener('abort', abort, { once: true });
       // Others hear of the join at once, before anything it sends, as it is listed now.
       here.joins = JSON.stringify(joined.joins);
+      here.joinsAt = Date.now();
       pushAll(here, { joins: joined.joins });
       here.streams.add(stream);
       refresh(sessionId).catch(failed);
