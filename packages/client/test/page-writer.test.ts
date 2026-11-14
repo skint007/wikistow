@@ -38,7 +38,12 @@ async function writerOn(connection: Connection) {
   const queue = kept.queue;
   const asked: (keyof ServerWrites)[] = [];
   // The IDs the last request was sent with.
-  const sent: { pageId?: PageId; revisionId?: RevisionId; folderId?: FolderId } = {};
+  const sent: {
+    pageId?: PageId;
+    revisionId?: RevisionId;
+    folderId?: FolderId;
+    markdown?: string | undefined;
+  } = {};
   const answer = <T>(call: keyof ServerWrites, value: T): Promise<T> => {
     asked.push(call);
     if (connection === 'no answer') return Promise.reject(new ApiError(0, 'network', 'No answer'));
@@ -46,8 +51,8 @@ async function writerOn(connection: Connection) {
     return Promise.resolve(value);
   };
   const server: ServerWrites = {
-    createPage: ({ pageId, revisionId }) => {
-      Object.assign(sent, { pageId, revisionId });
+    createPage: ({ pageId, revisionId, markdown }) => {
+      Object.assign(sent, { pageId, revisionId, markdown });
       return answer('createPage', pageId);
     },
     createFolder: ({ folderId }) => {
@@ -189,6 +194,44 @@ describe('the page writer', () => {
           newPage: { revisionId: sent.revisionId },
           sending: { revisionId: sent.revisionId },
         });
+      }
+    });
+
+    it('makes a page with its first draft’s text, and names that draft', async () => {
+      const { writer, queue, sent } = await writerOn(row.connection);
+      const spaceId = newId(SpaceId);
+      const parentId = row.waiting
+        ? (await queue.newFolder({ spaceId, parentId: null, metadata: newFolderMetadata('Trips') }))
+            .id
+        : newId(FolderId);
+
+      const making = writer.newPageDraft({ spaceId, parentId, title: 'Lisbon', markdown: 'Hi' });
+
+      if (expected === 'refused') {
+        await expect(making).rejects.toMatchObject({ code: 'not-found' });
+        return;
+      }
+      const { pageId, revisionId } = await making;
+      const entry = await queue.entry(pageId);
+      if (expected === 'server') {
+        expect(sent).toMatchObject({ pageId, revisionId, markdown: 'Hi' });
+        expect(entry).toBeNull();
+      } else {
+        expect(entry).toMatchObject({
+          newPage: { revisionId },
+          payload: { title: 'Lisbon', markdown: 'Hi' },
+        });
+      }
+      // A save on top of it goes where the page is.
+      const drafts = writer.draft({ spaceId, pageId }, { seen: null });
+      const basedOn = (await drafts.waitingHead()) ?? revisionId;
+      expect(basedOn).toBe(revisionId);
+      await drafts.save({
+        basedOn,
+        payload: newPayload({ title: 'Lisbon', markdown: 'Hi there' }),
+      });
+      if (expected !== 'server') {
+        expect(await queue.entry(pageId)).toMatchObject({ payload: { markdown: 'Hi there' } });
       }
     });
 

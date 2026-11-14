@@ -3,6 +3,7 @@ import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk/mani
 // Types only: the preload bundles this file and may load nothing but electron.
 // The package's index exports `PluginScope`.
 import type { PluginScope } from './plugin-installs.ts';
+import type { FolderId, PageId, SpaceId } from './records/ids.ts';
 
 /**
  * A plugin installed on this computer or loaded from a development folder,
@@ -155,7 +156,103 @@ export type ClippingState = {
   problem: 'translocated' | 'development' | 'unavailable' | null;
   /** The browsers whose manifests name this app, found on this computer. */
   browsers: ClipBrowser[];
+  /** This session's last ten clips saved, newest first, from memory only (ADR 0017, decision 3). */
+  recent: ClippedPage[];
 };
+
+/** A clip saved this session, as Settings → Browser clipping lists it. */
+export type ClippedPage = {
+  spaceId: SpaceId;
+  pageId: PageId;
+  title: string;
+  /** The folder's path, as the person sees it. */
+  path: string;
+};
+
+/** What a clip captured (ADR 0017, decision 5). Screenshots come later (step 6). */
+export type ClipMode = 'link' | 'selection' | 'article' | 'page';
+
+/**
+ * A clip from the browser extension, as main hands it to the page to save
+ * (ADR 0017, decisions 4 and 5). Main checked its fields' sizes; the page
+ * makes it a draft. Its ID is main's own, not the extension's.
+ */
+export type DesktopClip = {
+  id: string;
+  mode: ClipMode;
+  /** The tab's address, as the extension sent it: `http:` and `https:` are linked, others go in as text. */
+  url: string;
+  /** The title the person gave it, possibly blank. */
+  title: string;
+  /** The person's note, plain text. */
+  note: string;
+  tags: string[];
+  /** The clip's HTML, with every address absolute; empty for a link. */
+  html: string;
+  /** Its plain text: a link's selection, or the HTML's text, for when the HTML gives nothing. */
+  text: string;
+  /** An article's byline, the page's `author`. */
+  byline: string | null;
+  /** Where it goes: a folder, or the top of a space for a null `folderId`. */
+  folder: { spaceId: SpaceId; folderId: FolderId | null };
+  /** It came while the app was starting or locked, so its answer may reach no popup. */
+  waited: boolean;
+  /**
+   * Its page, once made (`clipMade`): a page that loads again with it held
+   * finishes it as saved, its text in, rather than making a second.
+   */
+  made: { spaceId: SpaceId; pageId: PageId; path: string } | null;
+};
+
+/** How saving a clip went, as the page tells main, which tells the extension. */
+export type ClipOutcome =
+  | {
+      ok: true;
+      spaceId: SpaceId;
+      pageId: PageId;
+      title: string;
+      path: string;
+      images: { saved: number; skipped: number };
+      /** False when the Markdown reads back otherwise than the clip's HTML showed (`htmlMarkdown`). */
+      faithful: boolean;
+    }
+  | {
+      ok: false;
+      code: 'too-large' | 'no-folder' | 'not-allowed' | 'failed';
+      message: string;
+    };
+
+/** A place a clip can go, as the folder search answers it. */
+export type ClipFolder = { spaceId: SpaceId; folderId: FolderId | null; path: string };
+
+/** The folder search's answer: the five places clips went last, and what matches. */
+export type ClipFolders = { recent: ClipFolder[]; matches: ClipFolder[] };
+
+/** What main asks of the page for the extension (`onClipRequest`). */
+export type ClipRequest =
+  | { kind: 'clip'; clip: DesktopClip }
+  /** Answer with `clipFolders`, under `id`. */
+  | { kind: 'folders'; id: string; query: string }
+  /** Open the draft a clip made this session. */
+  | { kind: 'show'; spaceId: SpaceId; pageId: PageId }
+  /** Main let these clips go, as at a sign-out: they no longer wait. */
+  | { kind: 'dropped'; clipIds: string[] };
+
+/** The vault's state as the page tells main, for the extension (ADR 0017, decision 7). */
+export type ClipPageState = { vault: 'locked' | 'unlocked'; offline: boolean };
+
+/** An image of a clip, as main fetched it (ADR 0017, decision 5). */
+export type ClipImage =
+  | { ok: true; bytes: Uint8Array; mediaType: string }
+  | {
+      ok: false;
+      /**
+       * `refused`: not an address main fetches (a local one, another
+       * scheme); `not-image`; `too-large`; `limit`: past the clip's
+       * images, or the minute's; `failed`: anything else.
+       */
+      reason: 'refused' | 'not-image' | 'too-large' | 'limit' | 'failed';
+    };
 
 /**
  * What the titlebar asks of the window. `toggle-maximize` leaves full screen
@@ -224,6 +321,16 @@ export type DesktopBridge = {
   keepSearchIndex(sealed: Uint8Array): Promise<void>;
   /** Delete the search index kept, as with **Pages I open** nothing keeps it (ADR 0009, decision 9). */
   dropSearchIndex(): Promise<void>;
+  /**
+   * The vectors search by meaning keeps, as the pages sealed them
+   * (`sealMeaningIndex`), or null (ADR 0016, decision 4). Kept and deleted
+   * as the search index is, but bound to the model, not the app's build.
+   */
+  meaningIndex(): Promise<Uint8Array | null>;
+  /** Keep these sealed vectors, in place of the ones kept. */
+  keepMeaningIndex(sealed: Uint8Array): Promise<void>;
+  /** Delete the vectors kept, as when search by meaning is turned off. */
+  dropMeaningIndex(): Promise<void>;
   /**
    * The contacts and No going back marks kept from an earlier launch, as the
    * pages sealed them (`KeptMarks`), or null. Kept and deleted as the search
@@ -334,6 +441,28 @@ export type DesktopBridge = {
    * writes them again.
    */
   setClipping(on: boolean): Promise<ClippingState>;
+  /** Tell main the vault's state, which the extension hears as `locked` or `ready`. */
+  setClipState(state: ClipPageState): Promise<void>;
+  /**
+   * Hear what main asks of the page for the extension: a clip to save, a
+   * folder search, or a draft to show. The returned function stops it. A
+   * clip that came before anyone heard is in `waitingClips`.
+   */
+  onClipRequest(listener: (request: ClipRequest) => void): () => void;
+  /** The clips main holds that no `clipDone` answered yet, oldest first, as after a reload. */
+  waitingClips(): Promise<DesktopClip[]>;
+  /** Say the clip `clipId`'s page is made, with its text, before its images are attached. */
+  clipMade(clipId: string, page: { spaceId: SpaceId; pageId: PageId; path: string }): Promise<void>;
+  /** Say how saving the clip `clipId` went; main lets it go. */
+  clipDone(clipId: string, outcome: ClipOutcome): Promise<void>;
+  /** Answer the folder search `requestId`: null while the vault is locked. */
+  clipFolders(requestId: string, folders: ClipFolders | null): Promise<void>;
+  /**
+   * Fetch an image the clip `clipId` names, `http:`, `https:` or `data:`:
+   * without cookies, never from the local network unless the clipped page
+   * is on it, within the clip's limits.
+   */
+  clipImage(clipId: string, url: string): Promise<ClipImage>;
 };
 
 /** The IPC channels behind `DesktopBridge`, one per method. */
@@ -350,6 +479,9 @@ export const DESKTOP_CHANNELS = {
   searchIndex: 'wikistow:search-index',
   keepSearchIndex: 'wikistow:keep-search-index',
   dropSearchIndex: 'wikistow:drop-search-index',
+  meaningIndex: 'wikistow:meaning-index',
+  keepMeaningIndex: 'wikistow:keep-meaning-index',
+  dropMeaningIndex: 'wikistow:drop-meaning-index',
   trustMarks: 'wikistow:trust-marks',
   keepTrustMarks: 'wikistow:keep-trust-marks',
   keptItems: 'wikistow:kept-items',
@@ -384,6 +516,13 @@ export const DESKTOP_CHANNELS = {
   onFind: 'wikistow:find',
   clipping: 'wikistow:clipping',
   setClipping: 'wikistow:set-clipping',
+  setClipState: 'wikistow:set-clip-state',
+  onClipRequest: 'wikistow:clip-request',
+  waitingClips: 'wikistow:waiting-clips',
+  clipMade: 'wikistow:clip-made',
+  clipDone: 'wikistow:clip-done',
+  clipFolders: 'wikistow:clip-folders',
+  clipImage: 'wikistow:clip-image',
 } as const satisfies Record<keyof DesktopBridge, string>;
 
 /** What a channel answers: the value, or the message for a failure. */
