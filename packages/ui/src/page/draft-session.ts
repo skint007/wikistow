@@ -720,7 +720,9 @@ export class DraftSession {
   landed(revisionId: RevisionId) {
     this.#known.add(revisionId);
     this.#base = revisionId;
-    // What comes next grows from what landed, not from a session's base.
+    // What comes next grows from what landed, not from a session's base; a
+    // change kept from a session was what the view shows, which landed.
+    if (this.#keptLive && !this.#participant) this.#payload = this.#current();
     this.#keptLive = null;
     this.#putBack = null;
     this.#region = null;
@@ -1554,6 +1556,12 @@ export class DraftSession {
     return release;
   }
 
+  // Whether the person typed in the editor since `captured`, read again now, as after an await.
+  #typedSince(captured: Content): boolean {
+    this.#pull();
+    return this.#content !== captured;
+  }
+
   // Whether this view holds just the draft it opened: nothing typed or changed.
   #untouched(): boolean {
     const { title, markdown, attachments } = this.#payload;
@@ -1805,10 +1813,20 @@ export class DraftSession {
           this.#base = waiting.basedOn ?? this.#base;
           this.#known.add(this.#base);
           this.#keptLive = waiting.live ?? null;
+          // The version the view revises is the change as it waits, so once
+          // it lands the view holds just what landed.
+          this.#payload = waiting.payload;
+          this.#region = null;
+          if (this.#rejoinHold) this.#rejoinKept = true;
+          // Typed meanwhile: that goes into the change, on what's on screen.
+          if (this.#typedSince(captured)) {
+            this.#extensions = over(waiting.payload.extensions, this.#extensions);
+            this.#schedule();
+            return false;
+          }
           const { title, markdown, attachments } = waiting.payload;
           this.#content = { title, markdown, attachments };
-          this.#extensions = over(this.#payload.extensions, held(waiting.payload.extensions));
-          if (this.#rejoinHold) this.#rejoinKept = true;
+          this.#extensions = {};
           if (this.#live) this.#surface.current?.replace(markdown);
           this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
           return false;
@@ -1846,13 +1864,13 @@ export class DraftSession {
         // Its join went, as offline: what the session didn't take waits on
         // this device, held back, and goes in when it joins again (ADR 0015
         // decision 10), never as a save from outside the session meanwhile.
-        if (await this.#keepForRejoin(participant, settled, typedMeanwhile)) return false;
+        if (await this.#keepForRejoin(participant, settled, captured)) return false;
       }
       if (!saveOver && !(settled.atHead && !settled.provisional)) {
         // Its document doesn't hold the head, or may hold text nobody typed:
         // never saved over a draft. Only the person's own typing goes back,
         // merged by block onto the head (section 5.10, **Putting typing back**).
-        if (await this.#putBackOnto(participant, typedMeanwhile, settled.payload)) return false;
+        if (await this.#putBackOnto(participant, captured, settled.payload)) return false;
       }
       if (settled.provisional && before) {
         // The head couldn't be read: a document that may hold text nobody
@@ -1911,15 +1929,16 @@ export class DraftSession {
    */
   async #putBackOnto(
     participant: LiveParticipant,
-    typedMeanwhile: boolean,
+    captured: Content,
     document: PagePayload | null,
   ): Promise<boolean> {
     const base = this.#keptLive?.base;
     if (!base || !document) return false;
     const head = await participant.headDraft();
     if (!head) return false;
-    // The person's: the document, and what they typed in the editor since it left.
-    const ours = typedMeanwhile
+    // The person's: the document, and what they typed in the editor since it
+    // left, read again now, as they may have typed while the head was read.
+    const ours = this.#typedSince(captured)
       ? revisePayload(
           { kind: 'current', payload: document },
           { ...this.#content, extensions: over(document.extensions, this.#extensions) },
@@ -2017,7 +2036,7 @@ export class DraftSession {
   async #keepForRejoin(
     participant: LiveParticipant,
     settled: Awaited<ReturnType<LiveParticipant['settle']>>,
-    typedMeanwhile: boolean,
+    captured: Content,
   ): Promise<boolean> {
     if (!this.#rejoinHold || !this.#ports.keep || !settled.payload || !this.#keptLive) {
       return false;
@@ -2035,6 +2054,8 @@ export class DraftSession {
       this.#payload = checked.payload;
       this.#region = null;
     }
+    // Read again now: typing while it was kept goes into the change too.
+    const typedMeanwhile = this.#typedSince(captured);
     if (!typedMeanwhile) {
       const { title, markdown, attachments } = settled.payload;
       this.#content = { title, markdown, attachments };
