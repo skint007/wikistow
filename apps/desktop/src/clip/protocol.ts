@@ -1,0 +1,181 @@
+// What crosses the web clipper's socket (docs/adr/0017-web-clipper.md,
+// decisions 1 and 4): the browser's framing, the token's challenge with
+// wikistow-clip-host (clip-host/connect.go), and the messages the
+// extension sends through it.
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { z } from 'zod';
+
+/** The protocol versions this app takes, lowest and highest. */
+export const PROTOCOLS = { min: 1, max: 1 } as const;
+
+/** The most a `clip` may be as JSON; the extension refuses larger before sending. */
+export const MAX_MESSAGE = 48 * 1024 * 1024;
+/** The token's challenge is a few short fields. */
+export const MAX_HANDSHAKE = 1024;
+/** How long a connection has to prove it holds the token. */
+export const HANDSHAKE_MS = 1_000;
+
+/**
+ * The browser's framing, which the helper copies unread: a 32-bit unsigned
+ * length in the computer's own byte order, then that much UTF-8 JSON. Every
+ * system WikiStow ships on is little-endian.
+ */
+export function frame(message: unknown): Buffer {
+  const body = Buffer.from(JSON.stringify(message), 'utf8');
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(body.length);
+  return Buffer.concat([header, body]);
+}
+
+export class FrameTooLarge extends Error {}
+
+/**
+ * Splits a stream into frames' bodies as its chunks arrive (`push`), one
+ * at a time (`next`), so each is held to the limit in force when it is
+ * read: a message sent just after the token's proof, in the same chunk,
+ * isn't judged by the challenge's. One larger than `max()` is refused
+ * from its header alone, before any of it is held. A frame's chunks are
+ * joined once, when the last arrives.
+ */
+export function frameReader(max: () => number) {
+  let held: Buffer[] = [];
+  let heldBytes = 0;
+  return {
+    push(chunk: Buffer) {
+      held.push(chunk);
+      heldBytes += chunk.length;
+    },
+    /** The next whole frame's body, or null until more arrives. */
+    next(): Buffer | null {
+      if (heldBytes < 4) return null;
+      if (held[0]!.length < 4) held = [Buffer.concat(held)];
+      const size = held[0]!.readUInt32LE(0);
+      if (size > max()) throw new FrameTooLarge(`A message of ${size} bytes`);
+      if (heldBytes < 4 + size) return null;
+      const all = held.length === 1 ? held[0]! : Buffer.concat(held);
+      const rest = all.subarray(4 + size);
+      held = rest.length > 0 ? [rest] : [];
+      heldBytes = rest.length;
+      return all.subarray(4, 4 + size);
+    },
+  };
+}
+
+/** HMAC-SHA256(token, role ‖ first ‖ second), as the helper computes it. */
+export function proof(
+  token: Uint8Array,
+  role: 'app' | 'helper',
+  first: Uint8Array,
+  second: Uint8Array,
+) {
+  return createHmac('sha256', token).update(role).update(first).update(second).digest();
+}
+
+/** A 32-byte value, strictly as standard base64. */
+const Bytes32 = z
+  .string()
+  .max(64)
+  .transform((text, context) => {
+    const bytes = Buffer.from(text, 'base64');
+    if (bytes.length !== 32 || bytes.toString('base64') !== text) {
+      context.addIssue({ code: 'custom', message: 'Not 32 bytes of base64' });
+      return z.NEVER;
+    }
+    return bytes;
+  });
+
+const Challenge = z.strictObject({ v: z.literal(1), type: z.literal('challenge'), nonce: Bytes32 });
+const HelperProof = z.strictObject({
+  type: z.literal('proof'),
+  mac: Bytes32,
+  caller: z.string().max(200),
+});
+
+/**
+ * The app's side of the token's challenge, one step per frame the helper
+ * sends. Each MAC names its role and both nonces, so neither answer can be
+ * replayed into another connection or bounced back as the other side's.
+ * A client without the token can make the app compute its MAC, never the
+ * helper's.
+ */
+export function appChallenge(token: Uint8Array) {
+  const ours = randomBytes(32);
+  let theirs: Buffer | null = null;
+  return {
+    /** The helper's challenge: the answer to send it, or null to drop the connection. */
+    challenged(body: Buffer): unknown {
+      const parsed = Challenge.safeParse(parseJson(body));
+      if (!parsed.success || theirs) return null;
+      theirs = parsed.data.nonce;
+      return {
+        type: 'proof',
+        nonce: ours.toString('base64'),
+        mac: proof(token, 'app', theirs, ours).toString('base64'),
+      };
+    },
+    /** The helper's proof: the extension it names, or null to drop the connection. */
+    proven(body: Buffer): { caller: string } | null {
+      const parsed = HelperProof.safeParse(parseJson(body));
+      if (!parsed.success || !theirs) return null;
+      const expected = proof(token, 'helper', ours, theirs);
+      return timingSafeEqual(parsed.data.mac, expected) ? { caller: parsed.data.caller } : null;
+    },
+  };
+}
+
+export function parseJson(body: Buffer): unknown {
+  try {
+    return JSON.parse(body.toString('utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+const Id = z.string().min(1).max(100);
+
+/** What every message from the extension carries, read first. */
+export const Envelope = z.object({ v: z.number(), id: Id, type: z.string().max(20) });
+
+/**
+ * The messages this app answers so far. A `clip` is only acknowledged
+ * here; its fields are checked once the app saves clips (ADR 0017, step 4).
+ */
+export const Message = z.discriminatedUnion('type', [
+  z.strictObject({
+    v: z.literal(1),
+    id: Id,
+    type: z.literal('hello'),
+    extension: z.string().max(50).optional(),
+    browser: z.string().max(50).optional(),
+  }),
+  z.strictObject({ v: z.literal(1), id: Id, type: z.literal('open') }),
+  z.strictObject({
+    v: z.literal(1),
+    id: Id,
+    type: z.literal('folders'),
+    query: z.string().max(200),
+  }),
+  z.object({ v: z.literal(1), id: Id, type: z.literal('clip') }),
+  z.strictObject({
+    v: z.literal(1),
+    id: Id,
+    type: z.literal('show'),
+    spaceId: z.string().max(100),
+    pageId: z.string().max(100),
+  }),
+]);
+export type Message = z.infer<typeof Message>;
+
+/** The app's state, as the extension shows it (ADR 0017, decision 7). */
+export type ClipAppState = 'starting' | 'signed-out' | 'locked' | 'ready';
+
+export type ErrorCode =
+  | 'version'
+  | 'invalid'
+  | 'too-large'
+  | 'signed-out'
+  | 'locked'
+  | 'no-folder'
+  | 'not-allowed'
+  | 'busy'
+  | 'failed';

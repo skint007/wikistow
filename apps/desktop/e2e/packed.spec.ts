@@ -4,7 +4,7 @@ import type { DesktopBridge } from '@wikistow/contracts';
 import { access } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { embedIn, embedWorker, PASSAGES, QUERY } from '../../web/e2e/meaning';
-import { launch, newProfile } from './desktop';
+import { askHelper, launch, newProfile } from './desktop';
 
 // The app as the Arch package installs it: the one app.asar `scripts/asar.ts`
 // packs, with the pages, bundles and icon inside. CI packs it in its build
@@ -104,4 +104,42 @@ test('the Mac app starts', async () => {
   } finally {
     await app.close();
   }
+});
+
+// The web clipper's helper in the bundle reaches the app on its socket in
+// the data folder, with the Mac's peer check and the token's challenge, and
+// answers for it once it's closed. The helper finds the app's real data
+// folder, so this runs only on CI's fresh runner.
+test('the Mac app answers its clipper’s helper', async () => {
+  test.skip(!MAC_APP || !process.env['CI'], 'on CI’s macOS job, which has no data to keep');
+  const helper = `${MAC_APP}/Contents/MacOS/wikistow-clip-host`;
+  // As Firefox starts it: the manifest's path, then the extension's ID,
+  // which this launch adds, as no extension is published yet.
+  const id = 'clip-check@wikistow.invalid';
+  const firefox = ['manifest.json', id];
+  const app = await _electron.launch({
+    executablePath: `${MAC_APP}/Contents/MacOS/WikiStow`,
+    args: [`--clip-extension=${id}`],
+  });
+  try {
+    const page = await app.firstWindow();
+    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    expect(await page.evaluate(() => window.wikistowDesktop?.clipping())).toMatchObject({
+      on: true,
+      problem: null,
+    });
+    expect(await askHelper(helper, firefox, { v: 1, id: 'a', type: 'hello' })).toMatchObject({
+      id: 'a',
+      type: 'status',
+      app: 'signed-out',
+    });
+  } finally {
+    await app.close();
+  }
+  expect(await askHelper(helper, firefox, { v: 1, id: 'b', type: 'hello' })).toEqual({
+    v: 1,
+    id: 'b',
+    type: 'status',
+    app: 'closed',
+  });
 });
