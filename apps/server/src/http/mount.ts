@@ -58,7 +58,7 @@ type Options = {
   bodyLimit?: number;
   /**
    * The large-body slots it takes: `bulk` (the default), `rotation`,
-   * `staging` or `live`. Rotations and owner removals have their own, so
+   * `staging`, `live` or `import`. Rotations and owner removals have their own, so
    * large shares being made can't hold off removing someone, and so does
    * staging a public copy, which holds its slot while the copy renders,
    * and a live session's snapshot.
@@ -96,8 +96,12 @@ const BULK_AT_ONCE = 4;
 const LIVE_PER_ACCOUNT = 2;
 const LIVE_AT_ONCE = 16;
 
-/** The large-body pools: `live` takes sessions' snapshots, so typing never waits on a share being made. */
-export type BodyPool = 'bulk' | 'rotation' | 'staging' | 'live';
+/**
+ * The large-body pools: `live` takes sessions' snapshots, so typing never
+ * waits on a share being made, and `import` imports' batches, which come
+ * one after another for minutes, so they never hold off one.
+ */
+export type BodyPool = 'bulk' | 'rotation' | 'staging' | 'live' | 'import';
 
 // A pool's large bodies being read or handled now, in all and by account:
 // a slot for `accountId`, or `rate-limited` if none is free.
@@ -161,6 +165,7 @@ export function createRoutes({
     rotation: bodySlots(),
     staging: bodySlots(),
     live: bodySlots(LIVE_PER_ACCOUNT, LIVE_AT_ONCE),
+    import: bodySlots(),
   };
 
   // Signed-in routes check the session, and count toward the account's rate

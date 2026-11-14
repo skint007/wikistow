@@ -47,7 +47,8 @@ export const BatchPage = z
  * of each page is checked as its own route checks it, in the order sent, so
  * a folder comes before what goes in it, and a page's create before its
  * save before its publish. The first refusal, as that route would refuse
- * it, answers for the batch. A page listed twice is `invalid-request`. It
+ * it, answers for the batch. A page listed twice is `invalid-request`, and
+ * an empty batch `not-found`. It
  * counts once against the write rate limit, and takes an
  * `Idempotency-Key`. Servers older than it answer `not-found`; they don't
  * say `importBatches` in `installation`.

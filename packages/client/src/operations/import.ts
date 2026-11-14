@@ -54,6 +54,7 @@ import {
   type OpenedRevision,
   type PageRef,
 } from './pages.ts';
+import { spaceKeys } from './keys.ts';
 import { patient, pause } from './patience.ts';
 import type { treeTarget } from './records.ts';
 import type { ClientContext } from './session.ts';
@@ -198,7 +199,7 @@ export async function importNotes(
       return step(true);
     }
   };
-  const writes = held ? inBatches(ctx, held, targets.forget, spaceId) : oneByOne(ctx, again);
+
   // A draft this run just wrote, as it wrote it, from memory.
   const writtenDraft = (pageId: PageId, revisionId: RevisionId) =>
     ctx.revisions.get({ spaceId, pageId, audience: 'draft', revisionId });
@@ -206,6 +207,9 @@ export async function importNotes(
   const live = () => {
     if (signal?.aborted || ctx.revisions.generation !== generation) throw stopped();
   };
+  const writes = held
+    ? inBatches(ctx, held, { spaceId, forget: targets.forget, live })
+    : oneByOne(ctx, again);
   const from = importFrom(source.format);
   const root = scope.folderId ?? null;
   const structure = await loadStructure(ctx, spaceId);
@@ -649,6 +653,14 @@ const movedOn = (error: unknown) =>
   ((error instanceof ApiError || error instanceof CryptoError) &&
     (error.code === 'region-mismatch' || error.code === 'key-version'));
 
+/**
+ * Whether the server refused a write for the space's keys as this app had
+ * them: a newer key version, or other owners (`withFreshKeys`).
+ */
+const staleKeys = (error: unknown) =>
+  error instanceof ApiError &&
+  (error.code === 'key-version' || error.code === 'recipients-mismatch');
+
 /** The changes an import sends that take an `Idempotency-Key`. */
 const KEYED: ReadonlySet<RouteDef> = new Set([
   structureRoutes.createFolder,
@@ -797,14 +809,15 @@ function holding(ctx: ClientContext) {
  * `MAX_BATCH_FOLDERS` folders and `MAX_BATCH_PAGES` pages, and about
  * `BATCH_BYTES`, but always one item, each batch one change on the server.
  * An item, or a batch, refused because where it goes moved on (`movedOn`)
- * is sealed again with fresh answers (`forget`), and sent once more. Once
- * a batch lands, its items' follow-ups run, in order.
+ * is sealed again with fresh answers (`forget`), and sent once more; a
+ * batch also with the space's keys worked out again, as when it was
+ * refused for them (`staleKeys`). Once a batch lands, its items'
+ * follow-ups run, in order. `live` throws to stop before a batch is sent.
  */
 function inBatches(
   ctx: ClientContext,
   held: ReturnType<typeof holding>,
-  forget: () => void,
-  spaceId: SpaceId,
+  { spaceId, forget, live }: { spaceId: SpaceId; forget: () => void; live: () => void },
 ): Writes {
   type Sealed = { item: Item; writes: Held; bytes: number; landed: () => void };
   let batch: Sealed[] = [];
@@ -825,29 +838,40 @@ function inBatches(
       return await seal(item, false);
     } catch (error) {
       if (!movedOn(error)) throw error;
+      // What is held goes first, so the server knows the folders it makes
+      // before the answers that named them are forgotten.
+      await flush();
       forget();
       return seal(item, true);
     }
+  };
+  const send = (sending: readonly Sealed[]) => {
+    // Cancel, or a lock, stops before a batch goes, however late it was sealed.
+    live();
+    return held.send(
+      spaceId,
+      sending.map((s) => s.writes),
+    );
   };
   const flush = async () => {
     let sending = batch;
     batch = [];
     if (sending.length === 0) return;
     try {
-      await held.send(
-        spaceId,
-        sending.map((s) => s.writes),
-      );
+      await send(sending);
     } catch (error) {
-      if (!movedOn(error)) throw error;
+      if (!movedOn(error) && !staleKeys(error)) throw error;
+      // The single routes' writes are sealed again with the space's keys
+      // worked out afresh when the server refuses them for those
+      // (`withFreshKeys`); a batch's are refused only here, so the keys
+      // are worked out again for it too, as a rotation or a change of
+      // owners may come with the change of access that refused it.
       forget();
+      await spaceKeys(ctx, spaceId, { refresh: true });
       const again: Sealed[] = [];
       for (const { item } of sending) again.push(await seal(item, true));
       sending = again;
-      await held.send(
-        spaceId,
-        sending.map((s) => s.writes),
-      );
+      await send(sending);
     }
     for (const { landed } of sending) landed();
   };

@@ -5,8 +5,10 @@
 import {
   createApiClient,
   importOperations,
+  openSession,
   pageOperations as pages,
   readObsidianVault,
+  sharingOperations,
   spaceOperations,
   type ClientContext,
   type Fetch,
@@ -384,6 +386,36 @@ describe('an import', () => {
     if (!ref) throw new Error('expected an attachment');
     const bytes = await pages.readAttachment(reader.ctx, a.page, 'published', ref);
     expect(new TextDecoder().decode(bytes)).toBe('PNG bytes');
+  });
+
+  it('finishes when another app rotates its share between batches', async () => {
+    const spaceId = await spaceOperations.createSpace(person.ctx, { name: 'Rotated midway' });
+    const folderId = await spaceOperations.createFolder(person.ctx, {
+      spaceId,
+      parentId: null,
+      name: 'Inbox',
+    });
+    const reader = await personWithVault(t);
+    const member = await invite(person, reader, 'reader');
+    const shareId = await shareFolder(person.ctx, { spaceId, rootId: folderId, people: [member] });
+    // The owner's phone, whose new key this app learns of only when told.
+    const phone = await openSession(person.api, person.vault);
+    const source = await vault([file('A.md', 'See [[Z]].'), file('Z.md', 'Plain words.')]);
+    let batches = 0;
+    const rotating: Fetch = async (url, init) => {
+      if (routeOf(url, init) === BATCH && ++batches === 2) {
+        await sharingOperations.rotateKeys(phone, { spaceId, shareId });
+      }
+      return person.browser.fetch(url, init);
+    };
+    const { ctx } = through(person.ctx, rotating);
+    const summary = await importOperations.importNotes(ctx, {
+      scope: { spaceId, folderId },
+      source,
+    });
+    expect(summary.pages).toHaveLength(2);
+    const a = await publication(spaceId, pageIdOf(summary, 'A.md'), reader.ctx);
+    expect(a.payload.markdown).toBe('See [[Z]].');
   });
 
   it('lands a batch whole or not at all, and makes nothing twice', async () => {

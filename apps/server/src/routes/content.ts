@@ -866,7 +866,12 @@ export function mountContentRoutes(
         ...body,
         once,
       }).catch(toApiError),
-    { rateLimit: WRITE_LIMIT, idempotent: true, bodyLimit: importRoutes.MAX_BATCH_BODY },
+    {
+      rateLimit: WRITE_LIMIT,
+      idempotent: true,
+      bodyLimit: importRoutes.MAX_BATCH_BODY,
+      bodyPool: 'import',
+    },
   );
 
   // Copies, and moves between spaces (section 10). Agents copy within their
