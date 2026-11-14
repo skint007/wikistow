@@ -1,13 +1,14 @@
-import type {
-  ClientContext,
+import {
   pageOperations,
-  PagePayload,
-  Region,
-  RevisionId,
+  type ClientContext,
+  type PagePayload,
+  type Region,
+  type RevisionId,
 } from '@wikistow/client';
 import type { QueryClient } from '@tanstack/react-query';
 import { connection } from '../../data/connection';
-import { treeQuery } from '../../data/queries';
+import { pageQuery, treeQuery } from '../../data/queries';
+import { claimPutIn, holdLivePage } from './live-lock';
 import { desktop } from '../../desktop';
 import type { LivePorts } from '../draft-session';
 import { readWikilinks } from '../page-reader';
@@ -83,6 +84,27 @@ export function livePorts(
       document.addEventListener('visibilitychange', shown);
       return () => document.removeEventListener('visibilitychange', shown);
     },
+    hold: () => holdLivePage(page.pageId),
+    claim: () => claimPutIn(page.pageId),
+    ask: () => void connection.check(),
+    online: () => connection.get().online,
+    async descends(head, ancestor) {
+      let at: RevisionId | null = head;
+      for (let steps = 0; at && steps < 256; steps++) {
+        if (at === ancestor) return true;
+        const opened = await pageOperations.openRevisionOf(ctx, page, 'draft', at);
+        at = opened.record.basedOn as RevisionId | null;
+      }
+      return false;
+    },
+    async head() {
+      const info = await queryClient.fetchQuery({ ...pageQuery(ctx, page.pageId), staleTime: 0 });
+      const head = info.heads.draftHead;
+      if (!head) return null;
+      const opened = await pageOperations.openRevisionOf(ctx, page, 'draft', head, { fresh: true });
+      if (opened.opened.kind !== 'current') return null;
+      return { revisionId: head, payload: opened.opened.payload, region: opened.region };
+    },
     async join(opening) {
       region = opening.region;
       const live = await import('@wikistow/client/live');
@@ -98,6 +120,16 @@ export function livePorts(
       const stops: (() => void)[] = [];
       // Marks, keys and owners another tab changed, or this one.
       if (ctx.kept) stops.push(ctx.kept.onChange(() => void participant.recheck()));
+      // Offline: a stream may hang rather than break, so it is taken as broken at once.
+      let online = connection.get().online;
+      stops.push(
+        connection.subscribe(() => {
+          const now = connection.get().online;
+          // As it goes offline, once: a stream opened since is the server answering.
+          if (online && !now) participant.offline();
+          online = now;
+        }),
+      );
       // Who saves: visible tabs first.
       const shown = () => participant.presenceChanged();
       if (typeof document !== 'undefined') {

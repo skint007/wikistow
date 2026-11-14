@@ -602,6 +602,7 @@ function PageBody({
           queued: {
             version: change.version,
             sending: change.sending?.revisionId ?? null,
+            live: change.live ?? null,
             // Someone saved since it was based: it opens as the conflict it came back as.
             theirs:
               change.failure?.kind === 'conflict' && info.heads.draftHead !== change.basedOn

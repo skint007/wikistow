@@ -21,7 +21,7 @@ import {
   type FolderPicture,
 } from '../metadata.ts';
 import { newPayload, type AttachmentRef, type PagePayload } from '../payload.ts';
-import { OWNER_REGION } from '../regions.ts';
+import { OWNER_REGION, type Region } from '../regions.ts';
 import {
   createPage,
   deleteNode,
@@ -31,15 +31,21 @@ import {
   type PageRef,
   type Written,
 } from './pages.ts';
-import type { FolderChanges, OfflineQueue } from './queue.ts';
+import type { FolderChanges, KeptLive, OfflineQueue, QueuedPage } from './queue.ts';
 import type { LoadedMetadata } from './records.ts';
 import type { ClientContext } from './session.ts';
 import { createFolderAs, updateMetadata } from './spaces.ts';
 
 type File = { name: string; mediaType: string; bytes: Uint8Array };
 
-/** A draft save as the draft view asks for it; the writer picks its revision ID. */
-export type DraftSave = Omit<Parameters<typeof saveDraft>[1], 'page' | 'revisionId'>;
+/**
+ * A draft save as the draft view asks for it; the writer picks its revision
+ * ID. `live`, for text made from a live session's document, is kept beside
+ * it if it goes into the queue (ADR 0015 decision 10).
+ */
+export type DraftSave = Omit<Parameters<typeof saveDraft>[1], 'page' | 'revisionId'> & {
+  live?: KeptLive | null;
+};
 
 /** The server operations the writer writes through, as `serverWrites` gives them for a session. */
 export type ServerWrites = {
@@ -85,8 +91,28 @@ export type DraftWriter = {
    * comes back as written on its base, as typed.
    */
   save(input: DraftSave): Promise<Written>;
-  /** A file for the draft, as `PageWriter.attach` takes it. */
-  attach(file: File): Promise<AttachmentRef>;
+  /**
+   * Keep the draft on this device, online too, as a change waiting for the
+   * page: a live session's document while it isn't saved (ADR 0015 decision
+   * 10), held back while this app is in the page's session. On `basedOn`,
+   * rebasing an entry on another base. The entry's version now.
+   */
+  keep(input: {
+    basedOn: RevisionId;
+    region: Region | null;
+    payload: PagePayload;
+    live: KeptLive;
+  }): Promise<number>;
+  /** A file for the draft, as `PageWriter.attach` takes it; to the server at once with `server`. */
+  attach(file: File, options?: { server?: boolean }): Promise<AttachmentRef>;
+  /** The page's draft entry as it is now, read in turn with the queue's sending (`OfflineQueue.entryNow`). */
+  entryNow(): Promise<QueuedPage | null>;
+  /** The entry at `version` was put into the page's live session (`OfflineQueue.markPutIn`). */
+  markPutIn(version: number, live: KeptLive): Promise<void>;
+  /** The version of the page's entry this writer last saw, if any. */
+  seen(): number | null;
+  /** Withdraw the entry at `version`, which a compared draft of the session holds (`OfflineQueue.withdraw`). */
+  withdraw(version: number): Promise<boolean>;
   /** The person chose to save theirs on top of `revisionId` (Save mine on top). */
   onTopOf(revisionId: RevisionId): void;
   /**
@@ -111,7 +137,13 @@ export type DraftWriter = {
 };
 
 /** A page's draft change waiting on this device, as `DraftWriter.waitingChange` reads it. */
-export type WaitingChange = { version: number; head: RevisionId | null; payload: PagePayload };
+export type WaitingChange = {
+  version: number;
+  head: RevisionId | null;
+  payload: PagePayload;
+  /** Made from a live session's document: what is kept beside it. */
+  live?: KeptLive | null;
+};
 
 export type PageWriter = {
   /**
@@ -288,6 +320,7 @@ export function createPageWriter({
         region: input.tableRegion ?? input.basedOnRegion ?? null,
         payload: input.payload,
         ...(input.linkChoices && { linkChoices: input.linkChoices }),
+        ...(input.live !== undefined && { live: input.live }),
       });
       return {
         async save(input) {
@@ -310,11 +343,12 @@ export function createPageWriter({
           }
           const revisionId = newId(RevisionId);
           const { attachments } = input.payload;
+          const { live: _live, ...save } = input;
           try {
             // Files added while the page's changes went into the queue are
             // there only: they go up first, and are let go of once saved.
             await queue?.upload(attachments, (blob) => server.uploadBlob(page, blob));
-            const written = await server.saveDraft({ page, ...input, revisionId });
+            const written = await server.saveDraft({ page, ...save, revisionId });
             void queue?.sent(attachments).catch(() => {});
             return written;
           } catch (error) {
@@ -323,7 +357,20 @@ export function createPageWriter({
             return asTyped(input);
           }
         },
-        attach: (file) => writer.attach(page, file),
+        async keep({ basedOn, region, payload, live }) {
+          if (!queue) throw new Error('This device keeps no changes');
+          // As any save into it: one another tab or window saved into since is theirs (`stale-head`).
+          seen = await queue.saveDraft({ page, basedOn, region, payload, seen, onTop: true, live });
+          return seen;
+        },
+        attach: (file, options) =>
+          options?.server ? server.uploadAttachment(page, file) : writer.attach(page, file),
+        entryNow: async () => (queue ? queue.entryNow(page.pageId) : null),
+        markPutIn: async (version, live) => {
+          await queue?.markPutIn(page.pageId, version, live);
+        },
+        seen: () => seen,
+        withdraw: async (version) => (queue ? queue.withdraw(page.pageId, version) : false),
         onTopOf(revisionId) {
           onTop = revisionId;
         },
@@ -338,7 +385,7 @@ export function createPageWriter({
           const entry = await queue?.entry(page.pageId);
           if (entry?.kind !== 'page') return null;
           const head = entry.basedOn ?? entry.newPage?.revisionId ?? null;
-          return { version: entry.version, head, payload: entry.payload };
+          return { version: entry.version, head, payload: entry.payload, live: entry.live ?? null };
         },
         mergedWith(version) {
           seen = version;

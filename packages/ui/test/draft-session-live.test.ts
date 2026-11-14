@@ -6,6 +6,8 @@ import {
   newPayload,
   OWNER_REGION,
   RevisionId,
+  type KeptLive,
+  type QueuedPage,
   type AttachmentRef,
   type pageOperations,
   type PagePayload,
@@ -15,9 +17,11 @@ import {
   documentFromPayload,
   type LiveDocument,
   type LiveParticipant,
+  type PutBack,
   type ParticipantState,
   type ParticipantStatus,
 } from '@wikistow/client/live';
+import { JoinId, LiveSessionId, PageId, SpaceId } from '@wikistow/contracts';
 import { describe, expect, it } from 'vite-plus/test';
 import { DraftSession, type DraftPorts } from '../src/page/draft-session.ts';
 import type { EditorSurfaceHandle } from '../src/page/editor/surface.ts';
@@ -60,6 +64,11 @@ class FakeParticipant {
   closed = false;
   typed = false;
   settled: Awaited<ReturnType<LiveParticipant['settle']>> | null = null;
+  readonly sessionId = LiveSessionId.parse('session-1');
+  /** The base a put-back merges from: what others typed that this app took in, and its own the session saved. */
+  outside: PagePayload | null = null;
+  /** The draft head, for putting typing back onto it. */
+  head: { revisionId: RevisionId; payload: PagePayload } | null = null;
 
   constructor(payload: PagePayload) {
     this.base = payload;
@@ -75,6 +84,7 @@ class FakeParticipant {
       people: [],
       provisional: false,
       notes: [],
+      connected: true,
     };
   }
   start() {}
@@ -152,6 +162,35 @@ class FakeParticipant {
   onBeforeRemote() {
     return () => {};
   }
+  readonly ownJoin = JoinId.parse('join-1');
+  putBack(): PutBack {
+    return {
+      sessionId: this.sessionId,
+      joinId: this.ownJoin,
+      ours: this.currentPayload(),
+      outside: this.outside ?? this.base,
+      outsideSeq: 0,
+      seq: 1,
+      unsealed: false,
+      inSession: () => this.outside ?? this.base,
+    };
+  }
+  placedThrough() {
+    return 0;
+  }
+  readonly startedFrom = R0;
+  /** Whether a compared head holds a document's state: here, once the session shows saved. */
+  holds: boolean | null = null;
+  headHolds() {
+    return this.holds ?? this.#status.saved;
+  }
+  async sentThrough() {
+    return { joinId: this.ownJoin, seq: 9 };
+  }
+  async headDraft() {
+    return this.head ?? { revisionId: R0, payload: this.base };
+  }
+
   sessionDrafts() {
     return [R0];
   }
@@ -170,11 +209,25 @@ class FakeParticipant {
 function session(
   payload = newPayload({ title: 'Notes', markdown: 'Start.', extensions: {} }),
   shared = payload,
-  { waiting = false }: { waiting?: boolean } = {},
+  {
+    waiting = false,
+    entry,
+    seen = entry?.version,
+  }: {
+    waiting?: boolean;
+    /** The page's change waiting here, which a join puts in. */
+    entry?: QueuedPage;
+    /** The version of that change this view last saw. */
+    seen?: number;
+  } = {},
 ) {
   const surface = new FakeSurface(payload.markdown);
   const saves: Parameters<DraftPorts['saveDraft']>[0][] = [];
   const joins: FakeParticipant[] = [];
+  const kept: { payload: PagePayload; live: KeptLive; basedOn: RevisionId }[] = [];
+  const withdrawn: number[] = [];
+  const marked: { version: number; putIn: KeptLive['putIn'] }[] = [];
+  let held = 0;
   let joinable = true;
   const ports: DraftPorts = {
     async saveDraft(input) {
@@ -208,9 +261,32 @@ function session(
     saved: async () => {},
     overtaken: () => undefined,
     readLinks: async () => [],
-    waitingChange: async () => (waiting ? { version: 1, head: R0, payload } : null),
+    waitingChange: async () =>
+      waiting || entry ? { version: entry?.version ?? 1, head: R0, payload } : null,
+    ...(entry && {
+      entryNow: async () => entry,
+      async markPutIn(version, live) {
+        marked.push({ version, putIn: live.putIn });
+      },
+      seen: () => seen ?? null,
+      openDraft: async () => entry.payload,
+    }),
+    async keep(input) {
+      kept.push(input);
+      return 40 + kept.length;
+    },
+    async withdraw(version) {
+      withdrawn.push(version);
+      return true;
+    },
     live: {
       allowed: () => joinable,
+      hold() {
+        held++;
+        return () => void held--;
+      },
+      head: async () => ({ revisionId: R0, payload: shared, region: OWNER_REGION }),
+      descends: async () => true,
       async join() {
         const participant = new FakeParticipant(shared);
         joins.push(participant);
@@ -229,6 +305,10 @@ function session(
     surface,
     saves,
     joins,
+    kept,
+    withdrawn,
+    marked,
+    held: () => held,
     noJoining: () => (joinable = false),
     /** The person types: the surface holds it, and reports it. */
     type: (markdown: string) => {
@@ -377,5 +457,241 @@ describe('a draft session in a live session', () => {
     expect(joins[0]?.closed).toBe(true);
     type('Start. After the lock.');
     expect(joins[0]?.document.text('body').toJSON()).toBe('Start.');
+  });
+});
+
+const page = (markdown: string) => newPayload({ title: 'Notes', markdown, extensions: {} });
+
+describe('putting typing back from a live session', () => {
+  it('puts only the person’s typing back by block onto the head when it can’t catch up', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, surface } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.theirs('A\n\nB\n\nTheirs');
+    surface.text = 'A\n\nB\n\nTheirs\n\nMine';
+    draft.edit(surface.text);
+    // What others typed that this app took in is in the base, as on both sides.
+    live.outside = page('A\n\nB\n\nTheirs');
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: page('A, saved\n\nB') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: false,
+      atHead: false,
+    };
+    live.end({ kind: 'stopped', why: 'it can’t catch up', saveOver: null, rejoin: false });
+    await settle();
+    await draft.saveOrThrow();
+    expect(saves.at(-1)).toMatchObject({ basedOn: 'r-head' });
+    // Theirs, unsaved, is theirs to put back: never saved as the person's.
+    expect(saves.at(-1)?.payload.markdown).toBe('A, saved\n\nB\n\nMine');
+    // Its text grows from the head now: no session base goes with it.
+    expect(saves.at(-1)?.live ?? null).toBeNull();
+  });
+
+  it('offers Merge… from the kept base where the person’s typing overlaps the head', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, surface } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    surface.text = 'A\n\nB, mine';
+    draft.edit(surface.text);
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: page('A\n\nB, theirs') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: true,
+      atHead: false,
+    };
+    live.end({ kind: 'stopped', why: 'it can’t take part', saveOver: null, rejoin: false });
+    await settle();
+    expect(draft.snapshot().status).toBe('conflict');
+    expect(saves).toHaveLength(0);
+    const versions = await draft.mergeVersions();
+    expect(versions?.theirs).toBe('r-head');
+    expect(versions?.basePayload?.markdown).toBe('A\n\nB');
+    expect(versions?.yours.markdown).toBe('A\n\nB, mine');
+  });
+
+  it('joins with a change waiting here, puts it in by block, and withdraws it once saved', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, marked, withdrawn, held } = session(opened, page('A\n\nB\n\nC'), {
+      entry,
+    });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    expect(live.document.text('body').toJSON()).toBe('A\n\nB, mine\n\nC');
+    await expect
+      .poll(() => marked)
+      .toEqual([{ version: 5, putIn: { sessionId: 'session-1', joinId: 'join-1', seq: 9 } }]);
+    // Held back from the queue while in the session.
+    expect(held()).toBe(1);
+    expect(withdrawn).toEqual([]);
+    live.set({ saved: true });
+    expect(withdrawn).toEqual([5]);
+    draft.close();
+    // Let go once leaving has settled, never before.
+    expect(held()).toBe(1);
+    await settle();
+    expect(held()).toBe(0);
+  });
+
+  it('doesn’t put a waiting change in where it overlaps the session: Merge… instead', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = { ...waitingEntry(opened, page('A\n\nB')), basedOn: RevisionId.parse('r-old') };
+    const { draft, joins, held } = session(opened, page('A\n\nB, theirs'), { entry });
+    await draft.joinLive();
+    expect(joins[0]?.closed).toBe(true);
+    expect(joins[0]?.typed).toBe(false);
+    expect(draft.participant).toBeNull();
+    expect(draft.snapshot().status).toBe('conflict');
+    expect((await draft.mergeVersions())?.basePayload?.markdown).toBe('A\n\nB');
+    // Held while the person settles it, so the queue doesn't send it meanwhile.
+    expect(held()).toBe(1);
+    draft.close();
+    expect(held()).toBe(0);
+  });
+
+  it('leaves a change made with no session, on the head, to the queue, for the saver to fold in', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = { ...waitingEntry(opened, page('x')), live: null, payload: page('A\n\nB') };
+    const { draft, joins, held } = session(opened, page('A\n\nB, theirs'), { entry });
+    await draft.joinLive();
+    expect(joins[0]?.closed).toBe(true);
+    expect(draft.participant).toBeNull();
+    expect(draft.snapshot().status).not.toBe('conflict');
+    expect(held()).toBe(0);
+  });
+
+  it('puts in a waiting change made with no session from the version it was based on', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = { ...waitingEntry(opened, page('x')), live: null, payload: page('A\n\nB') };
+    const { draft, joins } = session(opened, page('A\n\nB\n\nC'), { entry });
+    await draft.joinLive();
+    expect(joins[0]?.document.text('body').toJSON()).toBe('A\n\nB, mine\n\nC');
+  });
+
+  it('keeps what leaving can’t save on this device, beside its base', async () => {
+    const { draft, joins, kept, type } = session(page('A'));
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.outside = page('A');
+    type('A, typed');
+    expect(draft.hasUnsaved()).toBe(true);
+    expect(await draft.keepOnDevice()).toBe(true);
+    expect(kept.at(-1)?.payload.markdown).toBe('A, typed');
+    expect(kept.at(-1)?.live.base.markdown).toBe('A');
+    // Kept as it is now: nothing is lost if the tab closes.
+    expect(draft.hasUnsaved()).toBe(false);
+    type('A, typed more');
+    expect(draft.hasUnsaved()).toBe(true);
+    draft.close();
+    await settle();
+    expect(kept.at(-1)?.payload.markdown).toBe('A, typed more');
+  });
+});
+
+function waitingEntry(payload: PagePayload, base: PagePayload): QueuedPage {
+  return {
+    kind: 'page',
+    id: PageId.parse('p1'),
+    spaceId: SpaceId.parse('s1'),
+    newPage: null,
+    basedOn: R0,
+    region: null,
+    payload,
+    version: 5,
+    sending: null,
+    picks: {},
+    failure: null,
+    at: 1,
+    live: {
+      base,
+      typed: payload,
+      sessionId: LiveSessionId.parse('earlier'),
+      joinId: JoinId.parse('earlier-join'),
+      baseSeq: 0,
+      seq: 2,
+      putIn: null,
+    },
+  };
+}
+
+describe('putting a waiting change in, carefully', () => {
+  it('puts the text in as the person’s change though someone else added a file meanwhile', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const photo = {
+      id: 'a-photo',
+      name: 'photo.png',
+      mediaType: 'image/png',
+      size: 1,
+      key: 'A'.repeat(43),
+      blobHash: 'A'.repeat(43),
+    } as AttachmentRef;
+    const shared = { ...page('A\n\nB\n\n![photo](attachment:a-photo)'), attachments: [photo] };
+    const { draft, joins } = session(opened, shared, { entry });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    // As the person's own change, never through a file's save.
+    expect(live.typed).toBe(true);
+    expect(live.document.text('body').toJSON()).toBe(
+      'A\n\nB, mine\n\n![photo](attachment:a-photo)',
+    );
+    expect([...live.document.map('attachments').keys()]).toEqual(['a-photo']);
+  });
+
+  it('doesn’t put in a change saved into from elsewhere since this view saw it', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, held } = session(opened, page('A\n\nB\n\nC'), { entry, seen: 4 });
+    await draft.joinLive();
+    expect(joins[0]?.closed).toBe(true);
+    expect(joins[0]?.typed).toBe(false);
+    expect(held()).toBe(0);
+  });
+
+  it('keeps a change put in until a compared draft holds all it put in, not only this join’s', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, withdrawn } = session(opened, page('A\n\nB\n\nC'), { entry });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    // Saved, as this join counts it, but the old join's typing isn't in a draft yet.
+    live.holds = false;
+    live.set({ saved: true });
+    expect(withdrawn).toEqual([]);
+    expect(draft.hasUnsaved()).toBe(false);
+    live.holds = true;
+    live.set({ saved: true });
+    expect(withdrawn).toEqual([5]);
+  });
+
+  it('withdraws a change put in when leaving saves it, before the page showed it saved', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, withdrawn } = session(opened, page('A\n\nB\n\nC'), { entry });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    expect(live.status().saved).toBe(false);
+    // Leaving's own save lands it, in a draft that holds what was put in.
+    live.leave = async () => true;
+    live.holds = true;
+    draft.close();
+    await settle();
+    expect(withdrawn).toEqual([5]);
   });
 });

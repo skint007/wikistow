@@ -14,6 +14,7 @@ import { useEffect } from 'react';
 import { z } from 'zod';
 import { desktop } from '../desktop';
 import { readWikilinks } from '../page/page-reader';
+import { livePageHeld, onLivePageReleased } from '../page/live/live-lock';
 import { PLAIN } from '../vault/store';
 import { connection, useConnection } from './connection';
 import { contentChanged } from './content-changed';
@@ -189,7 +190,9 @@ export function useOfflineChanges(ctx: ClientContext | null, confirmed: boolean)
         do {
           again = false;
           // `'offline'` waits for the connection, which this effect follows.
-          const sent = await queue.send(ctx, { read: readWikilinks }).catch(() => null);
+          const sent = await queue
+            .send(ctx, { read: readWikilinks, held: livePageHeld })
+            .catch(() => null);
           // Another tab or window is sending: try again later, in case it closes.
           if (sent === 'busy') later(BUSY_MS);
         } while (again);
@@ -205,7 +208,10 @@ export function useOfflineChanges(ctx: ClientContext | null, confirmed: boolean)
     const stop = queue.subscribe((event) => {
       if (event.kind === 'saved' || event.kind === 'changed') later();
     });
+    // A page's change held back while a tab here was in its live session.
+    const stopHeld = onLivePageReleased(() => later());
     return () => {
+      stopHeld();
       stop();
       clearTimeout(timer);
     };

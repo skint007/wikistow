@@ -25,7 +25,13 @@ import {
   utf8,
   type ClientContext,
 } from '@wikistow/client';
-import { pageRoutes, sharingRoutes, structureRoutes } from '@wikistow/contracts';
+import {
+  JoinId,
+  LiveSessionId,
+  pageRoutes,
+  sharingRoutes,
+  structureRoutes,
+} from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
@@ -339,6 +345,78 @@ const nameOf = (metadata: Awaited<ReturnType<typeof folderNow>>) =>
 // Folder renames and deletes made offline (#330): sent in order with the
 // rest, refused as gone when the folder or page is, and a rename over
 // someone else's as a conflict, with both names to choose from.
+describe('changes waiting for a page in a live session', () => {
+  const live = (base: ReturnType<typeof newPayload>, typed: ReturnType<typeof newPayload>) => ({
+    base,
+    typed,
+    sessionId: LiveSessionId.parse('session-1'),
+    joinId: JoinId.parse('join-1'),
+    baseSeq: 1,
+    seq: 4,
+    putIn: null,
+  });
+
+  it('are held back while a tab is in the session, then sent as any other', async () => {
+    const { ctx, queue, page, based, draft, payload } = await device();
+    await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('mine'),
+      seen: null,
+      live: live(payload('first words'), payload('mine')),
+    });
+    expect(await queue.send(ctx, { held: async (id) => id === page.pageId })).toBe('sent');
+    const [waiting] = await queue.entries();
+    expect(waiting).toMatchObject({ kind: 'page', sending: null, failure: null });
+    expect(waiting?.kind === 'page' && waiting.live?.base.markdown).toBe('first words');
+    expect((await draft()).markdown).toBe('first words');
+
+    expect(await queue.send(ctx, { held: async () => false })).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect((await draft()).markdown).toBe('mine');
+  });
+
+  it('are withdrawn once in a session draft, unless saved into since, and put in once, the mark becoming the base', async () => {
+    const { queue, page, based, payload } = await device();
+    const version = await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('mine'),
+      seen: null,
+      live: live(payload('first words'), payload('mine')),
+    });
+    const putIn = {
+      sessionId: LiveSessionId.parse('session-2'),
+      joinId: JoinId.parse('j2'),
+      seq: 12,
+    };
+    await queue.markPutIn(page.pageId, version, {
+      ...live(payload('first words'), payload('mine')),
+      putIn,
+    });
+    const marked = await queue.entryNow(page.pageId);
+    // Recorded without a new version, so the draft view can still save into it.
+    expect(marked?.version).toBe(version);
+    expect(marked?.live?.putIn).toEqual(putIn);
+    const next = await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('mine, more'),
+      seen: version,
+    });
+    // What came after isn't in the session: the change as it went in is its base now.
+    const saved = await queue.entryNow(page.pageId);
+    expect(saved?.live).toMatchObject({ putIn: null, joinId: 'j2', baseSeq: 12, seq: 12 });
+    expect(saved?.live?.base.markdown).toBe('mine');
+    expect(await queue.withdraw(page.pageId, version)).toBe(false);
+    expect(await queue.withdraw(page.pageId, next)).toBe(true);
+    expect(await queue.entries()).toEqual([]);
+  });
+});
+
 describe('renames and deletes made offline', () => {
   /** `device()` with a folder on the server, and its metadata as the tree shows it. */
   async function withFolder() {

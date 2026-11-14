@@ -419,6 +419,11 @@ export function DraftEditor({
           }
         />
         <LiveNote ctx={ctx} live={snapshot.live} />
+        {snapshot.liveNotice && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {snapshot.liveNotice}
+          </p>
+        )}
         <LiveNotes
           ctx={ctx}
           notes={snapshot.live?.kind === 'live' ? snapshot.live.status.notes : []}

@@ -283,9 +283,10 @@ export function liveTransport(
   };
 }
 
-// The server sends a blank line every 15 s; three missed mean the
-// connection is gone, as for the tree's stream.
-const QUIET_MS = 45_000;
+// The server sends a blank line every 15 s. One missed means the connection
+// is gone: a live session's join lasts only 30 s without its stream, and a
+// stream that broke opens again with the same join (ADR 0015 decision 4).
+const QUIET_MS = 20_000;
 
 /**
  * A stream's lines, each read from its raw text with section 3.3's rules
