@@ -203,7 +203,9 @@ export type LiveTransport = {
     joinId: JoinId;
     messages: { message: LiveMessage; covers?: number }[];
     parent?: JoinId;
-  }): Promise<{ positions: (number | null)[] }>;
+    /** A fold grant to ask for, from a main join, or to place, from a further join (section 5.10). */
+    fold?: RevisionId;
+  }): Promise<{ positions: (number | null)[]; grant?: liveRoutes.Grant | null }>;
   snapshot(body: {
     joinId: JoinId;
     parent?: JoinId;
@@ -383,6 +385,7 @@ export function participantPorts(
         revisionId,
         payload: opened.opened.payload,
         authorId: opened.record.authorId,
+        basedOn: opened.record.basedOn,
         region: opened.region,
         keyVersion: opened.keyVersion,
       };

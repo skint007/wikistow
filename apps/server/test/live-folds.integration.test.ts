@@ -1,0 +1,221 @@
+// Writers outside a live session (ADR 0015 decision 8, step 7): a draft
+// saved from outside while people edit is folded into the session by its
+// saver, through the server's fold grant, with the session's text kept
+// where both changed one part and a note for Review.
+import { pageOperations as pages } from '@wikistow/client';
+import {
+  changeText,
+  joinLive,
+  participantPorts,
+  sessionState,
+  type LiveParticipant,
+} from '@wikistow/client/live';
+import type { PageId, SpaceId } from '@wikistow/contracts';
+import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
+import { listenForTreeChanges } from '@wikistow/server';
+import { personWithVault } from './support/content.ts';
+import { createTestApp, type TestApp } from './support/harness.ts';
+import { invite, library, shareFolder, type Person } from './support/sharing.ts';
+
+let t: TestApp;
+let listening: Awaited<ReturnType<typeof listenForTreeChanges>>;
+const open: LiveParticipant[] = [];
+beforeAll(async () => {
+  t = await createTestApp();
+  listening = await listenForTreeChanges(t.config.databaseUrl, () => {}, {
+    onLive: (payload) => t.live.notified(payload),
+  });
+});
+afterAll(async () => {
+  for (const participant of open) participant.close();
+  await listening.close();
+  await t.drop();
+});
+
+type Page = { spaceId: SpaceId; pageId: PageId };
+
+async function sharedPage() {
+  const [owner, editor] = await Promise.all([personWithVault(t), personWithVault(t)]);
+  const lib = await library(owner);
+  const shareId = await shareFolder(owner.ctx, {
+    spaceId: lib.spaceId,
+    rootId: lib.shared,
+    people: [await invite(owner, editor, 'editor')],
+  });
+  return { owner, editor, page: lib.page, shareId };
+}
+
+async function draftOf(person: Person, page: Page) {
+  const { heads } = await pages.loadPage(person.ctx, page.pageId);
+  if (!heads.draftHead) throw new Error('no draft');
+  const opened = await pages.openRevisionOf(person.ctx, page, 'draft', heads.draftHead, {
+    fresh: true,
+  });
+  if (opened.opened.kind !== 'current') throw new Error('newer format');
+  return { revisionId: heads.draftHead, payload: opened.opened.payload, region: opened.region };
+}
+
+/** Saves held back until `release`, so a save from outside lands first. */
+function gate() {
+  let release = () => {};
+  const open = new Promise<void>((resolve) => (release = resolve));
+  return { open, release };
+}
+
+async function join(person: Person, page: Page, { held }: { held?: Promise<void> } = {}) {
+  const draft = await draftOf(person, page);
+  const ports = participantPorts(person.ctx, page, () => draft.region, {
+    live: { fetch: person.browser.fetch },
+  });
+  if (held) {
+    const save = ports.saveDraft.bind(ports);
+    ports.saveDraft = async (input) => {
+      await held;
+      return save(input);
+    };
+  }
+  const joined = await joinLive(ports, draft);
+  if (!('start' in joined)) throw new Error(`not joined: ${JSON.stringify(joined)}`);
+  joined.start();
+  open.push(joined);
+  return joined;
+}
+
+const body = (participant: LiveParticipant) => participant.document.text('body').toJSON();
+
+const setBody = (participant: LiveParticipant, text: string) =>
+  participant.edit((document) => changeText(document.text('body'), text));
+
+/** A save from outside the session, as the CLI or an agent makes one: on the head, as it is. */
+async function saveOutside(person: Person, page: Page, markdown: (now: string) => string) {
+  const head = await draftOf(person, page);
+  const written = await pages.saveDraft(person.ctx, {
+    page,
+    basedOn: head.revisionId,
+    payload: { ...head.payload, markdown: markdown(head.payload.markdown) },
+  });
+  return written.revisionId;
+}
+
+describe('a draft saved from outside a live session', () => {
+  it('is folded in, and nobody leaves the session', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const mine = await join(owner, page);
+    const theirs = await join(editor, page);
+    setBody(mine, 'Inside.\n\ndraft words\n');
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+
+    const outside = await saveOutside(owner, page, (now) => `${now}\nFrom outside.\n`);
+    await expect.poll(() => body(mine), { timeout: 30_000 }).toContain('From outside.');
+    await expect.poll(() => body(theirs), { timeout: 30_000 }).toBe(body(mine));
+    expect(body(mine)).toMatch(/^Inside\.\n\ndraft words\n+From outside\.\n$/);
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    expect(mine.status().state).toEqual({ kind: 'live' });
+    expect(theirs.status().state).toEqual({ kind: 'live' });
+    // Nothing overlapped: no note.
+    expect(mine.status().notes).toEqual([]);
+    // The head is the outsider's draft itself, or a session draft on top of it.
+    const head = await draftOf(editor, page);
+    expect(head.payload.markdown).toBe(body(mine));
+    if (head.revisionId !== outside) {
+      expect(sessionState(head.payload, head.revisionId, mine.sessionId)).not.toBeNull();
+    }
+
+    // Typing goes on in the session as before.
+    setBody(theirs, `${body(theirs)}After.\n`);
+    await expect.poll(() => body(mine)).toContain('After.');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+  });
+
+  it('folds without a save when the session changed nothing since', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const mine = await join(owner, page);
+    const theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    const outside = await saveOutside(editor, page, (now) => `${now}\n\nAdded outside.\n`);
+    await expect.poll(() => body(theirs), { timeout: 30_000 }).toContain('Added outside.');
+    await expect.poll(() => body(mine), { timeout: 30_000 }).toBe(body(theirs));
+    // The outsider's draft stays the head, and counts as the session's for both.
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    expect((await draftOf(owner, page)).revisionId).toBe(outside);
+    setBody(theirs, `${body(theirs)}More.\n`);
+    await expect.poll(() => theirs.status().saved).toBe(false);
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    expect((await draftOf(owner, page)).payload.markdown).toContain('More.');
+  });
+
+  it('keeps the session’s text where both changed a part, and offers it for Review', async () => {
+    const { owner, editor, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'First line.\n\nSecond line.\n');
+    const saves = gate();
+    const mine = await join(owner, page, { held: saves.open });
+    const theirs = await join(editor, page, { held: saves.open });
+
+    // The session changes the first paragraph, and an outsider changes it too, before a save.
+    setBody(mine, 'First line, from the session.\n\nSecond line.\n');
+    await expect.poll(() => body(theirs)).toBe(body(mine));
+    const outside = await saveOutside(owner, page, (now) =>
+      now.replace('First line.', 'First line, from outside.'),
+    );
+    saves.release();
+    await expect.poll(() => mine.status().notes.length, { timeout: 30_000 }).toBe(1);
+    await expect.poll(() => theirs.status().notes.length, { timeout: 30_000 }).toBe(1);
+    const [note] = theirs.status().notes;
+    expect(note?.revision).toBe(outside);
+    expect(note?.parts).toEqual(['body:0-1']);
+    expect(body(mine)).toBe('First line, from the session.\n\nSecond line.\n');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    // The draft carries the note, so whoever opens it later sees it too.
+    const head = await draftOf(editor, page);
+    expect(head.payload.extensions['wikistow.overlaps']).toEqual({
+      format: 1,
+      revisions: [{ revision: outside, parts: ['body:0-1'] }],
+    });
+
+    // Review offers that part, and taking theirs is the person's own change.
+    const opened = await theirs.openNote(outside);
+    if (!opened) throw new Error('the note didn’t open');
+    const merge = theirs.reviewMerge(opened);
+    expect(merge.overlaps).toHaveLength(1);
+    const [overlap] = merge.overlaps;
+    if (overlap?.part !== 'body') throw new Error('not a body overlap');
+    expect(overlap.theirs).toContain('from outside');
+    expect(theirs.applyReview(opened, merge, { [overlap.id]: 'theirs' })).toBe(true);
+    await expect.poll(() => body(mine)).toBe('First line, from outside.\n\nSecond line.\n');
+    await expect.poll(() => mine.status().notes).toEqual([]);
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    const after = await draftOf(owner, page);
+    expect(after.payload.extensions['wikistow.overlaps']).toBeUndefined();
+  });
+
+  it('dismissing a note drops theirs there for good', async () => {
+    const { owner, editor, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'Only line.\n');
+    const saves = gate();
+    const mine = await join(owner, page, { held: saves.open });
+    const theirs = await join(editor, page, { held: saves.open });
+    setBody(mine, 'Only line, ours.\n');
+    await expect.poll(() => body(theirs)).toBe(body(mine));
+    const outside = await saveOutside(owner, page, () => 'Only line, theirs.\n');
+    saves.release();
+    await expect.poll(() => theirs.status().notes.length, { timeout: 30_000 }).toBe(1);
+    theirs.dismissNote(outside);
+    await expect.poll(() => mine.status().notes).toEqual([]);
+    expect(body(mine)).toBe('Only line, ours.\n');
+    // A note deleted never comes back, whoever writes it again.
+    mine.change({
+      entries: [
+        {
+          root: 'overlaps',
+          key: outside,
+          value: JSON.stringify({ revision: outside, parts: ['body:0-1'] }),
+        },
+      ],
+    });
+    await expect.poll(() => body(theirs)).toBe(body(mine));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(theirs.status().notes).toEqual([]);
+  });
+});

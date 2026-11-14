@@ -77,7 +77,20 @@ export type Merge = {
   readonly combined: { readonly yours: number; readonly theirs: number };
   /** How each part merges. Only `resolve` reads it. */
   readonly plan: Plan;
+  /**
+   * The overlaps offered, where only some are (`narrowMerge`): every other
+   * overlap is resolved as yours.
+   */
+  readonly only?: (overlap: Overlap) => boolean;
 };
+
+/**
+ * `merge` offering only the overlaps `only` keeps, the others resolved as
+ * yours, as Review offers only the parts a note names (ADR 0015 decision 8).
+ */
+export function narrowMerge(merge: Merge, only: (overlap: Overlap) => boolean): Merge {
+  return { ...merge, overlaps: merge.overlaps.filter(only), only };
+}
 
 // A field merged whole: the value taken, or an overlap.
 type Field<T> = { taken: T } | { overlap: { base: T; yours: T; theirs: T } };
@@ -338,7 +351,10 @@ export function resolve(merge: Merge, choices: Readonly<Record<string, Choice>>)
   const { plan } = merge;
   const choiceOf = (id: string): Choice => {
     const choice = choices[id];
-    const offers = merge.overlaps.find((other) => other.id === id)?.offers ?? [];
+    const listed = merge.overlaps.find((other) => other.id === id);
+    // Not offered in a narrowed merge: yours, which every overlap offers.
+    if (!listed && merge.only) return 'yours';
+    const offers = listed?.offers ?? [];
     if (choice === undefined || !offers.includes(typeof choice === 'object' ? 'edit' : choice))
       throw new Error(`No choice made for ${id}.`);
     return choice;
@@ -372,7 +388,14 @@ export function resolve(merge: Merge, choices: Readonly<Record<string, Choice>>)
       });
     }
     if (plan.frontmatterFits && !next.frontmatterFits) uncount(plan.frontmatter.combined);
-    return { ok: false, merge: { overlaps: overlapsOf(next), combined, plan: next } };
+    const overlaps = overlapsOf(next);
+    const only = merge.only;
+    return {
+      ok: false,
+      merge: only
+        ? { overlaps: overlaps.filter(only), combined, plan: next, only }
+        : { overlaps, combined, plan: next },
+    };
   }
   const title = pick('title', plan.title, (typed) => typed);
   const noEdit = () => {
