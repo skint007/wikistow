@@ -22,6 +22,7 @@ import {
   liveRoutes,
   type LiveMessage,
   type LivePresence,
+  type LiveSessionId,
   type PageId,
   type SpaceId,
 } from '@wikistow/contracts';
@@ -230,7 +231,7 @@ export type OpenedNote = {
  * be read as a payload.
  */
 export type PutBack = {
-  sessionId: string;
+  sessionId: LiveSessionId;
   joinId: JoinId;
   clientId: number;
   ours: PagePayload | null;
@@ -1661,7 +1662,10 @@ export class LiveParticipant {
     for (const { seq, update } of this.#ownLog) {
       let held: boolean;
       try {
-        held = holdsState(state, plusUpdate({ vector: new Map(), deletes: new Map() }, decodeUpdate(update)));
+        held = holdsState(
+          state,
+          plusUpdate({ vector: new Map(), deletes: new Map() }, decodeUpdate(update)),
+        );
       } catch {
         held = false;
       }
@@ -1716,8 +1720,28 @@ export class LiveParticipant {
     }
   }
 
+  /**
+   * The draft head as the stream last named it, opened, for putting typing
+   * back onto it as a writer outside the session; null when it can't be
+   * opened, or is a draft the session's drafts descend from, which would
+   * take what the session typed since for deleted (a rollback, A2).
+   */
+  async headDraft(): Promise<{ revisionId: RevisionId; payload: PagePayload } | null> {
+    const head = this.#head;
+    if (!head || this.#ancestors.has(head)) return null;
+    const known = this.#drafts.get(head)?.payload ?? this.#outsiderDrafts.get(head)?.payload;
+    if (known) return { revisionId: head, payload: known };
+    try {
+      const opened = await this.#ports.openDraft(head);
+      if (opened.revisionId !== head) return null;
+      return { revisionId: head, payload: opened.payload };
+    } catch {
+      return null;
+    }
+  }
+
   /** Where this join's own typing has reached: a change put in now is held once a document holds it. */
-  ownMark(): { sessionId: string; joinId: JoinId; clientId: number; clock: number } {
+  ownMark(): { sessionId: LiveSessionId; joinId: JoinId; clientId: number; clock: number } {
     return {
       sessionId: this.sessionId,
       joinId: this.#me.joinId,

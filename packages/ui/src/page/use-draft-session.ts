@@ -3,6 +3,7 @@ import {
   pageOperations,
   type ClientContext,
   type DraftWriter,
+  type KeptLive,
   type PageId,
   type PagePayload,
   type Region,
@@ -12,8 +13,8 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { contentChanged } from '../data/content-changed';
-import { onSent, pageWriter } from '../data/offline-changes';
-import { pageQuery, queueOf, treeQuery } from '../data/queries';
+import { onSent, pageWriter, queueChoices } from '../data/offline-changes';
+import { pageQuery, queueOf, revisionQuery, treeQuery } from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { connection } from '../data/connection';
 import { availability, waitingOf } from '../shell/availability';
@@ -60,7 +61,7 @@ export function useDraftSession({
   const [{ session, drafts }] = useState(() => {
     const drafts = pageWriter(ctx).draft(page, { seen: queued?.version ?? null });
     const session = new DraftSession(
-      { base, payload, region, theirs: queued?.theirs ?? null },
+      { base, payload, region, theirs: queued?.theirs ?? null, live: queued?.live ?? null },
       appPorts(ctx, page, queryClient, drafts, editorSaved),
       surface,
     );
@@ -98,6 +99,8 @@ export function useDraftSession({
         )
           return false;
         await session.flushSaves();
+        // In a live session, what can't be saved now is kept on this device, put back on the next join.
+        if (session.hasUnsaved()) await session.keepOnDevice();
         return (
           !session.hasUnsaved() ||
           ask('Your latest changes to this page are not saved. Lock anyway and lose them?')
@@ -147,7 +150,13 @@ export function useDraftSession({
 }
 
 /** The change waiting on this device that a draft view opens with (`useDraftSession`). */
-export type Queued = { version: number; theirs: RevisionId | null; sending: RevisionId | null };
+export type Queued = {
+  version: number;
+  theirs: RevisionId | null;
+  sending: RevisionId | null;
+  /** Made from a live session's document: its base's text, which Merge… starts from. */
+  live?: KeptLive | null;
+};
 
 // The draft on screen for each page, for work from outside the editor.
 const openDrafts = new Map<PageId, DraftSession>();
@@ -205,9 +214,25 @@ function appPorts(
     }),
     onTopOf: (revisionId) => drafts.onTopOf(revisionId),
     waitingChange: () => drafts.waitingChange(),
+    keep: (input) => drafts.keep(input),
+    entryNow: () => drafts.entryNow(),
+    markPutIn: (version, putIn) => drafts.markPutIn(version, putIn),
+    withdraw: (version) => drafts.withdraw(version),
+    async dropPublish() {
+      const choices = queueChoices(ctx);
+      const entries = (await queueOf(ctx)?.waiting(page.pageId)) ?? [];
+      const publish = entries.find((entry) => entry.kind === 'publish');
+      if (!publish || !choices) return false;
+      await choices.discard({ kind: 'publish', id: page.pageId });
+      return true;
+    },
+    async openDraft(revisionId) {
+      const opened = await queryClient.fetchQuery(revisionQuery(ctx, page, 'draft', revisionId));
+      return opened.opened.kind === 'current' ? opened.opened.payload : null;
+    },
     mergedWith: (version) => drafts.mergedWith(version),
     readLinks: readOpeningLinks,
-    uploadAttachment: (file) => drafts.attach(file),
+    uploadAttachment: (file, options) => drafts.attach(file, options),
     // After a conflict with a change another window saved, this one's goes on top of it.
     draftHead: async () =>
       (await drafts.waitingHead()) ??

@@ -12,6 +12,8 @@ import {
   type pageOperations,
   type PagePayload,
   type PayloadChanges,
+  type QueuedPage,
+  type KeptLive,
   type ReadWikilinks,
   type Region,
   type RevisionId,
@@ -25,6 +27,7 @@ import type {
   OpenedNote,
   ParticipantState,
   ParticipantStatus,
+  PutBack,
 } from '@wikistow/client/live';
 import { pageMerge } from '@wikistow/client';
 import { ATTACHMENT_SCHEME } from './attachments';
@@ -71,11 +74,35 @@ export type DraftPorts = {
   saveDraft(
     input: Omit<Parameters<typeof pageOperations.saveDraft>[1], 'page'>,
   ): Promise<pageOperations.Written>;
-  uploadAttachment(file: {
-    name: string;
-    mediaType: string;
-    bytes: Uint8Array;
-  }): Promise<AttachmentRef>;
+  uploadAttachment(
+    file: {
+      name: string;
+      mediaType: string;
+      bytes: Uint8Array;
+    },
+    /** To the server at once, as from within a live session, never behind a change waiting here. */
+    options?: { server?: boolean },
+  ): Promise<AttachmentRef>;
+  /**
+   * Keep the draft on this device as a change waiting for the page, online
+   * too, beside what `live` keeps (ADR 0015 decision 10): its version.
+   */
+  keep?(input: {
+    basedOn: RevisionId;
+    region: Region | null;
+    payload: PagePayload;
+    live: KeptLive;
+  }): Promise<number>;
+  /** The page's draft change waiting here as it is now, read in turn with the queue's sending. */
+  entryNow?(): Promise<QueuedPage | null>;
+  /** The change at `version` was put into the page's live session as `putIn`. */
+  markPutIn?(version: number, putIn: NonNullable<KeptLive['putIn']>): Promise<void>;
+  /** Withdraw the change at `version`, which a compared draft of the session holds. */
+  withdraw?(version: number): Promise<boolean>;
+  /** Drop a publish waiting here for the page (#331): whether there was one. */
+  dropPublish?(): Promise<boolean>;
+  /** A draft of the page, opened, as a change made with no session is merged from. */
+  openDraft?(revisionId: RevisionId): Promise<PagePayload | null>;
   /** The page's draft head as the server has it now. */
   draftHead(): Promise<RevisionId | null>;
   /** The person chose to save theirs on top of `revisionId` (Save mine on top). */
@@ -132,6 +159,14 @@ export type LivePorts = {
   watch?(participant: LiveParticipant): () => void;
   /** Run `run` now if the page is visible, else once it is shown; the result stops waiting. */
   whenVisible?(run: () => void): () => void;
+  /**
+   * Hold the page's live lock while this draft is in, or joining, its
+   * session, so this app's queue holds the page's change back meanwhile
+   * (ADR 0015 decision 1). The result lets it go.
+   */
+  hold?(): () => void;
+  /** The page's draft head as the server has it now, opened, which a session with a change waiting here starts from. */
+  head?(): Promise<{ revisionId: RevisionId; payload: PagePayload; region: Region } | null>;
 };
 
 /** The live session as the draft view shows it. */
@@ -169,6 +204,8 @@ export type DraftSnapshot = {
   saveError: unknown;
   /** The page's live session, while this session is in one or once it left one. */
   live: LiveShown | null;
+  /** Something to tell the person about putting their typing back, once. */
+  liveNotice: string | null;
 };
 
 type Content = Pick<PagePayload, 'title' | 'markdown' | 'attachments'>;
@@ -228,7 +265,14 @@ export class DraftSession {
      * edit not saved over it, as a change made offline that came back as a
      * conflict (ADR 0009, decision 7): the session opens stopped at it.
      */
-    opened: { base: RevisionId; payload: PagePayload; region: Region; theirs?: RevisionId | null },
+    opened: {
+      base: RevisionId;
+      payload: PagePayload;
+      region: Region;
+      theirs?: RevisionId | null;
+      /** Kept beside it, when it was made from a live session's document. */
+      live?: KeptLive | null;
+    },
     ports: DraftPorts,
     surface: { readonly current: EditorSurfaceHandle | null },
     timing?: { debounceMs: number; maxWaitMs: number },
@@ -266,7 +310,10 @@ export class DraftSession {
       tooLarge: null,
       saveError: undefined,
       live: null,
+      liveNotice: null,
     };
+    // Made from a live session's document: its base's text, which Merge… starts from.
+    this.#keptLive = opened.live ?? null;
     if (opened.theirs) {
       this.#theirs = opened.theirs;
       this.#autosave.hold(() => this.#current());
@@ -427,27 +474,17 @@ export class DraftSession {
     if (!this.#participant) return false;
     this.#pull();
     const current = this.#current();
-    const strip = (payload: PagePayload) => ({ ...payload, extensions: held(payload.extensions) });
     const yours = revisePayload({ kind: 'current', payload: base }, changes);
     // Within a second, as a fold's: one too large to merge here is refused.
-    let resolved: pageMerge.Resolved;
-    try {
-      resolved = pageMerge.withinTime(1_000, () => {
-        const merge = pageMerge.mergePayloads(strip(base), strip(yours), strip(current));
-        if (merge.overlaps.length > 0) return { ok: false, merge } as const;
-        return pageMerge.resolve(merge, {}, { review: false });
-      });
-    } catch {
-      return false;
-    }
-    if (!resolved.ok) return false;
-    const { title, markdown, attachments } = resolved.payload;
+    const merged = mergeByBlock(base, yours, current);
+    if (!merged) return false;
+    const { title, markdown, attachments } = merged;
     this.#reviseLive(
       {
         title,
         markdown,
         attachments,
-        extensions: over(current.extensions, held(resolved.payload.extensions)),
+        extensions: over(current.extensions, held(merged.extensions)),
       },
       { byLines: true },
     );
@@ -522,8 +559,14 @@ export class DraftSession {
         payload: next,
         ...(tree ? { tree } : {}),
         ...(this.#picks.size > 0 ? { linkChoices: new Map(this.#picks) } : {}),
+        ...(this.#keptLive && { live: this.#keptLive }),
       });
       saved = { revisionId, basedOn, written, region };
+      // On the server: what comes next grows from this draft, not from a session's base.
+      if (revisionId !== basedOn) {
+        this.#keptLive = null;
+        this.#putBack = null;
+      }
       this.#known.add(revisionId);
       this.#windowBase = null;
       // A save into this device's queue keeps its base, and one sent from
@@ -609,7 +652,10 @@ export class DraftSession {
 
   hasUnsaved() {
     if (this.#settling) return true;
-    if (this.#participant) return this.#unreported || !this.#participant.status().saved;
+    if (this.#participant) {
+      // Kept on this device as it is now, it is put back on the next join.
+      return this.#unreported || (!this.#participant.status().saved && !this.#keptFresh);
+    }
     return this.#unreported || this.#autosave.unsaved() !== null;
   }
 
@@ -663,6 +709,7 @@ export class DraftSession {
     // Their draft may be in another region by now: open it fresh.
     this.#region = null;
     this.#theirs = null;
+    this.#keptLive = null;
     this.#autosave.resume();
     this.#schedule();
     await this.#autosave.flush();
@@ -676,6 +723,8 @@ export class DraftSession {
    */
   async mergeVersions(): Promise<{
     base: RevisionId;
+    /** The base's text, when it isn't `base`'s: one kept beside typing from a live session. */
+    basePayload?: PagePayload;
     theirs: RevisionId;
     yours: PagePayload;
   } | null> {
@@ -684,7 +733,11 @@ export class DraftSession {
     this.#pull();
     const base = this.#base;
     const theirs = this.#theirs ?? (await this.#ports.draftHead());
-    return theirs && theirs !== base ? { base, theirs, yours: this.#current() } : null;
+    if (!theirs || (theirs === base && !this.#keptLive)) return null;
+    // Typing put back from a live session: its base holds what others typed
+    // that this app took in, so only the person's typing counts as theirs.
+    const kept = this.#keptLive?.base;
+    return { base, ...(kept && { basePayload: kept }), theirs, yours: this.#current() };
   }
 
   /**
@@ -718,6 +771,9 @@ export class DraftSession {
    * the conflict as usual, with theirs as read the base.
    */
   async saveMerged(over: MergedOver, merged: PagePayload) {
+    // The merged text grows from theirs, not from a live session's base.
+    this.#keptLive = null;
+    this.#putBack = null;
     this.#payload = merged;
     this.#extensions = {};
     const { title, markdown, attachments } = merged;
@@ -793,11 +849,15 @@ export class DraftSession {
       const added: AttachmentRef[] = [];
       for (const file of files) {
         added.push(
-          await this.#ports.uploadAttachment({
-            name: file.name,
-            mediaType: file.type || 'application/octet-stream',
-            bytes: new Uint8Array(await file.arrayBuffer()),
-          }),
+          await this.#ports.uploadAttachment(
+            {
+              name: file.name,
+              mediaType: file.type || 'application/octet-stream',
+              bytes: new Uint8Array(await file.arrayBuffer()),
+            },
+            // In a live session, never behind a change waiting here (ADR 0015 decision 1).
+            { server: this.#participant !== null },
+          ),
         );
       }
       if (!live()) return;
@@ -861,10 +921,26 @@ export class DraftSession {
     const participant = this.#participant;
     if (participant) {
       this.#detach();
-      void participant.leave();
+      // What leaving can't save is kept on this device, put back on the next join.
+      void participant.leave().then((saved) => {
+        if (!saved) void this.#keepNow(participant);
+      });
       return;
     }
     void this.#autosave.flush();
+  }
+
+  /**
+   * Keep what is typed in the live session on this device, as a change
+   * waiting for the page (ADR 0015 decision 10), as before a lock that
+   * can't wait for a save. Whether it is kept, or saved already.
+   */
+  async keepOnDevice(): Promise<boolean> {
+    const participant = this.#participant;
+    if (!participant) return false;
+    if (participant.status().saved && !this.#unreported) return true;
+    this.#pull();
+    return this.#keepNow(participant);
   }
 
   /**
@@ -938,6 +1014,19 @@ export class DraftSession {
 
   #participant: LiveParticipant | null = null;
   #unlive: (() => void)[] = [];
+  // Beside typing made from a live session's document, while it is saved
+  // outside one: its base's text and where it was typed (ADR 0015 decision 10).
+  #keptLive: KeptLive | null = null;
+  // What putting the last session's typing back takes, in memory, for
+  // joining that session again: a base by what the session serves.
+  #putBack: PutBack | null = null;
+  // The change kept on this device for the session, or put into it,
+  // withdrawn once a compared draft of the session holds it.
+  #kept: { version: number } | null = null;
+  #keepTimer: ReturnType<typeof setTimeout> | null = null;
+  #keeping: Promise<boolean> | null = null;
+  // The page's live lock, while in or joining its session.
+  #release: (() => void) | null = null;
   // Joining again, once saved outside a session: when, and whether never.
   #joinTimer: ReturnType<typeof setTimeout> | null = null;
   #joinTries = 0;
@@ -983,9 +1072,11 @@ export class DraftSession {
 
   /**
    * Join the page's live session, where this app may (ADR 0015 decision
-   * 1): from the draft this session is on, as the editor opened it. Not
-   * while a conflict waits for the person, nor once an edit typed before
-   * the session was joined can't go into it.
+   * 1): from the draft this session is on, as the editor opened it, or,
+   * with a change of the page waiting on this device, from the draft head,
+   * putting that change in as the person's own. Not while a conflict waits
+   * for the person, nor once an edit typed before the session was joined
+   * can't go into it.
    */
   async joinLive(): Promise<void> {
     const live = this.#ports.live;
@@ -993,19 +1084,36 @@ export class DraftSession {
     if (!live.allowed() || this.#theirs || this.#autosave.isStopped()) return;
     if (this.#autosave.isSaving() || this.#uploads.size > 0) return;
     this.#joining = true;
-    // Not while a change for the page waits on this device: it would come
-    // to the session as someone else's save (ADR 0015 step 7 takes it in).
-    const waiting = await this.#ports.waitingChange?.().catch(() => null);
-    if (waiting) {
-      this.#joining = false;
-      return;
-    }
-    const opening = { revisionId: this.#base, payload: this.#payload, region: this.#tableRegion };
+    // Held first: the queue then sends nothing of the page's that this join reads below.
+    const release = live.hold?.() ?? (() => {});
     const epoch = this.#ports.epoch();
+    let entry: QueuedPage | null = null;
+    let basedOn: PagePayload | null = null;
+    let opening: { revisionId: RevisionId; payload: PagePayload; region: Region };
     let joined: LiveParticipant | NotJoined;
     try {
+      const waiting = await this.#ports.waitingChange?.().catch(() => null);
+      if (waiting) {
+        // The page's change waiting here goes into the session as the person's own.
+        entry = (await this.#ports.entryNow?.().catch(() => null)) ?? null;
+        // Being sent, made offline or stopped: it lands, and the saver folds
+        // it in, or comes back as a conflict, which the person settles first.
+        const head = entry && !entry.sending && !entry.failure && !entry.newPage && live.head;
+        if (!head) throw new Error('not now');
+        const opened = await live.head!();
+        if (!opened) throw new Error('no head');
+        // A change made with no session is merged from the version it was based on.
+        if (!entry!.live && entry!.basedOn) {
+          basedOn = (await this.#ports.openDraft?.(entry!.basedOn).catch(() => null)) ?? null;
+          if (!basedOn) throw new Error('no base');
+        }
+        opening = opened;
+      } else {
+        opening = { revisionId: this.#base, payload: this.#payload, region: this.#tableRegion };
+      }
       joined = await live.join(opening);
     } catch {
+      release();
       this.#joining = false;
       this.#joinSoon();
       return;
@@ -1013,21 +1121,33 @@ export class DraftSession {
       this.#joining = false;
     }
     if (!('start' in joined)) {
+      release();
       this.#set({ live: { kind: 'not-joined', why: joined } });
       // No sessions on this server, or this app is too old for this one: it edits as before.
       if (joined.kind === 'older-server' || joined.kind === 'update-app') this.#liveOff = true;
       else this.#joinSoon();
       return;
     }
-    if (!this.#live || this.#ports.epoch() !== epoch || !this.#attach(joined, opening.payload)) {
+    const attached =
+      !this.#live || this.#ports.epoch() !== epoch
+        ? 'failed'
+        : entry
+          ? this.#attachQueued(joined, entry, basedOn)
+          : this.#attach(joined, opening.payload)
+            ? 'in'
+            : 'failed';
+    if (attached !== 'in') {
       // Never started, it saved nothing for anyone, and saves nothing now.
       joined.close();
+      release();
+      if (attached === 'overlap' && entry) return this.#overlapping(entry, opening.revisionId);
       if (this.#live) {
         this.#set({ live: { kind: 'not-joined', why: { kind: 'typed-meanwhile' } } });
         this.#joinSoon();
       }
       return;
     }
+    this.#release = release;
     joined.start();
     // Unless it stopped as it was taken in, and has gone already.
     if (this.#participant !== joined) return;
@@ -1073,18 +1193,7 @@ export class DraftSession {
       if (shared.title !== opening.title || shared.markdown !== opening.markdown) return false;
     }
     const parts = this.#surface.current?.parts?.() ?? splitFrontmatter(mine.markdown);
-    this.#participant = participant;
-    this.#beforeLive = {
-      base: this.#base,
-      payload: this.#payload,
-      content: this.#content,
-      extensions: this.#extensions,
-    };
-    this.#autosave.discard();
-    this.#unlive.push(
-      participant.subscribe(() => this.#liveStatus()),
-      participant.onChange((local) => this.#fromDocument(!local)),
-    );
+    this.#bind(participant);
     if (typed) {
       participant.change({
         texts: { title: mine.title, frontmatter: parts.frontmatter ?? '', body: parts.body },
@@ -1098,6 +1207,127 @@ export class DraftSession {
         }),
       });
     }
+    this.#fromDocument(true);
+    this.#liveStatus();
+    return true;
+  }
+
+  /**
+   * Take part through `participant`, putting the page's change waiting on
+   * this device in as the person's own change, merged by block (section
+   * 5.10, **Putting typing back**): from the base kept beside it, the base
+   * this app's last join of the same session left in memory, or, for a
+   * change made with no session, the version it was based on (`basedOn`).
+   * `overlap` where it overlaps what the session holds, which **Merge…**
+   * settles outside the session; nothing went in then.
+   */
+  #attachQueued(
+    participant: LiveParticipant,
+    entry: QueuedPage,
+    basedOn: PagePayload | null,
+  ): 'in' | 'overlap' | 'failed' {
+    if (this.#theirs || this.#autosave.isStopped()) return 'failed';
+    this.#pull();
+    // The person's text: the change as it waits, and whatever they typed since the view opened.
+    const ours = this.#current();
+    let current: PagePayload;
+    let state: ReturnType<LiveParticipant['document']['state']>;
+    try {
+      current = participant.currentPayload();
+      state = participant.document.state();
+    } catch {
+      return 'failed';
+    }
+    const kept = entry.live ?? null;
+    const memory = this.#putBack?.sessionId === participant.sessionId ? this.#putBack : null;
+    const clock = (client: number) => state.vector.get(client) ?? 0;
+    let base: PagePayload | null;
+    if (kept?.putIn) {
+      // Put in already, unchanged since: the session holds it, and only what came after is new.
+      base =
+        kept.putIn.sessionId === participant.sessionId &&
+        clock(kept.putIn.clientId) >= kept.putIn.clock
+          ? entry.payload
+          : null;
+      if (!base) return 'overlap';
+    } else if (memory) {
+      // Of its own, exactly what this newcomer's document, built from what the session serves, placed.
+      base = memory.inSession(state);
+    } else if (kept && kept.sessionId === participant.sessionId) {
+      // Its join's typing, whole or none of what the base lacks: else which is in can't be told.
+      const held = clock(kept.clientId);
+      base = held >= kept.clock ? kept.typed : held <= kept.baseClock ? kept.base : null;
+      if (!base) return 'overlap';
+    } else {
+      base = kept?.base ?? basedOn;
+    }
+    if (!base) return 'failed';
+    // Files added on this device are there only: they go up as the queue sends the change.
+    const known = new Set([...base.attachments, ...current.attachments].map((ref) => ref.id));
+    if (ours.attachments.some((ref) => !known.has(ref.id))) return 'overlap';
+    const merged = mergeByBlock(base, ours, current);
+    if (!merged) return 'overlap';
+    this.#bind(participant);
+    const { title, markdown, attachments } = merged;
+    this.#reviseLive(
+      {
+        title,
+        markdown,
+        attachments,
+        extensions: over(current.extensions, held(merged.extensions)),
+      },
+      { byLines: true },
+    );
+    // Recorded beside it, so a later join doesn't put it in again; withdrawn once saved.
+    const mark = participant.ownMark();
+    const putIn = { sessionId: mark.sessionId, clientId: mark.clientId, clock: mark.clock };
+    void this.#ports.markPutIn?.(entry.version, putIn).catch(() => {});
+    this.#kept = { version: entry.version };
+    this.#putBack = null;
+    this.#keptLive = null;
+    // A publish waiting with it isn't sent: others are editing, so the person publishes again.
+    void this.#ports
+      .dropPublish?.()
+      .then((dropped) => {
+        if (dropped) {
+          this.#set({
+            liveNotice:
+              'Your publish from offline wasn’t sent, as others are editing this page. Publish again when it’s ready.',
+          });
+        }
+      })
+      .catch(() => {});
+    this.#fromDocument(true);
+    this.#liveStatus();
+    return 'in';
+  }
+
+  // Where the page's change waiting here overlaps the live session: **Merge…**
+  // with the draft head, from the base kept beside it, outside the session.
+  #overlapping(entry: QueuedPage, head: RevisionId) {
+    if (!this.#live) return;
+    this.#keptLive = entry.live ?? null;
+    this.#theirs = head;
+    this.#autosave.hold(() => this.#current());
+  }
+
+  // In the session through `participant`: its status and changes shown here.
+  #bind(participant: LiveParticipant) {
+    this.#participant = participant;
+    this.#beforeLive = {
+      base: this.#base,
+      payload: this.#payload,
+      content: this.#content,
+      extensions: this.#extensions,
+    };
+    this.#autosave.discard();
+    this.#unlive.push(
+      participant.subscribe(() => this.#liveStatus()),
+      participant.onChange((local) => {
+        this.#keptFresh = false;
+        this.#fromDocument(!local);
+      }),
+    );
     this.#rejoins = 0;
     this.#joinTries = 0;
     this.#unlive.push(
@@ -1105,14 +1335,58 @@ export class DraftSession {
         if (this.#unreported) this.#pull();
       }),
     );
-    this.#fromDocument(true);
-    this.#liveStatus();
-    return true;
   }
 
   #detach() {
     for (const stop of this.#unlive.splice(0)) stop();
     this.#participant = null;
+    this.#release?.();
+    this.#release = null;
+    if (this.#keepTimer) clearTimeout(this.#keepTimer);
+    this.#keepTimer = null;
+  }
+
+  // Whether what is kept on this device is the document as it is now.
+  #keptFresh = false;
+
+  /**
+   * Keep `participant`'s document on this device, as a change waiting for
+   * the page beside its base's text (ADR 0015 decision 10), based on the
+   * latest session draft it compared. Whether it is kept.
+   */
+  #keepNow(participant: LiveParticipant): Promise<boolean> {
+    const ports = this.#ports;
+    if (!ports.keep) return Promise.resolve(false);
+    if (this.#keeping) return this.#keeping;
+    const run = (async () => {
+      const putBack = participant.putBack();
+      if (!putBack.ours || !putBack.outside) return false;
+      try {
+        const version = await ports.keep!({
+          basedOn: participant.status().checked,
+          region: this.#tableRegion,
+          payload: putBack.ours,
+          live: {
+            base: putBack.outside,
+            typed: putBack.ours,
+            sessionId: putBack.sessionId,
+            clientId: putBack.clientId,
+            baseClock: putBack.outsideClock,
+            clock: putBack.oursClock,
+            putIn: null,
+          },
+        });
+        this.#kept = { version };
+        this.#keptFresh = this.#participant === participant;
+        return true;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      this.#keeping = null;
+    });
+    this.#keeping = run;
+    return run;
   }
 
   // Show the shared document as it is now; `show` puts its text in the editor too.
@@ -1151,6 +1425,23 @@ export class DraftSession {
     // Drafts of the session it compared are this draft's own, not someone else's save.
     this.#known.add(status.checked);
     if (status.state.kind !== 'live') return void this.#leftLive(participant, status);
+    if (status.saved && !this.#unreported) {
+      // A compared draft of the session holds what was kept here, or put in: it goes.
+      if (this.#keepTimer) clearTimeout(this.#keepTimer);
+      this.#keepTimer = null;
+      const kept = this.#kept;
+      this.#kept = null;
+      if (kept) void this.#ports.withdraw?.(kept.version).catch(() => false);
+    } else if (!this.#keepTimer && this.#ports.keep) {
+      // "Saving…" for 10 s: the document is kept on this device too, so a tab closed loses nothing.
+      this.#keepTimer = setTimeout(() => {
+        this.#keepTimer = null;
+        const now = this.#participant;
+        if (!now || now.status().saved) return;
+        this.#pull();
+        void this.#keepNow(now).then(() => this.#liveStatus());
+      }, 10_000);
+    }
     this.#set({
       status: status.saved ? 'saved' : status.tooLarge ? 'too-large' : 'saving',
       tooLarge: status.tooLarge,
@@ -1259,9 +1550,32 @@ export class DraftSession {
       }
       // Drafts of the session are this draft's own: none is someone else's save.
       for (const draft of participant.sessionDrafts()) this.#known.add(draft);
+      // What putting the person's typing back takes: kept beside it from
+      // here on, and in memory for joining the same session again.
+      const putBack = participant.putBack();
+      this.#putBack = putBack;
+      this.#keptLive =
+        putBack.outside && putBack.ours && !saveOver
+          ? {
+              base: putBack.outside,
+              typed: putBack.ours,
+              sessionId: putBack.sessionId,
+              clientId: putBack.clientId,
+              baseClock: putBack.outsideClock,
+              clock: putBack.oursClock,
+              putIn: null,
+            }
+          : null;
+      if (!saveOver && !(settled.atHead && !settled.provisional)) {
+        // Its document doesn't hold the head, or may hold text nobody typed:
+        // never saved over a draft. Only the person's own typing goes back,
+        // merged by block onto the head (section 5.10, **Putting typing back**).
+        if (await this.#putBackOnto(participant, typedMeanwhile, settled.payload)) return false;
+      }
       if (settled.provisional && before) {
-        // Its document may hold text nobody typed: never saved over a draft
-        // unasked. The person chooses, with Merge… from the draft it opened.
+        // The head couldn't be read: a document that may hold text nobody
+        // typed is never saved over a draft unasked. The person chooses, with
+        // Merge…, from the base kept beside it.
         this.#base = before.base;
         this.#payload = before.payload;
         this.#extensions = over(before.payload.extensions, this.#extensions);
@@ -1295,6 +1609,64 @@ export class DraftSession {
       this.#settling = null;
       release();
     }
+  }
+
+  /**
+   * Put the person's typing in a session left back onto the draft head, as
+   * a writer outside the session: merged by block from the base kept beside
+   * it, which holds what others typed that this app took in, so theirs
+   * isn't counted as the person's (section 5.10, **Putting typing back**).
+   * Saved on the head where nothing overlaps; where it does, **Merge…**
+   * from that base. False, changing nothing, when the head can't be read.
+   */
+  async #putBackOnto(
+    participant: LiveParticipant,
+    typedMeanwhile: boolean,
+    document: PagePayload | null,
+  ): Promise<boolean> {
+    const base = this.#keptLive?.base;
+    if (!base || !document) return false;
+    const head = await participant.headDraft();
+    if (!head) return false;
+    // The person's: the document, and what they typed in the editor since it left.
+    const ours = typedMeanwhile
+      ? revisePayload(
+          { kind: 'current', payload: document },
+          { ...this.#content, extensions: over(document.extensions, this.#extensions) },
+        )
+      : document;
+    this.#known.add(head.revisionId);
+    const merged = mergeByBlock(base, ours, head.payload);
+    this.#payload = head.payload;
+    this.#region = null;
+    if (!merged) {
+      // Where it overlaps the head: Merge… from the kept base, the person's text as it is.
+      this.#base = participant.status().checked;
+      this.#theirs = head.revisionId;
+      this.#content = { title: ours.title, markdown: ours.markdown, attachments: ours.attachments };
+      this.#extensions = over(this.#payload.extensions, held(ours.extensions));
+      if (this.#live) this.#surface.current?.replace(this.#content.markdown);
+      this.#set({ ...this.#content, links: this.#table() });
+      this.#autosave.hold(() => this.#current());
+      return true;
+    }
+    this.#base = head.revisionId;
+    const { title, markdown, attachments } = merged;
+    this.#content = { title, markdown, attachments };
+    this.#extensions = over(head.payload.extensions, held(merged.extensions));
+    if (this.#live) this.#surface.current?.replace(markdown);
+    this.#set({ ...this.#content, links: this.#table() });
+    // Nothing of the person's that the head lacks: nothing to save.
+    const same =
+      title === head.payload.title &&
+      markdown === head.payload.markdown &&
+      JSON.stringify(attachments) === JSON.stringify(head.payload.attachments) &&
+      JSON.stringify(held(merged.extensions)) === JSON.stringify(held(head.payload.extensions));
+    if (same) {
+      this.#keptLive = null;
+      this.#set({ status: 'saved' });
+    } else this.#schedule();
+    return true;
   }
 
   // Join the next session once what this session holds is saved, trying
@@ -1371,6 +1743,29 @@ export class DraftSession {
           }
         }),
     );
+  }
+}
+
+/**
+ * `yours`, an edit of `base`, merged by block onto `current` (ADR 0013's
+ * merge), the extensions a live document never holds aside; null where
+ * they overlap, or the merge takes longer than a second.
+ */
+function mergeByBlock(
+  base: PagePayload,
+  yours: PagePayload,
+  current: PagePayload,
+): PagePayload | null {
+  const strip = (payload: PagePayload) => ({ ...payload, extensions: held(payload.extensions) });
+  try {
+    const resolved = pageMerge.withinTime(1_000, () => {
+      const merge = pageMerge.mergePayloads(strip(base), strip(yours), strip(current));
+      if (merge.overlaps.length > 0) return { ok: false, merge } as const;
+      return pageMerge.resolve(merge, {}, { review: false });
+    });
+    return resolved.ok ? resolved.payload : null;
+  } catch {
+    return null;
   }
 }
 

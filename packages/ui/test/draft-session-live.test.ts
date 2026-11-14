@@ -6,6 +6,8 @@ import {
   newPayload,
   OWNER_REGION,
   RevisionId,
+  type KeptLive,
+  type QueuedPage,
   type AttachmentRef,
   type pageOperations,
   type PagePayload,
@@ -15,9 +17,11 @@ import {
   documentFromPayload,
   type LiveDocument,
   type LiveParticipant,
+  type PutBack,
   type ParticipantState,
   type ParticipantStatus,
 } from '@wikistow/client/live';
+import { JoinId, LiveSessionId, PageId, SpaceId } from '@wikistow/contracts';
 import { describe, expect, it } from 'vite-plus/test';
 import { DraftSession, type DraftPorts } from '../src/page/draft-session.ts';
 import type { EditorSurfaceHandle } from '../src/page/editor/surface.ts';
@@ -60,6 +64,11 @@ class FakeParticipant {
   closed = false;
   typed = false;
   settled: Awaited<ReturnType<LiveParticipant['settle']>> | null = null;
+  readonly sessionId = LiveSessionId.parse('session-1');
+  /** The base a put-back merges from: what others typed that this app took in, and its own the session saved. */
+  outside: PagePayload | null = null;
+  /** The draft head, for putting typing back onto it. */
+  head: { revisionId: RevisionId; payload: PagePayload } | null = null;
 
   constructor(payload: PagePayload) {
     this.base = payload;
@@ -75,6 +84,7 @@ class FakeParticipant {
       people: [],
       provisional: false,
       notes: [],
+      connected: true,
     };
   }
   start() {}
@@ -152,6 +162,25 @@ class FakeParticipant {
   onBeforeRemote() {
     return () => {};
   }
+  putBack(): PutBack {
+    return {
+      sessionId: this.sessionId,
+      joinId: JoinId.parse('join-1'),
+      clientId: 7,
+      ours: this.currentPayload(),
+      outside: this.outside ?? this.base,
+      outsideClock: 0,
+      oursClock: 1,
+      inSession: () => this.outside ?? this.base,
+      heldBy: () => false,
+    };
+  }
+  async headDraft() {
+    return this.head ?? { revisionId: R0, payload: this.base };
+  }
+  ownMark() {
+    return { sessionId: this.sessionId, joinId: JoinId.parse('join-1'), clientId: 7, clock: 9 };
+  }
   sessionDrafts() {
     return [R0];
   }
@@ -170,11 +199,22 @@ class FakeParticipant {
 function session(
   payload = newPayload({ title: 'Notes', markdown: 'Start.', extensions: {} }),
   shared = payload,
-  { waiting = false }: { waiting?: boolean } = {},
+  {
+    waiting = false,
+    entry,
+  }: {
+    waiting?: boolean;
+    /** The page's change waiting here, which a join puts in. */
+    entry?: QueuedPage;
+  } = {},
 ) {
   const surface = new FakeSurface(payload.markdown);
   const saves: Parameters<DraftPorts['saveDraft']>[0][] = [];
   const joins: FakeParticipant[] = [];
+  const kept: { payload: PagePayload; live: KeptLive; basedOn: RevisionId }[] = [];
+  const withdrawn: number[] = [];
+  const marked: { version: number; putIn: NonNullable<KeptLive['putIn']> }[] = [];
+  let held = 0;
   let joinable = true;
   const ports: DraftPorts = {
     async saveDraft(input) {
@@ -208,9 +248,30 @@ function session(
     saved: async () => {},
     overtaken: () => undefined,
     readLinks: async () => [],
-    waitingChange: async () => (waiting ? { version: 1, head: R0, payload } : null),
+    waitingChange: async () =>
+      waiting || entry ? { version: entry?.version ?? 1, head: R0, payload } : null,
+    ...(entry && {
+      entryNow: async () => entry,
+      async markPutIn(version, putIn) {
+        marked.push({ version, putIn });
+      },
+      openDraft: async () => entry.payload,
+    }),
+    async keep(input) {
+      kept.push(input);
+      return 40 + kept.length;
+    },
+    async withdraw(version) {
+      withdrawn.push(version);
+      return true;
+    },
     live: {
       allowed: () => joinable,
+      hold() {
+        held++;
+        return () => void held--;
+      },
+      head: async () => ({ revisionId: R0, payload: shared, region: OWNER_REGION }),
       async join() {
         const participant = new FakeParticipant(shared);
         joins.push(participant);
@@ -229,6 +290,10 @@ function session(
     surface,
     saves,
     joins,
+    kept,
+    withdrawn,
+    marked,
+    held: () => held,
     noJoining: () => (joinable = false),
     /** The person types: the surface holds it, and reports it. */
     type: (markdown: string) => {
@@ -379,3 +444,152 @@ describe('a draft session in a live session', () => {
     expect(joins[0]?.document.text('body').toJSON()).toBe('Start.');
   });
 });
+
+const page = (markdown: string) => newPayload({ title: 'Notes', markdown, extensions: {} });
+
+describe('putting typing back from a live session', () => {
+  it('puts only the person’s typing back by block onto the head when it can’t catch up', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, surface } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.theirs('A\n\nB\n\nTheirs');
+    surface.text = 'A\n\nB\n\nTheirs\n\nMine';
+    draft.edit(surface.text);
+    // What others typed that this app took in is in the base, as on both sides.
+    live.outside = page('A\n\nB\n\nTheirs');
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: page('A, saved\n\nB') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: false,
+      atHead: false,
+    };
+    live.end({ kind: 'stopped', why: 'it can’t catch up', saveOver: null, rejoin: false });
+    await settle();
+    await draft.saveOrThrow();
+    expect(saves.at(-1)).toMatchObject({ basedOn: 'r-head' });
+    // Theirs, unsaved, is theirs to put back: never saved as the person's.
+    expect(saves.at(-1)?.payload.markdown).toBe('A, saved\n\nB\n\nMine');
+    expect(saves.at(-1)?.live?.base.markdown).toBe('A\n\nB\n\nTheirs');
+  });
+
+  it('offers Merge… from the kept base where the person’s typing overlaps the head', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, surface } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    surface.text = 'A\n\nB, mine';
+    draft.edit(surface.text);
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: page('A\n\nB, theirs') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: true,
+      atHead: false,
+    };
+    live.end({ kind: 'stopped', why: 'it can’t take part', saveOver: null, rejoin: false });
+    await settle();
+    expect(draft.snapshot().status).toBe('conflict');
+    expect(saves).toHaveLength(0);
+    const versions = await draft.mergeVersions();
+    expect(versions?.theirs).toBe('r-head');
+    expect(versions?.basePayload?.markdown).toBe('A\n\nB');
+    expect(versions?.yours.markdown).toBe('A\n\nB, mine');
+  });
+
+  it('joins with a change waiting here, puts it in by block, and withdraws it once saved', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, marked, withdrawn, held } = session(opened, page('A\n\nB\n\nC'), {
+      entry,
+    });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    expect(live.document.text('body').toJSON()).toBe('A\n\nB, mine\n\nC');
+    expect(marked).toEqual([
+      { version: 5, putIn: { sessionId: 'session-1', clientId: 7, clock: 9 } },
+    ]);
+    // Held back from the queue while in the session.
+    expect(held()).toBe(1);
+    expect(withdrawn).toEqual([]);
+    live.set({ saved: true });
+    expect(withdrawn).toEqual([5]);
+    draft.close();
+    expect(held()).toBe(0);
+  });
+
+  it('doesn’t put a waiting change in where it overlaps the session: Merge… instead', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, held } = session(opened, page('A\n\nB, theirs'), { entry });
+    await draft.joinLive();
+    expect(joins[0]?.closed).toBe(true);
+    expect(joins[0]?.typed).toBe(false);
+    expect(draft.participant).toBeNull();
+    expect(held()).toBe(0);
+    expect(draft.snapshot().status).toBe('conflict');
+    expect((await draft.mergeVersions())?.basePayload?.markdown).toBe('A\n\nB');
+  });
+
+  it('puts in a waiting change made with no session from the version it was based on', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = { ...waitingEntry(opened, page('x')), live: null, payload: page('A\n\nB') };
+    const { draft, joins } = session(opened, page('A\n\nB\n\nC'), { entry });
+    await draft.joinLive();
+    expect(joins[0]?.document.text('body').toJSON()).toBe('A\n\nB, mine\n\nC');
+  });
+
+  it('keeps what leaving can’t save on this device, beside its base', async () => {
+    const { draft, joins, kept, type } = session(page('A'));
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.outside = page('A');
+    type('A, typed');
+    expect(draft.hasUnsaved()).toBe(true);
+    expect(await draft.keepOnDevice()).toBe(true);
+    expect(kept.at(-1)?.payload.markdown).toBe('A, typed');
+    expect(kept.at(-1)?.live.base.markdown).toBe('A');
+    // Kept as it is now: nothing is lost if the tab closes.
+    expect(draft.hasUnsaved()).toBe(false);
+    type('A, typed more');
+    expect(draft.hasUnsaved()).toBe(true);
+    draft.close();
+    await settle();
+    expect(kept.at(-1)?.payload.markdown).toBe('A, typed more');
+  });
+});
+
+function waitingEntry(payload: PagePayload, base: PagePayload): QueuedPage {
+  return {
+    kind: 'page',
+    id: PageId.parse('p1'),
+    spaceId: SpaceId.parse('s1'),
+    newPage: null,
+    basedOn: R0,
+    region: null,
+    payload,
+    version: 5,
+    sending: null,
+    picks: {},
+    failure: null,
+    at: 1,
+    live: {
+      base,
+      typed: payload,
+      sessionId: LiveSessionId.parse('earlier'),
+      clientId: 3,
+      baseClock: 0,
+      clock: 2,
+      putIn: null,
+    },
+  };
+}

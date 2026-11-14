@@ -86,12 +86,15 @@ type Sending = z.output<typeof Sending>;
  * others typed that the app took in and, of its own, only what the latest
  * session draft it compared holds, so a merge from it counts only what the
  * person typed as theirs; the join it was typed in, with that join's own
- * Yjs clock in the base and in the change; and, once the change was put
+ * Yjs clock in the base and in the document as kept, which is kept too;
+ * and, once the change was put
  * into a session, that join's client and clock just after it, so it never
  * goes in twice.
  */
 const KeptLiveJson = z.strictObject({
   base: Payload,
+  /** The document as kept: once a session holds all that join typed, the base for what came after. */
+  typed: Payload,
   sessionId: LiveSessionId,
   clientId: z.number().int().nonnegative(),
   baseClock: z.number().int().nonnegative(),
@@ -569,6 +572,8 @@ export class OfflineQueue {
             // What was being sent on the old base is the person's no more,
             // nor is the base its text was merged from.
             ...(rebased && { basedOn, failure: null, sending: null, live: null }),
+            // Saved into after it was put into a session: what's new isn't in there.
+            ...(!rebased && before.live?.putIn && { live: { ...before.live, putIn: null } }),
             ...(live !== undefined && { live }),
           }
         : {

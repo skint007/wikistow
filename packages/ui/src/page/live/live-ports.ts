@@ -1,13 +1,14 @@
-import type {
-  ClientContext,
+import {
   pageOperations,
-  PagePayload,
-  Region,
-  RevisionId,
+  type ClientContext,
+  type PagePayload,
+  type Region,
+  type RevisionId,
 } from '@wikistow/client';
 import type { QueryClient } from '@tanstack/react-query';
 import { connection } from '../../data/connection';
-import { treeQuery } from '../../data/queries';
+import { pageQuery, treeQuery } from '../../data/queries';
+import { holdLivePage } from './live-lock';
 import { desktop } from '../../desktop';
 import type { LivePorts } from '../draft-session';
 import { readWikilinks } from '../page-reader';
@@ -82,6 +83,15 @@ export function livePorts(
       };
       document.addEventListener('visibilitychange', shown);
       return () => document.removeEventListener('visibilitychange', shown);
+    },
+    hold: () => holdLivePage(page.pageId),
+    async head() {
+      const info = await queryClient.fetchQuery({ ...pageQuery(ctx, page.pageId), staleTime: 0 });
+      const head = info.heads.draftHead;
+      if (!head) return null;
+      const opened = await pageOperations.openRevisionOf(ctx, page, 'draft', head, { fresh: true });
+      if (opened.opened.kind !== 'current') return null;
+      return { revisionId: head, payload: opened.opened.payload, region: opened.region };
     },
     async join(opening) {
       region = opening.region;
