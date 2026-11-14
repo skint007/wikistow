@@ -31,6 +31,7 @@ import { askBeforeMoves, useAskBeforeMoves } from '../../../page/ask-before-move
 import { showProperties, useShowProperties } from '../../../page/properties-shown';
 import { TableOfContents, type Heading } from '../../../page/table-of-contents';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
+import { BrowserClipping } from '../../../settings/browser-clipping';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
 import { ThemePicker } from '../../../theme/theme-picker';
 import { IDLE_DELAYS, idleLockDelay, useIdleLockDelay } from '../../../vault/idle-lock';
@@ -98,6 +99,7 @@ function Settings() {
               <AskBeforeMoves />
               <ShowProperties />
               <KeepForOffline />
+              {desktop && <BrowserClipping desktop={desktop} />}
             </SettingsGroup>
             <SettingsGroup id="plugins" title="Plugins" note="What plugins add to WikiStow">
               <PluginsSummary />

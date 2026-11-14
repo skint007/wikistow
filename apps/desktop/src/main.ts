@@ -39,6 +39,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { APP_ORIGIN, appFile } from './app-files.ts';
+import { desktopClipping } from './clip/clipping.ts';
 import { contextMenu } from './context-menu.ts';
 import { APP_NAMES, desktopApp, windowIcon } from './install.ts';
 import { cookieChange, forward } from './forward.ts';
@@ -103,7 +104,8 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
 
 // A second launch, such as the browser opening a `wikistow://` link, hands
 // its arguments to this one and quits.
-if (!app.requestSingleInstanceLock()) app.quit();
+const firstInstance = app.requestSingleInstanceLock();
+if (!firstInstance) app.quit();
 
 const mac = process.platform === 'darwin';
 
@@ -184,6 +186,30 @@ const keptFolders = {
 };
 const keptAccountFile = keptFile(join(app.getPath('userData'), 'kept-account'));
 const place = windowPlace(app.getPath('userData'));
+// The web clipper's socket and host manifests (ADR 0017). Main knows only
+// whether the page has loaded and whether there is a session; the pages
+// tell it the vault's state in a later step, so until then a signed-in app
+// answers `locked`.
+const clipping = desktopClipping({
+  which,
+  platform: process.platform,
+  arch: process.arch,
+  env: process.env,
+  home: app.getPath('home'),
+  userData: app.getPath('userData'),
+  ownDataFolder: app.commandLine.hasSwitch('user-data-dir'),
+  appPath: app.getAppPath(),
+  execPath: process.execPath,
+  version: app.getVersion(),
+  argv: process.argv,
+  state: () =>
+    !window || window.webContents.isLoading()
+      ? 'starting'
+      : server && cookie
+        ? 'locked'
+        : 'signed-out',
+  show: () => bringForward(),
+});
 
 /**
  * Delete the search index and the trust marks the pages kept sealed, as
@@ -706,6 +732,15 @@ app.on('open-url', (event, url) => {
   void linkArrived(url);
 });
 
+/** Show the window in front, as the web clipper's `open` asks (ADR 0017, decision 1). */
+function bringForward() {
+  if (!window) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+  if (mac) app.focus({ steal: true });
+}
+
 app.on('second-instance', (_event, argv) => {
   if (window?.isMinimized()) window.restore();
   window?.focus();
@@ -729,7 +764,13 @@ app.on('web-contents-created', (_event, contents) => {
   });
 });
 
-app.on('window-all-closed', () => app.quit());
+// The helper then finds the app closed, rather than a socket nobody
+// answers: from the window's closing, as quitting may wait on writes after.
+app.on('window-all-closed', () => {
+  clipping.stopNow();
+  app.quit();
+});
+app.on('will-quit', () => clipping.stopNow());
 
 // Quitting (Ctrl+Q) closes the window first, as its close button
 // does, so a draft with changes still to save can ask while the session
@@ -922,5 +963,9 @@ void app.whenReady().then(async () => {
       }),
     ),
   );
+  handle('clipping', () => clipping.state());
+  handle('setClipping', async (on) => clipping.set(z.boolean().parse(on)));
+  // Listening before the window loads, as a helper may be waiting to connect.
+  if (firstInstance) await clipping.start();
   openWindow();
 });

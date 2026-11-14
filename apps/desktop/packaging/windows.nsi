@@ -4,7 +4,9 @@
 ; Start menu entry, `wikistow://` links for signing in, and an uninstaller
 ; listed in Settings > Apps. Not Programs\wikistow, which is the CLI's, on
 ; the PATH: Windows ignores case, so its wikistow.exe would be WikiStow.exe.
-; The app's data in %APPDATA%\WikiStow Desktop stays when it goes.
+; The app's data in %APPDATA%\WikiStow Desktop stays when it goes, apart
+; from the web clipper's host manifests, which the app writes there at each
+; launch, and their registry keys.
 ;
 ; makensis (from any folder: it reads the icon beside this file) -DVERSION=<version> -DFILE_VERSION=<a.b.c.0> -DARCH=<x64|arm64>
 ;   -DAPP=<staged app folder> -DOUT=<installer> packaging/windows.nsi
@@ -20,6 +22,8 @@ SetCompressor /SOLID lzma
 !define KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\WikiStow"
 !define LINKS "Software\Classes\wikistow"
 !define UNINSTALLER "Uninstall WikiStow.exe"
+; The web clipper's native messaging host (docs/adr/0017-web-clipper.md).
+!define CLIP_HOST "io.github.skint007.wikistow"
 
 Name "WikiStow"
 OutFile "${OUT}"
@@ -44,14 +48,24 @@ VIAddVersionKey LegalCopyright "MIT License"
 !insertmacro MUI_LANGUAGE "English"
 
 ; Windows keeps a running program's file open, so neither replacing nor
-; removing it works until WikiStow is closed. Silent runs give up.
+; removing it works until WikiStow is closed, nor its web clipper's helper,
+; which a browser runs while it clips. Silent runs give up.
 !macro WaitUntilClosed
   retry:
-  IfFileExists "$INSTDIR\WikiStow.exe" 0 closed
+  IfFileExists "$INSTDIR\WikiStow.exe" 0 app_closed
   ClearErrors
   FileOpen $0 "$INSTDIR\WikiStow.exe" a
-  IfErrors 0 opened
+  IfErrors 0 app_opened
   MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "WikiStow is open. Close it, then choose Retry." /SD IDCANCEL IDRETRY retry
+  Abort
+  app_opened:
+  FileClose $0
+  app_closed:
+  IfFileExists "$INSTDIR\wikistow-clip-host.exe" 0 closed
+  ClearErrors
+  FileOpen $0 "$INSTDIR\wikistow-clip-host.exe" a
+  IfErrors 0 opened
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "A browser is clipping to WikiStow. Close the WikiStow extension's popup, or the browser, then choose Retry." /SD IDCANCEL IDRETRY retry
   Abort
   opened:
   FileClose $0
@@ -113,6 +127,16 @@ Section Uninstall
   Delete "$SMPROGRAMS\WikiStow.lnk"
   DeleteRegKey HKCU "${LINKS}"
   DeleteRegKey HKCU "${KEY}"
+  ; The keys and manifests the app writes at each launch for the browsers
+  ; (src/clip/manifests.ts), and the file naming its pipe, left if it crashed.
+  DeleteRegKey HKCU "Software\Google\Chrome\NativeMessagingHosts\${CLIP_HOST}"
+  DeleteRegKey HKCU "Software\Chromium\NativeMessagingHosts\${CLIP_HOST}"
+  DeleteRegKey HKCU "Software\Microsoft\Edge\NativeMessagingHosts\${CLIP_HOST}"
+  DeleteRegKey HKCU "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\${CLIP_HOST}"
+  DeleteRegKey HKCU "Software\Mozilla\NativeMessagingHosts\${CLIP_HOST}"
+  RMDir /r "$APPDATA\WikiStow Desktop\native-messaging"
+  Delete "$LOCALAPPDATA\WikiStow Desktop\clip-host.json"
+  RMDir "$LOCALAPPDATA\WikiStow Desktop"
   !insertmacro RemoveApp
   RMDir "$INSTDIR"
 SectionEnd

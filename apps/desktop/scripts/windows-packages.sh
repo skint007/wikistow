@@ -1,9 +1,10 @@
 #!/bin/sh
 # Build the Windows installers, x64 and arm64: out/app.asar in Electron's
-# Windows build of the version the desktop tests run, as WikiStow.exe,
-# installed by an NSIS installer (packaging/windows.nsi). The app has no
-# native modules, so this runs on Linux. Run from apps/desktop after
-# scripts/asar.ts, with makensis on PATH:
+# Windows build of the version the desktop tests run, as WikiStow.exe, with
+# the web clipper's helper beside it, installed by an NSIS installer
+# (packaging/windows.nsi). The app has no native modules and the helper is
+# Go, so this runs on Linux. Run from apps/desktop after scripts/asar.ts
+# and scripts/clip-host.sh, with makensis on PATH:
 #
 #   scripts/windows-packages.sh <version> <output folder> [x64|arm64]
 #
@@ -37,6 +38,7 @@ for arch in $arches; do
   cp out/app.asar "$app/resources/app.asar"
   # How it was installed, for the update notice (src/updates.ts).
   printf 'windows\n' > "$app/resources/install-source"
+  cp "out/clip-host/windows-$(echo "$arch" | sed s/x64/amd64/)/wikistow-clip-host.exe" "$app/"
   cp ../../LICENSE "$app/LICENSE.WikiStow.txt"
   node scripts/windows-exe.ts "$app/WikiStow.exe" "$version"
 
