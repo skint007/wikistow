@@ -148,6 +148,9 @@ class FakeParticipant {
     for (const listener of this.#changes) listener(false);
     return true;
   }
+  sessionDrafts() {
+    return [R0];
+  }
   async recheck() {}
   presenceChanged() {}
   regionIs() {}

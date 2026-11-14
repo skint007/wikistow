@@ -197,7 +197,12 @@ function appPorts(
   const info = pageQuery(ctx, page.pageId);
   return {
     saveDraft: (input) => drafts.save({ read: readWikilinks, ...input }),
-    live: livePorts(ctx, page, queryClient),
+    live: livePorts(ctx, page, queryClient, ({ revisionId, basedOn, payload: written, region }) => {
+      editorSaved(page, revisionId);
+      void contentChanged(queryClient, ctx, {
+        saved: { ...page, basedOn, revisionId, payload: written, region },
+      });
+    }),
     onTopOf: (revisionId) => drafts.onTopOf(revisionId),
     waitingChange: () => drafts.waitingChange(),
     mergedWith: (version) => drafts.mergedWith(version),

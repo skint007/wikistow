@@ -356,8 +356,15 @@ export function participantPorts(
     read,
     visible = () => true,
     editor = () => 'source',
+    onSaved,
   }: {
     live?: LiveFetch;
+    /** A save of the session landed, as the app hears of every draft save. */
+    onSaved?: (saved: {
+      revisionId: RevisionId;
+      basedOn: RevisionId;
+      payload: PagePayload;
+    }) => void;
     read?: Parameters<typeof saveDraft>[1]['read'];
     visible?: () => boolean;
     editor?: () => 'source' | 'visual';
@@ -393,6 +400,7 @@ export function participantPorts(
       for (let tries = 0; ; tries++) {
         try {
           const written = await saveDraft(ctx, input);
+          onSaved?.({ revisionId: written.revisionId, basedOn, payload: written.payload });
           return { revisionId: written.revisionId, payload: written.payload };
         } catch (error) {
           if (tries < 2 && outcomeUnknown(error)) continue;
@@ -400,6 +408,7 @@ export function participantPorts(
           if (tries > 0 && error instanceof ApiError && error.code === 'duplicate') {
             const opened = await openRevisionOf(ctx, page, 'draft', revisionId, { fresh: true });
             if (opened.opened.kind !== 'current') throw error;
+            onSaved?.({ revisionId, basedOn, payload: opened.opened.payload });
             return { revisionId, payload: opened.opened.payload };
           }
           throw error;

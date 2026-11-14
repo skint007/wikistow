@@ -1,4 +1,10 @@
-import type { ClientContext, pageOperations, Region } from '@wikistow/client';
+import type {
+  ClientContext,
+  pageOperations,
+  PagePayload,
+  Region,
+  RevisionId,
+} from '@wikistow/client';
 import type { QueryClient } from '@tanstack/react-query';
 import { connection } from '../../data/connection';
 import { treeQuery } from '../../data/queries';
@@ -51,6 +57,13 @@ export function livePorts(
   ctx: ClientContext,
   page: pageOperations.PageRef,
   queryClient: QueryClient,
+  /** A save of the session landed, as the draft session tells the app of its own. */
+  saved: (saved: {
+    revisionId: RevisionId;
+    basedOn: RevisionId;
+    payload: PagePayload;
+    region: Region;
+  }) => void,
 ): LivePorts {
   let region: Region | null = null;
   const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
@@ -63,6 +76,7 @@ export function livePorts(
         read: readWikilinks,
         visible,
         editor: () => 'source',
+        onSaved: (landed) => saved({ ...landed, region: region ?? opening.region }),
       });
       return live.joinLive(ports, opening);
     },

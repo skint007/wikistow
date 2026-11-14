@@ -13,7 +13,8 @@ import {
 } from '@wikistow/client/live';
 import type { PageId, RevisionId, SpaceId } from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
-import { listenForTreeChanges } from '@wikistow/server';
+import { listenForTreeChanges, schema } from '@wikistow/server';
+import { eq } from 'drizzle-orm';
 import { personWithVault } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
 import { invite, library, shareFolder, type Person } from './support/sharing.ts';
@@ -185,6 +186,33 @@ describe('editing a page live', () => {
     await expect.poll(() => body(mine)).toBe(both);
     await expect.poll(() => body(theirs)).toBe(both);
     await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+  });
+
+  it('tells the server everything is saved once it is, a file’s own join included', async () => {
+    const { owner, page } = await sharedPage();
+    const mine = await join(owner, page);
+    type(mine, ' saved');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    expect(
+      await mine.commitOwn({ texts: { body: `${body(mine)} ![photo](attachment:photo)` } }),
+    ).toBe(true);
+    const row = async () =>
+      (
+        await t.db
+          .select()
+          .from(schema.liveSessions)
+          .where(eq(schema.liveSessions.id, mine.sessionId))
+      )[0];
+    // Unsaved, for the server, only while an update comes after what the latest Saved covers.
+    await expect
+      .poll(
+        async () => {
+          const session = await row();
+          return session && (session.savedCovers ?? 0) >= session.lastUpdatePosition;
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
   });
 
   it('ends the session for everyone when a member is removed', async () => {
