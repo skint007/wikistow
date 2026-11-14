@@ -80,8 +80,13 @@ const stable = (value: unknown): string =>
       : v,
   );
 
+/**
+ * The database's time now, not when the transaction began: writes take it
+ * once they hold their locks, so a write that waited never dates a join or
+ * a grant before one that went first.
+ */
 async function dbNow(tx: Database): Promise<Date> {
-  const [row] = await tx.execute<{ now: Date | string }>(sql`select now() as now`);
+  const [row] = await tx.execute<{ now: Date | string }>(sql`select clock_timestamp() as now`);
   return new Date(row?.now ?? Date.now());
 }
 
@@ -985,8 +990,9 @@ export async function startLive(db: Database, input: StartLive) {
       accountId: caller.accountId,
       ordinal: 1,
       lastSeq: 1,
+      lastMessageAt: sql`clock_timestamp()`,
       // Present for 30 s until its stream opens, whatever it sends meanwhile.
-      streamBrokeAt: sql`now()`,
+      streamBrokeAt: sql`clock_timestamp()`,
     });
     await tx.insert(liveMessages).values({
       sessionId: input.sessionId,
@@ -1215,7 +1221,7 @@ export async function streamClosed(
 ) {
   await db
     .update(liveJoins)
-    .set({ streamOpen: false, streamToken: null, streamBrokeAt: sql`now()` })
+    .set({ streamOpen: false, streamToken: null, streamBrokeAt: sql`clock_timestamp()` })
     .where(
       and(
         eq(liveJoins.sessionId, input.sessionId),
@@ -1915,6 +1921,10 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
     if (input.covers > session.lastPosition) {
       throw new ContentError('invalid-request', 'A snapshot covers only what was stored before it');
     }
+    // Its own refusal first: a skipped seq is that, whatever the storage.
+    if (input.message.seq !== join.lastSeq + 1) {
+      throw new ContentError('invalid-request', 'Stored messages are numbered without gaps');
+    }
     // What it covers goes, but the first snapshot and each join's latest kept
     // change, and so do older later snapshots; then it is charged, so it can
     // free room for itself; then stored. Ranked in one pass, so the delete
@@ -1982,7 +1992,7 @@ export async function leaveLive(
     });
     const left = await tx
       .update(liveJoins)
-      .set({ leftAt: sql`now()`, streamOpen: false })
+      .set({ leftAt: sql`clock_timestamp()`, streamOpen: false })
       .where(
         and(
           eq(liveJoins.sessionId, session.id),
@@ -1996,7 +2006,12 @@ export async function leaveLive(
   });
 }
 
-/** A participant ends the session (section 5.10, **Ending**). Ending an ended one changes nothing. */
+/**
+ * A participant ends the session (section 5.10, **Ending**). Ending an ended
+ * one changes nothing. Any caller who can edit the page may: an app that
+ * can't take part, because it refused the snapshot it fetched, ends it
+ * without ever having joined, and anyone who could end it could join first.
+ */
 export async function endLive(db: Database, input: { actor: Actor; sessionId: string }) {
   return db.transaction(async (tx) => {
     const { session } = await sessionFor(tx, input.actor, input.sessionId, { lock: true });
@@ -2004,7 +2019,7 @@ export async function endLive(db: Database, input: { actor: Actor; sessionId: st
     await tx
       .update(liveSessions)
       .set({
-        endedAt: sql`now()`,
+        endedAt: sql`clock_timestamp()`,
         endedReason: 'ended',
         endedPosition: session.lastPosition,
         endedDraftHead: (await headsOf(tx, session.pageId)).draftHead,
@@ -2232,7 +2247,9 @@ export async function sweepLive(
   let removed = 0;
   const retention = sql`${`${retentionMs} milliseconds`}::interval`;
   // Each session that may be due, a batch at a time: ended past the
-  // retention; ended, and not chosen to keep in the last 10 minutes; or open,
+  // retention; ended, and not chosen to keep lately, the wait growing with
+  // its age from 10 minutes to a day, so many kept for days cost the sweep
+  // little; or open,
   // nobody in it, and either saved or left alone past the retention. An
   // open one with unsaved changes isn't read until then.
   for (let after = ''; ;) {
@@ -2240,8 +2257,9 @@ export async function sweepLive(
       select s.id, s.page_id, s.space_id from ${liveSessions} s
       where s.id > ${after} and (
         (s.ended_at is not null and s.ended_at <= now() - ${retention})
-        or (s.ended_at is not null
-          and (s.kept_at is null or s.kept_at <= now() - interval '10 minutes'))
+        or (s.ended_at is not null and (s.kept_at is null
+          or s.kept_at <= now() - least(interval '1 day',
+            greatest(interval '10 minutes', (s.kept_at - s.ended_at) / 6))))
         or (s.ended_at is null and not exists (select 1 from ${liveJoins} j
           where j.session_id = s.id and j.parent_join_id is null and j.left_at is null
             and j.last_message_at > now() - interval '30 seconds'

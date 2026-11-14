@@ -1632,6 +1632,33 @@ describe('limits', () => {
     ).toMatchObject({ position: 4 });
   });
 
+  it('refuses a later snapshot that skips a seq for that, even with no room left', async () => {
+    const app = await scratch({ limits: { uploadBytes: 1024 * 1024, storageBytes: 400_000 } });
+    const { editor, lib } = await sharedLibrary(app);
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    const room = 400_000 - (await usedBytes(app.db, editor.id));
+    const size = 128 * Math.floor((room * 0.6) / 128);
+    await me.send([me.message('update', { size })]);
+    const poster = typist(editor, session);
+    poster.message('update');
+    expect(
+      await rejection(
+        editor.ctx.api.call(liveRoutes.postSnapshot, {
+          params: { sessionId: session.sessionId },
+          body: {
+            joinId: poster.joinId,
+            parent: me.joinId,
+            message: poster.message('snapshot', { size }),
+            covers: 1,
+            revisionId: session.revisionId,
+          },
+        }),
+      ),
+    ).toBe('invalid-request');
+  });
+
   it('counts storage once a statement, so deleting many messages stays quick and exact', async () => {
     const { editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);

@@ -9,6 +9,7 @@ import type {
 import { hash, utf8 } from '@wikistow/client';
 import { consumeRateLimit, type Actor, type Database, type Once } from '@wikistow/server';
 import type { Context, Hono } from 'hono';
+import type { ServerResponse } from 'node:http';
 import type { z } from 'zod';
 import type { Auth } from '../auth/auth.ts';
 import type { Config } from '../config.ts';
@@ -509,6 +510,11 @@ export function createRoutes({
               } catch {
                 // Closed already.
               }
+              // A reader that isn't reading keeps the socket, and what is
+              // buffered for it, until the idle timeout: cut it off now. A
+              // response sent in full is left be, its connection reused.
+              const outgoing = (c.env as { outgoing?: ServerResponse } | undefined)?.outgoing;
+              if (outgoing && !outgoing.writableFinished) outgoing.destroy();
             };
           },
           async pull(controller) {

@@ -141,7 +141,7 @@ CREATE INDEX "live_wraps_share_idx" ON "live_wraps" USING btree ("share_id");-->
 -- then find the session ended, or this waits for them.
 CREATE FUNCTION "wikistow_live_end"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  UPDATE "live_sessions" SET "ended_at" = now(), "ended_reason" = 'access',
+  UPDATE "live_sessions" SET "ended_at" = clock_timestamp(), "ended_reason" = 'access',
       "ended_position" = "last_position",
       "ended_draft_head" = (SELECT "draft_head" FROM "page_heads" WHERE "page_id" = NEW."id")
     WHERE "page_id" = NEW."id" AND "ended_at" IS NULL;
