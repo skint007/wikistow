@@ -2,7 +2,7 @@ import { QueryObserver, useQueryClient, type QueryClient } from '@tanstack/react
 import { openMeaningIndex, sealMeaningIndex, type ClientContext } from '@wikistow/client';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { desktop } from '../desktop';
-import { onDraftSaved, searchIndexKey, searchIndexQuery } from '../data/queries';
+import { builtFromKept, onDraftSaved, searchIndexKey, searchIndexQuery } from '../data/queries';
 import { useDeviceSwitch } from '../shell/device-switch';
 import { PLAIN, vaultStore } from '../vault/store';
 import { Embedder } from './embedder';
@@ -61,11 +61,11 @@ export function startMeaningIndex(queryClient: QueryClient, ctx: ClientContext) 
   const observer = new QueryObserver(queryClient, searchIndexQuery(ctx, queryClient));
   // Reset as access changed (`refreshAccess`), it has no index until rebuilt.
   const unfollow = observer.subscribe(({ data }) => {
-    if (data) indexer.indexChanged(data);
+    if (data) indexer.indexChanged(data, { partial: builtFromKept(data) });
     else indexer.indexGone();
   });
   const shown = observer.getCurrentResult().data;
-  if (shown) indexer.indexChanged(shown);
+  if (shown) indexer.indexChanged(shown, { partial: builtFromKept(shown) });
   return {
     indexer,
     stop() {

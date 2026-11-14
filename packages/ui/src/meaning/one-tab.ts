@@ -53,6 +53,8 @@ export function oneTabAtATime(start: () => Turn, tabs: Tabs = browserTabs()): ()
   const channel = tabs.channel(QUEUE_LOCK);
   const ask = () => {
     if (left || turn || waiting) return;
+    // A tab holding it out of view lets go on hearing this.
+    channel?.postMessage('shown');
     const asking = new AbortController();
     waiting = asking;
     void locks
@@ -86,10 +88,8 @@ export function oneTabAtATime(start: () => Turn, tabs: Tabs = browserTabs()): ()
     if (turn && !tabs.shown() && pending.some((lock) => lock.name === QUEUE_LOCK)) await letGo();
   };
   const unwatch = tabs.onShownChange(() => {
-    if (tabs.shown()) {
-      channel?.postMessage('shown');
-      ask();
-    } else {
+    if (tabs.shown()) ask();
+    else {
       waiting?.abort();
       waiting = null;
       void letGoIfWanted();

@@ -420,6 +420,24 @@ describe('MeaningIndexer', () => {
     expect([...fake.writes.at(-1)!.keys()]).toEqual([rev('boiler-1')]);
   });
 
+  it('an index built offline from the pages kept alone lets go of nothing', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    const writes = fake.writes.length;
+    // Offline, the beach wasn't kept on this device: the index lacks it.
+    indexer.indexChanged(wordIndex([boiler]), { partial: true });
+    await settle(1);
+    expect(fake.writes).toHaveLength(writes);
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+    // Back online, it is there, with its vectors: nothing embedded again.
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle(1);
+    expect(fake.embedded).toHaveLength(2);
+    expect(indexer.status()).toEqual({ pages: 2, total: 2 });
+  });
+
   it('while the word index is built afresh, as access changes, nothing is found or kept', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);

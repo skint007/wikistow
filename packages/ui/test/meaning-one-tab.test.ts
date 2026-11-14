@@ -177,6 +177,22 @@ describe('one tab at a time', () => {
     expect(b.turns).toEqual([]);
   });
 
+  it('a tab that starts in view takes it from one out of view', async () => {
+    const { tab } = browser();
+    const a = tab(true);
+    oneTabAtATime(a.turn, a.tabs);
+    await settled();
+    a.show(false);
+    await settled();
+    // Opened, or unlocked, in view: it says so as it asks.
+    const b = tab(true);
+    oneTabAtATime(b.turn, b.tabs);
+    await settled();
+    await settled();
+    expect(a.turns).toEqual(['start', 'flush', 'stop']);
+    expect(b.turns).toEqual(['start']);
+  });
+
   it('a tab out of view from the start waits to be shown', async () => {
     const { tab } = browser();
     const a = tab(false);

@@ -471,6 +471,9 @@ async function withQueuedDrafts(
 /** Indexes built from what's kept alone, offline: never kept, and updated from the server once back. */
 const fromKept = new WeakSet<searchOperations.PageIndex>();
 
+/** `index` was built offline from what's kept alone, so may lack pages still there. */
+export const builtFromKept = (index: searchOperations.PageIndex): boolean => fromKept.has(index);
+
 const searchIndexHash = hashKey(searchIndexKey);
 const trackers = new WeakMap<QueryClient, IndexTracker>();
 

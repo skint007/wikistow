@@ -189,20 +189,24 @@ export class MeaningIndexer {
     }
   }
 
-  /** The word index, built or updated: what to embed, and what to let go. */
-  indexChanged(index: searchOperations.PageIndex) {
+  /**
+   * The word index, built or updated: what to embed, and what to let go.
+   * One built offline from the pages kept alone (`partial`) may lack pages
+   * that are still there: it lets go of nothing, until a whole one does.
+   */
+  indexChanged(index: searchOperations.PageIndex, { partial = false }: { partial?: boolean } = {}) {
     if (this.#stopped || index === this.#index) return;
     this.#index = index;
     if (!this.#isOpen) {
       void this.#opened.then(() => {
-        if (this.#index === index) this.#follow(index);
+        if (this.#index === index) this.#follow(index, partial);
       });
       return;
     }
-    this.#follow(index);
+    this.#follow(index, partial);
   }
 
-  #follow(index: searchOperations.PageIndex) {
+  #follow(index: searchOperations.PageIndex, partial: boolean) {
     if (this.#stopped) return;
     const before = this.#shown;
     const shown = new Map<string, IndexedPage>();
@@ -227,12 +231,15 @@ export class MeaningIndexer {
         if (this.#kept.has(standing)) this.#held.set(key, standing);
       } else this.#held.delete(key);
     }
-    for (const key of this.#held.keys()) if (!shown.has(key)) this.#held.delete(key);
-    for (const key of this.#reusable.keys()) if (!shown.has(key)) this.#reusable.delete(key);
+    // A partial index: pages it lacks keep what stands in for them, for the next.
+    if (!partial) {
+      for (const key of this.#held.keys()) if (!shown.has(key)) this.#held.delete(key);
+      for (const key of this.#reusable.keys()) if (!shown.has(key)) this.#reusable.delete(key);
+    }
     // A version let go of goes from the file at once, as from memory: its
     // page left, or another's version replaced it. Only a draft this person
     // saved over waits, which happens once its next version is embedded.
-    const letGo = this.#prune();
+    const letGo = !partial && this.#prune();
     if (letGo || this.#deferred) this.#keep(letGo);
     this.#deferred = false;
     this.#plan();
