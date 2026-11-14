@@ -49,6 +49,7 @@ import {
 import { ContentError } from './errors.ts';
 import { humanActor, requireCaller, type Actor, type Caller } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
+import { isLiveVersion } from './live.ts';
 import { requirePage, requirePageAccess } from './pages.ts';
 import { charge } from './quota.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
@@ -155,7 +156,8 @@ async function verifyCommentCommit(
 
 /**
  * A comment version ID is new: no comment version has it, nor any metadata
- * version (section 5.9). Names' versions check the other way (`storeMetadata`).
+ * version (section 5.9) or session record (section 5.10). Names' versions
+ * check the other way (`storeMetadata`).
  */
 async function requireNewVersionId(tx: Database, versionId: string) {
   const [comment] = await tx
@@ -166,7 +168,9 @@ async function requireNewVersionId(tx: Database, versionId: string) {
     .select({ id: metadataRevisions.id })
     .from(metadataRevisions)
     .where(eq(metadataRevisions.id, versionId));
-  if (comment || name) throw new ContentError('duplicate', 'That version ID is taken');
+  if (comment || name || (await isLiveVersion(tx, versionId))) {
+    throw new ContentError('duplicate', 'That version ID is taken');
+  }
 }
 
 /** Whether a comment version takes `versionId`, for names' versions to refuse it. */

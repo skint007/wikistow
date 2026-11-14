@@ -18,6 +18,7 @@ import {
 import { endLapsedWhere, linksIfOnly } from '../public-links/links.ts';
 import { subtreeOf } from './access.ts';
 import { ContentError } from './errors.ts';
+import { loseLiveKeys } from './live.ts';
 import { humanActor } from './identities.ts';
 import { replaceKeyMaterial, requireOwnerEnvelopes, verifyGrants } from './moves.ts';
 import {
@@ -116,6 +117,7 @@ export async function endShare(
     await replaceKeyMaterial(tx, { wraps: [], ...input }, records);
     // Judged now the share is gone, as a rotation judges after it (ADR 0005, decision 8).
     await endLapsedWhere(tx, { spaceId, under: share.rootId }, input.accountId);
+    await loseLiveKeys(tx, spaceId, share.rootId === null ? 'space' : subtree);
     await bumpPermissions(tx, spaceId, subtree);
     await audit(tx, {
       actor: input.accountId,
