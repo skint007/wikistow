@@ -1137,18 +1137,6 @@ export class LiveParticipant {
   }
 
   /**
-   * Publish the page as the person's editor showed it at the press (section
-   * 5.10, **Saving**). Its presence says it is publishing, so the saver
-   * holds its saves. The document as it is now is saved, never caught up
-   * and saved on top, unless the head is a draft of the session with
-   * exactly its state that this app compared; then `publish` publishes that
-   * draft, which must still be the head. If either meets `stale-head`, the
-   * newer head is published only if it is a session draft with exactly
-   * the state saved at the press, compared; otherwise it stops
-   * (`LivePublishStopped`), so nothing typed after the press goes out
-   * under the publisher's name.
-   */
-  /**
    * Take the press of **Publish** (section 5.10, **Saving**): the document
    * as it is now, and the payload a save would write from it. Refused at
    * once when the editor hadn't shown everything others typed yet
