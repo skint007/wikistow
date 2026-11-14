@@ -193,6 +193,8 @@ export type ParticipantStatus = {
   provisional: boolean;
   /** Drafts from outside the session whose overlapping parts wait for review (ADR 0015 decision 8). */
   notes: readonly LiveNote[];
+  /** Whether the session's stream is open: while it isn't, typing waits unsent, for up to the join's 30 s. */
+  connected: boolean;
 };
 
 /**
@@ -220,6 +222,29 @@ export type OpenedNote = {
   gone: boolean;
 };
 
+/**
+ * What putting one join's own typing back takes (section 5.10, **Putting
+ * typing back**): the document's payload, `ours`, and the bases a merge by
+ * block from it takes, each holding everything the join took in from
+ * others and only some of its own changes; null where the document can't
+ * be read as a payload.
+ */
+export type PutBack = {
+  sessionId: string;
+  joinId: JoinId;
+  clientId: number;
+  ours: PagePayload | null;
+  /** Onto a draft, as a writer outside the session: its own changes the latest session draft it compared holds. */
+  outside: PagePayload | null;
+  /** The join's own clock in `outside`, and in `ours`. */
+  outsideClock: number;
+  oursClock: number;
+  /** Into the session again, as a newcomer whose document has `state`: its own changes that document placed. */
+  inSession(state: LiveState): PagePayload | null;
+  /** Whether `state` holds everything of the join's own, typed or deleted. */
+  heldBy(state: LiveState): boolean;
+};
+
 /** The origin of this app's own changes to the document. */
 export const LOCAL_ORIGIN = Symbol('live-local');
 /** The origin of changes taken in from others. */
@@ -236,6 +261,8 @@ const CHECK_MS = 10_000;
 const HOLD_MS = 30_000;
 const GRACE_MS = 25_000;
 const SNAPSHOT_BYTES = 256 * 1024;
+// A base's own client: one no join derives (53 bits, all set), and which never writes.
+const BASE_CLIENT = 0x1fffffffffffff;
 
 const key = (join: JoinRef) => `${join.senderId} ${join.joinId}`;
 
@@ -702,12 +729,24 @@ export class LiveParticipant {
   #snapshotBytes: number;
   #tooLarge: string | null = null;
 
+  // The acknowledged copy (ADR 0015 decision 6), kept as what makes it, so
+  // a base holding any part of this join's own changes can be built: the
+  // document as this join started, everything it took in from others and
+  // its own copies' changes once placed, merged now and then, and each of
+  // its own updates as sealed, by `seq`.
+  readonly #startUpdate: Uint8Array;
+  #othersLog: Uint8Array[] = [];
+  readonly #ownLog: { seq: number; update: Uint8Array }[] = [];
+  // Whether the stream is open now, and since when it hasn't been.
+  #connected = false;
+
   constructor(ports: ParticipantPorts, opening: Opening) {
     this.#ports = ports;
     this.#opened = opening.opened;
     this.#binding = liveBinding(opening.opened);
     this.#joins = opening.joins;
     this.document = opening.document;
+    this.#startUpdate = Y.encodeStateAsUpdate(opening.document.doc);
     this.#clientId = opening.document.clientId;
     this.sessionId = opening.opened.record.subjectId;
     this.#transport = liveTransport(ports.ctx, this.sessionId, ports.live);
@@ -766,6 +805,8 @@ export class LiveParticipant {
     this.#snapshotDraft = later?.revisionId ?? record;
     this.document.doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (origin === LOCAL_ORIGIN) this.#own(update);
+      // What Yjs placed of someone else's change, or of a copy's once saved: the acknowledged copy's.
+      else if (origin === REMOTE_ORIGIN || origin === COPY_ORIGIN) this.#tookIn(update);
     });
     // Yjs doesn't catch what its listeners throw: nothing here may throw past it.
     this.document.doc.on('afterTransaction', (transaction: Y.Transaction) => {
@@ -1572,6 +1613,119 @@ export class LiveParticipant {
     }
   }
 
+  /**
+   * What putting this app's own typing back takes (section 5.10, **Putting
+   * typing back**), once it left the session or is about to keep its
+   * document on the device: the document as it is, and the bases a merge
+   * by block takes. Each base holds everything this app took in from
+   * others and only some of its own changes, so only what the person typed
+   * counts as theirs. It works after the session key is wiped: it seals nothing.
+   */
+  putBack(): PutBack {
+    let ours: PagePayload | null;
+    try {
+      ours = this.#payload();
+    } catch {
+      ours = null;
+    }
+    const checked = this.#drafts.get(this.#checked);
+    // Onto a draft, as a writer outside the session: of its own, only what
+    // the latest session draft it compared holds, since a head it hasn't
+    // compared may lack what the session served.
+    const outsideThrough = checked ? this.#ownThrough(checked.state) : 0;
+    const own = () => Y.getState(this.document.doc.store, this.#clientId);
+    return {
+      sessionId: this.sessionId,
+      joinId: this.#me.joinId,
+      clientId: this.#clientId,
+      ours,
+      outside: this.#baseOf(outsideThrough),
+      outsideClock: this.#ownClockThrough(outsideThrough),
+      oursClock: own(),
+      // Into the session again, as a newcomer: of its own, exactly what that
+      // newcomer's document, built from what the session serves, placed.
+      inSession: (state) => this.#baseOf(this.#ownThrough(state)),
+      heldBy: (state) => {
+        try {
+          return holdsState(state, this.#ownState());
+        } catch {
+          return false;
+        }
+      },
+    };
+  }
+
+  // The highest `seq` up to which `state` holds every update this join sent, message by message.
+  #ownThrough(state: LiveState): number {
+    let through = 0;
+    for (const { seq, update } of this.#ownLog) {
+      let held: boolean;
+      try {
+        held = holdsState(state, plusUpdate({ vector: new Map(), deletes: new Map() }, decodeUpdate(update)));
+      } catch {
+        held = false;
+      }
+      if (!held) break;
+      through = seq;
+    }
+    return through;
+  }
+
+  // This join's own clock once its updates up to `seq` are in.
+  #ownClockThrough(seq: number): number {
+    let clock = this.#startClock;
+    for (const entry of this.#ownLog) {
+      if (entry.seq > seq) break;
+      try {
+        for (const structs of decodeUpdate(entry.update).structs) {
+          if (structs.client === this.#clientId) clock = Math.max(clock, structs.end);
+        }
+      } catch {
+        // Counted as none.
+      }
+    }
+    return clock;
+  }
+
+  // A base for putting typing back: the document as this join started, all
+  // it took in from others, and its own updates up to `seq`.
+  #baseOf(seq: number): PagePayload | null {
+    try {
+      const base = new LiveDocument(BASE_CLIENT);
+      base.apply(this.#startUpdate, 'base');
+      if (this.#othersLog.length > 0) base.apply(Y.mergeUpdates(this.#othersLog), 'base');
+      for (const entry of this.#ownLog) {
+        if (entry.seq > seq) break;
+        base.apply(entry.update, 'base');
+      }
+      return this.#payload(this.headPayload, base);
+    } catch {
+      return null;
+    }
+  }
+
+  // Someone else's change, or a copy's, as Yjs placed it: into the acknowledged copy's log.
+  #tookIn(update: Uint8Array): void {
+    this.#othersLog.push(update);
+    if (this.#othersLog.length >= 256) {
+      try {
+        this.#othersLog = [Y.mergeUpdates(this.#othersLog)];
+      } catch {
+        // Kept as they are: merged when the base is built.
+      }
+    }
+  }
+
+  /** Where this join's own typing has reached: a change put in now is held once a document holds it. */
+  ownMark(): { sessionId: string; joinId: JoinId; clientId: number; clock: number } {
+    return {
+      sessionId: this.sessionId,
+      joinId: this.#me.joinId,
+      clientId: this.#clientId,
+      clock: Y.getState(this.document.doc.store, this.#clientId),
+    };
+  }
+
   /** Close without saving, as when the vault locks: the key is wiped. */
   close(): void {
     this.#close({ kind: 'left' });
@@ -1620,23 +1774,36 @@ export class LiveParticipant {
             this.#joined = true;
             this.#schedule();
           }
+          if (!this.#connected) {
+            // Back: what it typed meanwhile goes out from its join, as it was made.
+            this.#connected = true;
+            this.#schedule();
+            this.#update();
+          }
           this.#line(line);
           if (this.#status.state.kind !== 'live') return;
         }
       } catch (error) {
         if (this.#abort.signal.aborted) return;
         if (error instanceof ApiError && !outcomeUnknown(error) && error.code !== 'rate-limited') {
-          // The join went, a snapshot deleted what it missed, or the stream was refused.
+          // The join went, a snapshot deleted what it missed, or the stream was
+          // refused: it joins again as a newcomer, putting its typing back.
           return this.#stop(`the session’s stream was refused (${error.code})`, null, true);
         }
       }
       if (this.#abort.signal.aborted || this.#status.state.kind !== 'live') return;
+      if (this.#connected) {
+        this.#connected = false;
+        this.#update();
+      }
       brokeAt ??= Date.now();
       if (Date.now() - brokeAt > GRACE_MS) {
         return this.#stop('the connection to the session was lost', null, true);
       }
       await sleep(pause, this.#abort.signal);
-      pause = Math.min(pause * 2, 4_000);
+      // While the server doesn't answer, it asks again every 2 s, so a short
+      // break resumes within the join's 30 s (ADR 0015 decision 10).
+      pause = Math.min(pause * 2, 2_000);
     }
   }
 
@@ -3443,6 +3610,7 @@ export class LiveParticipant {
       }
       this.#clock = clock;
       this.#clocks.set(this.#seq, clock);
+      this.#ownLog.push({ seq: this.#seq, update: merged });
       this.#seq++;
       this.#queue.push({ message });
       this.#bytesSinceSnapshot += message.sealed.ciphertext.length;
@@ -3615,6 +3783,7 @@ export class LiveParticipant {
       people: [...people.values()],
       provisional: this.#provisional,
       notes: [...this.#notes.values()].map((note) => ({ ...note, parts: [...note.parts] })),
+      connected: this.#connected,
     };
   }
 
