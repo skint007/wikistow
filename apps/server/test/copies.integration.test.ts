@@ -1002,6 +1002,12 @@ describe('a copy’s hidden nodes', () => {
     // delete naming each ID twice would pass.
     const top = big.newIdOf(w.lib.shared);
     const prefix = `big${big.copyId.slice(0, 8)}`;
+    // Each row's parent check reuses a plan its connection made while
+    // `nodes` was nearly empty and never analyzed. That plan may look the
+    // parent up by space alone, so each check could walk the whole space:
+    // 33,000 squared rows, past the timeout (#431). Analyzing makes it plan
+    // again, by ID.
+    await t.db.execute(sql`analyze nodes`);
     await t.db.execute(sql`
       insert into nodes (id, space_id, parent_id, kind, copy_id)
       select ${prefix} || g, ${w.board}, ${top}, 'page', ${big.copyId}
