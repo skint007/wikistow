@@ -98,8 +98,10 @@ function DialogContent({
         // Escape closes it natively at once, but its close event comes a
         // task later, after any key pressed meanwhile: one that opens it
         // again would find it open still, and then be undone. So React
-        // hears of it now.
+        // hears of it now, once it is closed here: closing gives the focus
+        // back, which a dialog unmounted first never does.
         if (!locked && !onDismiss) {
+          event.currentTarget.close();
           onOpenChange(false);
           return;
         }
