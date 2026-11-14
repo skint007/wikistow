@@ -93,7 +93,14 @@ function DialogContent({
       aria-labelledby={labelledBy ?? titleId}
       aria-describedby={describedBy ?? descriptionId}
       onCancel={(event) => {
-        if (!locked && !onDismiss) return;
+        // Escape closes it natively at once, but its close event comes a
+        // task later, after any key pressed meanwhile: one that opens it
+        // again would find it open still, and then be undone. So React
+        // hears of it now.
+        if (!locked && !onDismiss) {
+          onOpenChange(false);
+          return;
+        }
         event.preventDefault();
         dismiss();
       }}
