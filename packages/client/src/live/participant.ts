@@ -27,7 +27,7 @@ import { CryptoError } from '../errors.ts';
 import { isAgentId } from '../identity.ts';
 import { changePending, requireNotBehind } from '../key-versions.ts';
 import { newId } from '../ids.ts';
-import { LINKS_NAMESPACE } from '../link-table.ts';
+import { LINKS_NAMESPACE, withoutLinkTable } from '../link-table.ts';
 import type { ClientContext } from '../operations/session.ts';
 import { checkPayloadSize, PageTooLarge, type PagePayload } from '../payload.ts';
 import { sameRegion, type Region } from '../regions.ts';
@@ -800,10 +800,16 @@ export class LiveParticipant {
     let access: LiveAccess;
     try {
       access = await this.#ports.access(true);
+      this.#recheckFailures = 0;
     } catch {
-      // Access that can't be read again can't be checked: stop, and join again later.
-      this.#stopSending = true;
-      return this.#stop('access to the page couldn’t be checked', null, true);
+      // What the marks say held just now. Access that can't be read again,
+      // try after try, can't be checked: then it stops, and joins again later.
+      if (++this.#recheckFailures >= 3) {
+        this.#stopSending = true;
+        return this.#stop('access to the page couldn’t be checked', null, true);
+      }
+      setTimeout(() => void this.recheck(), 5_000);
+      return;
     }
     try {
       requireLiveAccess(this.#opened, access);
@@ -813,6 +819,8 @@ export class LiveParticipant {
       this.#stop(error.message, null, true);
     }
   }
+
+  #recheckFailures = 0;
 
   /**
    * The checks of `requireLiveAccess` this app can make at once, from the
@@ -1626,7 +1634,8 @@ export class LiveParticipant {
     this.#changedAt = Date.now();
     this.#unsavedSince ??= this.#changedAt;
     try {
-      checkPayloadSize(this.#payload());
+      // As a save checks it: without the link table it works out.
+      checkPayloadSize(withoutLinkTable(this.#payload()));
       this.#tooLarge = null;
     } catch (error) {
       // A value that doesn't fit the page: the change that placed it stops

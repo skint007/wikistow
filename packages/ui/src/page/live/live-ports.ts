@@ -69,6 +69,20 @@ export function livePorts(
   const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
   return {
     allowed: () => !ctx.agent && liveAllowed(),
+    whenVisible(run) {
+      if (visible()) {
+        run();
+        return () => {};
+      }
+      // A hidden tab whose join lapsed joins again when shown (ADR 0015 decision 5).
+      const shown = () => {
+        if (!visible()) return;
+        document.removeEventListener('visibilitychange', shown);
+        run();
+      };
+      document.addEventListener('visibilitychange', shown);
+      return () => document.removeEventListener('visibilitychange', shown);
+    },
     async join(opening) {
       region = opening.region;
       const live = await import('@wikistow/client/live');
@@ -99,9 +113,9 @@ export function livePorts(
           void import('@wikistow/client/live').then(async (live) => {
             const now = await live.pageRegionNow(ctx, page).catch(() => null);
             if (!now) return;
+            // Access itself is checked again when the marks, keys or owners change.
             region = now;
             participant.regionIs(now);
-            await participant.recheck();
           });
         }, 500);
       };

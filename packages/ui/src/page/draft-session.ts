@@ -128,6 +128,8 @@ export type LivePorts = {
   }): Promise<LiveParticipant | NotJoined>;
   /** Hear of changes that may change access to the page: marks, keys, owners, the tree. */
   watch?(participant: LiveParticipant): () => void;
+  /** Run `run` now if the page is visible, else once it is shown; the result stops waiting. */
+  whenVisible?(run: () => void): () => void;
 };
 
 /** The live session as the draft view shows it. */
@@ -588,6 +590,8 @@ export class DraftSession {
     this.#known.add(revisionId);
     this.#base = revisionId;
     this.#region = null;
+    // The change waiting on this device is sent: the session can be joined now.
+    this.#joinSoon();
   }
 
   /** A save is waiting for its answer, or a file is still uploading. */
@@ -813,6 +817,7 @@ export class DraftSession {
     this.#live = false;
     if (this.#rejoin) clearTimeout(this.#rejoin);
     if (this.#joinTimer) clearTimeout(this.#joinTimer);
+    this.#unwait?.();
     const participant = this.#participant;
     if (participant) {
       this.#detach();
@@ -839,6 +844,14 @@ export class DraftSession {
   #joinTries = 0;
   #liveOff = false;
 
+  #unwait: (() => void) | null = null;
+
+  // Run `run` while the page is visible: a hidden tab joins again when shown.
+  #whenVisible(run: () => void) {
+    this.#unwait?.();
+    this.#unwait = this.#ports.live?.whenVisible?.(run) ?? (run(), null);
+  }
+
   // Join the page's session soon, once what this draft holds is saved, at
   // a pace that slows with each try in a row that didn't join.
   #joinSoon() {
@@ -850,7 +863,7 @@ export class DraftSession {
       if (this.#participant || !this.#live) return;
       if (this.#autosave.status !== 'saved' || this.#autosave.unsaved() !== null) return;
       this.#joinTries++;
-      void this.joinLive();
+      this.#whenVisible(() => void this.joinLive());
     }, wait);
   }
   // What this draft held as it joined: what it goes back to if it leaves having changed nothing.
@@ -881,6 +894,13 @@ export class DraftSession {
     if (!live.allowed() || this.#theirs || this.#autosave.isStopped()) return;
     if (this.#autosave.isSaving() || this.#uploads.size > 0) return;
     this.#joining = true;
+    // Not while a change for the page waits on this device: it would come
+    // to the session as someone else's save (ADR 0015 step 7 takes it in).
+    const waiting = await this.#ports.waitingChange?.().catch(() => null);
+    if (waiting) {
+      this.#joining = false;
+      return;
+    }
     const opening = { revisionId: this.#base, payload: this.#payload, region: this.#tableRegion };
     const epoch = this.#ports.epoch();
     let joined: LiveParticipant | NotJoined;
@@ -910,6 +930,8 @@ export class DraftSession {
       return;
     }
     joined.start();
+    // Unless it stopped as it was taken in, and has gone already.
+    if (this.#participant !== joined) return;
     const unwatch = live.watch?.(joined);
     if (unwatch) this.#unlive.push(unwatch);
   }
@@ -1187,9 +1209,12 @@ export class DraftSession {
           return this.#rejoinWhenSaved();
         }
         this.#rejoins++;
-        void this.joinLive().then(() => {
-          if (!this.#participant) this.#rejoinWhenSaved();
-        });
+        this.#whenVisible(
+          () =>
+            void this.joinLive().then(() => {
+              if (!this.#participant) this.#rejoinWhenSaved();
+            }),
+        );
       },
       Math.min(1_000 * 2 ** this.#rejoins, 30_000),
     );
