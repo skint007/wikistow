@@ -37,6 +37,24 @@ const UNHELD = new Set(['wikistow.live', 'wikistow.links', 'wikistow.change', 'w
 const held = (extensions: PagePayload['extensions']): PagePayload['extensions'] =>
   Object.fromEntries(Object.entries(extensions).filter(([namespace]) => !UNHELD.has(namespace)));
 
+/**
+ * `extensions`, the document's, as changes to `base`'s: each namespace
+ * `base` has that they don't, but those the document never holds, is
+ * deleted (`undefined`), as a change made outside a session deletes one.
+ */
+function over(
+  base: PagePayload['extensions'],
+  extensions: PagePayload['extensions'],
+): PagePayload['extensions'] {
+  const changes: Record<string, unknown> = { ...extensions };
+  for (const namespace of Object.keys(base)) {
+    if (!UNHELD.has(namespace) && !Object.hasOwn(extensions, namespace)) {
+      changes[namespace] = undefined;
+    }
+  }
+  return changes as PagePayload['extensions'];
+}
+
 /** Saving stopped at a conflict: someone else saved this draft meanwhile. */
 export class DraftConflict extends Error {
   constructor() {
@@ -1081,11 +1099,14 @@ export class DraftSession {
           return true;
         }
       }
+      // Drafts of the session are this draft's own: none is someone else's save.
+      for (const draft of participant.sessionDrafts()) this.#known.add(draft);
       if (settled.provisional && before) {
         // Its document may hold text nobody typed: never saved over a draft
         // unasked. The person chooses, with Merge… from the draft it opened.
         this.#base = before.base;
         this.#payload = before.payload;
+        this.#extensions = over(before.payload.extensions, this.#extensions);
         this.#region = null;
         this.#theirs = settled.base?.revisionId ?? null;
         this.#set({ ...this.#content, links: this.#table() });
@@ -1106,6 +1127,8 @@ export class DraftSession {
         this.#content = { title, markdown, attachments };
         this.#extensions = held(settled.payload.extensions);
       }
+      // What the document deleted, the next save deletes too.
+      this.#extensions = over(this.#payload.extensions, this.#extensions);
       this.#set({ ...this.#content, links: this.#table() });
       if (!settled.saved || saveOver || typedMeanwhile) this.#schedule();
       else this.#set({ status: 'saved' });

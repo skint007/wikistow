@@ -187,6 +187,8 @@ const SNAPSHOT_BYTES = 256 * 1024;
 const key = (join: JoinRef) => `${join.senderId} ${join.joinId}`;
 
 type SessionDraft = {
+  /** Saved by this app, which may then send a Saved notice naming it. */
+  ours?: boolean;
   revisionId: RevisionId;
   payload: PagePayload;
   state: LiveState;
@@ -239,6 +241,7 @@ export async function joinLive(
         firstPosition: started.position,
         base: { revisionId: opening.revisionId, payload: opening.payload },
         position: started.position,
+        covers: started.position,
         kept: undefined,
         head: opening.revisionId,
         provisional: false,
@@ -403,6 +406,7 @@ async function newcomerFrom(
           base: null,
           laterDraft: draft,
           position: served.position,
+          covers: served.snapshot.covers ?? served.firstSnapshot.position,
           kept: served.complete ? undefined : (served.snapshot.covers ?? undefined),
           head,
           provisional,
@@ -441,6 +445,7 @@ async function newcomerFrom(
         firstPosition: served.firstSnapshot.position,
         base: { revisionId: draft.revisionId, payload: draft.payload },
         position: served.position,
+        covers: served.firstSnapshot.position,
         kept: served.complete ? undefined : (served.firstSnapshot.position ?? undefined),
         head,
         provisional: false,
@@ -503,6 +508,8 @@ type Opening = {
   /** The draft a later snapshot named, for a newcomer built from one. */
   laterDraft?: OpenedDraft;
   position: number;
+  /** The position up to which the document holds every stored message, as it starts. */
+  covers: number;
   kept: number | undefined;
   head: RevisionId | null;
   provisional: boolean;
@@ -610,7 +617,7 @@ export class LiveParticipant {
     this.#present.set(key(this.#me), true);
     this.#startClock = Y.getState(opening.document.doc.store, opening.document.clientId);
     this.#position = opening.position;
-    this.#covers = opening.position;
+    this.#covers = opening.covers;
     this.#kept = opening.kept;
     this.#head = opening.head;
     this.#provisional = opening.provisional;
@@ -739,6 +746,11 @@ export class LiveParticipant {
   get checkedDraft(): { revisionId: RevisionId; payload: PagePayload } | null {
     const draft = this.#drafts.get(this.#checked);
     return draft ? { revisionId: draft.revisionId, payload: draft.payload } : null;
+  }
+
+  /** Every draft of the session this app has opened or saved: drafts of its own, not someone else's saves. */
+  sessionDrafts(): RevisionId[] {
+    return [...this.#drafts.keys()];
   }
 
   /** The payload a save would write from the document now, with the head's link table. */
@@ -913,6 +925,7 @@ export class LiveParticipant {
       const clock = Y.getState(copy.doc.store, clientId);
       await send(seal(2, 'update', clock, update));
       this.#drafts.set(result.revisionId, {
+        ours: true,
         revisionId: result.revisionId,
         payload: result.payload,
         state: savedState,
@@ -924,6 +937,8 @@ export class LiveParticipant {
       if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
       if (!this.#keyed()) return true;
       await send(seal(3, 'saved', clock, stateContent(result.revisionId, stateBytes)), covers);
+      // Done with: a join has at most two further joins at a time.
+      void this.#transport.leave(further).catch(() => {});
     } catch {
       // The draft claims a change the others never got: the session can't go on with it.
       this.#stop('a file’s change couldn’t be sent', null, true);
@@ -1146,6 +1161,12 @@ export class LiveParticipant {
     let saved = this.#status.saved;
     if (this.#status.state.kind === 'live' && !this.#stopSending && this.#started) {
       saved = await withTimeout(this.saveNow(), 8_000).catch(() => false);
+      // Once the server has placed and relayed what it sent, it says what's saved.
+      for (let waited = 0; waited < 1_500 && this.#covers < this.#placed; waited += SEND_MS) {
+        await sleep(SEND_MS, this.#abort.signal);
+      }
+      this.#trail();
+      await withTimeout(this.flush(), 2_000).catch(() => {});
     }
     this.#close({ kind: 'left' });
     return saved;
@@ -1171,7 +1192,13 @@ export class LiveParticipant {
   #close(state: ParticipantState): void {
     const wasLive = this.#status.state.kind === 'live' || this.#status.state.kind === 'stopped';
     this.#abort.abort();
-    for (const timer of [this.#sendTimer, this.#saveTimer, this.#checkTimer, this.#holdTimer]) {
+    for (const timer of [
+      this.#sendTimer,
+      this.#saveTimer,
+      this.#checkTimer,
+      this.#holdTimer,
+      this.#trailTimer,
+    ]) {
       if (timer) clearTimeout(timer);
     }
     if (this.#presenceTimer) clearInterval(this.#presenceTimer);
@@ -1359,10 +1386,11 @@ export class LiveParticipant {
   }
 
   #taken(position: number): void {
+    queueMicrotask(() => this.#trailSoon());
     const lowestHeld = Math.min(...this.#held.map((held) => held.stored.position));
     this.#covers = Number.isFinite(lowestHeld)
       ? Math.max(this.#covers, lowestHeld - 1)
-      : Math.max(this.#covers, position, this.#position);
+      : Math.max(this.#covers, position);
   }
 
   #armHold(): void {
@@ -1671,6 +1699,7 @@ export class LiveParticipant {
         linkChoices: choices,
       });
       this.#drafts.set(result.revisionId, {
+        ours: true,
         revisionId: result.revisionId,
         payload: result.payload,
         state: savedState,
@@ -1731,7 +1760,42 @@ export class LiveParticipant {
     this.#clocks.set(this.#seq, this.#clock);
     this.#seq++;
     this.#queue.push({ message, covers });
+    this.#savedCovers = Math.max(this.#savedCovers, covers);
     this.#schedule();
+  }
+
+  // The most any Saved notice of this app's has covered.
+  #savedCovers = 0;
+  #trailTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Tell the server what is saved once it is (section 5.10, **Ending**): when
+   * the head is a draft this app saved and compared, the document has
+   * exactly its state, and stored messages after the last Saved notice it
+   * sent are all in the document, a Saved notice naming the head covers
+   * them. Otherwise a session nothing more happens in would look unsaved,
+   * and be kept for the draft retention.
+   */
+  #trail(): void {
+    if (!this.#keyed() || this.#covers <= this.#savedCovers) return;
+    if (this.#pending.length > 0 || this.#queue.length > 0 || this.#sending || this.#placing)
+      return;
+    const head = this.#head ? this.#drafts.get(this.#head) : undefined;
+    if (!head?.ours || !head.compared) return;
+    try {
+      if (!sameState(this.document.state(), head.state)) return;
+    } catch {
+      return;
+    }
+    this.#queueSaved(head.revisionId, this.document.stateBytes(), this.#covers);
+  }
+
+  #trailSoon(): void {
+    if (this.#trailTimer || this.#covers <= this.#savedCovers) return;
+    this.#trailTimer = setTimeout(() => {
+      this.#trailTimer = null;
+      this.#trail();
+    }, DEBOUNCE_MS);
   }
 
   /**
@@ -1778,6 +1842,7 @@ export class LiveParticipant {
         covers,
         revisionId,
       });
+      void this.#transport.leave(further).catch(() => {});
       this.#snapshotBytes = message.sealed.ciphertext.length;
       this.#bytesSinceSnapshot = 0;
     } catch {
@@ -1889,7 +1954,10 @@ export class LiveParticipant {
     for (let tries = 0; ; tries++) {
       if (this.#stopSending || this.#abort.signal.aborted) return;
       try {
-        await this.#transport.send({ joinId: this.#me.joinId, messages });
+        const { positions } = await this.#transport.send({ joinId: this.#me.joinId, messages });
+        for (const position of positions) {
+          if (position !== null) this.#placed = Math.max(this.#placed, position);
+        }
         break;
       } catch (error) {
         if (error instanceof ApiError && (outcomeUnknown(error) || error.code === 'rate-limited')) {
@@ -1915,6 +1983,8 @@ export class LiveParticipant {
   }
 
   #sentSeq = 0;
+  // The highest position the server gave a stored message of this app's main join.
+  #placed = 0;
   /** Each stored message's `clock`, by `seq`: a notice's is the update's before it. */
   readonly #clocks = new Map<number, number>();
 
