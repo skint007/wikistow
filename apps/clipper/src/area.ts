@@ -11,8 +11,10 @@
 //
 // It takes only the person's own input (`isTrusted`), so the page's
 // scripts can't drag one out for them; its elements are in a closed
-// shadow root, so they can't read or restyle them, and it's in the top
-// layer, so the page can't cover it.
+// shadow root, so they can't read or restyle them. It's a modal dialog of
+// its own, in the top layer, so the page can't cover it, and a dialog the
+// page has open, which makes the rest of the page inert, doesn't take its
+// input: the newest modal is the one that isn't inert.
 import { api } from './api.ts';
 import type { Area, AreaMessage } from './shot.ts';
 
@@ -57,6 +59,23 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   stop?.();
   if (visualViewport && Math.abs(visualViewport.scale - 1) > 0.001) return 'zoomed';
 
+  const frame = document.createElement('dialog');
+  style(frame, {
+    all: 'initial',
+    display: 'block',
+    position: 'fixed',
+    inset: '0',
+    width: '100vw',
+    height: '100vh',
+    'max-width': 'none',
+    'max-height': 'none',
+    margin: '0',
+    padding: '0',
+    border: '0',
+    overflow: 'hidden',
+    background: 'transparent',
+    'z-index': '2147483647',
+  });
   const host = document.createElement('div');
   style(host, {
     all: 'initial',
@@ -165,11 +184,17 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   host.addEventListener('wheel', still, { passive: false });
   host.addEventListener('contextmenu', still);
   addEventListener('keydown', key, true);
+  // A modal dialog's own Escape, should the key reach it first.
+  frame.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    void finish(null);
+  });
+  frame.append(host);
 
   function remove() {
     clearTimeout(timer);
     removeEventListener('keydown', key, true);
-    host.remove();
+    frame.remove();
     if (stop === remove) stop = null;
   }
   async function finish(chosen: Area | null) {
@@ -182,13 +207,13 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   }
   stop = remove;
 
-  document.documentElement.append(host);
-  // The top layer, above the page's own dialogs and full-screen elements.
+  document.documentElement.append(frame);
+  // The top layer, above the page's own dialogs and full-screen elements,
+  // and modal, so a dialog the page has open doesn't take the person's input.
   try {
-    host.popover = 'manual';
-    host.showPopover();
+    frame.showModal();
   } catch {
-    // Without popovers, its z-index alone.
+    // Where it can't be modal, its z-index alone.
   }
   return 'choosing';
 }
@@ -196,9 +221,11 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
 declare global {
   var wikistowArea: typeof choose | undefined;
   var wikistowAreaStop: (() => void) | undefined;
+  var wikistowAreaShown: (() => boolean) | undefined;
 }
 
 // Reached through a second injection (background.ts), in this extension's
 // own world: the page's scripts can't see them.
 globalThis.wikistowArea = choose;
 globalThis.wikistowAreaStop = () => stop?.();
+globalThis.wikistowAreaShown = () => stop !== null;

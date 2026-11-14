@@ -105,7 +105,12 @@ const Outcome = z.discriminatedUnion('ok', [
     message: z.string().max(1_000),
   }),
 ]);
-const Made = z.strictObject({ spaceId: SpaceId, pageId: PageId, path: z.string().max(100_000) });
+const Made = z.strictObject({
+  spaceId: SpaceId,
+  pageId: PageId,
+  path: z.string().max(100_000),
+  partial: z.boolean().optional(),
+});
 export const PageState = z.strictObject({
   vault: z.enum(['locked', 'unlocked']),
   offline: z.boolean(),

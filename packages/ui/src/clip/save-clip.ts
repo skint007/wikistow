@@ -12,11 +12,10 @@ import {
   type AttachmentRef,
   type LinkSpans,
   type PageId,
-  type SpaceId,
   type PageWriter,
   type RevisionId,
 } from '@wikistow/client';
-import type { ClipImage, ClipOutcome, DesktopClip } from '@wikistow/contracts';
+import type { ClipImage, ClipMade, ClipOutcome, DesktopClip } from '@wikistow/contracts';
 import {
   clipFrontmatter,
   clipParts,
@@ -45,7 +44,7 @@ export type SaveClipDeps = {
   /** Where the Markdown's links are (`linkSpans`), as the app reads it, in a worker. */
   spans?: (markdown: string) => Promise<LinkSpans>;
   /** Tell main the clip's page is made, so a reload finishes it rather than making another. */
-  made?: (page: { spaceId: SpaceId; pageId: PageId; path: string }) => Promise<void>;
+  made?: (page: ClipMade) => Promise<void>;
   /** Main's fetch of one of the clip's images (`DesktopBridge.clipImage`). */
   image: (url: string) => Promise<ClipImage>;
   /** Today, as `clipped` says it. */
@@ -77,6 +76,20 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   if (clip.mode === 'screenshot' && !shot && !clip.made) {
     return failed('failed', 'WikiStow couldn’t read this screenshot.');
   }
+  // A screenshot's page made before a reload cut it short, without the
+  // screenshot: it isn't the clip, so it goes in the trash, and the clip
+  // is saved again.
+  if (clip.made?.partial) {
+    const { spaceId, pageId } = clip.made;
+    const dropped = await deps.writer
+      .deleteNode({ spaceId, nodeId: pageId, node: 'page', name: title, dropChanges: true })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!dropped) return failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
+    return saveClip({ ...clip, made: null }, deps);
+  }
   // Made before a reload cut it short: its text is saved, so it's done.
   if (clip.made) {
     const { spaceId, pageId, path } = clip.made;
@@ -87,7 +100,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         pageId,
         title,
         path,
-        images: { saved: 0, skipped: 0 },
+        images: { saved: clip.mode === 'screenshot' ? 1 : 0, skipped: 0 },
         faithful: true,
       },
       place: null,
@@ -164,7 +177,8 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
     return failed('failed', 'WikiStow couldn’t save the clip. Try again.');
   }
   const page = { spaceId, pageId: made.pageId };
-  await deps.made?.({ spaceId, pageId: made.pageId, path: savedTo(place.path) }).catch(() => {});
+  const madeAs = { spaceId, pageId: made.pageId, path: savedTo(place.path) };
+  await deps.made?.(shot ? { ...madeAs, partial: true } : madeAs).catch(() => {});
 
   if (shot) {
     let ref: AttachmentRef;
@@ -200,6 +214,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         .catch(() => {});
       return failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
     }
+    await deps.made?.({ ...madeAs, partial: false }).catch(() => {});
     return {
       outcome: {
         ok: true,

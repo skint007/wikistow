@@ -39,7 +39,7 @@ export function manifest(target: Target, options: ManifestOptions) {
     name: 'WikiStow Web Clipper',
     short_name: 'WikiStow',
     description:
-      'Save links, selections, articles and whole pages to your WikiStow desktop app, as drafts.',
+      'Save links, selections, articles, whole pages and screenshots to your WikiStow desktop app, as drafts.',
     version: options.version,
     homepage_url: 'https://github.com/skint007/wikistow',
     icons,

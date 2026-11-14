@@ -521,6 +521,19 @@ test('a screenshot of an area is the part dragged over, scrolled, in its device 
   const origin = await serve();
   const { page, popup, tabId } = await popupFor(worker, origin, undefined, '/shot');
   await page.evaluate(() => scrollTo(0, 1000));
+  // A dialog the page has open, modal, which makes the rest of it inert,
+  // away from the box and with no backdrop, takes nothing from the overlay.
+  await page.evaluate(() => {
+    const style = document.createElement('style');
+    style.textContent =
+      'dialog::backdrop { background: transparent } #modal { margin: 0; inset: 20px 20px auto auto }';
+    const modal = document.createElement('dialog');
+    modal.id = 'modal';
+    modal.innerHTML = '<button>A button</button>';
+    document.head.append(style);
+    document.body.append(modal);
+    modal.showModal();
+  });
   await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
   await popup.getByRole('radio', { name: 'Choose an area' }).check();
   await page.bringToFront();
@@ -590,4 +603,22 @@ test('Escape stops choosing an area, sending nothing', async () => {
   expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
   expect(await got('stable', 'clip')).toEqual([]);
   expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+
+  // An overlay that went with its page leaves the popup nothing to wait for.
+  const third = await reopen(tabId);
+  await third.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const gone = third.waitForEvent('close');
+  await third.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await gone;
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  await page.reload();
+  const fourth = await reopen(tabId);
+  await expect(fourth.getByRole('button', { name: 'Save to WikiStow' })).toBeVisible();
+  await expect
+    .poll(() => worker.evaluate(() => chrome.storage.session.get(['clip', 'choosing'])))
+    .toEqual({});
+  await expect(
+    fourth.getByText('Drag over the page to choose the area. Esc cancels.'),
+  ).toBeHidden();
 });

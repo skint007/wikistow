@@ -523,6 +523,46 @@ describe('saving a screenshot', () => {
     expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'deleteNode']);
   });
 
+  it('says its page is made only partly until the screenshot is saved in it', async () => {
+    const { writer, calls } = fakeWriter();
+    const told: string[] = [];
+    await saveClip(
+      shot(),
+      deps({
+        writer,
+        made: async (page) => {
+          told.push(
+            `${page.partial ? 'partly' : 'whole'} after ${calls.map((c) => c.call).join(',')}`,
+          );
+        },
+      }),
+    );
+    expect(told).toEqual(['partly after newPageDraft', 'whole after newPageDraft,attach,save']);
+  });
+
+  it('puts a page made partly before a reload in the trash, and saves the screenshot again', async () => {
+    const { writer, calls } = fakeWriter();
+    const pageId = newId(PageId);
+    const saved = await saveClip(
+      shot({ made: { spaceId, pageId, path: 'Home / News', partial: true } }),
+      deps({ writer }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    expect(calls.map((c) => c.call)).toEqual(['deleteNode', 'newPageDraft', 'attach', 'save']);
+    expect(calls[0]?.input).toMatchObject({ spaceId, nodeId: pageId, dropChanges: true });
+  });
+
+  it('finishes a screenshot whose page was made whole before a reload, making no other', async () => {
+    const { writer, calls } = fakeWriter();
+    const pageId = newId(PageId);
+    const saved = await saveClip(
+      shot({ made: { spaceId, pageId, path: 'Home / News' } }),
+      deps({ writer }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, pageId, images: { saved: 1, skipped: 0 } });
+    expect(calls).toEqual([]);
+  });
+
   it('refuses a screenshot clip with no screenshot, making nothing', async () => {
     const { writer, calls } = fakeWriter();
     const saved = await saveClip(shot({ screenshot: null }), deps({ writer }));

@@ -233,7 +233,12 @@ async function screenshot(
   if (part) png = await cropPng(png, part.area, part.view);
   const shot = base64(png);
   if (shot.length > MAX_SCREENSHOT_CHARS) {
-    throw new NoShot('too-long', 'This screenshot is too large to clip. Choose a smaller area.');
+    throw new NoShot(
+      'too-long',
+      part
+        ? 'This screenshot is too large to clip. Choose a smaller area.'
+        : 'This screenshot is too large to clip. Try Choose an area.',
+    );
   }
   return shot;
 }
@@ -241,6 +246,19 @@ async function screenshot(
 /** The area being chosen, as `storage.session` keeps it, which outlives a sleeping background. */
 async function choosing(): Promise<Choosing | null> {
   return ((await api.storage.session.get('choosing')) as SessionState).choosing ?? null;
+}
+
+/** Whether the overlay is still on its page: one that went with its page, or was taken off, isn't. */
+async function overlayShown(tabId: number): Promise<boolean> {
+  try {
+    const [ran] = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => globalThis.wikistowAreaShown?.() ?? false,
+    });
+    return ran?.result === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Stop choosing an area, taking the overlay off its page. */
@@ -495,7 +513,10 @@ api.runtime.onConnect.addListener((port) => {
     // An overlay that went with its page, or gave up, leaves nothing to wait for.
     if (current?.phase === 'choosing') {
       const was = await choosing();
-      if (!was || Date.now() > was.until) clearClip();
+      if (!was || Date.now() > was.until || !(await overlayShown(was.tabId))) {
+        await api.storage.session.remove('choosing');
+        clearClip();
+      }
     }
     // A failure's `!` has been seen once the popup opens.
     if (current?.phase === 'failed') badge('');

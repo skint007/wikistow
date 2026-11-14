@@ -365,6 +365,21 @@ describe('a screenshot', () => {
   const base64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
   const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
 
+  it('keeps whether its page was made only partly, for a reload to finish it', () => {
+    const { desk, requests } = setup();
+    desk.setPageState({ vault: 'unlocked', offline: false });
+    const { open } = connection();
+    desk.answer(clipMessage({ mode: 'screenshot', html: '', screenshot: base64(PNG) }), open);
+    const request = requests[0]!;
+    if (request.kind !== 'clip') throw new Error('Not a clip');
+    const page = { spaceId: 'space1', pageId: 'page1', path: 'Home' };
+    desk.made(request.clip.id, { ...page, partial: true });
+    expect(desk.waiting()[0]?.made).toEqual({ ...page, partial: true });
+    desk.made(request.clip.id, { ...page, partial: false });
+    expect(desk.waiting()[0]?.made).toEqual({ ...page, partial: false });
+    expect(() => desk.made(request.clip.id, { ...page, partial: 'no' })).toThrow();
+  });
+
   it('goes to the page as its bytes, told PNG or JPEG by them', () => {
     const { desk, requests } = setup();
     desk.setPageState({ vault: 'unlocked', offline: false });
