@@ -28,7 +28,7 @@ import type { Pluggable } from 'unified';
 import { markdownSyntaxes } from '../../../registries';
 import { inertHost, type VisualHost } from './host';
 import { isLiteral } from './literals';
-import { highlightEditorNode } from './highlight-marks';
+import { HIGHLIGHT, highlightEditorNode, TEXT_COLOR } from './highlight-marks';
 import { leaveLastBlock } from './plugins';
 import { pluginInlineNode } from './plugin-inline';
 import { readAlone } from './read-alone';
@@ -74,11 +74,13 @@ const WWW_DOT = /(?<=[Ww])\.(?=\\)/g;
 // (`b@x.org\_`).
 const EMAIL_AT = /(?<=[+\-.\w])@(?=[-.\w])/g;
 
-// A space in a link, starting text after more of it, as it's given to
-// Milkdown (`writable`): one that closes the link early, where a mark
-// around it ends, moves the spaces starting the rest out of it. This
-// private-use character it leaves be, and it's written as the space.
-const LINKED_SPACE = '\uE002';
+// A space at the edge of text in a mark that goes on past it, or in a
+// colour's HTML, as it's given to Milkdown (`writable`): Milkdown moves the
+// spaces at a mark's ends out of it as it closes it, and it closes a mark
+// early, to open it again, where one it opened later ends, parting
+// `**==a== b**`. This private-use character it leaves be, and it's
+// written as the space.
+const HELD_SPACE = '\uE002';
 
 /**
  * Text, escaped wherever Markdown would read more in it. Milkdown's own
@@ -96,7 +98,7 @@ const LINKED_SPACE = '\uE002';
  * an autolink (`<…>`), where nothing escapes, text is written as it is.
  */
 const escaped: Handle = (node: Text, parent, state, info) => {
-  const value = node.value.replaceAll(LINKED_SPACE, ' ');
+  const value = node.value.replaceAll(HELD_SPACE, ' ');
   if (state.stack.includes('autolink')) return value;
   // With the character written before it, which may be an address's, as
   // the `_` of a `__` before `@x.org` is. A `*` there may be written `_`
@@ -384,14 +386,20 @@ const leafText = (leaf: Node) => (leaf.type.name === 'hardbreak' ? '\n' : '\uFFF
 export const holds = (atom: Node, mark: Mark) =>
   !mark.type.spec.code && !(atom.type.name === 'footnote_reference' && mark.type.name === 'link');
 
+// A colour's HTML, `<span data-color>` or `<mark data-color>`, which can
+// hold spaces at its ends, as `**` and `==` can't.
+const holdsSpaces = (mark: Mark) =>
+  mark.type.name === TEXT_COLOR || (mark.type.name === HIGHLIGHT && mark.attrs['color'] !== null);
+
 /**
  * `doc` without the marks Markdown can't hold. None on the spaces and line
- * breaks a mark's run starts or ends with, but code: delimiters can't sit
- * beside them, and Milkdown, which moves spaces out of a mark, wrote some
- * around nothing (`~~~~`, `[](…)`) and others differently each time. And
- * none an atom can't hold (`holds`). A space starting text in a link after
- * more of it is held for Milkdown, which may otherwise move it out
- * (`LINKED_SPACE`).
+ * breaks a mark's run starts or ends with, but code, and a colour's HTML on
+ * spaces (`holdsSpaces`): delimiters can't sit beside them, and Milkdown,
+ * which moves spaces out of a mark, wrote some around nothing (`~~~~`,
+ * `[](…)`) and others differently each time. And none an atom can't hold
+ * (`holds`). A space at the edge of text in a mark that goes on past it,
+ * or in a colour's HTML, is held for Milkdown, which may otherwise move it
+ * out (`HELD_SPACE`).
  */
 function writable(doc: Node): Node {
   const tr = new Transform(doc);
@@ -414,23 +422,30 @@ function writable(doc: Node): Node {
     const text = block.textBetween(0, block.content.size, undefined, leafText);
     for (const { mark, from, to } of runs) {
       const inside = text.slice(from, to);
-      const lead = inside.length - inside.trimStart().length;
-      const trail = inside.length - inside.trimEnd().length;
+      // A colour's HTML keeps spaces at its ends, but not a line break.
+      const edge = (spaces: string) =>
+        holdsSpaces(mark) && !spaces.includes('\n') ? 0 : spaces.length;
+      const lead = edge(inside.slice(0, inside.length - inside.trimStart().length));
+      const trail = edge(inside.slice(inside.trimEnd().length));
       if (lead > 0) tr.removeMark(start + from, start + from + lead, mark);
       if (trail > 0 && lead < inside.length) tr.removeMark(start + to - trail, start + to, mark);
     }
     return false;
   });
-  const spaces: { pos: number; marks: readonly Mark[] }[] = [];
+  const spaces = new Map<number, readonly Mark[]>();
   tr.doc.descendants((node, pos, parent, index) => {
-    const before = index > 0 ? parent?.child(index - 1) : null;
-    const link = node.marks.find((mark) => mark.type.name === 'link');
-    const code = node.marks.some((mark) => mark.type.spec.code);
-    if (node.text?.startsWith(' ') && link?.isInSet(before?.marks ?? []) && !code)
-      spaces.push({ pos, marks: node.marks });
+    if (!node.isText || !node.text || node.marks.some((mark) => mark.type.spec.code)) return;
+    const beside = (at: number) =>
+      parent && at >= 0 && at < parent.childCount ? parent.child(at) : null;
+    const before = beside(index - 1);
+    const after = beside(index + 1);
+    const held = (other: Node | null) =>
+      node.marks.some((mark) => holdsSpaces(mark) || mark.isInSet(other?.marks ?? []));
+    if (node.text.startsWith(' ') && held(before)) spaces.set(pos, node.marks);
+    if (node.text.endsWith(' ') && held(after)) spaces.set(pos + node.text.length - 1, node.marks);
   });
-  for (const { pos, marks } of spaces)
-    tr.replaceWith(pos, pos + 1, doc.type.schema.text(LINKED_SPACE, marks));
+  for (const [pos, marks] of spaces)
+    tr.replaceWith(pos, pos + 1, doc.type.schema.text(HELD_SPACE, marks));
   return tr.doc;
 }
 

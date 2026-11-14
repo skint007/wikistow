@@ -196,8 +196,13 @@ const highlights: MarkdownConfig = {
       parse(cx, next, pos) {
         if (next !== EQUALS || cx.char(pos + 1) !== EQUALS || cx.char(pos + 2) === EQUALS)
           return -1;
-        // One after a `=` an escape doesn't take is no sequence's start.
-        if (cx.char(pos - 1) === EQUALS && cx.char(pos - 2) !== 92) return -1;
+        // One after a `=` an escape doesn't take is no sequence's start: one
+        // after an odd number of backslashes is escaped.
+        if (cx.char(pos - 1) === EQUALS) {
+          let slashes = 0;
+          while (cx.char(pos - 2 - slashes) === 92) slashes++;
+          if (slashes % 2 === 0) return -1;
+        }
         const before = cx.slice(pos - 1, pos);
         const after = cx.slice(pos + 2, pos + 3);
         const spaceBefore = /^\s?$/.test(before);

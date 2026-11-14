@@ -109,9 +109,11 @@ function obsidianSyntax(tree: Root, body: string): Unkept | null {
  */
 export const withLf = (markdown: string) => markdown.replace(/\r\n?/g, '\n');
 
-// Marks as Markdown writes them, around text: two around exactly the same
-// text show the same in either order (`==**a**==`, `**==a==**`).
+// Marks as Markdown writes them, around text, links among them: two around
+// exactly the same text show the same in either order (`==**a**==`,
+// `**==a==**`, `[==a==](u)`).
 const NESTING = new Set<string>([
+  'link',
   'emphasis',
   'strong',
   'delete',
@@ -145,12 +147,15 @@ function inOneOrder(tree: Root): Root {
         if (at.children.length !== 1 || !only) break;
         at = only;
       }
-      if (chain.length > 1) {
-        const shells = chain.map((wrap) => ({ ...wrap })).sort(byKey);
-        shells.forEach((shell, k) => (shell.children = shells[k + 1] ? [shells[k + 1]!] : content));
-        children[i] = shells[0] ?? child;
+      if (chain.length < 2) {
+        stack.push(child);
+        continue;
       }
-      stack.push(...(chain.length > 1 ? content : [child]));
+      const shells = chain.map((wrap) => ({ ...wrap })).sort(byKey);
+      shells.forEach((shell, k) => (shell.children = shells[k + 1] ? [shells[k + 1]!] : content));
+      children[i] = shells[0] ?? child;
+      // The innermost, whose children may start runs of their own.
+      stack.push(shells.at(-1) ?? child);
     }
   }
   return tree;

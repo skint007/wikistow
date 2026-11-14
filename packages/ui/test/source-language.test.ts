@@ -31,6 +31,7 @@ it('shows a highlight as the reader reads one (#403), and text that only looks l
     expect.arrayContaining(['Highlight', 'HighlightMark', 'StrongEmphasis']),
   );
   expect(nodes('==starts== a line')).toContain('Highlight');
-  for (const text of ['a == b == c', '===a===', '== a ==', '`==code==`', '\\==a=='])
+  expect(nodes('a \\\\==b==')).toContain('Highlight');
+  for (const text of ['a == b == c', '===a===', '== a ==', '`==code==`', '\\==a==', 'a \\\\===b=='])
     expect(nodes(text), text).not.toContain('Highlight');
 });

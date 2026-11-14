@@ -138,6 +138,14 @@ describe('highlights and colours in the visual editor', () => {
     await reported(m, 'Pick one word here.\n');
   });
 
+  it('keep bold around a highlight at its start as one', async () => {
+    const m = await mount('Pick **one word** here.\n');
+    select(m, 'one');
+    await userEvent.keyboard('{Control>}{Shift>}h{/Shift}{/Control}');
+    await reported(m, 'Pick **==one== word** here.\n');
+    expect(m.unfaithful).toEqual([]);
+  });
+
   it('give the selection a highlight and text colour from the toolbar', async () => {
     const m = await mount('Pick one word here.\n');
     select(m, 'word');
@@ -166,8 +174,8 @@ describe('highlights and colours in the visual editor', () => {
     select(m, 'Start', true);
     await choose('Text colour', 'Green');
     await userEvent.keyboard(' green');
-    // Markdown writes no colour on the space starting it.
-    await reported(m, 'Start <span data-color="green">green</span>\n\n```\ncode\n```\n');
+    // A colour's HTML holds the space typed in it, as `**` couldn't.
+    await reported(m, 'Start<span data-color="green"> green</span>\n\n```\ncode\n```\n');
     select(m, 'code');
     expect(control('Highlight').getAttribute('aria-disabled')).toBe('true');
     await userEvent.click(control('Highlight and text colour'));

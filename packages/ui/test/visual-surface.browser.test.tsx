@@ -229,6 +229,15 @@ describe('the fidelity check', () => {
       '- ==**item**== <span data-color="red">red</span> <mark data-color="blue">blue</mark>\n',
       '| a |\n| - |\n| ==b== <span data-color="green">c</span> |\n',
       '<span data-color="pink">not a colour</span> <span data-color="red">open\n',
+      // Marks around a highlight or colour at their start, and around all of it.
+      '**==a== b**\n',
+      '*==a== b*, ~~==a== b~~\n',
+      '**<span data-color="red">a</span> b** <span data-color="red">==a== b</span>\n',
+      '<span data-color="red"><mark data-color="blue">a</mark> b</span>\n',
+      '[==a==](https://x.test) [<span data-color="red">a</span>](https://x.test)\n',
+      '**==x ~~*a*~~==** and **==x *~~a~~*==**\n',
+      // A colour's HTML holds spaces at its ends.
+      'x <span data-color="red"> a</span> y <span data-color="red">a </span>b x<mark data-color="red"> a</mark>\n',
       '> [!NOTE]\n> body\n',
       'Speed is $v = d / t$ here.\n',
       'It costs \\$5, so $x^2$ more.\n',
