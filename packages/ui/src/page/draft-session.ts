@@ -722,7 +722,9 @@ export class DraftSession {
     this.#base = revisionId;
     // What comes next grows from what landed, not from a session's base; a
     // change kept from a session was what the view shows, which landed.
-    if (this.#keptLive && !this.#participant) this.#payload = this.#current();
+    if (this.#keptLive && !this.#participant && this.#autosave.unsaved() === null) {
+      this.#payload = this.#current();
+    }
     this.#keptLive = null;
     this.#putBack = null;
     this.#region = null;
@@ -1782,7 +1784,7 @@ export class DraftSession {
     try {
       // At an end, its own document is saved on the head unless that holds it.
       const settled = await participant.settle({ save: state.kind !== 'stopped' });
-      const typedMeanwhile = this.#content !== captured;
+      let typedMeanwhile = this.#content !== captured;
       const before = this.#beforeLive;
       this.#beforeLive = null;
       const saveOver = state.kind === 'stopped' ? state.saveOver : null;
@@ -1809,7 +1811,9 @@ export class DraftSession {
         this.#withdrawKept();
         const kept = this.#kept;
         const waiting = kept ? await this.#ports.entryNow?.().catch(() => null) : null;
-        if (kept && waiting?.version === kept.version) {
+        // Typed while that was read: the person's text goes on as below.
+        typedMeanwhile = this.#typedSince(captured);
+        if (!typedMeanwhile && kept && waiting?.version === kept.version) {
           this.#base = waiting.basedOn ?? this.#base;
           this.#known.add(this.#base);
           this.#keptLive = waiting.live ?? null;
@@ -1818,12 +1822,6 @@ export class DraftSession {
           this.#payload = waiting.payload;
           this.#region = null;
           if (this.#rejoinHold) this.#rejoinKept = true;
-          // Typed meanwhile: that goes into the change, on what's on screen.
-          if (this.#typedSince(captured)) {
-            this.#extensions = over(waiting.payload.extensions, this.#extensions);
-            this.#schedule();
-            return false;
-          }
           const { title, markdown, attachments } = waiting.payload;
           this.#content = { title, markdown, attachments };
           this.#extensions = {};
@@ -1831,7 +1829,7 @@ export class DraftSession {
           this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
           return false;
         }
-        if (back) {
+        if (back && !typedMeanwhile) {
           this.#base = back.base;
           this.#known.add(back.base);
           this.#payload = back.payload;
@@ -1896,6 +1894,8 @@ export class DraftSession {
         // A change waiting here, kept or put in, goes on top of it too.
         this.#ports.onTopOf?.(base.revisionId);
       }
+      // Read again: the keep or the head read above may have waited on the device or the server.
+      typedMeanwhile = this.#typedSince(captured);
       if (settled.payload && !typedMeanwhile) {
         const { title, markdown, attachments } = settled.payload;
         this.#content = { title, markdown, attachments };
@@ -2062,8 +2062,12 @@ export class DraftSession {
       this.#extensions = over(this.#payload.extensions, held(settled.payload.extensions));
     }
     this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
-    // Typed in the editor since it left: into the kept change too.
-    if (typedMeanwhile) this.#schedule();
+    // Typed in the editor since it left: into the kept change too, what the
+    // document deleted deleted there too.
+    if (typedMeanwhile) {
+      this.#extensions = over(this.#payload.extensions, this.#extensions);
+      this.#schedule();
+    }
     return true;
   }
 
