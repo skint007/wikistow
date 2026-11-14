@@ -61,6 +61,9 @@ const RECHECKS = 2;
 
 const MINE = Symbol('visual-binding');
 
+/** Text read from `body` for a take-in or a whole read, and how it became `body` since, while that's followed. */
+type Pending = { text: string; map: Mapping | null };
+
 /**
  * The binding of one visual editor to one session's `body`. The editor's
  * text and `body` are the same once it has taken everything in and written
@@ -91,7 +94,7 @@ export class VisualBinding {
    */
   #map: Mapping | null = null;
   /** While a take-in or a whole read is checked, how the text it read became `body` since. */
-  #pending: { text: string; map: Mapping } | null = null;
+  #pending: Pending | null = null;
   /** Others' changes to `body`, and the editor's own writes, counted. */
   #theirs = 0;
   #mine = 0;
@@ -104,7 +107,7 @@ export class VisualBinding {
     this.#synced();
     const observer = (event: Y.YTextEvent, transaction: Y.Transaction) => {
       const delta = event.delta as Delta;
-      if (this.#pending) this.#pending.map = this.#pending.map.remote(delta);
+      if (this.#pending) this.#pending.map = this.#pending.map?.remote(delta) ?? null;
       if (transaction.meta.get(MINE) === this) return;
       this.#map = this.#map?.remote(delta) ?? null;
       this.#theirs++;
@@ -154,7 +157,7 @@ export class VisualBinding {
   }
 
   // `held` is `body`, or what's followed from now on starts from the text the editor took in.
-  #synced(from?: { text: string; map: Mapping }) {
+  #synced(from?: Pending) {
     const body = this.#body.text.toJSON();
     if (this.#held === body) this.#map = Mapping.identity(body.length);
     else if (from && from.text === this.#held) this.#map = from.map;
@@ -233,7 +236,7 @@ export class VisualBinding {
     this.write();
     const text = this.#body.text.toJSON();
     if (text === this.#held) return this.#caughtUp();
-    const pending = { text, map: Mapping.identity(text.length) };
+    const pending: Pending = { text, map: Mapping.identity(text.length) };
     this.#pending = pending;
     const taking = this.#editor.take(text);
     if (taking instanceof Promise) {
@@ -249,11 +252,11 @@ export class VisualBinding {
     this.#took(pending, taking);
   }
 
-  #took(pending: { text: string; map: Mapping }, took: Taking) {
+  #took(pending: Pending, took: Taking) {
     this.#pending = null;
     if (this.#destroyed || !this.#body.active()) return;
     if (took === 'composing') return this.#schedule(COMPOSING_MS);
-    if (!took) return this.#whole(pending.text);
+    if (!took) return this.#whole();
     this.#held = this.#editor.written();
     this.#synced(pending);
     if (this.#again || this.behind) return this.#schedule();
@@ -274,15 +277,19 @@ export class VisualBinding {
   // checked at once, a few times; past that, the text checked goes in, and
   // what came since follows as any change does, unless the person typed
   // meanwhile too, which it never hides: then it tries again at its pace.
-  #whole(text: string, rechecks = 0) {
+  #whole(rechecks = 0) {
     const due = this.#wholeAt - performance.now();
     if (rechecks === 0 && due > 0) return this.#schedule(due);
+    // `body` as it is now, the person's typing in it, is what's checked:
+    // what came in before counts as checked, and what comes after as since.
+    this.write();
+    const text = this.#body.text.toJSON();
     const started = performance.now();
     this.#wholeAt = started + WHOLE_MS;
     this.#reading = true;
     const by = [...this.#by];
     const [theirs, mine] = [this.#theirs, this.#mine];
-    const pending = { text, map: Mapping.identity(text.length) };
+    const pending: Pending = { text, map: Mapping.identity(text.length) };
     this.#pending = pending;
     void this.#editor
       .check(text)
@@ -306,9 +313,9 @@ export class VisualBinding {
         const now = this.#body.text.toJSON();
         const othersSince = this.#theirs !== theirs;
         const ownSince = this.#mine !== mine;
-        let shown: { text: string; map: Mapping };
+        let shown: Pending;
         if (!othersSince) shown = { text: now, map: Mapping.identity(now.length) };
-        else if (rechecks < RECHECKS) return this.#whole(now, rechecks + 1);
+        else if (rechecks < RECHECKS) return this.#whole(rechecks + 1);
         else if (!ownSince) shown = pending;
         else return this.#schedule(Math.max(TAKE_MS, this.#wholeAt - performance.now()));
         if (this.#editor.show(shown.text) === 'composing') return this.#schedule(COMPOSING_MS);

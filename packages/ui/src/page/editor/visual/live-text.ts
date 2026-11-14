@@ -56,44 +56,76 @@ function smallest(before: string, after: string, at: number): TextChange | null 
 }
 
 /**
- * The changes that make `before` read `after`: one for each run of lines
- * that differ, in order, each the smallest within its lines, so blocks the
- * editor didn't change between two it did stay as they are in `body`.
+ * The changes that make `before` read `after`, each the smallest in
+ * characters: by a character diff of the lines between the common start and
+ * end, so text the editor didn't change, between or within its changes,
+ * stays as it is in `body`, and others' changes there with it. Past
+ * `DIFF_MS`, by lines, each run of lines that differ its smallest change;
+ * failing that, one span.
  */
 export function ownChanges(before: string, after: string): TextChange[] {
   if (before === after) return [];
-  const { start, endA, endB } = edges(before, after);
+  let { start, endA, endB } = edges(before, after);
+  // Whole lines, which the line diff, if it comes to that, lines up.
+  start = before.lastIndexOf('\n', start - 1) + 1;
+  const lineEnd = before.indexOf('\n', endA);
+  const onward = (lineEnd < 0 ? before.length : lineEnd + 1) - endA;
+  endA += onward;
+  endB += onward;
   const was = before.slice(start, endA);
   const now = after.slice(start, endB);
-  const whole = () => {
-    const change = smallest(was, now, start);
-    return change ? [change] : [];
-  };
-  // One line, or none, either side: one span.
-  if (!was.includes('\n') || !now.includes('\n')) return whole();
-  const parts = diffLines(was, now, { timeout: DIFF_MS });
-  if (!parts) return whole();
   const changes: TextChange[] = [];
   let at = start;
   let removed = '';
   let added = '';
-  const flush = () => {
-    const change = smallest(removed, added, at);
+  const flush = (smallestOf: boolean) => {
+    const change = smallestOf
+      ? smallest(removed, added, at)
+      : removed === '' && added === ''
+        ? null
+        : { from: at, remove: removed.length, insert: added };
     if (change) changes.push(change);
     at += removed.length;
     removed = '';
     added = '';
   };
-  for (const part of parts) {
+  const byChars = diffChars(was, now, { timeout: DIFF_MS });
+  const parts = byChars ?? diffLines(was, now, { timeout: DIFF_MS });
+  if (!parts) {
+    const change = smallest(was, now, start);
+    return change ? [change] : [];
+  }
+  for (const [i, part] of parts.entries()) {
     if (part.removed) removed += part.value;
     else if (part.added) added += part.value;
-    else {
-      flush();
+    else if (byChars && changed(removed, added) && closeUp(part.value, parts, i)) {
+      // A few characters alike between two changes are lined up by chance,
+      // as the "r" of "world" and "there": part of one change.
+      removed += part.value;
+      added += part.value;
+    } else {
+      flush(!byChars);
       at += part.value.length;
     }
   }
-  flush();
+  flush(!byChars);
   return changes;
+}
+
+// Characters alike this few, on one line, between two changes join them.
+const ALIKE_BY_CHANCE = 3;
+
+const changed = (removed: string, added: string) => removed !== '' || added !== '';
+
+/** Whether `value`, alike at `parts[i]`, is short, on one line, and has a change after it. */
+function closeUp(value: string, parts: readonly ChangeObject<string>[], i: number): boolean {
+  const after = parts[i + 1];
+  return (
+    value.length <= ALIKE_BY_CHANCE &&
+    !value.includes('\n') &&
+    !!after &&
+    (after.added || after.removed)
+  );
 }
 
 /**
@@ -129,6 +161,38 @@ function joined(pieces: readonly Piece[]): Piece[] {
     else out.push(piece);
   }
   return out;
+}
+
+// Past this many runs, following each change costs more than the diff
+// that then stands in for it, which is bounded in time.
+const MAX_PIECES = 2_000;
+
+/** Pieces read from the front, a part of one at a time, without copying the rest. */
+class Cursor {
+  readonly #pieces: readonly Piece[];
+  #at = 0;
+  /** What's left of the piece at `#at`. */
+  #left: number;
+  constructor(pieces: readonly Piece[]) {
+    this.#pieces = pieces;
+    this.#left = pieces[0]?.length ?? 0;
+  }
+  peek(): Piece | undefined {
+    const piece = this.#pieces[this.#at];
+    return piece && { kind: piece.kind, length: this.#left };
+  }
+  /** Up to `length` of the piece in front, as a piece of its own. */
+  take(length: number): Piece {
+    const piece = this.#pieces[this.#at] as Piece;
+    const used = Math.min(length, this.#left);
+    this.#left -= used;
+    if (this.#left === 0) this.#left = this.#pieces[++this.#at]?.length ?? 0;
+    return { kind: piece.kind, length: used };
+  }
+  left(): Piece[] {
+    const piece = this.peek();
+    return piece ? [piece, ...this.#pieces.slice(this.#at + 1)] : [];
+  }
 }
 
 /**
@@ -187,32 +251,31 @@ export class Mapping {
     return new Mapping(pieces);
   }
 
-  /** As it is once someone else's change, `delta`, in places of `body`, went into `body`. */
-  remote(delta: Delta): Mapping {
+  /**
+   * As it is once someone else's change, `delta`, in places of `body`, went
+   * into `body`: null once it has grown past `MAX_PIECES`, as so many
+   * scattered changes would make following each one cost more than a diff.
+   */
+  remote(delta: Delta): Mapping | null {
     const out: Piece[] = [];
-    const rest = [...this.#pieces];
-    // Take `length` of `body` from the front of `rest`, as `take` says, with
-    // what of `held` only lies within it or just before.
+    const rest = new Cursor(this.#pieces);
+    // Take `length` of `body` from `rest`, as `take` says, with what of
+    // `held` only lies within it or just before.
     const walk = (length: number, take: (piece: Piece, length: number) => void) => {
       let left = length;
-      while (rest.length > 0) {
-        const piece = rest[0] as Piece;
+      for (let piece = rest.peek(); piece; piece = rest.peek()) {
         if (piece.kind === 'held') {
-          out.push(piece);
-          rest.shift();
+          out.push(rest.take(piece.length));
           continue;
         }
         if (left === 0) break;
         const used = Math.min(left, piece.length);
-        take(piece, used);
+        take(rest.take(used), used);
         left -= used;
-        if (used === piece.length) rest.shift();
-        else rest[0] = { kind: piece.kind, length: piece.length - used };
       }
     };
     for (const op of delta) {
-      if (op.retain !== undefined)
-        walk(op.retain, (piece, length) => out.push({ kind: piece.kind, length }));
+      if (op.retain !== undefined) walk(op.retain, (piece) => out.push(piece));
       else if (op.delete !== undefined)
         // Alike, it's now in `held` only; theirs, it's gone.
         walk(op.delete, (piece, length) => {
@@ -220,54 +283,55 @@ export class Mapping {
         });
       else if (op.insert !== undefined) {
         // After what of `held` only lies here.
-        while (rest[0]?.kind === 'held') out.push(rest.shift() as Piece);
+        while (rest.peek()?.kind === 'held') out.push(rest.take(Infinity));
         out.push({ kind: 'body', length: lengthOf(op.insert) });
       }
+      if (out.length > MAX_PIECES) return null;
     }
-    return new Mapping([...out, ...rest]);
+    return Mapping.#bounded([...out, ...rest.left()]);
   }
 
   /**
    * As it is once `changes`, of `held`, went into `body` as `carry` carries
    * them, and the editor's text became `held` with them: what's put in is
    * in both, what's taken out alike goes from both, and what someone else
-   * put in inside it stays in `body` only.
+   * put in inside it stays in `body` only. Null past `MAX_PIECES`.
    */
-  afterOwn(changes: readonly TextChange[]): Mapping {
+  afterOwn(changes: readonly TextChange[]): Mapping | null {
     const out: Piece[] = [];
-    const rest = [...this.#pieces];
+    const rest = new Cursor(this.#pieces);
     let at = 0;
-    // Pieces up to `to` in `held`, kept, or, in a range taken out, as `keep` says.
-    const upTo = (to: number, keep: (piece: Piece, length: number) => void) => {
-      while (rest.length > 0) {
-        const piece = rest[0] as Piece;
+    // Pieces up to `to` in `held`: kept, or, in a range taken out, only
+    // what's someone else's in `body`. Theirs at the very end of a range
+    // taken out waits for what comes after it.
+    const upTo = (to: number, takenOut: boolean) => {
+      for (let piece = rest.peek(); piece; piece = rest.peek()) {
         if (piece.kind === 'body') {
-          // Theirs at the very end waits: an insertion goes after it.
-          if (at === to && keep !== kept) break;
-          keep(piece, piece.length);
-          rest.shift();
+          if (takenOut && at === to) break;
+          out.push(rest.take(Infinity));
           continue;
         }
         if (at >= to) break;
         const used = Math.min(to - at, piece.length);
-        keep(piece, used);
+        const taken = rest.take(used);
+        if (!takenOut) out.push(taken);
         at += used;
-        if (used === piece.length) rest.shift();
-        else rest[0] = { kind: piece.kind, length: piece.length - used };
       }
     };
-    const kept = (piece: Piece, length: number) => out.push({ kind: piece.kind, length });
-    const takenOut = (piece: Piece, length: number) => {
-      if (piece.kind === 'body') out.push({ kind: 'body', length });
-    };
     for (const change of changes) {
-      upTo(change.from, kept);
+      upTo(change.from, false);
       // Theirs just before an insertion's place comes before it, as `toBody` puts it.
-      while (rest[0]?.kind === 'body') out.push(rest.shift() as Piece);
+      while (rest.peek()?.kind === 'body') out.push(rest.take(Infinity));
       out.push({ kind: 'same', length: change.insert.toWellFormed().length });
-      upTo(change.from + change.remove, takenOut);
+      upTo(change.from + change.remove, true);
+      if (out.length > MAX_PIECES) return null;
     }
-    return new Mapping([...out, ...rest]);
+    return Mapping.#bounded([...out, ...rest.left()]);
+  }
+
+  static #bounded(pieces: readonly Piece[]): Mapping | null {
+    const mapping = new Mapping(pieces);
+    return mapping.#pieces.length > MAX_PIECES ? null : mapping;
   }
 
   get #segments(): Segment[] {

@@ -37,6 +37,16 @@ describe('its own edits', () => {
     expect(own(before, after)).toBe(after);
   });
 
+  it('adds at a line’s end and on a later line as two insertions, nothing between rewritten', () => {
+    const before = 'One sentence.\n\nSam wrote this paragraph.\n';
+    const after = 'One sentence. More.\n\nSam wrote this paragraph. Yes.\n';
+    expect(ownChanges(before, after)).toEqual([
+      { from: 13, remove: 0, insert: ' More.' },
+      { from: 40, remove: 0, insert: ' Yes.' },
+    ]);
+    expect(own(before, after)).toBe(after);
+  });
+
   it('never starts or ends a change inside an emoji’s two halves', () => {
     // 😀 and 😁 share their first half: a change by code unit would start between them.
     const before = 'A 😀 b';
@@ -98,6 +108,20 @@ describe('carried onto body', () => {
     expect(result.isWellFormed()).toBe(true);
   });
 
+  it('leaves someone’s deletion between two changes in one line', () => {
+    const held = 'The quick brown fox.\n';
+    const body = 'The brown fox.\n';
+    const next = 'A quick brown dog.\n';
+    const carried = Mapping.between(held, body).carry(ownChanges(held, next));
+    expect(applyTo(body, carried)).toBe('A brown dog.\n');
+  });
+
+  it('stops following changes past a bound, for a diff to stand in', () => {
+    const delta = Array.from({ length: 3_000 }, () => [{ retain: 1 }, { insert: 'x' }]).flat();
+    expect(Mapping.identity(3_000).remote(delta)).toBe(null);
+    expect(Mapping.identity(10).remote([{ retain: 2 }, { insert: 'x' }])?.bodyLength).toBe(11);
+  });
+
   it('maps places both ways', () => {
     const mapping = Mapping.between('abc def', 'abc XX def');
     expect(mapping.toBody(4)).toBe(7);
@@ -151,6 +175,8 @@ class FakeEditor implements BoundEditor {
   checks: string[] = [];
   composing = false;
   byBlock = true;
+  /** Block take-ins checked off the thread, failing after this long. */
+  asyncTakeMs: number | null = null;
   visual = true;
   checkMs = 0;
   cantShows: (readonly (string | null)[])[] = [];
@@ -161,7 +187,9 @@ class FakeEditor implements BoundEditor {
   written() {
     return this.shown;
   }
-  take(text: string): Taking {
+  take(text: string): Taking | Promise<Taking> {
+    if (this.asyncTakeMs !== null)
+      return new Promise((resolve) => setTimeout(() => resolve(false), this.asyncTakeMs ?? 0));
     if (this.composing) return 'composing';
     if (!this.byBlock) return false;
     this.taken.push(text);
@@ -397,6 +425,19 @@ describe('the binding', () => {
     await settle();
     expect(editor.canShows).toBe(1);
     expect(editor.shown).toBe('One.\n\nTwo.\n');
+  });
+
+  it('checks body as it is when a whole read starts, after a take-in checked off the thread', async () => {
+    editor.asyncTakeMs = 200;
+    editor.visual = false;
+    theirs('sam', (body) => body.insert(0, '```\n'));
+    await vi.advanceTimersByTimeAsync(TAKE_MS + 50);
+    theirs('rita', (body) => body.insert(body.length, '<div>raw</div>\n'));
+    await vi.advanceTimersByTimeAsync(200);
+    await settle();
+    expect(editor.checks).toEqual(['```\nOne.\n\nTwo.\n<div>raw</div>\n']);
+    expect(editor.wholes).toEqual([]);
+    expect(editor.cantShows).toEqual([['sam', 'rita']]);
   });
 
   it('names nobody for the person’s own change from elsewhere', async () => {
