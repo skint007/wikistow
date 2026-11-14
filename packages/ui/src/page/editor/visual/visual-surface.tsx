@@ -42,17 +42,12 @@ import type { VisualHost } from './host';
 import { QueryResults } from './query-results';
 import { DiagramPreview } from '../../diagram';
 import {
-  cellLinks,
+  changeRules,
   EXTERNAL,
-  autolinks,
-  footnotes,
-  htmlBlocks,
   linkKeys,
   pasting,
   reportEdits,
   type Insert,
-  tableHeaders,
-  typedLinks,
   unshownFootnotes,
 } from './plugins';
 import { FormatToolbar, FormatWatch } from './toolbar';
@@ -622,13 +617,8 @@ function Surface({
             else if (inserting.current === insert) inserting.current = null;
           },
         ),
-        typedLinks,
-        autolinks,
-        cellLinks,
-        htmlBlocks,
-        footnotes,
+        ...changeRules,
         unshownFootnotes,
-        tableHeaders,
         codeHighlights,
         propertyReferences(
           () => latest.current.properties ?? null,
