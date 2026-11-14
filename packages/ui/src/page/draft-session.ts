@@ -245,7 +245,10 @@ export class DraftSession {
       },
       (status, saveError) => {
         // In a live session, the session's saver saves (ADR 0015 decision 5).
-        if (!this.#participant) this.#set({ status: this.#shown(status), saveError });
+        if (this.#participant) return;
+        this.#set({ status: this.#shown(status), saveError });
+        // Saved outside a session: join one, so saves from here aren't someone else's to it.
+        if (status === 'saved') this.#joinSoon();
       },
       timing,
     );
@@ -805,6 +808,7 @@ export class DraftSession {
   close() {
     this.#live = false;
     if (this.#rejoin) clearTimeout(this.#rejoin);
+    if (this.#joinTimer) clearTimeout(this.#joinTimer);
     const participant = this.#participant;
     if (participant) {
       this.#detach();
@@ -826,6 +830,25 @@ export class DraftSession {
 
   #participant: LiveParticipant | null = null;
   #unlive: (() => void)[] = [];
+  // Joining again, once saved outside a session: when, and whether never.
+  #joinTimer: ReturnType<typeof setTimeout> | null = null;
+  #joinTries = 0;
+  #liveOff = false;
+
+  // Join the page's session soon, once what this draft holds is saved, at
+  // a pace that slows with each try in a row that didn't join.
+  #joinSoon() {
+    if (this.#liveOff || this.#joinTimer || this.#participant || !this.#live) return;
+    if (!this.#ports.live || this.#joinTries >= 30) return;
+    const wait = Math.min(1_000 * 2 ** this.#joinTries, 60_000);
+    this.#joinTimer = setTimeout(() => {
+      this.#joinTimer = null;
+      if (this.#participant || !this.#live) return;
+      if (this.#autosave.status !== 'saved' || this.#autosave.unsaved() !== null) return;
+      this.#joinTries++;
+      void this.joinLive();
+    }, wait);
+  }
   // What this draft held as it joined: what it goes back to if it leaves having changed nothing.
   #beforeLive: {
     base: RevisionId;
@@ -860,18 +883,26 @@ export class DraftSession {
     try {
       joined = await live.join(opening);
     } catch {
+      this.#joining = false;
+      this.#joinSoon();
       return;
     } finally {
       this.#joining = false;
     }
     if (!('start' in joined)) {
       this.#set({ live: { kind: 'not-joined', why: joined } });
+      // No sessions on this server, or this app is too old for this one: it edits as before.
+      if (joined.kind === 'older-server' || joined.kind === 'update-app') this.#liveOff = true;
+      else this.#joinSoon();
       return;
     }
     if (!this.#live || this.#ports.epoch() !== epoch || !this.#attach(joined, opening.payload)) {
       // Never started, it saved nothing for anyone, and saves nothing now.
       joined.close();
-      if (this.#live) this.#set({ live: { kind: 'not-joined', why: { kind: 'typed-meanwhile' } } });
+      if (this.#live) {
+        this.#set({ live: { kind: 'not-joined', why: { kind: 'typed-meanwhile' } } });
+        this.#joinSoon();
+      }
       return;
     }
     joined.start();
@@ -943,6 +974,12 @@ export class DraftSession {
       });
     }
     this.#rejoins = 0;
+    this.#joinTries = 0;
+    this.#unlive.push(
+      participant.onBeforeRemote(() => {
+        if (this.#unreported) this.#pull();
+      }),
+    );
     this.#fromDocument(true);
     this.#liveStatus();
     return true;
@@ -957,15 +994,6 @@ export class DraftSession {
   #fromDocument(show: boolean) {
     const participant = this.#participant;
     if (!participant) return;
-    // An edit the editor hasn't reported yet goes in first, so others' change doesn't drop it.
-    if (show && this.#unreported) {
-      queueMicrotask(() => {
-        if (this.#participant !== participant) return;
-        this.#pull();
-        this.#fromDocument(true);
-      });
-      return;
-    }
     let payload: PagePayload;
     try {
       payload = participant.currentPayload();
