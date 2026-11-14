@@ -177,7 +177,7 @@ describe('offline in a live session', () => {
       const again = await join(editor, page, net);
       await expect.poll(() => body(again)).toBe('Owner.\n\ndraft words sent');
       // Into the session: of its own, exactly what the session served.
-      const base = putBack.inSession(again.document.state());
+      const base = putBack.inSession(again.placedThrough(theirs.ownJoin));
       expect(base?.markdown).toBe('draft words sent');
       if (!base || !putBack.ours) throw new Error('no base');
       const merge = pageMerge.mergePayloads(base, putBack.ours, again.currentPayload());

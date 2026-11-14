@@ -86,6 +86,16 @@ export function livePorts(
     },
     hold: () => holdLivePage(page.pageId),
     ask: () => void connection.check(),
+    online: () => connection.get().online,
+    async descends(head, ancestor) {
+      let at: RevisionId | null = head;
+      for (let steps = 0; at && steps < 64; steps++) {
+        if (at === ancestor) return true;
+        const opened = await pageOperations.openRevisionOf(ctx, page, 'draft', at);
+        at = opened.record.basedOn as RevisionId | null;
+      }
+      return false;
+    },
     async head() {
       const info = await queryClient.fetchQuery({ ...pageQuery(ctx, page.pageId), staleTime: 0 });
       const head = info.heads.draftHead;

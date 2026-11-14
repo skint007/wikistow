@@ -216,7 +216,8 @@ function appPorts(
     waitingChange: () => drafts.waitingChange(),
     keep: (input) => drafts.keep(input),
     entryNow: () => drafts.entryNow(),
-    markPutIn: (version, putIn) => drafts.markPutIn(version, putIn),
+    markPutIn: (version, live) => drafts.markPutIn(version, live),
+    seen: () => drafts.seen(),
     withdraw: (version) => drafts.withdraw(version),
     async dropPublish() {
       const choices = queueChoices(ctx);

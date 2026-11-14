@@ -108,7 +108,9 @@ export type DraftWriter = {
   /** The page's draft entry as it is now, read in turn with the queue's sending (`OfflineQueue.entryNow`). */
   entryNow(): Promise<QueuedPage | null>;
   /** The entry at `version` was put into the page's live session (`OfflineQueue.markPutIn`). */
-  markPutIn(version: number, putIn: NonNullable<KeptLive['putIn']>): Promise<void>;
+  markPutIn(version: number, live: KeptLive): Promise<void>;
+  /** The version of the page's entry this writer last saw, if any. */
+  seen(): number | null;
   /** Withdraw the entry at `version`, which a compared draft of the session holds (`OfflineQueue.withdraw`). */
   withdraw(version: number): Promise<boolean>;
   /** The person chose to save theirs on top of `revisionId` (Save mine on top). */
@@ -364,9 +366,10 @@ export function createPageWriter({
         attach: (file, options) =>
           options?.server ? server.uploadAttachment(page, file) : writer.attach(page, file),
         entryNow: async () => (queue ? queue.entryNow(page.pageId) : null),
-        markPutIn: async (version, putIn) => {
-          await queue?.markPutIn(page.pageId, version, putIn);
+        markPutIn: async (version, live) => {
+          await queue?.markPutIn(page.pageId, version, live);
         },
+        seen: () => seen,
         withdraw: async (version) => (queue ? queue.withdraw(page.pageId, version) : false),
         onTopOf(revisionId) {
           onTop = revisionId;

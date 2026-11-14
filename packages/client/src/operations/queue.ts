@@ -3,6 +3,7 @@
 import {
   FolderId,
   type InstallationId,
+  JoinId,
   LiveSessionId,
   MetadataRevisionId,
   PageId,
@@ -85,25 +86,24 @@ type Sending = z.output<typeof Sending>;
  * 0015 decisions 1 and 10): the text of its base, which holds everything
  * others typed that the app took in and, of its own, only what the latest
  * session draft it compared holds, so a merge from it counts only what the
- * person typed as theirs; the join it was typed in, with that join's own
- * Yjs clock in the base and in the document as kept, which is kept too;
- * and, once the change was put
- * into a session, that join's client and clock just after it, so it never
- * goes in twice.
+ * person typed as theirs; the document as kept; the join it was typed in,
+ * with the `seq` of that join's latest message the base holds, and of its
+ * latest sealed, null if typing waited unsealed beyond it. Once the change
+ * was put into a session, the join and `seq` of the message it went in as,
+ * so it never goes in twice (section 5.10, **Putting typing back**).
  */
 const KeptLiveJson = z.strictObject({
   base: Payload,
-  /** The document as kept: once a session holds all that join typed, the base for what came after. */
   typed: Payload,
   sessionId: LiveSessionId,
-  clientId: z.number().int().nonnegative(),
-  baseClock: z.number().int().nonnegative(),
-  clock: z.number().int().nonnegative(),
+  joinId: JoinId,
+  baseSeq: z.number().int().nonnegative(),
+  seq: z.number().int().nonnegative().nullable(),
   putIn: z
     .strictObject({
       sessionId: LiveSessionId,
-      clientId: z.number().int().nonnegative(),
-      clock: z.number().int().nonnegative(),
+      joinId: JoinId,
+      seq: z.number().int().positive(),
     })
     .nullable(),
 });
@@ -658,15 +658,16 @@ export class OfflineQueue {
   }
 
   /**
-   * The entry at `version` went into the page's live session as the change
-   * `putIn`: recorded beside it, without a new version, so a draft view
-   * saving into it still can, and a later join doesn't put it in again.
+   * The entry at `version` went into the page's live session: `live`, kept
+   * beside it, says as which change (`putIn`). Recorded without a new
+   * version, so a draft view saving into it still can, and a later join
+   * doesn't put it in again.
    */
-  async markPutIn(pageId: PageId, version: number, putIn: NonNullable<KeptLive['putIn']>) {
+  async markPutIn(pageId: PageId, version: number, live: KeptLive) {
     await this.#store.queueExclusive(async () => {
       const current = await this.#page(pageId);
-      if (!current?.live || current.version !== version) return;
-      await this.#write({ ...current, live: { ...current.live, putIn } });
+      if (!current || current.version !== version) return;
+      await this.#write({ ...current, live });
     });
   }
 

@@ -8,14 +8,32 @@ const lockName = (pageId: PageId) => `wikistow live ${pageId}`;
 const locks = (): LockManager | null =>
   typeof navigator !== 'undefined' && navigator.locks ? navigator.locks : null;
 
+const released = new Set<() => void>();
+
+/** Hear when this tab lets a page's live lock go, so its queue can send what it held back. */
+export function onLivePageReleased(listener: () => void): () => void {
+  released.add(listener);
+  return () => void released.delete(listener);
+}
+
 /** Hold the page's live lock until the returned function is called. */
 export function holdLivePage(pageId: PageId): () => void {
   const manager = locks();
   if (!manager) return () => {};
   let release = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
-  void manager.request(lockName(pageId), { mode: 'shared' }, () => held).catch(() => {});
-  return release;
+  const request = manager.request(lockName(pageId), { mode: 'shared' }, () => held);
+  void request.catch(() => {});
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    release();
+    // Once let go, the queue may send the page's change it held back.
+    void request.finally(() => {
+      for (const listener of released) listener();
+    });
+  };
 }
 
 /** Whether a tab or window of this app is in the page's live session now. */

@@ -233,17 +233,16 @@ export type OpenedNote = {
 export type PutBack = {
   sessionId: LiveSessionId;
   joinId: JoinId;
-  clientId: number;
   ours: PagePayload | null;
   /** Onto a draft, as a writer outside the session: its own changes the latest session draft it compared holds. */
   outside: PagePayload | null;
-  /** The join's own clock in `outside`, and in `ours`. */
-  outsideClock: number;
-  oursClock: number;
-  /** Into the session again, as a newcomer whose document has `state`: its own changes that document placed. */
-  inSession(state: LiveState): PagePayload | null;
-  /** Whether `state` holds everything of the join's own, typed or deleted. */
-  heldBy(state: LiveState): boolean;
+  /** The highest `seq` of the join's own messages `outside` holds. */
+  outsideSeq: number;
+  /** The join's latest message sealed, and whether typing waited unsealed beyond it. */
+  seq: number;
+  unsealed: boolean;
+  /** Into the session again: its own messages up to `placed`, the highest `seq` a newcomer's document placed (`placedThrough`). */
+  inSession(placed: number): PagePayload | null;
 };
 
 /** The origin of this app's own changes to the document. */
@@ -738,6 +737,8 @@ export class LiveParticipant {
   readonly #startUpdate: Uint8Array;
   #othersLog: Uint8Array[] = [];
   readonly #ownLog: { seq: number; update: Uint8Array }[] = [];
+  // Each join's highest stored message this document placed itself, by `senderId joinId`.
+  readonly #placedSeq = new Map<string, number>();
   // Whether the stream is open now, and since when it hasn't been.
   #connected = false;
 
@@ -1633,27 +1634,41 @@ export class LiveParticipant {
     // Onto a draft, as a writer outside the session: of its own, only what
     // the latest session draft it compared holds, since a head it hasn't
     // compared may lack what the session served.
-    const outsideThrough = checked ? this.#ownThrough(checked.state) : 0;
-    const own = () => Y.getState(this.document.doc.store, this.#clientId);
+    const outsideSeq = checked ? this.#ownThrough(checked.state) : 0;
     return {
       sessionId: this.sessionId,
       joinId: this.#me.joinId,
-      clientId: this.#clientId,
       ours,
-      outside: this.#baseOf(outsideThrough),
-      outsideClock: this.#ownClockThrough(outsideThrough),
-      oursClock: own(),
-      // Into the session again, as a newcomer: of its own, exactly what that
-      // newcomer's document, built from what the session serves, placed.
-      inSession: (state) => this.#baseOf(this.#ownThrough(state)),
-      heldBy: (state) => {
-        try {
-          return holdsState(state, this.#ownState());
-        } catch {
-          return false;
-        }
-      },
+      outside: this.#baseOf(outsideSeq),
+      outsideSeq,
+      seq: this.#ownLog.at(-1)?.seq ?? 0,
+      unsealed: this.#pending.length > 0,
+      // Into the session again, as a newcomer: of its own, exactly the
+      // messages up to the highest `seq` that newcomer's document placed.
+      inSession: (placed) => this.#baseOf(placed),
     };
+  }
+
+  /**
+   * The highest `seq` of `joinId`'s, a join of this person's, whose message
+   * this document placed itself, from what the session served (section
+   * 5.10, **Putting typing back**); 0 for none. A message the session lists
+   * but this document never placed, as one a snapshot claims to cover, doesn't count.
+   */
+  placedThrough(joinId: JoinId): number {
+    return this.#placedSeq.get(key({ senderId: this.#me.senderId, joinId })) ?? 0;
+  }
+
+  /** This app's join. */
+  get ownJoin(): JoinId {
+    return this.#me.joinId;
+  }
+
+  /** The `seq` of this join's latest message sealed, once everything typed is sent: what a change put in now went out as. */
+  async sentThrough(): Promise<{ joinId: JoinId; seq: number } | null> {
+    await this.flush();
+    if (this.#pending.length > 0 || this.#queue.length > 0) return null;
+    return { joinId: this.#me.joinId, seq: this.#sentSeq };
   }
 
   // The highest `seq` up to which `state` holds every update this join sent, message by message.
@@ -1673,22 +1688,6 @@ export class LiveParticipant {
       through = seq;
     }
     return through;
-  }
-
-  // This join's own clock once its updates up to `seq` are in.
-  #ownClockThrough(seq: number): number {
-    let clock = this.#startClock;
-    for (const entry of this.#ownLog) {
-      if (entry.seq > seq) break;
-      try {
-        for (const structs of decodeUpdate(entry.update).structs) {
-          if (structs.client === this.#clientId) clock = Math.max(clock, structs.end);
-        }
-      } catch {
-        // Counted as none.
-      }
-    }
-    return clock;
   }
 
   // A base for putting typing back: the document as this join started, all
@@ -1723,31 +1722,35 @@ export class LiveParticipant {
   /**
    * The draft head as the stream last named it, opened, for putting typing
    * back onto it as a writer outside the session; null when it can't be
-   * opened, or is a draft the session's drafts descend from, which would
-   * take what the session typed since for deleted (a rollback, A2).
+   * opened, or isn't a head to put typing back onto: one the session's
+   * drafts descend from, which would take what the session typed since for
+   * deleted (a rollback, A2), a draft of another session or under other
+   * keys, or a draft from outside whose signed `basedOn` chain doesn't
+   * reach the latest session draft this app saw as head, which descends
+   * from the one the base (`PutBack.outside`) holds of its own, within 64 steps.
    */
   async headDraft(): Promise<{ revisionId: RevisionId; payload: PagePayload } | null> {
     const head = this.#head;
     if (!head || this.#ancestors.has(head)) return null;
-    const known = this.#drafts.get(head)?.payload ?? this.#outsiderDrafts.get(head)?.payload;
-    if (known) return { revisionId: head, payload: known };
+    const session = this.#drafts.get(head);
+    if (session) return { revisionId: head, payload: session.payload };
     try {
-      const opened = await this.#ports.openDraft(head);
-      if (opened.revisionId !== head) return null;
-      return { revisionId: head, payload: opened.payload };
+      const opened = this.#outsiderDrafts.get(head) ?? (await this.#ports.openDraft(head));
+      if (opened.revisionId !== head || ofAnotherSession(opened, this.sessionId)) return null;
+      if (!sameKeys(opened, this.#opened)) return null;
+      // The latest session draft seen as head: one it skips would be rolled back.
+      const reach = this.#lastHead?.revisionId ?? this.#checked;
+      let at = opened.basedOn;
+      for (let steps = 0; at && steps < 64; steps++) {
+        if (at === reach) return { revisionId: head, payload: opened.payload };
+        if (this.#ancestors.has(at)) return null;
+        const known = this.#basedOn.get(at);
+        at = known !== undefined ? known : (await this.#ports.openDraft(at)).basedOn;
+      }
+      return null;
     } catch {
       return null;
     }
-  }
-
-  /** Where this join's own typing has reached: a change put in now is held once a document holds it. */
-  ownMark(): { sessionId: LiveSessionId; joinId: JoinId; clientId: number; clock: number } {
-    return {
-      sessionId: this.sessionId,
-      joinId: this.#me.joinId,
-      clientId: this.#clientId,
-      clock: Y.getState(this.document.doc.store, this.#clientId),
-    };
   }
 
   /** Close without saving, as when the vault locks: the key is wiped. */
@@ -2058,6 +2061,8 @@ export class LiveParticipant {
     if (opened.kind === 'snapshot' && key(opened) !== key(this.#me)) this.#bytesSinceSnapshot = 0;
     this.#joins.take(opened);
     this.#verified.add(key(opened));
+    // Placed by this document itself, from what the session served.
+    if (opened.kind !== 'presence') this.#placedSeq.set(key(opened), opened.seq);
     this.#taken(stored.position);
     // What it held up may fit now.
     const waiting = this.#held;

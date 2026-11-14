@@ -162,25 +162,29 @@ class FakeParticipant {
   onBeforeRemote() {
     return () => {};
   }
+  readonly ownJoin = JoinId.parse('join-1');
   putBack(): PutBack {
     return {
       sessionId: this.sessionId,
-      joinId: JoinId.parse('join-1'),
-      clientId: 7,
+      joinId: this.ownJoin,
       ours: this.currentPayload(),
       outside: this.outside ?? this.base,
-      outsideClock: 0,
-      oursClock: 1,
+      outsideSeq: 0,
+      seq: 1,
+      unsealed: false,
       inSession: () => this.outside ?? this.base,
-      heldBy: () => false,
     };
+  }
+  placedThrough() {
+    return 0;
+  }
+  async sentThrough() {
+    return { joinId: this.ownJoin, seq: 9 };
   }
   async headDraft() {
     return this.head ?? { revisionId: R0, payload: this.base };
   }
-  ownMark() {
-    return { sessionId: this.sessionId, joinId: JoinId.parse('join-1'), clientId: 7, clock: 9 };
-  }
+
   sessionDrafts() {
     return [R0];
   }
@@ -202,10 +206,13 @@ function session(
   {
     waiting = false,
     entry,
+    seen = entry?.version,
   }: {
     waiting?: boolean;
     /** The page's change waiting here, which a join puts in. */
     entry?: QueuedPage;
+    /** The version of that change this view last saw. */
+    seen?: number;
   } = {},
 ) {
   const surface = new FakeSurface(payload.markdown);
@@ -213,7 +220,7 @@ function session(
   const joins: FakeParticipant[] = [];
   const kept: { payload: PagePayload; live: KeptLive; basedOn: RevisionId }[] = [];
   const withdrawn: number[] = [];
-  const marked: { version: number; putIn: NonNullable<KeptLive['putIn']> }[] = [];
+  const marked: { version: number; putIn: KeptLive['putIn'] }[] = [];
   let held = 0;
   let joinable = true;
   const ports: DraftPorts = {
@@ -252,9 +259,10 @@ function session(
       waiting || entry ? { version: entry?.version ?? 1, head: R0, payload } : null,
     ...(entry && {
       entryNow: async () => entry,
-      async markPutIn(version, putIn) {
-        marked.push({ version, putIn });
+      async markPutIn(version, live) {
+        marked.push({ version, putIn: live.putIn });
       },
+      seen: () => seen ?? null,
       openDraft: async () => entry.payload,
     }),
     async keep(input) {
@@ -272,6 +280,7 @@ function session(
         return () => void held--;
       },
       head: async () => ({ revisionId: R0, payload: shared, region: OWNER_REGION }),
+      descends: async () => true,
       async join() {
         const participant = new FakeParticipant(shared);
         joins.push(participant);
@@ -474,7 +483,8 @@ describe('putting typing back from a live session', () => {
     expect(saves.at(-1)).toMatchObject({ basedOn: 'r-head' });
     // Theirs, unsaved, is theirs to put back: never saved as the person's.
     expect(saves.at(-1)?.payload.markdown).toBe('A, saved\n\nB\n\nMine');
-    expect(saves.at(-1)?.live?.base.markdown).toBe('A\n\nB\n\nTheirs');
+    // Its text grows from the head now: no session base goes with it.
+    expect(saves.at(-1)?.live ?? null).toBeNull();
   });
 
   it('offers Merge… from the kept base where the person’s typing overlaps the head', async () => {
@@ -515,7 +525,7 @@ describe('putting typing back from a live session', () => {
     if (!live) throw new Error('not joined');
     expect(live.document.text('body').toJSON()).toBe('A\n\nB, mine\n\nC');
     expect(marked).toEqual([
-      { version: 5, putIn: { sessionId: 'session-1', clientId: 7, clock: 9 } },
+      { version: 5, putIn: { sessionId: 'session-1', joinId: 'join-1', seq: 9 } },
     ]);
     // Held back from the queue while in the session.
     expect(held()).toBe(1);
@@ -586,10 +596,61 @@ function waitingEntry(payload: PagePayload, base: PagePayload): QueuedPage {
       base,
       typed: payload,
       sessionId: LiveSessionId.parse('earlier'),
-      clientId: 3,
-      baseClock: 0,
-      clock: 2,
+      joinId: JoinId.parse('earlier-join'),
+      baseSeq: 0,
+      seq: 2,
       putIn: null,
     },
   };
 }
+
+describe('putting a waiting change in, carefully', () => {
+  it('puts the text in as the person’s change though someone else added a file meanwhile', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const photo = {
+      id: 'a-photo',
+      name: 'photo.png',
+      mediaType: 'image/png',
+      size: 1,
+      key: 'A'.repeat(43),
+      blobHash: 'A'.repeat(43),
+    } as AttachmentRef;
+    const shared = { ...page('A\n\nB\n\n![photo](attachment:a-photo)'), attachments: [photo] };
+    const { draft, joins } = session(opened, shared, { entry });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    // As the person's own change, never through a file's save.
+    expect(live.typed).toBe(true);
+    expect(live.document.text('body').toJSON()).toBe(
+      'A\n\nB, mine\n\n![photo](attachment:a-photo)',
+    );
+    expect([...live.document.map('attachments').keys()]).toEqual(['a-photo']);
+  });
+
+  it('doesn’t put in a change saved into from elsewhere since this view saw it', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, held } = session(opened, page('A\n\nB\n\nC'), { entry, seen: 4 });
+    await draft.joinLive();
+    expect(joins[0]?.closed).toBe(true);
+    expect(joins[0]?.typed).toBe(false);
+    expect(held()).toBe(0);
+  });
+
+  it('withdraws a change put in when leaving saves it, before the page showed it saved', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, withdrawn } = session(opened, page('A\n\nB\n\nC'), { entry });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    expect(live.status().saved).toBe(false);
+    // Leaving's own save lands it.
+    live.leave = async () => true;
+    draft.close();
+    await settle();
+    expect(withdrawn).toEqual([5]);
+  });
+});

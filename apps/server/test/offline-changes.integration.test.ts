@@ -25,7 +25,13 @@ import {
   utf8,
   type ClientContext,
 } from '@wikistow/client';
-import { LiveSessionId, pageRoutes, sharingRoutes, structureRoutes } from '@wikistow/contracts';
+import {
+  JoinId,
+  LiveSessionId,
+  pageRoutes,
+  sharingRoutes,
+  structureRoutes,
+} from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
@@ -344,9 +350,9 @@ describe('changes waiting for a page in a live session', () => {
     base,
     typed,
     sessionId: LiveSessionId.parse('session-1'),
-    clientId: 3,
-    baseClock: 1,
-    clock: 4,
+    joinId: JoinId.parse('join-1'),
+    baseSeq: 1,
+    seq: 4,
     putIn: null,
   });
 
@@ -381,8 +387,15 @@ describe('changes waiting for a page in a live session', () => {
       seen: null,
       live: live(payload('first words'), payload('mine')),
     });
-    const putIn = { sessionId: LiveSessionId.parse('session-2'), clientId: 8, clock: 12 };
-    await queue.markPutIn(page.pageId, version, putIn);
+    const putIn = {
+      sessionId: LiveSessionId.parse('session-2'),
+      joinId: JoinId.parse('j2'),
+      seq: 12,
+    };
+    await queue.markPutIn(page.pageId, version, {
+      ...live(payload('first words'), payload('mine')),
+      putIn,
+    });
     const marked = await queue.entryNow(page.pageId);
     // Recorded without a new version, so the draft view can still save into it.
     expect(marked?.version).toBe(version);
