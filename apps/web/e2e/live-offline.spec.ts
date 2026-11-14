@@ -22,8 +22,8 @@ test('typing offline in a live session goes in when the app is back, short break
   test.setTimeout(300_000);
   const adminPage = await adminTab(freshPage, admin.email);
   const editor = await freshPage();
-  await memberWithVault(owner, adminPage, 'Olive Owner');
-  const { email: editorEmail } = await memberWithVault(editor, adminPage, 'Eddie Editor');
+  await memberWithVault(owner, adminPage, 'Oona Offline');
+  const { email: editorEmail } = await memberWithVault(editor, adminPage, 'Ezra Editor');
 
   await test.step('both open the shared page’s draft', async () => {
     await newSpace(owner, 'Family');
@@ -36,7 +36,7 @@ test('typing offline in a live session goes in when the app is back, short break
     await openShared(editor, 'Garden', 'Planting plan');
     await editor.getByRole('button', { name: 'Edit' }).click();
     await expectSource(editor, 'Beans in May.');
-    await expect(owner.getByRole('img', { name: 'Eddie Editor is editing' })).toBeVisible();
+    await expect(owner.getByRole('img', { name: 'Ezra Editor is editing' })).toBeVisible();
   });
 
   await test.step('a short break: the same join resumes, sending what was typed', async () => {
@@ -56,7 +56,7 @@ test('typing offline in a live session goes in when the app is back, short break
     await typeAt(owner, 'start', 'Garden notes.\n\n');
     await expect(saveStatus(owner)).toHaveText('All changes saved', { timeout: 30_000 });
     // Past the join's 30 s, the editor's app leaves the session.
-    await expect(owner.getByRole('img', { name: 'Eddie Editor is editing' })).toBeHidden({
+    await expect(owner.getByRole('img', { name: 'Ezra Editor is editing' })).toBeHidden({
       timeout: 60_000,
     });
     await editor.waitForTimeout(5_000);
