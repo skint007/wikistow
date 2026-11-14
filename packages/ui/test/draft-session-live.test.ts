@@ -750,6 +750,12 @@ describe('a change another tab keeps for its live session', () => {
     const entry = waitingEntry(opened, page('A\n\nB'));
     const { draft } = session(opened, page('A\n\nB'), { entry, claimed: true });
     draft.noticeHead(RevisionId.parse('r-someone'));
+    await settle();
     expect(draft.snapshot().status).not.toBe('conflict');
+    // Once no tab holds it, a head someone else saved is a conflict again.
+    const free = session(opened, page('A\n\nB'), { entry });
+    free.draft.noticeHead(RevisionId.parse('r-someone'));
+    await settle();
+    expect(free.draft.snapshot().status).toBe('conflict');
   });
 });

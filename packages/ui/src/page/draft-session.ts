@@ -668,11 +668,32 @@ export class DraftSession {
     // saved meanwhile. So for a view showing a change kept for a session,
     // another tab's maybe, that nothing was typed into: the join puts it in.
     if (this.#participant || this.#rejoinHold) return;
-    if (this.#keptLive && !this.#keptLive.putIn && this.#untouched() && this.#ports.live) return;
     // A save in flight may already be the head before its answer arrives.
     if (!head || this.#known.has(head) || this.#saving) return;
+    if (this.#keptLive && !this.#keptLive.putIn && this.#untouched() && this.#ports.live) {
+      // Only while that change still waits, and another tab holds it.
+      void this.#keptElsewhere().then((elsewhere) => {
+        if (!elsewhere && !this.#participant && !this.#theirs) this.#conflictAt(head);
+      });
+      return;
+    }
+    this.#conflictAt(head);
+  }
+
+  #conflictAt(head: RevisionId) {
+    if (this.#known.has(head) || this.#saving) return;
     this.#theirs = head;
     this.#autosave.conflict();
+  }
+
+  // Whether the change this view shows still waits here and another tab of this app holds it.
+  async #keptElsewhere(): Promise<boolean> {
+    const live = this.#ports.live;
+    const waiting = await this.#ports.waitingChange?.().catch(() => null);
+    if (!waiting || !live?.claim || this.#ports.seen?.() !== waiting.version) return false;
+    const claim = await live.claim().catch(() => null);
+    claim?.();
+    return claim === null;
   }
 
   hasUnsaved() {
@@ -1156,7 +1177,10 @@ export class DraftSession {
       // Another tab or window of this app holds the change, putting it in or
       // keeping it for its session: a view showing that change waits; one
       // that opened the draft instead joins without it.
-      claim = waiting ? (live.claim ? await live.claim() : () => {}) : null;
+      // One this view holds already, kept through a join that lapsed, is its own.
+      const own = this.#claimed;
+      if (waiting && own) this.#claimed = null;
+      claim = waiting ? (own ?? (live.claim ? await live.claim() : () => {})) : null;
       const theirs = waiting && !claim;
       if (theirs && this.#ports.seen?.() === waiting.version) throw new Error('claimed');
       if (waiting && !theirs) {
@@ -1177,6 +1201,11 @@ export class DraftSession {
         if (!descends) {
           release();
           this.#joining = false;
+          // Not over typing done meanwhile: that waits for the next try.
+          const holds = this.#ports.seen?.() === entry!.version;
+          if (this.#theirs || this.#autosave.isStopped() || (!holds && !this.#untouched())) {
+            return this.#joinSoon();
+          }
           return this.#overlapping(entry!, opened.revisionId);
         }
         // A change made with no session is merged from the version it was based on.
@@ -1556,6 +1585,13 @@ export class DraftSession {
       // Nothing of the person's, typed or put in: nothing to keep.
       const own = putBack.seq > 0 || putBack.unsealed || this.#kept?.participant === participant;
       if (!own) return false;
+      // Kept for this session: claimed first, so no other tab puts it in, or
+      // opens it as its own, while this one is in.
+      if (this.#participant === participant && !this.#claimed && ports.live?.claim) {
+        const claimed = await ports.live.claim().catch(() => null);
+        if (claimed && this.#participant === participant && !this.#claimed) this.#claimed = claimed;
+        else claimed?.();
+      }
       try {
         const { provisional, checked } = participant.status();
         const state = participant.document.state();
@@ -1570,13 +1606,6 @@ export class DraftSession {
         });
         this.#kept = { version, participant, state };
         this.#keptFresh = this.#participant === participant;
-        // Kept for this session: no other tab puts it in, or opens it as its own, while it's in.
-        if (this.#participant === participant && !this.#claimed && this.#ports.live?.claim) {
-          const claimed = await this.#ports.live.claim().catch(() => null);
-          if (claimed && this.#participant === participant && !this.#claimed)
-            this.#claimed = claimed;
-          else claimed?.();
-        }
         return true;
       } catch {
         return false;
@@ -1658,6 +1687,9 @@ export class DraftSession {
     const { state } = status;
     // Its join went: held from now, so the queue sends nothing of the page's before it is kept.
     if (state.kind === 'stopped' && state.rejoin) this.#holdForRejoin();
+    // A claim on what this tab kept stays its own while it gets back in.
+    const claimed = state.kind === 'stopped' && state.rejoin ? this.#claimed : null;
+    if (claimed) this.#claimed = null;
     const release = this.#detach();
     let untouched: boolean;
     try {
@@ -1666,7 +1698,10 @@ export class DraftSession {
       release();
     }
     // Nothing kept for the next join: the queue may send the page's changes.
-    if (!this.#rejoinKept) this.#releaseRejoinHold();
+    if (!this.#rejoinKept) {
+      claimed?.();
+      this.#releaseRejoinHold();
+    } else if (claimed) this.#claimed = claimed;
     const why =
       state.kind === 'ended'
         ? state.reason === 'access'
@@ -1826,6 +1861,8 @@ export class DraftSession {
       if (!settled.saved || saveOver || typedMeanwhile) this.#schedule();
       else {
         this.#set({ status: 'saved' });
+        // Its text is the head's: no session base goes with it now.
+        this.#keptLive = null;
         // The head holds what was kept or put in: it goes.
         this.#withdrawKept();
       }
@@ -1929,6 +1966,12 @@ export class DraftSession {
   #releaseRejoinHold() {
     if (this.#holdCheck) clearTimeout(this.#holdCheck);
     this.#holdCheck = null;
+    // Out of a session, a claim kept for getting back in goes with the hold.
+    if (!this.#participant && this.#rejoinHold) {
+      const claimed = this.#claimed;
+      this.#claimed = null;
+      claimed?.();
+    }
     this.#rejoinKept = false;
     const release = this.#rejoinHold;
     this.#rejoinHold = null;

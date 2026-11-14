@@ -1817,7 +1817,14 @@ export class OfflineQueue {
         if (base) this.#landedOn.set(entry.id, { base, landed: sent.revisionId, at: Date.now() });
         return this.#remove(current);
       }
-      await this.#write({ ...current, newPage: null, basedOn: sent.revisionId, sending: null });
+      // What was typed after grows from what landed, not from a session's base.
+      await this.#write({
+        ...current,
+        newPage: null,
+        basedOn: sent.revisionId,
+        sending: null,
+        live: null,
+      });
     });
     this.#emit({
       kind: 'landed',
