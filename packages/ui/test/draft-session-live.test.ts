@@ -533,6 +533,9 @@ describe('putting typing back from a live session', () => {
     live.set({ saved: true });
     expect(withdrawn).toEqual([5]);
     draft.close();
+    // Let go once leaving has settled, never before.
+    expect(held()).toBe(1);
+    await settle();
     expect(held()).toBe(0);
   });
 

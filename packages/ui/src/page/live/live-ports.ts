@@ -8,7 +8,7 @@ import {
 import type { QueryClient } from '@tanstack/react-query';
 import { connection } from '../../data/connection';
 import { pageQuery, treeQuery } from '../../data/queries';
-import { holdLivePage } from './live-lock';
+import { claimPutIn, holdLivePage } from './live-lock';
 import { desktop } from '../../desktop';
 import type { LivePorts } from '../draft-session';
 import { readWikilinks } from '../page-reader';
@@ -85,11 +85,12 @@ export function livePorts(
       return () => document.removeEventListener('visibilitychange', shown);
     },
     hold: () => holdLivePage(page.pageId),
+    claim: () => claimPutIn(page.pageId),
     ask: () => void connection.check(),
     online: () => connection.get().online,
     async descends(head, ancestor) {
       let at: RevisionId | null = head;
-      for (let steps = 0; at && steps < 64; steps++) {
+      for (let steps = 0; at && steps < 256; steps++) {
         if (at === ancestor) return true;
         const opened = await pageOperations.openRevisionOf(ctx, page, 'draft', at);
         at = opened.record.basedOn as RevisionId | null;

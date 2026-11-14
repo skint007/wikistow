@@ -170,6 +170,12 @@ export type LivePorts = {
    * (ADR 0015 decision 1). The result lets it go.
    */
   hold?(): () => void;
+  /**
+   * Claim the page's waiting change for putting it into the session, so no
+   * other tab or window puts it in at once: the release, or null while
+   * another holds it.
+   */
+  claim?(): Promise<(() => void) | null>;
   /** Ask the server now whether it answers, offline, rather than at the app's next check. */
   ask?(): void;
   /** Whether the app is online. */
@@ -570,8 +576,9 @@ export class DraftSession {
         payload: next,
         ...(tree ? { tree } : {}),
         ...(this.#picks.size > 0 ? { linkChoices: new Map(this.#picks) } : {}),
-        // Kept beside it if it goes into this device's queue; none once its base moved on.
-        live: this.#keptLive,
+        // Kept beside it if it goes into this device's queue; none once its base
+        // moved on. A put-in's mark is the queue's to turn into a base.
+        ...(!this.#keptLive?.putIn && { live: this.#keptLive }),
       });
       saved = { revisionId, basedOn, written, region };
       // On the server: what comes next grows from this draft, not from a session's base.
@@ -934,14 +941,20 @@ export class DraftSession {
     this.#unwait?.();
     const participant = this.#participant;
     if (participant) {
-      this.#detach();
+      const release = this.#detach();
       // What leaving can't save is kept on this device, put back on the next join;
       // a change kept or put in that the saved draft holds goes.
-      const kept = this.#kept;
-      void participant.leave().then((saved) => {
-        if (!saved) void this.#keepNow(participant);
-        else if (kept) void this.#ports.withdraw?.(kept.version).catch(() => false);
-      });
+      void participant
+        .leave()
+        .then(async (saved) => {
+          // One being kept now goes first, so the one withdrawn is the latest.
+          await this.#keeping?.catch(() => false);
+          const kept = this.#kept;
+          if (!saved) await this.#keepNow(participant);
+          else if (kept) await this.#ports.withdraw?.(kept.version);
+        })
+        .catch(() => {})
+        .finally(release);
       return;
     }
     void this.#autosave.flush();
@@ -1023,7 +1036,7 @@ export class DraftSession {
   lock() {
     const participant = this.#participant;
     if (!participant) return;
-    this.#detach();
+    this.#detach()();
     participant.close();
   }
 
@@ -1041,6 +1054,9 @@ export class DraftSession {
   // withdrawn once a compared draft of the session holds it.
   #kept: { version: number } | null = null;
   #keepTimer: ReturnType<typeof setTimeout> | null = null;
+  // Recording the change put in from the queue, and the claim held on it until then.
+  #markedPutIn: Promise<void> | null = null;
+  #claimed: (() => void) | null = null;
   #keeping: Promise<boolean> | null = null;
   // The page's live lock, while in or joining its session.
   #release: (() => void) | null = null;
@@ -1102,7 +1118,14 @@ export class DraftSession {
     if (this.#autosave.isSaving() || this.#uploads.size > 0) return;
     this.#joining = true;
     // Held first: the queue then sends nothing of the page's that this join reads below.
-    const release = live.hold?.() ?? (() => {});
+    const hold = live.hold?.() ?? (() => {});
+    // And the claim on a change waiting here, once taken: one tab puts it in at a time.
+    let claim: (() => void) | null = null;
+    const release = () => {
+      hold();
+      claim?.();
+      claim = null;
+    };
     const epoch = this.#ports.epoch();
     let entry: QueuedPage | null = null;
     let basedOn: PagePayload | null = null;
@@ -1111,6 +1134,9 @@ export class DraftSession {
     try {
       const waiting = await this.#ports.waitingChange?.().catch(() => null);
       if (waiting) {
+        // Another tab or window of this app is putting it in: not now.
+        claim = live.claim ? await live.claim() : () => {};
+        if (!claim) throw new Error('claimed');
         // The page's change waiting here goes into the session as the person's own.
         entry = (await this.#ports.entryNow?.().catch(() => null)) ?? null;
         // Being sent, made offline or stopped: it lands, and the saver folds
@@ -1175,7 +1201,16 @@ export class DraftSession {
       }
       return;
     }
-    this.#release = release;
+    // Kept in the session; the claim goes once the change put in is recorded.
+    this.#release = hold;
+    const claimed = claim as (() => void) | null;
+    if (claimed) {
+      this.#claimed = claimed;
+      void (this.#markedPutIn ?? Promise.resolve()).finally(() => {
+        if (this.#claimed === claimed) this.#claimed = null;
+        claimed();
+      });
+    }
     joined.start();
     // Unless it stopped as it was taken in, and has gone already.
     if (this.#participant !== joined) return;
@@ -1304,7 +1339,7 @@ export class DraftSession {
     // Files added on this device are there only: they go up as the queue sends the change.
     const known = new Set([...base.attachments, ...current.attachments].map((ref) => ref.id));
     if (ours.attachments.some((ref) => !known.has(ref.id))) return 'overlap';
-    const merged = mergeByBlock(base, ours, current);
+    const merged = mergeByBlock(base, ours, current, { addsOverlap: true });
     if (!merged) return 'overlap';
     // From here the view shows the session's document: what `merged` adds to it is the person's.
     this.#content = {
@@ -1335,7 +1370,7 @@ export class DraftSession {
       baseSeq: 0,
       seq: null,
     };
-    void participant
+    this.#markedPutIn = participant
       .sentThrough()
       .then(async (sent) => {
         if (!sent || sent.seq < 1) return;
@@ -1399,13 +1434,23 @@ export class DraftSession {
     );
   }
 
-  #detach() {
+  // Out of the session: the page's live lock goes with the returned function,
+  // once leaving has settled what was kept or put in, so the queue doesn't
+  // send it meanwhile.
+  #detach(): () => void {
     for (const stop of this.#unlive.splice(0)) stop();
     this.#participant = null;
-    this.#release?.();
+    const hold = this.#release ?? (() => {});
+    const claimed = this.#claimed;
+    this.#claimed = null;
+    const release = () => {
+      hold();
+      claimed?.();
+    };
     this.#release = null;
     if (this.#keepTimer) clearTimeout(this.#keepTimer);
     this.#keepTimer = null;
+    return release;
   }
 
   // Whether what is kept on this device is the document as it is now.
@@ -1516,8 +1561,13 @@ export class DraftSession {
     const { state } = status;
     // Its join went: held from now, so the queue sends nothing of the page's before it is kept.
     if (state.kind === 'stopped' && state.rejoin) this.#holdForRejoin();
-    this.#detach();
-    const untouched = await this.#goOn(participant, state);
+    const release = this.#detach();
+    let untouched: boolean;
+    try {
+      untouched = await this.#goOn(participant, state);
+    } finally {
+      release();
+    }
     // Nothing kept for the next join: the queue may send the page's changes.
     if (!this.#rejoinKept) this.#releaseRejoinHold();
     const why =
@@ -1546,9 +1596,13 @@ export class DraftSession {
     if (this.#rejoin) clearTimeout(this.#rejoin);
     const participant = this.#participant;
     if (!participant) return;
-    this.#detach();
-    await participant.leave();
-    await this.#goOn(participant, { kind: 'left' });
+    const release = this.#detach();
+    try {
+      await participant.leave();
+      await this.#goOn(participant, { kind: 'left' });
+    } finally {
+      release();
+    }
     this.#set({ live: null });
   }
 
@@ -1701,7 +1755,7 @@ export class DraftSession {
         )
       : document;
     this.#known.add(head.revisionId);
-    const merged = mergeByBlock(base, ours, head.payload);
+    const merged = mergeByBlock(base, ours, head.payload, { addsOverlap: true });
     this.#payload = head.payload;
     this.#region = null;
     if (!merged) {
@@ -1748,13 +1802,15 @@ export class DraftSession {
     const hold = this.#ports.live?.hold?.();
     if (!hold) return;
     this.#rejoinHold = hold;
-    const since = Date.now();
+    let online: number | null = null;
     // Online for long without getting back in, as a hidden tab or one this
     // server won't let join: the queue sends what is kept as it would.
     const check = () => {
       this.#holdCheck = null;
       if (!this.#rejoinHold) return;
-      if (this.#ports.live?.online?.() !== false && Date.now() - since > HOLD_FOR_REJOIN_MS) {
+      if (this.#ports.live?.online?.() === false) online = null;
+      else online ??= Date.now();
+      if (online !== null && Date.now() - online > HOLD_FOR_REJOIN_MS) {
         return this.#releaseRejoinHold();
       }
       this.#holdCheck = setTimeout(check, 15_000);
@@ -1915,11 +1971,18 @@ function mergeByBlock(
   base: PagePayload,
   yours: PagePayload,
   current: PagePayload,
+  {
+    addsOverlap = false,
+  }: {
+    /** Both sides adding at one place overlaps, as when putting typing back: never both kept. */
+    addsOverlap?: boolean;
+  } = {},
 ): PagePayload | null {
   const strip = (payload: PagePayload) => ({ ...payload, extensions: held(payload.extensions) });
   try {
     const resolved = pageMerge.withinTime(1_000, () => {
-      const merge = pageMerge.mergePayloads(strip(base), strip(yours), strip(current));
+      const run = () => pageMerge.mergePayloads(strip(base), strip(yours), strip(current));
+      const merge = addsOverlap ? pageMerge.addsOverlap(run) : run();
       if (merge.overlaps.length > 0) return { ok: false, merge } as const;
       return pageMerge.resolve(merge, {}, { review: false });
     });

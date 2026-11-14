@@ -377,7 +377,7 @@ describe('changes waiting for a page in a live session', () => {
     expect((await draft()).markdown).toBe('mine');
   });
 
-  it('are withdrawn once in a session draft, unless saved into since, and put in once', async () => {
+  it('are withdrawn once in a session draft, unless saved into since, and put in once, the mark becoming the base', async () => {
     const { queue, page, based, payload } = await device();
     const version = await queue.saveDraft({
       page,
@@ -407,10 +407,10 @@ describe('changes waiting for a page in a live session', () => {
       payload: payload('mine, more'),
       seen: version,
     });
-    // What came after isn't in the session: the mark goes, the base stays.
+    // What came after isn't in the session: the change as it went in is its base now.
     const saved = await queue.entryNow(page.pageId);
-    expect(saved?.live?.putIn).toBeNull();
-    expect(saved?.live?.base.markdown).toBe('first words');
+    expect(saved?.live).toMatchObject({ putIn: null, joinId: 'j2', baseSeq: 12, seq: 12 });
+    expect(saved?.live?.base.markdown).toBe('mine');
     expect(await queue.withdraw(page.pageId, version)).toBe(false);
     expect(await queue.withdraw(page.pageId, next)).toBe(true);
     expect(await queue.entries()).toEqual([]);

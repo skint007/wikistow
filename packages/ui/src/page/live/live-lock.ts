@@ -45,3 +45,24 @@ export async function livePageHeld(pageId: PageId): Promise<boolean> {
   // One asked for and not yet given counts: it is on its way into the session.
   return [...held, ...pending].some((lock) => lock.name === name);
 }
+
+/**
+ * Claim the page's waiting change for putting it into the page's live
+ * session, so no other tab or window of this app puts it in at once: the
+ * release, or null while another holds the claim.
+ */
+export async function claimPutIn(pageId: PageId): Promise<(() => void) | null> {
+  const manager = locks();
+  if (!manager) return () => {};
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const granted = await new Promise<boolean>((answer) => {
+    void manager
+      .request(`wikistow live put-in ${pageId}`, { ifAvailable: true }, (lock) => {
+        answer(lock !== null);
+        return lock ? held : undefined;
+      })
+      .catch(() => answer(false));
+  });
+  return granted ? release : null;
+}

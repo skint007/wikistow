@@ -572,9 +572,21 @@ export class OfflineQueue {
             // What was being sent on the old base is the person's no more,
             // nor is the base its text was merged from.
             ...(rebased && { basedOn, failure: null, sending: null, live: null }),
-            // Saved into after it was put into a session: what's new isn't in there.
-            ...(!rebased && before.live?.putIn && { live: { ...before.live, putIn: null } }),
             ...(live !== undefined && { live }),
+            // Saved into after it was put into a session: the session holds the
+            // change as it was then, which is the base of what's new.
+            ...(!rebased &&
+              before.live?.putIn && {
+                live: {
+                  base: before.payload,
+                  typed: before.payload,
+                  sessionId: before.live.putIn.sessionId,
+                  joinId: before.live.putIn.joinId,
+                  baseSeq: before.live.putIn.seq,
+                  seq: before.live.putIn.seq,
+                  putIn: null,
+                },
+              }),
           }
         : {
             kind: 'page',

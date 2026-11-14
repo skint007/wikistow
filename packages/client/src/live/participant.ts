@@ -1733,7 +1733,12 @@ export class LiveParticipant {
     const head = this.#head;
     if (!head || this.#ancestors.has(head)) return null;
     const session = this.#drafts.get(head);
-    if (session) return { revisionId: head, payload: session.payload };
+    if (session) {
+      // One that doesn't hold the last session head's state was saved beside it: a rollback.
+      const last = this.#lastHead;
+      const descends = !last || head === last.revisionId || holdsState(session.state, last.state);
+      return descends ? { revisionId: head, payload: session.payload } : null;
+    }
     try {
       const opened = this.#outsiderDrafts.get(head) ?? (await this.#ports.openDraft(head));
       if (opened.revisionId !== head || ofAnotherSession(opened, this.sessionId)) return null;
