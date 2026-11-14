@@ -275,9 +275,11 @@ export function clipDesk(options: DeskOptions) {
   }
 
   function letGo() {
-    for (const one of [...held.values()]) {
+    const gone = [...held.values()];
+    for (const one of gone) {
       finish(one, { type: 'error', code: 'signed-out', message: 'You signed out of WikiStow.' });
     }
+    if (gone.length > 0) ask({ kind: 'dropped', clipIds: gone.map((one) => one.clip.id) });
     recent.length = 0;
     clipped.clear();
   }

@@ -177,6 +177,10 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
     const stop = bridge.onClipRequest((request) => {
       if (request.kind === 'clip') return take(request.clip);
       if (request.kind === 'show') return openPage(request.spaceId, request.pageId);
+      if (request.kind === 'dropped') {
+        const gone = new Set(request.clipIds);
+        return keepOnly(waiting.filter((clip) => !gone.has(clip.id)));
+      }
       // Folder names cross only while unlocked, for what the person typed.
       const now = vaultStore.get();
       if (now.status !== 'unlocked')
@@ -259,9 +263,13 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
         place: null,
       }));
       setAsking(null);
-      const { outcome, place } = saved;
+      const { place } = saved;
+      let { outcome } = saved;
+      const locked = vaultStore.epoch() !== started;
       // Locked meanwhile, it couldn't save: it waits for the next unlock.
-      if (!outcome.ok && vaultStore.epoch() !== started) return;
+      if (!outcome.ok && locked) return;
+      // Saved, though the vault locked since: no folder's name leaves it now.
+      if (outcome.ok && locked) outcome = { ...outcome, path: '' };
       await bridge.clipDone(next.id, outcome).catch(() => {});
       waiting = waiting.filter((clip) => clip.id !== next.id);
       emit();

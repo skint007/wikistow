@@ -300,14 +300,16 @@ describe('a clip', () => {
     expect(desk.holding()).toEqual([]);
   });
 
-  it('is let go once the person signs out', () => {
-    const { desk } = setup();
+  it('is let go once the person signs out, and the page told', () => {
+    const { desk, requests } = setup();
     desk.setPageState({ vault: 'locked', offline: false });
     const { open, replies } = connection();
     desk.answer(clipMessage(), open);
     desk.signedOut();
     expect(replies[1]).toMatchObject({ type: 'error', code: 'signed-out' });
     expect(desk.holding()).toEqual([]);
+    const clipId = requests[0]?.kind === 'clip' ? requests[0].clip.id : null;
+    expect(requests.at(-1)).toEqual({ kind: 'dropped', clipIds: [clipId] });
   });
 
   it('lists the last ten saved, newest first', () => {

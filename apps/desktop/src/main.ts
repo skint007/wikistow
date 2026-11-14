@@ -721,7 +721,8 @@ function askToClose(window: BrowserWindow, event: { preventDefault(): void }) {
       : 'Your latest changes to this page aren’t saved yet. They save in a moment.',
   });
   if (answer === 1) return event.preventDefault();
-  if (answer !== 0) return;
+  // Staying: clips the person let go for this close are theirs to be asked about again.
+  if (answer !== 0) return clipsLetGo.clear();
   closeBy = Date.now() + CLOSE_WAIT_MS;
   closeRetry = setInterval(() => window.close(), 500);
 }

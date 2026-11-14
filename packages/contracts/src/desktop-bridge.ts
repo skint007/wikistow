@@ -234,7 +234,9 @@ export type ClipRequest =
   /** Answer with `clipFolders`, under `id`. */
   | { kind: 'folders'; id: string; query: string }
   /** Open the draft a clip made this session. */
-  | { kind: 'show'; spaceId: SpaceId; pageId: PageId };
+  | { kind: 'show'; spaceId: SpaceId; pageId: PageId }
+  /** Main let these clips go, as at a sign-out: they no longer wait. */
+  | { kind: 'dropped'; clipIds: string[] };
 
 /** The vault's state as the page tells main, for the extension (ADR 0017, decision 7). */
 export type ClipPageState = { vault: 'locked' | 'unlocked'; offline: boolean };
