@@ -497,9 +497,9 @@ describe('text taken in by block', () => {
   });
 
   it('joins a line to the table, list or quote before it as reading whole does, keeping it as written', async () => {
-    // Beside a long list, the page is read whole (`show`).
-    const long = Array.from({ length: 1_500 }, (_, i) => `- item ${i}`).join('\n');
-    for (const block of ['| a |\n| - |\n| 1 |', '- x\n- y', '> x\n> y'])
+    // Beside a long paragraph, the page is read whole (`show`).
+    const long = 'Long text. '.repeat(1_600);
+    for (const block of ['| a |\n| - |\n| x |', '- x\n- y', '> x\n> y'])
       for (const [after, byBlock] of [
         ['', true],
         [`\n\n${long}`, false],
@@ -508,12 +508,20 @@ describe('text taken in by block', () => {
         // The blank line before `B` gone, as a row, an item's line or the quote's.
         const next = page.replace(`${block}\n\nB`, `${block}\nB`);
         const m = await mount(page);
+        const view = viewOf(m.dom);
+        const cursor = (at: number) =>
+          act(() =>
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at))),
+          );
+        cursor(find(view.state.doc, 'x'));
         expect(await takeIn(m, next), next).toBe(byBlock);
         if (!byBlock) await replaceWith(m, next);
         expect(m.handle.read()).toBe(next);
         expect(await showsAsRead(m, next), next).toBe(true);
+        // The cursor stays where it was, in what reads the same.
+        const { head } = view.state.selection;
+        expect(view.state.doc.textBetween(head, head + 1), next).toBe('x');
         // An edit elsewhere leaves it as it was given.
-        const view = viewOf(m.dom);
         const written = await typeAt(m, find(view.state.doc, 'C') + 1, '!');
         expect(written, next).toBe(next.replace(/C\n$/, 'C!\n'));
         m.unmount();

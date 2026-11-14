@@ -1,5 +1,6 @@
 import type { Node, Slice } from '@milkdown/kit/prose/model';
-import { Transform } from '@milkdown/kit/prose/transform';
+import type { Transaction } from '@milkdown/kit/prose/state';
+import { StepMap, Transform } from '@milkdown/kit/prose/transform';
 import { normalizeIdentifier } from 'micromark-util-normalize-identifier';
 import { BLOCK_TIMED, withLf } from './fidelity';
 import { inText, spansOf, type Span } from './sources';
@@ -67,19 +68,26 @@ function inPlace(doc: Node, next: Node, start: number, a: number, b: number): Sl
   return tr.doc.slice(start, b);
 }
 
+/** A change that makes a document show as another reading (`replacement`). */
+export type Change = {
+  /** From `from` to `to` in the document, `slice` in their place. */
+  readonly from: number;
+  readonly to: number;
+  readonly slice: Slice;
+  /** Where whole blocks go in, the least change: from `from`, `size` replaced by `next` of the reading. */
+  readonly least: { readonly from: number; readonly size: number; readonly next: number } | null;
+};
+
 /**
  * The least change that makes `doc` show as `next`, a reading of other
- * text: from `from` to `to` in `doc`, `slice` in their place, links it
- * changes inside keeping their ids; null if they show the same. Put in
- * with `replace`, it gives `next`, whole top-level blocks where less wouldn't.
+ * text, links it changes inside keeping their ids; null if they show the
+ * same. Put in with `replace`, it gives `next`: whole top-level blocks
+ * where less wouldn't.
  */
-export function replacement(
-  doc: Node,
-  next: Node,
-): { from: number; to: number; slice: Slice } | null {
+export function replacement(doc: Node, next: Node): Change | null {
   const mine = unnumbered(doc);
   const read = unnumbered(next);
-  let start = mine.content.findDiffStart(read.content);
+  const start = mine.content.findDiffStart(read.content);
   const end = mine.content.findDiffEnd(read.content);
   if (start === null || !end) return null;
   let { a, b } = end;
@@ -89,14 +97,29 @@ export function replacement(
   // can make nodes neither had: a row a table takes in where the blank line
   // after it went comes as a second table, with an empty header and row.
   // Where it would, the top-level blocks the change is in go in whole.
-  if (!new Transform(mine).replace(start, a, read.slice(start, b)).doc.eq(read)) {
-    // What's before `start`, and after `a` and `b`, is the same in each, so
-    // the blocks they're in begin, and end, as far from each end.
-    const [$start, $a, $b] = [mine.resolve(start), mine.resolve(a), read.resolve(b)];
-    if ($start.depth > 0) start = $start.before(1);
-    if ($a.depth > 0) [a, b] = [$a.after(1), $b.after(1)];
-  }
-  return { from: start, to: a, slice: inPlace(doc, next, start, a, b) };
+  if (new Transform(mine).replace(start, a, read.slice(start, b)).doc.eq(read))
+    return { from: start, to: a, slice: inPlace(doc, next, start, a, b), least: null };
+  // What's before `start`, and after `a` and `b`, is the same in each, so
+  // the blocks they're in begin, and end, as far from each end.
+  const [$start, $a, $b] = [mine.resolve(start), mine.resolve(a), read.resolve(b)];
+  const from = $start.depth > 0 ? $start.before(1) : start;
+  const [to, past] = $a.depth > 0 ? [$a.after(1), $b.after(1)] : [a, b];
+  const least = { from: start, size: a - start, next: b - start };
+  return { from, to, slice: inPlace(doc, next, from, to, past), least };
+}
+
+/**
+ * `tr` with `change`, of the document from `at` in it, put in; the
+ * selection where the least change would leave it, so a cursor in what
+ * reads the same stays there.
+ */
+export function replaceIn(tr: Transaction, change: Change, at = 0): Transaction {
+  const { selection } = tr;
+  tr.replace(at + change.from, at + change.to, change.slice);
+  const { least } = change;
+  if (!least) return tr;
+  const moved = new StepMap([at + least.from, least.size, least.next]);
+  return tr.setSelection(selection.map(tr.doc, moved));
 }
 
 /** Whether two blocks show the same, whatever ids their links were given. */
