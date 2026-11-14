@@ -846,9 +846,17 @@ export class LiveParticipant {
     // Built from a snapshot nobody has checked yet: its whole document is
     // never saved on leaving, locking or publishing (section 5.10).
     if (this.#provisional) return false;
-    const saved = await this.#save({ force: true });
-    this.#update();
-    return saved && this.#status.saved;
+    // Someone may save first: then the new head is opened at once, and
+    // counts as done when it holds this app's typing and compares equal;
+    // otherwise this app saves on top of it again (section 5.10, **Saving**).
+    for (let tries = 0; tries < 3 && this.#keyed(); tries++) {
+      await this.#save({ force: true });
+      await this.#ensureHead();
+      this.#compare();
+      this.#update();
+      if (this.#status.saved) return true;
+    }
+    return this.#status.saved;
   }
 
   /**
@@ -922,9 +930,13 @@ export class LiveParticipant {
       });
     } catch {
       // Nothing of it went to anyone: a refused save leaves nothing behind.
+      void this.#transport.leave(further).catch(() => {});
       return false;
     }
-    if (!this.#keyed()) return false;
+    if (!this.#keyed()) {
+      void this.#transport.leave(further).catch(() => {});
+      return false;
+    }
     // Landed: the change goes into this app's document and out to everyone.
     this.#placing = true;
     try {
@@ -1744,6 +1756,12 @@ export class LiveParticipant {
     } catch (error) {
       if (error instanceof PageTooLarge) {
         this.#tooLarge = error.message;
+      } else if (error instanceof ApiError && error.code === 'payload-too-large') {
+        // Its text fits, so the session's own state takes it past the
+        // limit: the session starts again, small, and the page saves as it
+        // is (section 5.10, **Saving**).
+        this.#stop('the live session grew too large, so it starts again', null, true, true);
+        return false;
       } else if (error instanceof ApiError && error.code === 'stale-head') {
         // Someone saved first: the stream names the new head.
         const detail = error.detail as { draftHead?: unknown } | undefined;
