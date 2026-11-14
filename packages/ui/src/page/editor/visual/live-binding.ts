@@ -146,14 +146,26 @@ export class VisualBinding {
   mapping(written = this.#held): Mapping | null {
     const body = this.#body.text.toJSON();
     if (body === written) return null;
-    return written === this.#held ? this.#mapNow(body) : Mapping.between(written, body);
+    return written === this.#held ? this.#mapNow(body) : this.#between(written, body);
   }
 
-  // How `held` became `body`: as followed, if it still fits them, else by a diff.
+  // How `held` became `body`: as followed, if it still fits them, else by
+  // a diff, kept while neither changes, as bars and carets ask often.
   #mapNow(body: string): Mapping {
     const map = this.#map;
     if (map && map.heldLength === this.#held.length && map.bodyLength === body.length) return map;
-    return body === this.#held ? Mapping.identity(body.length) : Mapping.between(this.#held, body);
+    if (body === this.#held) return Mapping.identity(body.length);
+    return this.#between(this.#held, body);
+  }
+
+  #diffed: { held: string; body: string; map: Mapping } | null = null;
+
+  #between(held: string, body: string): Mapping {
+    const known = this.#diffed;
+    if (known && known.held === held && known.body === body) return known.map;
+    const map = Mapping.between(held, body);
+    this.#diffed = { held, body, map };
+    return map;
   }
 
   // `held` is `body`, or what's followed from now on starts from the text the editor took in.
@@ -175,8 +187,8 @@ export class VisualBinding {
     if (this.#destroyed) return body;
     const next = this.#editor.written();
     if (next === this.#held) return body;
-    const changes = ownChanges(this.#held, next);
     const mapping = this.#mapNow(body);
+    const changes = ownChanges(this.#held, next, (from, to) => mapping.untouched(from, to));
     const carried = body === this.#held ? changes : mapping.carry(changes);
     const expected = applyTo(body, carried);
     const text = this.#body.text;

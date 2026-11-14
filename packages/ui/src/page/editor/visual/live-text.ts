@@ -57,17 +57,22 @@ function smallest(before: string, after: string, at: number): TextChange | null 
 
 /**
  * The changes that make `before` read `after`, each the smallest in
- * characters: by a character diff of the lines between the common start and
+ * characters, those a few alike characters apart joined where `untouched`
+ * says nobody else changed those: by a character diff of the lines between the common start and
  * end, so text the editor didn't change, between or within its changes,
  * stays as it is in `body`, and others' changes there with it. Past
  * `DIFF_MS`, by lines, each run of lines that differ its smallest change;
  * failing that, one span.
  */
-export function ownChanges(before: string, after: string): TextChange[] {
+export function ownChanges(
+  before: string,
+  after: string,
+  untouched: (from: number, to: number) => boolean = () => true,
+): TextChange[] {
   if (before === after) return [];
   let { start, endA, endB } = edges(before, after);
   // Whole lines, which the line diff, if it comes to that, lines up.
-  start = before.lastIndexOf('\n', start - 1) + 1;
+  start = start === 0 ? 0 : before.lastIndexOf('\n', start - 1) + 1;
   const lineEnd = before.indexOf('\n', endA);
   const onward = (lineEnd < 0 ? before.length : lineEnd + 1) - endA;
   endA += onward;
@@ -98,9 +103,15 @@ export function ownChanges(before: string, after: string): TextChange[] {
   for (const [i, part] of parts.entries()) {
     if (part.removed) removed += part.value;
     else if (part.added) added += part.value;
-    else if (byChars && changed(removed, added) && closeUp(part.value, parts, i)) {
+    else if (
+      byChars &&
+      changed(removed, added) &&
+      closeUp(part.value, parts, i) &&
+      untouched(at + removed.length, at + removed.length + part.value.length)
+    ) {
       // A few characters alike between two changes are lined up by chance,
-      // as the "r" of "world" and "there": part of one change.
+      // as the "r" of "world" and "there": part of one change, where nobody
+      // else changed them meanwhile (`untouched`), which it would undo.
       removed += part.value;
       added += part.value;
     } else {
@@ -347,6 +358,24 @@ export class Mapping {
       body = bodyEnd;
     }
     return (this.#cached = segments);
+  }
+
+  /**
+   * Whether nobody else changed `held` from `from` to `to`: none of it
+   * taken out, and nothing put in within it or at either end.
+   */
+  untouched(from: number, to: number): boolean {
+    for (const segment of this.#segments) {
+      if (segment.same) continue;
+      const put = segment.held === segment.heldEnd;
+      if (
+        put
+          ? segment.held >= from && segment.held <= to
+          : segment.held < to && segment.heldEnd > from
+      )
+        return false;
+    }
+    return true;
   }
 
   /**

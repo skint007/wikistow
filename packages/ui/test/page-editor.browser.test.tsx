@@ -315,6 +315,17 @@ describe('in a live session', () => {
     await expect.poll(() => editor.textContent).toContain('Sam. One. Source');
   });
 
+  it('checks text it’s given once the session has been left, as ever', async () => {
+    const { live } = liveBody('One.\n\nTwo.\n');
+    let active = true;
+    const m = mount('One.\n\nTwo.\n', 'visual', { ...live, active: () => active });
+    await expect.poll(() => shown(m)).toBe('visual');
+    active = false;
+    act(() => m.handle.replace('One.\n\nTwo.\n\n[r]: https://example.test/\n'));
+    await expect.poll(() => shown(m)).toBe('source');
+    expect(m.container.textContent).not.toContain('added something');
+  });
+
   it('turns to source mode when someone adds what the visual editor can’t show', async () => {
     const { live, theirs } = liveBody('One.\n\nTwo.\n');
     const m = mount('One.\n\nTwo.\n', 'visual', live);

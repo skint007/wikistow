@@ -47,6 +47,34 @@ describe('its own edits', () => {
     expect(own(before, after)).toBe(after);
   });
 
+  it('changes a page that starts with a blank line from its very start', () => {
+    for (const [before, after] of [
+      ['\n# Title\n', '# Title\n'],
+      ['\nHello', 'Hello'],
+      ['\n\nA\n', 'A\n'],
+      ['\n# Title\n\nBody', 'Intro\n\n# Title\n\nBody'],
+    ] as const)
+      expect(own(before, after)).toBe(after);
+  });
+
+  it('makes every text the other, at random', () => {
+    let seed = 11;
+    const next = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const alphabet = ['a', 'b', ' ', '\n', '\r\n', '😀', '#', '*'];
+    const text = () =>
+      Array.from({ length: Math.floor(next() * 12) }, () => alphabet[Math.floor(next() * 8)]).join(
+        '',
+      );
+    for (let i = 0; i < 2_000; i++) {
+      const [before, after] = [text(), text()];
+      const result = own(before, after);
+      expect(result).toBe(after);
+    }
+  });
+
   it('never starts or ends a change inside an emoji’s two halves', () => {
     // 😀 and 😁 share their first half: a change by code unit would start between them.
     const before = 'A 😀 b';
@@ -120,6 +148,15 @@ describe('carried onto body', () => {
     const delta = Array.from({ length: 3_000 }, () => [{ retain: 1 }, { insert: 'x' }]).flat();
     expect(Mapping.identity(3_000).remote(delta)).toBe(null);
     expect(Mapping.identity(10).remote([{ retain: 2 }, { insert: 'x' }])?.bodyLength).toBe(11);
+  });
+
+  it('doesn’t join two changes over characters someone else changed between them', () => {
+    const held = 'x a-b y\n';
+    const body = 'x ab y\n';
+    const next = 'x A-B y\n';
+    const mapping = Mapping.between(held, body);
+    const changes = ownChanges(held, next, (from, to) => mapping.untouched(from, to));
+    expect(applyTo(body, mapping.carry(changes))).toBe('x AB y\n');
   });
 
   it('maps places both ways', () => {

@@ -180,6 +180,9 @@ export function PageEditor({
   // In a live session's split, whether the visual side takes no edit, as
   // it can't show the shared text (`cantShow`).
   const liveHeld = useRef(false);
+  // The live session's body as last drawn, for the handle the session calls, made once.
+  const liveNow = useRef(assist.live);
+  liveNow.current = assist.live;
   // In split, the side the person was in last, where Insert in page puts its code.
   const lastSide = useRef<'source' | 'visual'>('visual');
   // What Find on page searches: the editor the page's text is in, or in
@@ -466,9 +469,12 @@ export function PageEditor({
     body.current = text;
     if (given.current !== null) given.current = text;
     mirror.current?.replace(text);
-    // In a live session, the visual editor takes `body` itself, by block (ADR 0015 decision 3).
+    // In a live session, the visual editor takes `body` itself, by block
+    // (ADR 0015 decision 3); once it's left, text given is checked as ever.
+    const live = liveNow.current;
     if (
-      assist.live &&
+      live &&
+      live.active?.() !== false &&
       surface.current &&
       (modeNow.current === 'visual' || modeNow.current === 'split')
     )
@@ -571,7 +577,7 @@ export function PageEditor({
     const said = own
       ? reason
       : others.length === 1 && by.length === 1
-        ? cantShowBy(assist.live?.nameOf?.(others[0] ?? '') ?? 'Someone')
+        ? cantShowBy(liveNow.current?.nameOf?.(others[0] ?? '') ?? 'Someone')
         : CANT_SHOW_OTHERS;
     if (modeNow.current === 'split') {
       liveHeld.current = true;
