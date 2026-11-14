@@ -64,6 +64,9 @@ for (const build of builds) {
   await cp(join(root, 'src', 'popup', 'popup.html'), join(out, 'popup.html'));
   await cp(join(root, 'src', 'popup', 'popup.css'), join(out, 'popup.css'));
   await cp(join(root, 'icons'), join(out, 'icons'), { recursive: true });
+  // The extension's licence, and Readability's, which capture.js bundles.
+  await cp(join(root, '..', '..', 'LICENSE'), join(out, 'LICENSE'));
+  await cp(join(root, 'THIRD-PARTY-NOTICES.txt'), join(out, 'THIRD-PARTY-NOTICES.txt'));
   await writeFile(
     join(out, 'manifest.json'),
     `${JSON.stringify(manifest(build.target, build.options), null, 2)}\n`,

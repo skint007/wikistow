@@ -35,6 +35,7 @@ const PNG = Buffer.from(
 const WORDS =
   'Good bread needs only flour, water, salt and time, and a warm kitchen helps the dough rise. ';
 const ARTICLE = `<!doctype html><html><head><title>Bread at home</title>
+<meta property="og:site_name" content="The Bakery">
 <style>.gone { display: none } .ghost { visibility: hidden }</style></head>
 <body><nav><a href="/">Home</a> · <a href="/recipes">Recipes</a></nav>
 <article>
@@ -206,6 +207,7 @@ test('an article goes to the folder found, and opens in WikiStow', async () => {
     folder: { spaceId: 'space1', folderId: 'folder1' },
   });
   expect(clip!['byline']).toContain('Ann Baker');
+  expect(clip!['siteName']).toBe('The Bakery');
   const html = String(clip!['html']);
   expect(html).toContain(WORDS.trim());
   expect(html).toContain(`href="${origin}/flour"`);

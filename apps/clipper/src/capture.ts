@@ -168,6 +168,12 @@ function article(): Pick<Captured, 'html' | 'text' | 'byline' | 'siteName'> {
   const base = copy.createElement('base');
   base.href = document.baseURI;
   copy.head.append(base);
+  // What Readability reads the byline and site's name from: the page's
+  // meta tags and JSON-LD, which the cleaned body leaves out as unseen.
+  // Nothing runs or loads in the copy.
+  for (const meta of document.querySelectorAll('head meta, script[type="application/ld+json"]')) {
+    copy.head.append(copy.importNode(meta, true));
+  }
   copy.body.replaceWith(copy.adoptNode(cleanBody()));
   const found = new Readability(copy).parse();
   if (!found?.content) throw new Error('No article');
