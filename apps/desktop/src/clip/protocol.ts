@@ -142,22 +142,40 @@ export const MAX_CLIP_HTML = 16 * 1024 * 1024;
 /** A tab's address, at most: longer than any browser keeps in its address bar. */
 const MAX_URL = 32 * 1024;
 
+/**
+ * Standard base64, padded, checked without a regular expression that
+ * backtracks: a screenshot's is tens of megabytes.
+ */
+export function isBase64(text: string): boolean {
+  if (text.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(text)) return false;
+  const padding = text.indexOf('=');
+  return padding === -1 || (padding >= text.length - 2 && /^=+$/.test(text.slice(padding)));
+}
+
 /** One of the extension's clips, every field held to its limit (ADR 0017, decisions 4 and 5). */
-const Clip = z.strictObject({
-  v: z.literal(1),
-  id: Id,
-  type: z.literal('clip'),
-  mode: z.enum(['link', 'selection', 'article', 'page']),
-  url: z.string().min(1).max(MAX_URL),
-  title: z.string().max(500),
-  note: z.string().max(10_000).default(''),
-  tags: z.array(z.string().max(100)).max(20).default([]),
-  html: z.string().max(MAX_CLIP_HTML).default(''),
-  text: z.string().max(MAX_CLIP_HTML).default(''),
-  byline: z.string().max(500).nullable().default(null),
-  siteName: z.string().max(500).nullable().optional(),
-  folder: z.strictObject({ spaceId: SpaceId, folderId: FolderId.nullable() }),
-});
+const Clip = z
+  .strictObject({
+    v: z.literal(1),
+    id: Id,
+    type: z.literal('clip'),
+    mode: z.enum(['link', 'selection', 'article', 'page', 'screenshot']),
+    url: z.string().min(1).max(MAX_URL),
+    title: z.string().max(500),
+    note: z.string().max(10_000).default(''),
+    tags: z.array(z.string().max(100)).max(20).default([]),
+    html: z.string().max(MAX_CLIP_HTML).default(''),
+    text: z.string().max(MAX_CLIP_HTML).default(''),
+    byline: z.string().max(500).nullable().default(null),
+    siteName: z.string().max(500).nullable().optional(),
+    folder: z.strictObject({ spaceId: SpaceId, folderId: FolderId.nullable() }),
+    /**
+     * A screenshot's image as base64, in `screenshot` mode alone, which has
+     * no HTML. Its bytes are checked as the clip is taken (desk.ts).
+     */
+    screenshot: z.string().max(MAX_MESSAGE).refine(isBase64).default(''),
+  })
+  .refine((clip) => (clip.mode === 'screenshot') === (clip.screenshot !== ''))
+  .refine((clip) => clip.mode !== 'screenshot' || (clip.html === '' && clip.text === ''));
 export type ClipMessage = z.infer<typeof Clip>;
 
 /** The messages this app answers. */

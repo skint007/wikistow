@@ -172,7 +172,7 @@ Inline code such as `` `=servings` `` or `` `=[[Page]].servings` `` that shows a
 _Avoid_: Variable (template variables are filled once, when a page is made), placeholder.
 
 **Search by meaning**
-Finding pages by what they mean as well as by their words, with a small embedding model the person's own app runs over the pages it can read. Each page's passages become vectors, sealed on the device and never sent anywhere. Word matches come first; **By meaning** lists other pages close in meaning below them. Accepted in ADR 0016, not built yet.
+Finding pages by what they mean as well as by their words, with a small embedding model the person's own app runs over the pages it can read. Each page's passages become vectors, sealed on the device and never sent anywhere. Word matches come first; **By meaning** lists other pages close in meaning below them. Built as decided in ADR 0016.
 _Avoid_: Semantic search, AI search, vector search.
 
 **Query table**

@@ -30,6 +30,7 @@ export * from './plugins/proposals.ts';
 export * from './plugins/library.ts';
 export * from './plugins/store.ts';
 export * from './content/pages.ts';
+export * from './content/imports.ts';
 export * from './content/trash.ts';
 export * from './content/contacts.ts';
 export * from './content/quota.ts';

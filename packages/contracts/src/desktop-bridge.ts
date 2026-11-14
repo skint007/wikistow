@@ -169,8 +169,8 @@ export type ClippedPage = {
   path: string;
 };
 
-/** What a clip captured (ADR 0017, decision 5). Screenshots come later (step 6). */
-export type ClipMode = 'link' | 'selection' | 'article' | 'page';
+/** What a clip captured (ADR 0017, decision 5). */
+export type ClipMode = 'link' | 'selection' | 'article' | 'page' | 'screenshot';
 
 /**
  * A clip from the browser extension, as main hands it to the page to save
@@ -195,13 +195,30 @@ export type DesktopClip = {
   byline: string | null;
   /** Where it goes: a folder, or the top of a space for a null `folderId`. */
   folder: { spaceId: SpaceId; folderId: FolderId | null };
+  /**
+   * A screenshot's image, for `screenshot` mode alone: PNG or JPEG, as
+   * main told by its bytes, at most 24 MiB. Null for every other mode.
+   */
+  screenshot: { bytes: Uint8Array; mediaType: 'image/png' | 'image/jpeg' } | null;
   /** It came while the app was starting or locked, so its answer may reach no popup. */
   waited: boolean;
   /**
    * Its page, once made (`clipMade`): a page that loads again with it held
    * finishes it as saved, its text in, rather than making a second.
    */
-  made: { spaceId: SpaceId; pageId: PageId; path: string } | null;
+  made: ClipMade | null;
+};
+
+/**
+ * A clip's page, made. `partial`: a screenshot's, made with its note and
+ * link but not the screenshot yet, which a page that loads again puts in
+ * the trash and makes again, rather than finish without its screenshot.
+ */
+export type ClipMade = {
+  spaceId: SpaceId;
+  pageId: PageId;
+  path: string;
+  partial?: boolean | undefined;
 };
 
 /** How saving a clip went, as the page tells main, which tells the extension. */
@@ -452,7 +469,7 @@ export type DesktopBridge = {
   /** The clips main holds that no `clipDone` answered yet, oldest first, as after a reload. */
   waitingClips(): Promise<DesktopClip[]>;
   /** Say the clip `clipId`'s page is made, with its text, before its images are attached. */
-  clipMade(clipId: string, page: { spaceId: SpaceId; pageId: PageId; path: string }): Promise<void>;
+  clipMade(clipId: string, page: ClipMade): Promise<void>;
   /** Say how saving the clip `clipId` went; main lets it go. */
   clipDone(clipId: string, outcome: ClipOutcome): Promise<void>;
   /** Answer the folder search `requestId`: null while the vault is locked. */

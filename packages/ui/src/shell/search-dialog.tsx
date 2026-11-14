@@ -27,6 +27,8 @@ import {
 } from '../commands/palette';
 import { usePageIndex } from '../data/page-index';
 import { errorMessage } from '../errors';
+import type { MeaningHit } from '../meaning/meaning-index';
+import { passageSnippet, useMeaningSearch } from '../meaning/search';
 import { Replaceable } from '../plugins/places';
 import { usePlugins } from '../plugins/runtime';
 import {
@@ -43,6 +45,14 @@ type Hit = SearchHit<searchOperations.SearchPage>;
 
 const hitKey = ({ doc }: Hit) => `${doc.spaceId}/${doc.pageId}`;
 
+/** A page found by meaning, as a row shows it: no word marked, and the start of its passage. */
+const meaningRow = ({ page, passage, score }: MeaningHit): Hit => ({
+  doc: page.doc,
+  score,
+  title: { text: page.title, highlights: [] },
+  snippet: () => ({ text: passageSnippet(page.text, passage.start), highlights: [] }),
+});
+
 /**
  * Search across every space, from the rail or Ctrl+K (Cmd+K on Apple), or
  * opened with `query` from a link (`SearchLink`). Words search titles and
@@ -53,13 +63,19 @@ const hitKey = ({ doc }: Hit) => `${doc.spaceId}/${doc.pageId}`;
  * its draft, for a draft hit. A copy unpublished where it is opens as its
  * page does, at its last publication.
  *
+ * Where search by meaning is on (ADR 0016), a **By meaning** section
+ * below the word matches lists up to five other pages close in meaning
+ * (`useMeaningSearch`), narrowed by the same filters, with how far the
+ * vectors have got on the status line while pages are left. Up and down
+ * move through both, its label naming its group, not a stop.
+ *
  * Typed first, `>` turns it into the command palette (`paletteRows`): the
  * commands offered where the person is (`usePaletteEntries`), recent ones
  * first. Ctrl+Shift+P (Cmd+Shift+P on Apple) or F1 opens it so.
  *
  * A plugin can draw the results of a word search in place of the list
- * (`search.results`, ADR 0011); the box, the line under it and the
- * commands stay the app's. The view opens a result with
+ * (`search.results`, ADR 0011); the box, the line under it, the commands
+ * and **By meaning**, below the plugin's view, stay the app's. The view opens a result with
  * `host.app.navigate`, which closes search (`AppShell`).
  */
 export function SearchDialog({
@@ -103,11 +119,14 @@ function SearchBody({
   const deferred = useDeferredValue(query);
   // `>` first lists commands instead; deleting it searches again.
   const commanding = query.startsWith('>');
+  const searching = deferred.startsWith('>') ? '' : deferred;
   const results = useMemo(
-    () => (deferred.startsWith('>') ? [] : (index?.search(deferred, { limit: 50 }) ?? [])),
-    [index, deferred],
+    () => (searching ? (index?.search(searching, { limit: 50 }) ?? []) : []),
+    [index, searching],
   );
-  const hits = useChosen(results.map(hitKey), deferred);
+  const listed = useMemo(() => results.map(hitKey), [results]);
+  const meaning = useMeaningSearch(index, searching, listed);
+  const byMeaning = useMemo(() => (meaning?.hits ?? []).map(meaningRow), [meaning?.hits]);
   // What a plugin drawing the results is given of them.
   const searchResults = useMemo(
     () =>
@@ -126,11 +145,17 @@ function SearchBody({
     commands.map(({ entry }) => entry.command.id),
     query,
   );
-  const list = commanding ? chosenCommand : hits;
   // Up, down and Enter move through the app's own list, not a plugin's drawn in its place.
   // Set as the list mounts (`Own`), so search opened with a query a plugin draws never has it.
   const [ownShown, setOwnShown] = useState(false);
-  const count = commanding ? commands.length : ownShown ? results.length : 0;
+  // One list for the keys: the word matches, then those by meaning.
+  const rows = useMemo(
+    () => [...(ownShown ? results : []), ...byMeaning],
+    [ownShown, results, byMeaning],
+  );
+  const hits = useChosen(rows.map(hitKey), deferred);
+  const list = commanding ? chosenCommand : hits;
+  const count = commanding ? commands.length : rows.length;
   const { active } = list;
   const ids = useId();
   const optionId = (i: number) => `${ids}-${i}`;
@@ -178,20 +203,37 @@ function SearchBody({
     role: 'listbox',
     className: '-mx-1 grid max-h-[min(60vh,28rem)] gap-0.5 overflow-y-auto px-1',
   };
+  const rowOf = (hit: Hit, i: number) => (
+    <ResultRow
+      key={hitKey(hit)}
+      hit={hit}
+      id={optionId(i)}
+      active={!commanding && i === active}
+      onOpen={() => openHit(hit)}
+      onHover={() => hits.choose(hitKey(hit))}
+    />
+  );
+  // After the word matches the app lists, or alone below a plugin's.
+  const meaningFrom = ownShown ? results.length : 0;
+  const meaningGroup = byMeaning.length > 0 && (
+    <li role="group" aria-label="By meaning" className="grid gap-0.5">
+      <span
+        aria-hidden
+        className="px-2.5 pt-2 pb-0.5 text-xs font-bold tracking-wide text-muted-foreground uppercase"
+      >
+        By meaning
+      </span>
+      <ul role="presentation" className="grid gap-0.5">
+        {byMeaning.map((hit, i) => rowOf(hit, meaningFrom + i))}
+      </ul>
+    </li>
+  );
   const resultList = (
     <Own onShown={setOwnShown}>
-      {results.length > 0 && (
+      {(results.length > 0 || (!replaced && meaningGroup)) && (
         <ul {...listProps} aria-label="Results">
-          {results.map((hit, i) => (
-            <ResultRow
-              key={hitKey(hit)}
-              hit={hit}
-              id={optionId(i)}
-              active={i === active}
-              onOpen={() => openHit(hit)}
-              onHover={() => hits.choose(hitKey(hit))}
-            />
-          ))}
+          {results.map(rowOf)}
+          {!replaced && meaningGroup}
         </ul>
       )}
     </Own>
@@ -201,7 +243,16 @@ function SearchBody({
     ? commandStatus(commands.length)
     : error
       ? null
-      : searchStatus({ index, progress, query: deferred, results: results.length });
+      : searchStatus({
+          index,
+          progress,
+          query: deferred,
+          results: results.length,
+          meaning: byMeaning.length,
+        });
+  // Not announced: it changes with each page indexed.
+  const meaningProgress =
+    !commanding && !error && index && index.size > 0 && meaning?.asks ? meaning.progress : null;
   return (
     <>
       <div className="relative mr-8">
@@ -222,7 +273,7 @@ function SearchBody({
           role="combobox"
           aria-label={commanding ? 'Run a command' : 'Search pages'}
           aria-expanded={count > 0}
-          aria-controls={`${ids}-results`}
+          aria-controls={replaced ? `${ids}-results ${ids}-meaning` : `${ids}-results`}
           aria-activedescendant={count > 0 ? optionId(active) : undefined}
           aria-autocomplete="list"
           ref={box}
@@ -248,7 +299,7 @@ function SearchBody({
               event.preventDefault();
               list.step(event.key === 'ArrowDown' ? 1 : -1);
             } else if (event.key === 'Enter' && count > 0) {
-              const row = commanding ? commands[active] : results[active];
+              const row = commanding ? commands[active] : rows[active];
               if (!row) return;
               event.preventDefault();
               if ('entry' in row) runCommandRow(row);
@@ -258,10 +309,13 @@ function SearchBody({
           className="h-10 w-full rounded-control border border-input bg-transparent pr-3 pl-9 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
       </div>
-      <p role="status" className="text-sm text-muted-foreground">
-        {status}
-        {/* Once a rebuild, not at each step: pages others change rebuild it. */}
-        {!commanding && index && updating && <span className="sr-only">Updating</span>}
+      <p className="text-sm text-muted-foreground">
+        <span role="status">
+          {status}
+          {/* Once a rebuild, not at each step: pages others change rebuild it. */}
+          {!commanding && index && updating && <span className="sr-only">Updating</span>}
+        </span>
+        {meaningProgress && <span> · {meaningProgress}</span>}
       </p>
       {!commanding && error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
@@ -287,15 +341,27 @@ function SearchBody({
           </ul>
         )
       ) : replaced ? (
-        <div className="-mx-1 flex max-h-[min(60vh,28rem)] min-h-0 flex-col px-1 empty:hidden">
-          <Replaceable
-            name="search.results"
-            inputs={{ query: deferred, results: searchResults }}
-            keep
-          >
-            {resultList}
-          </Replaceable>
-        </div>
+        <>
+          <div className="-mx-1 flex max-h-[min(60vh,28rem)] min-h-0 flex-col px-1 empty:hidden">
+            <Replaceable
+              name="search.results"
+              inputs={{ query: deferred, results: searchResults }}
+              keep
+            >
+              {resultList}
+            </Replaceable>
+          </div>
+          {meaningGroup && (
+            <ul
+              {...listProps}
+              id={`${ids}-meaning`}
+              aria-label="More results"
+              className="-mx-1 grid max-h-[min(30vh,16rem)] gap-0.5 overflow-y-auto px-1"
+            >
+              {meaningGroup}
+            </ul>
+          )}
+        </>
       ) : (
         resultList
       )}

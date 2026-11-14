@@ -515,3 +515,117 @@ describe('an update with this person’s own saves', () => {
     expect(called).toContain('/api/spaces');
   });
 });
+
+describe('a change waiting on this device (#423)', () => {
+  const session = () =>
+    ({
+      revisions: { generation: 0 },
+      api: {
+        call: async () => {
+          throw new Error('listed');
+        },
+      },
+    }) as unknown as ClientContext;
+
+  // A page with draft changes, indexed as its draft.
+  const doc: SearchPage = {
+    spaceId: SpaceId.parse('home'),
+    pageId: PageId.parse('plan'),
+    revisionId: RevisionId.parse('draft-1'),
+    parentId: null,
+    folderIds: [],
+    path: ['home'],
+    draft: true,
+    unpublished: false,
+  };
+  const at = '2026-11-13T09:30:00.000Z';
+  const base = new PageIndex();
+  base.addText(doc, { title: 'Base', ...indexedContent('base words'), updated: at });
+  // As `OfflineQueue.drafts` gives it: on its base, named as the version.
+  const waiting = (n: number, markdown: string) => ({
+    spaceId: doc.spaceId,
+    pageId: doc.pageId,
+    basedOn: doc.revisionId,
+    revisionId: doc.revisionId,
+    payload: { title: `Typed ${n}`, markdown, extensions: {} },
+  });
+
+  it('goes in over a draft held at the version it is on, as typed', async () => {
+    const next = await searchOperations.updateIndex(session(), base, {
+      spaces: [],
+      saved: [waiting(1, '---\ntags: [typed]\n---\ntypedzebra words')],
+    });
+    expect({
+      same: next === base,
+      title: next.page(doc.spaceId, doc.pageId)?.title,
+      hits: next.search('typedzebra').length,
+    }).toEqual({ same: false, title: 'Typed 1', hits: 1 });
+    expect(next.page(doc.spaceId, doc.pageId)).toMatchObject({
+      revisionId: doc.revisionId,
+      draft: true,
+      updated: at,
+    });
+    expect(next.list({ spaceId: doc.spaceId, tag: 'typed' })).toHaveLength(1);
+    expect(next.search('base')).toEqual([]);
+    // Typed on, over the same version: in again.
+    const again = await searchOperations.updateIndex(session(), next, {
+      spaces: [],
+      saved: [waiting(2, 'typedyak words')],
+    });
+    expect(again.page(doc.spaceId, doc.pageId)?.title).toBe('Typed 2');
+    expect(again.search('typedyak')).toHaveLength(1);
+    expect(again.search('typedzebra')).toEqual([]);
+    // The same text again changes nothing.
+    const same = await searchOperations.updateIndex(session(), again, {
+      spaces: [],
+      saved: [waiting(2, 'typedyak words')],
+    });
+    expect(same).toBe(again);
+  });
+
+  it('keeps what it holds through a move or a time, and isn’t kept as the version’s text', async () => {
+    const typed = base.with([[doc, { title: 'Typed', text: 'typedzebra', waiting: true }]]);
+    expect(typed.waiting(doc.spaceId, doc.pageId)).toBe(true);
+    expect(base.waiting(doc.spaceId, doc.pageId)).toBe(false);
+    const moved = typed.with([[{ ...doc, parentId: null, path: ['home', 'renamed'] }]]);
+    expect(moved.page(doc.spaceId, doc.pageId)?.title).toBe('Typed');
+    expect(moved.waiting(doc.spaceId, doc.pageId)).toBe(true);
+    const timed = typed.with([[doc, { updated: '2026-11-13T10:00:00.000Z' }]]);
+    expect(timed.page(doc.spaceId, doc.pageId)?.title).toBe('Typed');
+    expect(timed.waiting(doc.spaceId, doc.pageId)).toBe(true);
+    // A later index never takes what was typed for the version it was typed on.
+    expect(searchOperations.keptPages(typed).has(doc.revisionId)).toBe(false);
+    expect(searchOperations.keptPages(base).get(doc.revisionId)?.title).toBe('Base');
+  });
+
+  it('gives way to the version’s own text, and to the version it was sent as', async () => {
+    const typed = base.with([[doc, { title: 'Typed', text: 'typedzebra', waiting: true }]]);
+    // Opened again from the server, as when the change was discarded.
+    const own = typed.with([
+      [doc, { title: 'Base', ...indexedContent('base words'), updated: at }],
+    ]);
+    expect(own.page(doc.spaceId, doc.pageId)?.title).toBe('Base');
+    expect(own.search('typedzebra')).toEqual([]);
+    expect(own.waiting(doc.spaceId, doc.pageId)).toBe(false);
+    expect(searchOperations.keptPages(own).has(doc.revisionId)).toBe(true);
+    // Sent: the server took it as a version of its own, saved over the base.
+    const sent = await searchOperations.updateIndex(session(), typed, {
+      spaces: [],
+      saved: [
+        {
+          ...waiting(3, 'sentzebra words'),
+          revisionId: RevisionId.parse('draft-2'),
+          updated: '2026-11-13T11:00:00.000Z',
+        },
+      ],
+    });
+    expect(sent.page(doc.spaceId, doc.pageId)).toMatchObject({
+      revisionId: 'draft-2',
+      title: 'Typed 3',
+      updated: '2026-11-13T11:00:00.000Z',
+    });
+    expect(sent.search('typedzebra')).toEqual([]);
+    expect(sent.waiting(doc.spaceId, doc.pageId)).toBe(false);
+    expect([...searchOperations.keptPages(sent).keys()]).toEqual(['draft-2']);
+  });
+});

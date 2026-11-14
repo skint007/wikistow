@@ -2,6 +2,9 @@
 // package.json: the account menu shows the web app's, the desktop app's goes
 // into its app.asar, and the CLI prints its own. The AUR packages take the
 // version of the release they are published for (.github/workflows/aur.yml).
+// The browser extension (apps/clipper) has versions of its own, as its
+// stores take only numbers and it updates apart from the app (ADR 0017,
+// decision 8), so it isn't one of them.
 //
 //   node scripts/version.ts         prints it, and fails if any disagree
 //   node scripts/version.ts 0.3.0   sets it everywhere
@@ -17,6 +20,7 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const packages = ['package.json'];
 for (const group of ['apps', 'packages']) {
   for (const name of (await readdir(join(root, group))).sort()) {
+    if (group === 'apps' && name === 'clipper') continue;
     packages.push(`${group}/${name}/package.json`);
   }
 }

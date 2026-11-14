@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Clip to WikiStow</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="icons/icon-32.png" alt="" width="20" height="20" />
+        <h1>Clip to WikiStow</h1>
+      </header>
+
+      <section id="notice" class="notice" hidden>
+        <p id="notice-text" role="status"></p>
+        <button id="notice-action" type="button" class="secondary" hidden></button>
+        <a
+          id="install"
+          href="https://github.com/skint007/wikistow/blob/main/docs/desktop.md#install"
+          target="_blank"
+          rel="noreferrer"
+          hidden
+          >How to install it</a
+        >
+      </section>
+
+      <section id="result" class="result" hidden>
+        <p id="result-text" role="status"></p>
+        <p id="result-detail" class="muted" hidden></p>
+        <button id="open-draft" type="button" class="secondary" hidden>Open in WikiStow</button>
+      </section>
+
+      <form id="form" hidden>
+        <fieldset class="modes">
+          <legend>Mode</legend>
+          <div class="segments">
+            <label><input type="radio" name="mode" value="link" /><span>Link</span></label>
+            <label
+              ><input type="radio" name="mode" value="selection" /><span>Selection</span></label
+            >
+            <label><input type="radio" name="mode" value="article" /><span>Article</span></label>
+            <label><input type="radio" name="mode" value="page" /><span>Whole page</span></label>
+          </div>
+          <div class="segments" role="group" aria-label="Screenshot">
+            <label
+              ><input type="radio" name="mode" value="visible" /><span>Visible area</span></label
+            >
+            <label
+              ><input type="radio" name="mode" value="area" /><span>Choose an area</span></label
+            >
+          </div>
+        </fieldset>
+
+        <label class="field">
+          <span>Title</span>
+          <input id="title" maxlength="500" autocomplete="off" />
+        </label>
+        <label id="note-field" class="field">
+          <span>Note</span>
+          <textarea id="note" rows="3" maxlength="10000"></textarea>
+        </label>
+        <label class="field">
+          <span>Tags</span>
+          <input id="tags" placeholder="Separated by commas" autocomplete="off" />
+        </label>
+
+        <fieldset class="field">
+          <legend>Folder</legend>
+          <input
+            id="folder-search"
+            type="search"
+            placeholder="Find a folder"
+            aria-label="Find a folder"
+            maxlength="200"
+            autocomplete="off"
+          />
+          <div id="folders" class="folders" role="radiogroup" aria-label="Folder"></div>
+          <p id="folder-note" class="muted" hidden></p>
+        </fieldset>
+
+        <button id="save" type="submit" class="primary">Save to WikiStow</button>
+      </form>
+
+      <details id="settings">
+        <summary>Which WikiStow app</summary>
+        <p class="muted">For someone who runs both the stable app and the beta.</p>
+        <label><input type="radio" name="host" value="auto" /> Whichever is open</label>
+        <label><input type="radio" name="host" value="stable" /> WikiStow</label>
+        <label><input type="radio" name="host" value="beta" /> WikiStow Beta</label>
+      </details>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
