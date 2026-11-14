@@ -274,6 +274,14 @@ export function clipDesk(options: DeskOptions) {
     return answer;
   }
 
+  function letGo() {
+    for (const one of [...held.values()]) {
+      finish(one, { type: 'error', code: 'signed-out', message: 'You signed out of WikiStow.' });
+    }
+    recent.length = 0;
+    clipped.clear();
+  }
+
   /** End a held clip, telling the extension if it's still there. */
   function finish(one: Held, answer: Record<string, unknown>) {
     held.delete(one.clip.id);
@@ -319,6 +327,7 @@ export function clipDesk(options: DeskOptions) {
       const next = PageState.parse(input);
       const first = page === null;
       page = next;
+      if (options.session() === 'signed-out') return letGo();
       // A clip that came while the app started now waits for the unlock.
       if (first && next.vault === 'locked' && held.size > 0) options.show();
     },
@@ -356,12 +365,8 @@ export function clipDesk(options: DeskOptions) {
       if (one) one.clip = { ...one.clip, made: Made.parse(input) };
     },
 
-    /** The person signed out: the clips held can't be saved as them. */
-    signedOut() {
-      for (const one of [...held.values()]) {
-        finish(one, { type: 'error', code: 'signed-out', message: 'You signed out of WikiStow.' });
-      }
-    },
+    /** The person signed out: the clips held can't be saved as them, and those saved aren't listed. */
+    signedOut: () => letGo(),
 
     answerFolders(requestId: unknown, input: unknown) {
       const answered = typeof requestId === 'string' ? searches.get(requestId) : undefined;
@@ -382,7 +387,7 @@ export function clipDesk(options: DeskOptions) {
       return run;
     },
 
-    /** This session's last clips, newest first. */
-    recent: () => [...recent],
+    /** This session's last clips, newest first, only while the vault is open: their names are its. */
+    recent: () => (state() === 'ready' ? [...recent] : []),
   };
 }

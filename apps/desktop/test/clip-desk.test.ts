@@ -270,7 +270,34 @@ describe('a clip', () => {
     if (request.kind !== 'clip') throw new Error('Not a clip');
     desk.done(request.clip.id, SAVED);
     expect(replies).toHaveLength(1);
+    // Listed only while the vault is open: the names are the vault's.
+    expect(desk.recent()).toEqual([]);
+    desk.setPageState({ vault: 'unlocked', offline: false });
     expect(desk.recent()).toHaveLength(1);
+    // Gone once signed out, and no longer shown from the browser.
+    desk.signedOut();
+    expect(desk.recent()).toEqual([]);
+    const show = connection();
+    const parsed = Message.parse({
+      v: 1,
+      id: 's',
+      type: 'show',
+      spaceId: 'space1',
+      pageId: 'page1',
+    });
+    if (parsed.type !== 'show') throw new Error('Not a show');
+    desk.answer(parsed, show.open);
+    expect(show.replies).toEqual([expect.objectContaining({ code: 'not-allowed' })]);
+  });
+
+  it('is let go once the page loads in an app signed out meanwhile', () => {
+    const { desk, signIn } = setup();
+    const { open, replies } = connection();
+    desk.answer(clipMessage(), open);
+    signIn('signed-out');
+    desk.setPageState({ vault: 'locked', offline: false });
+    expect(replies[1]).toMatchObject({ type: 'error', code: 'signed-out' });
+    expect(desk.holding()).toEqual([]);
   });
 
   it('is let go once the person signs out', () => {

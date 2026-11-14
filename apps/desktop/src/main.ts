@@ -201,12 +201,13 @@ const clipping = desktopClipping({
   execPath: process.execPath,
   version: app.getVersion(),
   argv: process.argv,
+  // Signed out is known before the window loads: the session is read first.
   session: () =>
-    !window || window.webContents.isLoading()
-      ? 'starting'
-      : server && cookie
-        ? 'signed-in'
-        : 'signed-out',
+    !(server && cookie)
+      ? 'signed-out'
+      : !window || window.webContents.isLoading()
+        ? 'starting'
+        : 'signed-in',
   show: () => bringForward(),
   userAgent: app.userAgentFallback,
 });
