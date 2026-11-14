@@ -56,7 +56,7 @@ export function testAppOn(testDb: TestDatabase, blobDir: string, overrides: Part
   const mails: Mail[] = [];
   const logs: LogEntry[] = [];
   const config = testConfig(testDb.url, { blobDir, ...overrides });
-  const { app, auth, treeChanges, commentChanges } = createApp({
+  const { app, auth, treeChanges, commentChanges, live } = createApp({
     db: testDb.db,
     config,
     log: (entry) => logs.push(entry),
@@ -70,12 +70,14 @@ export function testAppOn(testDb: TestDatabase, blobDir: string, overrides: Part
     auth,
     treeChanges,
     commentChanges,
+    live,
     db: testDb.db,
     config,
     mails,
     logs,
     blobDir,
     drop: async () => {
+      live.close();
       await testDb.drop();
       await rm(blobDir, { recursive: true, force: true });
     },

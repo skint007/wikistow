@@ -67,7 +67,7 @@ Identity key rotation, and its statement format, are left to a later milestone (
 
 ### What live sessions add (accepted)
 
-[ADR 0015](../docs/adr/0015-live-editing.md) accepts live sessions (#321, section 5.10), not built yet: the editors who have a page's draft open edit one shared document, whose changes the server relays sealed under a session key. The session record is a metadata record v2 with `subjectKind: "live"`, wrapped with the draft key or sealed to the owners, so it adds no record format. Its messages add three domains, `live-message/v1`, `live-message-payload/v1` and `live-client/v1`, and draft payloads gain the `wikistow.live` and `wikistow.overlaps` extensions (section 5.5). What a session's saver writes is an ordinary draft revision. Older clients never see a session, and save as writers outside it.
+[ADR 0015](../docs/adr/0015-live-editing.md) accepts live sessions (#321, section 5.10). The server's part and the client's `live` module are built; the editor isn't yet. The editors who have a page's draft open edit one shared document, whose changes the server relays sealed under a session key. The session record is a metadata record v2 with `subjectKind: "live"`, wrapped with the draft key or sealed to the owners, so it adds no record format. Its messages add three domains, `live-message/v1`, `live-message-payload/v1` and `live-client/v1`, and draft payloads gain the `wikistow.live` and `wikistow.overlaps` extensions (section 5.5). What a session's saver writes is an ordinary draft revision. Older clients never see a session, and save as writers outside it.
 
 Section 15 lists what PR #29 merged that this design keeps, changes or retires.
 
@@ -792,7 +792,7 @@ The server can't open the wrap or read the payload, so it checks nothing of a co
 
 ### 5.10 Live sessions
 
-**Status: accepted** in [ADR 0015](../docs/adr/0015-live-editing.md) (#321), not built yet.
+**Status: accepted** in [ADR 0015](../docs/adr/0015-live-editing.md) (#321). The server's part is built (step 4): the routes of the ADR's decision 13, the stream, the limits, ending a session in the transaction that moves the page's permission version, deletion and retention. The client's `live` module, which seals, opens and checks session records and messages, is built too (step 5); the editor that edits in a session isn't yet.
 
 A **live session** lets the editors who have a page's draft open edit one shared document, a Yjs `Y.Doc`. Changes to it are relayed through the server, sealed under a **session key** that only the draft's audience holds. One participant's app, the **saver**, writes the shared document as ordinary draft revisions (section 5.1), checked by the server as any draft save is. A session is short-lived: the server deletes it once everyone has left and everything in it is saved, and ends it at once when the page's permission version moves.
 

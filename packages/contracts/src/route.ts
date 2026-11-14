@@ -48,9 +48,19 @@ export type RouteOutput<R extends RouteDef> = z.input<R['response']>;
  * the tree changes. Blank lines, sent while the stream is quiet to keep it
  * open, carry nothing. A POST takes a JSON `body`; a GET takes none.
  */
-export type StreamRouteDef =
+export type StreamRouteDef = {
+  params?: z.ZodType;
+  query?: z.ZodType;
+} & (
   | { method: 'POST'; path: string; body: z.ZodType; event: z.ZodType }
-  | { method: 'GET'; path: string; body?: never; event: z.ZodType };
+  | { method: 'GET'; path: string; body?: never; event: z.ZodType }
+);
 
 /** The parsed body a stream route's handler receives: none for a GET. */
 export type StreamBody<R extends StreamRouteDef> = Infer<R['body']>;
+
+/** The parsed params and query a stream route's handler receives, as `RouteInput` has them. */
+export type StreamInput<R extends StreamRouteDef> = {
+  params: Infer<R['params']>;
+  query: Infer<R['query']>;
+};
