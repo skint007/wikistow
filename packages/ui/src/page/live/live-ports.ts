@@ -11,6 +11,7 @@ import { treeQuery } from '../../data/queries';
 import { desktop } from '../../desktop';
 import type { LivePorts } from '../draft-session';
 import { readWikilinks } from '../page-reader';
+import { liveEditorOf } from './live-editor';
 
 /**
  * Whether this app may join live sessions here (ADR 0015 decision 10):
@@ -89,7 +90,7 @@ export function livePorts(
       const ports = live.participantPorts(ctx, page, () => region ?? opening.region, {
         read: readWikilinks,
         visible,
-        editor: () => 'source',
+        editor: () => liveEditorOf(page.pageId),
         onSaved: (landed) => saved({ ...landed, region: region ?? opening.region }),
       });
       return live.joinLive(ports, opening);

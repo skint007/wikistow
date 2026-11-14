@@ -30,8 +30,10 @@ import {
 } from '@codemirror/view';
 import * as Y from 'yjs';
 import { CARET_COLOURS } from './live-colours';
+import { resolveIn } from '../live-cursor';
 
 export { CARET_COLOURS, colourOf } from './live-colours';
+export { resolveIn } from '../live-cursor';
 
 /** Another person's caret and selection, as their presence says. */
 export type RemoteCaret = {
@@ -56,8 +58,22 @@ export type LiveSource = {
   /** Others' carets, and hearing when they change. */
   carets(): readonly RemoteCaret[];
   onCarets(listener: () => void): () => void;
-  /** The person's caret and selection moved, as Yjs relative positions in `body`. */
-  cursor(cursor: { anchor: Uint8Array; head: Uint8Array } | null): void;
+  /**
+   * The person's caret and selection moved, as Yjs relative positions in
+   * `body`, in `editor` (the source editor's by default). None from an
+   * editor the cursor already left for another changes nothing.
+   */
+  cursor(
+    cursor: { anchor: Uint8Array; head: Uint8Array } | null,
+    editor?: 'source' | 'visual',
+  ): void;
+  /**
+   * Hear just before someone else's change goes into the document, with
+   * who sent it, so an edit not yet in it goes in first (the visual editor's).
+   */
+  onBeforeRemote?(listener: (senderId: string) => void): () => void;
+  /** The name a person is shown by, as their caret is. */
+  nameOf?(id: string): string;
 };
 
 // Others' changes, which aren't reported as the person's edits.
@@ -151,37 +167,6 @@ export function changesFrom(
     }
   }
   return changes;
-}
-
-/**
- * The offset in `text` a relative position names, or null when it isn't
- * in `text` (section 5.10, **`presence`**): resolved against `text` itself,
- * a position naming `body` as its root included, never through `doc.get`,
- * which would make any other root it names.
- */
-export function resolveIn(text: Y.Text, encoded: Uint8Array): number | null {
-  const doc = text.doc;
-  if (!doc) return null;
-  let position: Y.RelativePosition;
-  try {
-    position = Y.decodeRelativePosition(encoded);
-  } catch {
-    return null;
-  }
-  if (position.item === null) {
-    if (position.tname !== 'body') return null;
-    return position.assoc >= 0 ? text.length : 0;
-  }
-  let absolute: Y.AbsolutePosition | null;
-  try {
-    absolute = Y.createAbsolutePositionFromRelativePosition(
-      new Y.RelativePosition(null, null, position.item, position.assoc),
-      doc,
-    );
-  } catch {
-    return null;
-  }
-  return absolute && absolute.type === text ? Math.min(absolute.index, text.length) : null;
 }
 
 const setCarets = StateEffect.define<DecorationSet>();

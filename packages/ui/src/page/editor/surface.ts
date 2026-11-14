@@ -142,8 +142,9 @@ export type EditorSurfaceProps = {
    */
   toolbar?: ReactNode;
   /**
-   * The page's body in its live session, which the source editor binds to
-   * (ADR 0015 decision 3); none outside one, or in the visual editor.
+   * The page's body in its live session, which both editors bind to (ADR
+   * 0015 decision 3): the source editor as text, the visual editor by
+   * block. None outside one.
    */
   live?: LiveSource | null | undefined;
   ref?: Ref<EditorSurfaceHandle>;

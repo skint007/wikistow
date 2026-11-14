@@ -408,7 +408,6 @@ export function DraftEditor({
           queryTable={queryTable}
           toolbar={toolbar}
           live={live}
-          othersEditing={snapshot.live?.kind === 'live' && snapshot.live.status.people.length > 0}
           onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
           status={
             <span role="status" aria-live="polite">

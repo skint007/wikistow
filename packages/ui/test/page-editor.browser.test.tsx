@@ -5,7 +5,9 @@ import { act, createRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
+import * as Y from 'yjs';
 import { PageEditor } from '../src/page/editor/page-editor.tsx';
+import type { LiveSource } from '../src/page/editor/source/live.ts';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
@@ -51,7 +53,11 @@ afterEach(() => {
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 openVault();
 
-function mount(initial: string, mode: 'source' | 'split' | 'visual'): Mounted {
+function mount(
+  initial: string,
+  mode: 'source' | 'split' | 'visual',
+  live: LiveSource | null = null,
+): Mounted {
   window.localStorage.setItem('wikistow.editor', mode);
   const container = document.createElement('div');
   document.body.append(container);
@@ -71,6 +77,7 @@ function mount(initial: string, mode: 'source' | 'split' | 'visual'): Mounted {
         attachments={{ list: [], url: async () => null }}
         onFiles={() => {}}
         page={PAGE_REF}
+        live={live}
       />,
     ),
   );
@@ -251,5 +258,84 @@ describe('the page editor', () => {
     await expect.poll(() => m.handle.read()).toBe(page);
     // What's saved is what's shown.
     expect(m.changes.at(-1)).toBe(page);
+  });
+});
+
+// A live session's `body` (ADR 0015 decision 3), and someone else's changes to it.
+function liveBody(initial: string) {
+  const LOCAL = Symbol('local');
+  const doc = new Y.Doc();
+  const text = doc.getText('body');
+  text.insert(0, initial);
+  const remote = new Y.Doc();
+  const before = new Set<(sender: string) => void>();
+  const live: LiveSource = {
+    text,
+    edit: (change) => doc.transact(change, LOCAL),
+    localOrigin: LOCAL,
+    carets: () => [],
+    onCarets: () => () => {},
+    cursor: () => {},
+    onBeforeRemote(listener) {
+      before.add(listener);
+      return () => void before.delete(listener);
+    },
+    nameOf: (id) => (id === 'sam' ? 'Sam' : 'Someone'),
+  };
+  const theirs = (sender: string, change: (text: Y.Text) => void) => {
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc, Y.encodeStateVector(remote)));
+    change(remote.getText('body'));
+    const update = Y.encodeStateAsUpdate(remote, Y.encodeStateVector(doc));
+    for (const listener of before) listener(sender);
+    Y.applyUpdate(doc, update, 'remote');
+  };
+  return { text, live, theirs };
+}
+
+describe('in a live session', () => {
+  it('in split, both sides show the shared text, each taking the other’s changes', async () => {
+    const { text, live, theirs } = liveBody('One.\n\nTwo.\n');
+    const m = mount('One.\n\nTwo.\n', 'split', live);
+    await expect.poll(() => !!visual(m) && !!sourceView(m)).toBe(true);
+    const code = sourceView(m);
+    const editor = visual(m);
+    if (!code || !editor) throw new Error('No editors');
+    // The source side's typing, into the shared text and the visual side.
+    act(() => code.dispatch({ changes: { from: 4, insert: ' Source' } }));
+    expect(text.toJSON()).toBe('One. Source\n\nTwo.\n');
+    await expect.poll(() => editor.textContent).toContain('One. Source');
+    // The visual side's, into the shared text and the source side.
+    const view = viewOf(editor);
+    act(() => view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1)));
+    await expect.poll(() => text.toJSON()).toBe('One. Source\n\nTwo.!\n');
+    await expect.poll(() => code.state.doc.toString()).toBe('One. Source\n\nTwo.!\n');
+    // Someone else's, into both.
+    theirs('sam', (body) => body.insert(0, 'Sam. '));
+    await expect.poll(() => code.state.doc.toString()).toBe('Sam. One. Source\n\nTwo.!\n');
+    await expect.poll(() => editor.textContent).toContain('Sam. One. Source');
+  });
+
+  it('turns to source mode when someone adds what the visual editor can’t show', async () => {
+    const { live, theirs } = liveBody('One.\n\nTwo.\n');
+    const m = mount('One.\n\nTwo.\n', 'visual', live);
+    await expect.poll(() => shown(m)).toBe('visual');
+    theirs('sam', (body) => body.insert(body.length, '\n[r]: https://example.test/\n'));
+    await expect.poll(() => shown(m)).toBe('source');
+    expect(m.container.textContent).toContain('Sam added something the visual editor can’t show.');
+    await expect
+      .poll(() => sourceView(m)?.state.doc.toString())
+      .toBe('One.\n\nTwo.\n\n[r]: https://example.test/\n');
+  });
+
+  it('in split, holds the visual side while the shared text is one it can’t show', async () => {
+    const { live, theirs } = liveBody('One.\n\nTwo.\n');
+    const m = mount('One.\n\nTwo.\n', 'split', live);
+    await expect.poll(() => !!visual(m) && !!sourceView(m)).toBe(true);
+    theirs('sam', (body) => body.insert(body.length, '\n[r]: https://example.test/\n'));
+    await expect
+      .poll(() => m.container.textContent)
+      .toContain('The visual side is on hold. Sam added something the visual editor can’t show.');
+    theirs('sam', (body) => body.delete(body.toJSON().indexOf('\n[r]'), 27));
+    await expect.poll(() => m.container.textContent).not.toContain('on hold');
   });
 });
