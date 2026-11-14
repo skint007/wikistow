@@ -1,7 +1,7 @@
 // What a clip from the browser becomes as a page (ADR 0017, decision 5):
 // its title, its properties, the HTML to turn into Markdown, and where its
 // images go. Pure, so it is table-tested; `save-clip.ts` puts it together.
-import { linkSpans, setProperty, type PropertyValue } from '@wikistow/client';
+import { linkSpans, setProperty, type LinkSpans, type PropertyValue } from '@wikistow/client';
 import { pageRoutes, type DesktopClip } from '@wikistow/contracts';
 
 /** A clip has at most this many images fetched (ADR 0017, decision 3). */
@@ -95,6 +95,14 @@ export const byteLength = (text: string) => new TextEncoder().encode(text).lengt
 export const fitsPage = (markdown: string) => byteLength(markdown) <= pageRoutes.MAX_MARKDOWN_BYTES;
 
 /**
+ * Whether `markdown` could fit a page once its images are written as the
+ * page shows them: without its `data:` addresses, which become
+ * attachments or text, it must already. Cheap, so a clip far too long is
+ * refused before its links are read.
+ */
+export const mayFit = (markdown: string) => fitsPage(markdown.replace(/data:[^\s)"'>]*/gi, ''));
+
+/**
  * Where a clip's images go. `fetch` is each address to fetch, once, at
  * most 50: `http:`, `https:` or `data:`. `written` is the page with the
  * images given attachments (by address) shown from them, and the rest as
@@ -112,8 +120,12 @@ export type ImagePlan = {
   count: number;
 };
 
-export function planImages(markdown: string, max = MAX_CLIP_IMAGES): ImagePlan {
-  const images = linkSpans(markdown).urls.filter(
+export function planImages(
+  markdown: string,
+  spans: LinkSpans = linkSpans(markdown),
+  max = MAX_CLIP_IMAGES,
+): ImagePlan {
+  const images = spans.urls.filter(
     (url): url is typeof url & { imageSpan: { start: number; end: number } } =>
       url.image === true && url.imageSpan !== undefined && url.destination !== null,
   );
@@ -122,28 +134,31 @@ export function planImages(markdown: string, max = MAX_CLIP_IMAGES): ImagePlan {
     if (fetch.length >= max) break;
     if ((linkable(url) || /^data:/i.test(url)) && !fetch.includes(url)) fetch.push(url);
   }
+  // In one pass, in order: what's between the images, and each as written.
   const written = (attached: ReadonlyMap<string, string>) => {
-    let out = markdown;
-    // From the end, so each edit leaves the places before it.
-    for (const image of [...images].reverse()) {
+    const parts: string[] = [];
+    let at = 0;
+    for (const image of images) {
       const { start, end } = image.imageSpan;
       const destination = image.destination!;
       const id = attached.get(image.url);
-      let next: string;
+      parts.push(markdown.slice(at, start));
       if (id !== undefined) {
-        next =
-          markdown.slice(start, destination.start) +
-          `attachment:${id}` +
-          markdown.slice(destination.end, end);
+        parts.push(
+          markdown.slice(start, destination.start),
+          `attachment:${id}`,
+          markdown.slice(destination.end, end),
+        );
       } else if (linkable(image.url) && !image.inLink) {
         // `[`… as the link it becomes, dropping the image's `!`.
-        next = markdown.slice(start + 1, end);
+        parts.push(markdown.slice(start + 1, end));
       } else {
-        next = markdown.slice(start + 2, image.at - 1);
+        parts.push(markdown.slice(start + 2, image.at - 1));
       }
-      out = out.slice(0, start) + next + out.slice(end);
+      at = end;
     }
-    return out;
+    parts.push(markdown.slice(at));
+    return parts.join('');
   };
   const placeholder = 'x'.repeat(ATTACHMENT_URL_CHARS - 'attachment:'.length);
   const fitsAttached = fitsPage(written(new Map(fetch.map((url) => [url, placeholder]))));

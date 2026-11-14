@@ -631,7 +631,12 @@ function keepClips(window: BrowserWindow) {
     message: count === 1 ? 'A clip isn’t saved yet' : `${count} clips aren’t saved yet`,
     detail: 'It came from your browser and is kept only until it’s saved. Closing now loses it.',
   });
-  if (answer !== 0) return false;
+  if (answer !== 0) {
+    // Staying is staying: a "Close when saved" waiting to close again stops too.
+    clearInterval(closeRetry);
+    closeBy = null;
+    return false;
+  }
   for (const id of held) clipsLetGo.add(id);
   return true;
 }
@@ -993,6 +998,7 @@ void app.whenReady().then(async () => {
   handle('setClipping', async (on) => clipping.set(z.boolean().parse(on)));
   handle('setClipState', async (state) => clipping.desk.setPageState(state));
   handle('waitingClips', async () => clipping.desk.waiting());
+  handle('clipMade', async (clipId, page) => clipping.desk.made(clipId, page));
   handle('clipDone', async (clipId, outcome) => clipping.desk.done(clipId, outcome));
   handle('clipFolders', async (requestId, folders) =>
     clipping.desk.answerFolders(requestId, folders),

@@ -38,6 +38,7 @@ const clip = (fields: Partial<DesktopClip> = {}): DesktopClip => ({
   byline: null,
   folder: { spaceId, folderId },
   waited: false,
+  made: null,
   ...fields,
 });
 
@@ -123,7 +124,7 @@ describe('a clip’s images', () => {
       'https://cdn.test/2.png',
     ]);
     expect(planImages(page).count).toBe(4);
-    expect(planImages(page, 1).fetch).toEqual(['https://cdn.test/1.png']);
+    expect(planImages(page, undefined, 1).fetch).toEqual(['https://cdn.test/1.png']);
   });
 
   it('shows those attached from their attachments, and the rest as links or their text', () => {
@@ -248,7 +249,7 @@ function deps(overrides: Partial<SaveClipDeps> = {}): SaveClipDeps & { asked: st
   return {
     asked,
     writer: fakeWriter().writer,
-    places: async () => [here],
+    places: async () => ({ places: [here], unread: new Set() }),
     // As `htmlMarkdown` would write the test's HTML: its text, with any image.
     convert: async (html, text) => ({
       markdown: `${html.replace(/<img src="([^"]*)">/g, '![]($1)').replace(/<[^>]+>/g, '') || text}\n`,
@@ -373,5 +374,67 @@ describe('saving a clip', () => {
       ok: false,
       code: 'not-allowed',
     });
+  });
+
+  it('finishes a clip whose page was made before a reload, making no other', async () => {
+    const { writer, calls } = fakeWriter();
+    const pageId = newId(PageId);
+    const saved = await saveClip(
+      clip({ made: { spaceId, pageId, path: 'Home / News' } }),
+      deps({ writer }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, pageId, path: 'Home / News' });
+    expect(calls).toEqual([]);
+  });
+
+  it('says the page is made as soon as it is, before its images', async () => {
+    const { writer, calls } = fakeWriter();
+    const told: string[] = [];
+    await saveClip(
+      clip({ html: '<img src="https://cdn.test/a.png">' }),
+      deps({
+        writer,
+        made: async (page) => {
+          told.push(`${page.path} after ${calls.map((c) => c.call).join(',')}`);
+        },
+      }),
+    );
+    expect(told).toEqual(['Home / News after newPageDraft']);
+  });
+
+  it('queues a clip to a space not kept offline, whose folders it can’t read', async () => {
+    const { writer, calls } = fakeWriter();
+    const saved = await saveClip(
+      clip(),
+      deps({ writer, places: async () => ({ places: [], unread: new Set([spaceId]) }) }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, path: '' });
+    expect(calls[0]?.input).toMatchObject({ spaceId, parentId: folderId });
+  });
+
+  it('fails a clip whose properties can’t be written, rather than throwing', async () => {
+    const { writer, calls } = fakeWriter();
+    const saved = await saveClip(clip({ url: '\u0001'.repeat(20_000) }), deps({ writer }));
+    expect(saved.outcome).toMatchObject({ ok: false, code: 'failed' });
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses a clip far too long before reading its links', async () => {
+    const { writer } = fakeWriter();
+    let read = false;
+    const huge = clip({ html: '<img src="https://cdn.test/a.png">x'.repeat(100_000) });
+    const saved = await saveClip(
+      huge,
+      deps({
+        writer,
+        convert: async (html) => ({ markdown: html, faithful: true }),
+        spans: async () => {
+          read = true;
+          throw new Error('Not read');
+        },
+      }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: false, code: 'too-large' });
+    expect(read).toBe(false);
   });
 });

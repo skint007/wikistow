@@ -8,8 +8,11 @@ import {
   ApiError,
   newPayload,
   PageTooLarge,
+  linkSpans,
   type AttachmentRef,
+  type LinkSpans,
   type PageId,
+  type SpaceId,
   type PageWriter,
   type RevisionId,
 } from '@wikistow/client';
@@ -20,6 +23,7 @@ import {
   clipTitle,
   fitsPage,
   imageName,
+  mayFit,
   planImages,
 } from './clip-page';
 import { samePlace, type ClipPlace } from './clip-places';
@@ -30,11 +34,17 @@ export type Convert = (
   text: string,
 ) => Promise<{ markdown: string; faithful: boolean }>;
 
+/** Where the person can make pages now, and the spaces whose trees couldn't be read, as offline. */
+export type Places = { places: ClipPlace[]; unread: ReadonlySet<string> };
+
 export type SaveClipDeps = {
   writer: PageWriter;
-  /** Where the person can make pages now. */
-  places: () => Promise<ClipPlace[]>;
+  places: () => Promise<Places>;
   convert: Convert;
+  /** Where the Markdown's links are (`linkSpans`), as the app reads it, in a worker. */
+  spans?: (markdown: string) => Promise<LinkSpans>;
+  /** Tell main the clip's page is made, so a reload finishes it rather than making another. */
+  made?: (page: { spaceId: SpaceId; pageId: PageId; path: string }) => Promise<void>;
   /** Main's fetch of one of the clip's images (`DesktopBridge.clipImage`). */
   image: (url: string) => Promise<ClipImage>;
   /** Today, as `clipped` says it. */
@@ -57,12 +67,34 @@ const failed = (code: Exclude<ClipOutcome, { ok: true }>['code'], message: strin
 const TOO_LONG =
   'This is too long for one page. Try Article, or select part of it and clip the selection.';
 
+const savedTo = (path: readonly string[]) => path.join(' / ');
+
 /** Save `clip` as a new draft. Never throws: a failure is an outcome, said in the app's words. */
 export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<Saved> {
   const title = clipTitle(clip);
+  // Made before a reload cut it short: its text is saved, so it's done.
+  if (clip.made) {
+    const { spaceId, pageId, path } = clip.made;
+    return {
+      outcome: {
+        ok: true,
+        spaceId,
+        pageId,
+        title,
+        path,
+        images: { saved: 0, skipped: 0 },
+        faithful: true,
+      },
+      place: null,
+    };
+  }
   let place: ClipPlace | null;
   try {
-    place = (await deps.places()).find((one) => samePlace(one, clip.folder)) ?? null;
+    const { places, unread } = await deps.places();
+    place = places.find((one) => samePlace(one, clip.folder)) ?? null;
+    // A space not kept for offline: its folder can't be checked here, so
+    // the page waits on this device, and the server checks it once sent.
+    if (!place && unread.has(clip.folder.spaceId)) place = { ...clip.folder, path: [] };
     if (!place && clip.waited) place = await deps.choose(clip, title);
   } catch {
     return failed('failed', 'WikiStow couldn’t load your folders.');
@@ -85,7 +117,19 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   } catch {
     return failed('failed', 'WikiStow couldn’t read this clip.');
   }
-  const plan = planImages(clipFrontmatter(clip, deps.today) + body);
+  let markdown: string;
+  try {
+    markdown = clipFrontmatter(clip, deps.today) + body;
+  } catch {
+    return failed('failed', 'This clip’s address or tags can’t be written as its properties.');
+  }
+  if (!mayFit(markdown)) return failed('too-large', TOO_LONG);
+  let plan: ReturnType<typeof planImages>;
+  try {
+    plan = planImages(markdown, await (deps.spans ?? (async (text) => linkSpans(text)))(markdown));
+  } catch {
+    return failed('too-large', TOO_LONG);
+  }
   const first = plan.written(new Map());
   if (!fitsPage(first)) return failed('too-large', TOO_LONG);
 
@@ -106,6 +150,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
     return failed('failed', 'WikiStow couldn’t save the clip. Try again.');
   }
   const page = { spaceId, pageId: made.pageId };
+  await deps.made?.({ spaceId, pageId: made.pageId, path: savedTo(place.path) }).catch(() => {});
 
   // Images, one at a time, each kept only once attached.
   const attached = new Map<string, string>();
@@ -145,7 +190,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       spaceId,
       pageId: made.pageId,
       title,
-      path: place.path.join(' / '),
+      path: savedTo(place.path),
       images: { saved: refs.length, skipped: plan.count - refs.length },
       faithful,
     },

@@ -49,11 +49,15 @@ async function save(fields: Partial<DesktopClip>) {
       byline: null,
       folder: { spaceId, folderId },
       waited: false,
+      made: null,
       ...fields,
     },
     {
       writer,
-      places: async () => [{ spaceId, folderId, path: ['Home', 'News'] }],
+      places: async () => ({
+        places: [{ spaceId, folderId, path: ['Home', 'News'] }],
+        unread: new Set(),
+      }),
       convert: htmlMarkdown,
       image: async () => ({ ok: true, bytes: PNG, mediaType: 'image/png' }),
       today: '2026-11-13',

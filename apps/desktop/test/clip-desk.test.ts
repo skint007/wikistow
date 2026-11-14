@@ -148,6 +148,7 @@ describe('a clip', () => {
         byline: 'Ann',
         folder: { spaceId: 'space1', folderId: 'folder1' },
         waited: false,
+        made: null,
       },
     });
     if (request?.kind !== 'clip') throw new Error('Not a clip');
@@ -244,6 +245,19 @@ describe('a clip', () => {
     // Once answered, it's gone: a second answer does nothing.
     desk.done(request.clip.id, SAVED);
     expect(replies).toHaveLength(2);
+  });
+
+  it('keeps its page once made, for a page that loads again to finish', () => {
+    const { desk, requests } = setup();
+    desk.setPageState({ vault: 'unlocked', offline: false });
+    desk.answer(clipMessage(), connection().open);
+    const request = requests[0]!;
+    if (request.kind !== 'clip') throw new Error('Not a clip');
+    expect(() =>
+      desk.made(request.clip.id, { spaceId: 'space1', pageId: '../x', path: '' }),
+    ).toThrow();
+    desk.made(request.clip.id, { spaceId: 'space1', pageId: 'page1', path: 'Home' });
+    expect(desk.waiting()[0]?.made).toEqual({ spaceId: 'space1', pageId: 'page1', path: 'Home' });
   });
 
   it('is saved and listed when the extension left meanwhile', () => {

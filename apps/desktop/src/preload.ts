@@ -80,6 +80,7 @@ const bridge: DesktopBridge = {
     return () => void ipcRenderer.off(DESKTOP_CHANNELS.onClipRequest, heard);
   },
   waitingClips: () => call(DESKTOP_CHANNELS.waitingClips),
+  clipMade: (clipId, page) => call(DESKTOP_CHANNELS.clipMade, clipId, page),
   clipDone: (clipId, outcome) => call(DESKTOP_CHANNELS.clipDone, clipId, outcome),
   clipFolders: (requestId, folders) => call(DESKTOP_CHANNELS.clipFolders, requestId, folders),
   clipImage: (clipId, url) => call(DESKTOP_CHANNELS.clipImage, clipId, url),

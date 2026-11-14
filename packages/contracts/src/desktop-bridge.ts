@@ -197,6 +197,11 @@ export type DesktopClip = {
   folder: { spaceId: SpaceId; folderId: FolderId | null };
   /** It came while the app was starting or locked, so its answer may reach no popup. */
   waited: boolean;
+  /**
+   * Its page, once made (`clipMade`): a page that loads again with it held
+   * finishes it as saved, its text in, rather than making a second.
+   */
+  made: { spaceId: SpaceId; pageId: PageId; path: string } | null;
 };
 
 /** How saving a clip went, as the page tells main, which tells the extension. */
@@ -434,6 +439,8 @@ export type DesktopBridge = {
   onClipRequest(listener: (request: ClipRequest) => void): () => void;
   /** The clips main holds that no `clipDone` answered yet, oldest first, as after a reload. */
   waitingClips(): Promise<DesktopClip[]>;
+  /** Say the clip `clipId`'s page is made, with its text, before its images are attached. */
+  clipMade(clipId: string, page: { spaceId: SpaceId; pageId: PageId; path: string }): Promise<void>;
   /** Say how saving the clip `clipId` went; main lets it go. */
   clipDone(clipId: string, outcome: ClipOutcome): Promise<void>;
   /** Answer the folder search `requestId`: null while the vault is locked. */
@@ -497,6 +504,7 @@ export const DESKTOP_CHANNELS = {
   setClipState: 'wikistow:set-clip-state',
   onClipRequest: 'wikistow:clip-request',
   waitingClips: 'wikistow:waiting-clips',
+  clipMade: 'wikistow:clip-made',
   clipDone: 'wikistow:clip-done',
   clipFolders: 'wikistow:clip-folders',
   clipImage: 'wikistow:clip-image',

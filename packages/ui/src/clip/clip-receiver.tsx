@@ -35,7 +35,8 @@ import {
   searchPlaces,
   type ClipPlace,
 } from './clip-places';
-import { saveClip } from './save-clip';
+import { saveClip, type Places, type Saved } from './save-clip';
+import { MarkdownWorker, READ_BUDGET_MS } from '../page/markdown-worker';
 
 /** How long a space's tree loaded for clipping is taken as current. */
 const TREES_FRESH_MS = 30_000;
@@ -105,8 +106,11 @@ function keepRecentPlace(ctx: ClientContext, accountId: string, place: ClipPlace
   }
 }
 
-/** Every place the person can make pages, from the trees of the spaces they can write in. */
-async function loadPlaces(queryClient: QueryClient, ctx: ClientContext): Promise<ClipPlace[]> {
+/**
+ * Every place the person can make pages, from the trees of the spaces they
+ * can write in, and those whose trees couldn't be read, as offline.
+ */
+async function loadPlaces(queryClient: QueryClient, ctx: ClientContext): Promise<Places> {
   const fresh = { staleTime: TREES_FRESH_MS };
   const [spaces, shared] = await Promise.all([
     queryClient.fetchQuery({ ...spacesQuery(ctx), ...fresh }),
@@ -116,16 +120,24 @@ async function loadPlaces(queryClient: QueryClient, ctx: ClientContext): Promise
     ...spaces.filter((space) => space.role !== 'reader').map((space) => space.id),
     ...shared.filter((item) => item.role !== 'reader').map((item) => item.share.spaceId),
   ]);
+  const unread = new Set<string>();
   const trees = await Promise.all(
     [...ids].map((spaceId) =>
       queryClient
         .fetchQuery({ ...treeQuery(ctx, spaceId), ...fresh })
         .then((tree) => ({ spaceId, tree }))
-        .catch(() => null),
+        .catch(() => {
+          unread.add(spaceId);
+          return null;
+        }),
     ),
   );
-  return clipPlaces(trees.filter((tree) => tree !== null));
+  return { places: clipPlaces(trees.filter((tree) => tree !== null)), unread };
 }
+
+/** Links read in the app's Markdown worker, which no text can hold up for long (#47). */
+const reader = new MarkdownWorker();
+const spans = (markdown: string) => reader.run('spans', markdown, { budgetMs: READ_BUDGET_MS });
 
 const convert = async (html: string, text: string) => {
   // The visual editor loads only when a clip comes.
@@ -171,7 +183,7 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
         return void bridge.clipFolders(request.id, null).catch(() => {});
       void (async () => {
         try {
-          const places = await loadPlaces(queryClient, now.ctx);
+          const { places } = await loadPlaces(queryClient, now.ctx);
           const found = searchPlaces(
             places,
             request.query,
@@ -222,36 +234,37 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
     const { accountId } = vault.vault;
     const started = vaultStore.epoch();
     setSaving(true);
-    void (async () => {
+    const save = async () => {
       // Only a clip main still holds: one a sign-out let go isn't saved.
       const held = await bridge.waitingClips().catch(() => null);
-      if (!held?.some((clip) => clip.id === next.id)) {
-        keepOnly(held ?? []);
-        return setSaving(false);
-      }
-      const saved = await saveClip(next, {
+      if (!held?.some((clip) => clip.id === next.id)) return keepOnly(held ?? []);
+      const saved: Saved = await saveClip(next, {
         writer: pageWriter(ctx),
         places: () => loadPlaces(queryClient, ctx),
         convert,
+        spans,
+        made: (page) => bridge.clipMade(next.id, page),
         image: (url) => bridge.clipImage(next.id, url),
         today: localDay(),
         choose: (_clip, title) =>
           new Promise(
             (answer) =>
               void loadPlaces(queryClient, ctx).then(
-                (places) => setAsking({ title, places, answer }),
+                ({ places }) => setAsking({ title, places, answer }),
                 () => answer(null),
               ),
           ),
-      });
+      }).catch((): Saved => ({
+        outcome: { ok: false, code: 'failed', message: 'WikiStow couldn’t save the clip.' },
+        place: null,
+      }));
       setAsking(null);
       const { outcome, place } = saved;
       // Locked meanwhile, it couldn't save: it waits for the next unlock.
-      if (!outcome.ok && vaultStore.epoch() !== started) return setSaving(false);
+      if (!outcome.ok && vaultStore.epoch() !== started) return;
       await bridge.clipDone(next.id, outcome).catch(() => {});
       waiting = waiting.filter((clip) => clip.id !== next.id);
       emit();
-      setSaving(false);
       if (!outcome.ok) {
         const title = clipTitle(next);
         showNotice({ ctx, message: `“${title}” wasn’t saved. ${outcome.message}`, failed: true });
@@ -261,13 +274,17 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
       void contentChanged(queryClient, ctx, { spaceId: outcome.spaceId });
       showNotice({
         ctx,
-        message: `Saved “${outcome.title}” to ${outcome.path}`,
+        message: outcome.path
+          ? `Saved “${outcome.title}” to ${outcome.path}`
+          : `Saved “${outcome.title}”`,
         ...(outcome.faithful
           ? {}
           : { notes: 'Some of it may look different from the site. Check the draft.' }),
         action: { label: 'Open', run: () => openPage(outcome.spaceId, outcome.pageId) },
       });
-    })();
+    };
+    // However it ends, the next clip gets its turn.
+    void save().finally(() => setSaving(false));
   }, [vault, next, saving, bridge, queryClient, openPage]);
 
   return asking && vault.status === 'unlocked' ? (

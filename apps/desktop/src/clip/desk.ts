@@ -103,6 +103,7 @@ const Outcome = z.discriminatedUnion('ok', [
     message: z.string().max(1_000),
   }),
 ]);
+const Made = z.strictObject({ spaceId: SpaceId, pageId: PageId, path: z.string().max(100_000) });
 export const PageState = z.strictObject({
   vault: z.enum(['locked', 'unlocked']),
   offline: z.boolean(),
@@ -181,6 +182,7 @@ export function clipDesk(options: DeskOptions) {
       byline: message.byline,
       folder: { spaceId: message.folder.spaceId, folderId: message.folder.folderId },
       waited: waits !== null,
+      made: null,
     };
     held.set(desk.id, {
       clip: desk,
@@ -346,6 +348,12 @@ export function clipDesk(options: DeskOptions) {
         images,
         faithful,
       });
+    },
+
+    /** The page made the held clip `clipId`'s page, which a reload then doesn't make again. */
+    made(clipId: unknown, input: unknown) {
+      const one = typeof clipId === 'string' ? held.get(clipId) : undefined;
+      if (one) one.clip = { ...one.clip, made: Made.parse(input) };
     },
 
     /** The person signed out: the clips held can't be saved as them. */
