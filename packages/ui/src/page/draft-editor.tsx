@@ -50,6 +50,7 @@ import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor
 import { useDraftSession, type Queued } from './use-draft-session';
 import type { DraftSnapshot } from './draft-session';
 import { useLiveSource } from './live/use-live-source';
+import { LiveNotes, useReviewing } from './live/live-notes';
 import { peopleQuery } from '../sharing/people';
 import { MergeView } from './merge/merge-view';
 import { openOnlineMerge, openWindowMerge, type OpenedMerge } from './merge/open-merge';
@@ -246,6 +247,8 @@ export function DraftEditor({
   const mine = session.hasUnsaved() || draftWaiting;
   const canMerge = snapshot.status === 'conflict' && mine;
   const merge = merging.state?.status === 'ready' ? merging.state.opened : null;
+  const reviewing = useReviewing(session);
+  const review = reviewing.state?.status === 'ready' ? reviewing.state : null;
   const mergeButton = useRef<HTMLButtonElement>(null);
   // Once the conflict is resolved another way, a merge that failed is forgotten.
   const { cancel: forgetMerge } = merging;
@@ -273,6 +276,21 @@ export function DraftEditor({
           }}
         />
       )}
+      {review && (
+        <MergeView
+          key={review.opened.revision}
+          merge={review.merge}
+          theirs={review.theirs}
+          pictures={{
+            ctx,
+            page,
+            attachments: [...review.opened.ours.attachments, ...review.opened.theirs.attachments],
+          }}
+          onCancel={reviewing.cancel}
+          onSave={() => {}}
+          review={{ onApply: reviewing.apply }}
+        />
+      )}
       {merging.state?.status === 'loading' && (
         <p role="status" className="text-sm text-muted-foreground">
           Merging…
@@ -282,7 +300,7 @@ export function DraftEditor({
       <div
         className={cn(
           'flex flex-1 flex-col gap-4',
-          merging.state?.status !== 'failed' && merging.state && 'hidden',
+          ((merging.state?.status !== 'failed' && merging.state) || review) && 'hidden',
         )}
       >
         {/* Until it saves, or someone else's save stops it saving. */}
@@ -377,6 +395,18 @@ export function DraftEditor({
           }
         />
         <LiveNote ctx={ctx} live={snapshot.live} />
+        <LiveNotes
+          ctx={ctx}
+          notes={snapshot.live?.kind === 'live' ? snapshot.live.status.notes : []}
+          busy={reviewing.state?.status === 'opening' ? reviewing.state.revision : null}
+          onReview={reviewing.start}
+          onDismiss={(note) => session.dismissNote(note.revision)}
+        />
+        {reviewing.state?.status === 'message' && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {reviewing.state.text}
+          </p>
+        )}
         {links.error && (
           <p role="alert" className="text-sm text-destructive">
             {links.error}

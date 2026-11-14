@@ -87,12 +87,15 @@ export function foldPayloads(base: PagePayload, ours: PagePayload, theirs: PageP
 
 // Code point order, not JavaScript's default sort by code unit (section 5.5).
 function byCodePoint(a: string, b: string): number {
-  const [x, y] = [[...a], [...b]];
-  for (let i = 0; i < Math.min(x.length, y.length); i++) {
-    const [p, q] = [x[i]?.codePointAt(0) ?? 0, y[i]?.codePointAt(0) ?? 0];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const [p, q] = [a.codePointAt(i) ?? 0, b.codePointAt(j) ?? 0];
     if (p !== q) return p - q;
+    i += p > 0xffff ? 2 : 1;
+    j += q > 0xffff ? 2 : 1;
   }
-  return x.length - y.length;
+  return a.length - i - (b.length - j);
 }
 
 /** `payload`'s extension namespaces as `data:<n>` counts them: every one, in code point order. */
@@ -205,25 +208,26 @@ export function reviewMerge(
   );
 }
 
-// An overlap as the person saw it: what it is about, and theirs there.
+// An overlap as the person saw it: what it is about, and both sides there.
 function identity(overlap: Overlap): string {
   switch (overlap.part) {
     case 'body':
     case 'title':
     case 'frontmatter':
-      return `${overlap.part}\0${overlap.theirs}`;
+      return JSON.stringify([overlap.part, overlap.yours, overlap.theirs]);
     case 'property':
-      return `property\0${overlap.key ?? ''}\0${overlap.theirs}`;
+      return JSON.stringify(['property', overlap.key, overlap.yours, overlap.theirs]);
     default:
-      return `${overlap.part}\0${overlap.namespace ?? ''}\0${JSON.stringify(overlap.theirs)}`;
+      return JSON.stringify([overlap.part, overlap.namespace, overlap.yours, overlap.theirs]);
   }
 }
 
 /**
  * The choices made in `chosen`'s overlaps, carried to `now`'s that are
- * about the same part with the same text of theirs, as when the document
- * changed while the person chose. One that changed meanwhile is left as
- * yours, and so isn't changed.
+ * about the same part with the same text on both sides, as when the
+ * document changed elsewhere while the person chose. One whose text
+ * changed meanwhile is left as it is now, so nobody's typing there is
+ * replaced by a choice made before it.
  */
 export function carryChoices(
   chosen: Merge,

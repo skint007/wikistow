@@ -22,9 +22,11 @@ import { ApiError } from '@wikistow/client/api';
 import type {
   LiveParticipant,
   NotJoined,
+  OpenedNote,
   ParticipantState,
   ParticipantStatus,
 } from '@wikistow/client/live';
+import type { pageMerge } from '@wikistow/client';
 import { ATTACHMENT_SCHEME } from './attachments';
 import { Autosave, type SaveStatus } from './autosave';
 import { lineBreakOf, type EditorSurfaceHandle, type MarkdownParts } from './editor/surface';
@@ -826,6 +828,40 @@ export class DraftSession {
       return;
     }
     void this.#autosave.flush();
+  }
+
+  // ---- Notes waiting for review (ADR 0015 decision 8) ----
+
+  /** Open a note of the live session for Review; null when it can't be, or this draft isn't in one. */
+  async openNote(revision: RevisionId): Promise<OpenedNote | null> {
+    return (await this.#participant?.openNote(revision)) ?? null;
+  }
+
+  /** The merge Review shows for an opened note. */
+  reviewMerge(opened: OpenedNote): pageMerge.Merge | null {
+    return this.#participant?.reviewMerge(opened) ?? null;
+  }
+
+  /**
+   * Put Review's choices in as the person's change to those parts of the
+   * page, and show it in the editor. False when they no longer fit.
+   */
+  applyReview(
+    opened: OpenedNote,
+    merge: pageMerge.Merge,
+    choices: Readonly<Record<string, pageMerge.Choice>>,
+  ): boolean {
+    const participant = this.#participant;
+    if (!participant) return false;
+    this.#pull();
+    const applied = participant.applyReview(opened, merge, choices);
+    if (applied) this.#fromDocument(true);
+    return applied;
+  }
+
+  /** Dismiss a note: theirs in its parts is dropped for good. */
+  dismissNote(revision: RevisionId) {
+    this.#participant?.dismissNote(revision);
   }
 
   /** The vault locked: leave the live session at once, its key wiped, saving nothing more. */
