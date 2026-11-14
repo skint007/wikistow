@@ -1086,6 +1086,7 @@ test('capture highlights and colours: in the reader, the visual editor, its colo
       '- <span data-color="green">Agree:</span> <mark data-color="green">mulch twice a year</mark>.',
       '- <span data-color="blue">Look up</span> the <mark data-color="purple">1998 trial</mark> it cites.',
       'Every colour: <mark data-color="red">red</mark> <mark data-color="orange">orange</mark> <mark data-color="yellow">yellow</mark> <mark data-color="green">green</mark> <mark data-color="blue">blue</mark> <mark data-color="purple">purple</mark>, and text in <span data-color="red">red</span> <span data-color="orange">orange</span> <span data-color="yellow">yellow</span> <span data-color="green">green</span> <span data-color="blue">blue</span> <span data-color="purple">purple</span>.',
+      'Links take the colour too: <span data-color="red">[the drainage table](https://example.com)</span> and [<span data-color="purple">the trial</span>](https://example.com).',
       'A comparison like a == b stays as written.',
       '',
     ].join('\n\n'),

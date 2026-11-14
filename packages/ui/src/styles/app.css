@@ -466,3 +466,11 @@
     text-underline-offset: 3px;
   }
 }
+
+/* A link in coloured text (`<span data-color>`) takes the text's colour, whichever is
+   written outside the other, over the link's own (`text-primary`, a utility). */
+@layer utilities {
+  .page-body span[data-color] a {
+    color: inherit;
+  }
+}
