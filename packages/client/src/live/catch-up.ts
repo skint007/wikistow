@@ -655,6 +655,7 @@ async function targetOn(
   }
   // The latest draft of the ended session in the head's signed chain.
   const whole = document.state();
+  const passed: LiveState[] = [];
   let base: { payload: PagePayload; state: LiveState } | null = null;
   let at: OpenedDraft | null = headDraft;
   for (let steps = 0; at && steps < CHAIN_STEPS; steps++) {
@@ -663,17 +664,10 @@ async function targetOn(
     // text is the document merged onto a head, not the document.
     const marked = markedState(at.payload, sessionId);
     if (marked && sameState(marked, whole)) return { kind: 'held' };
-    // A catch-up that put part of it in, from the session served cut back:
-    // merged from an older draft, what was deleted since that went in would
-    // come back. An older app's copy of a session draft's mark holds no more
-    // than its latest draft, and is walked past.
-    if (
-      marked &&
-      !holdsState(latest.state, marked) &&
-      !sessionState(at.payload, at.revisionId, sessionId)
-    ) {
-      return { kind: 'cant', why: 'part of it was put in already', lasting: true };
-    }
+    // Marked, but no draft of the session: an older app's copy of a session
+    // draft's mark, which that draft below it holds, or a catch-up that put
+    // part of it in, which the base found below doesn't hold (after the walk).
+    if (marked && !sessionState(at.payload, at.revisionId, sessionId)) passed.push(marked);
     if (at.revisionId === latest.revisionId) {
       base = latest;
       break;
@@ -705,6 +699,12 @@ async function targetOn(
   }
   if (!base)
     return { kind: 'cant', why: 'the page’s drafts since don’t come from it', lasting: true };
+  // A catch-up that put part of it in, from the session served cut back:
+  // merged from an older draft, what was deleted since that went in would come back.
+  const from = base.state;
+  if (passed.some((mark) => !holdsState(from, mark))) {
+    return { kind: 'cant', why: 'part of it was put in already', lasting: true };
+  }
   // Served cut back: its document lacks what a draft of it holds.
   if (!holdsState(whole, base.state)) {
     return { kind: 'cant', why: 'it holds less than a draft of it', lasting: true };
