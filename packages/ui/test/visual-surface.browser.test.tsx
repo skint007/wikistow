@@ -18,6 +18,7 @@ import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
 // What Word puts on the clipboard: its styles, list paragraphs and conditional comments.
 import WORD from './word-paste.html?raw';
+import { pollActing } from './acting.ts';
 
 // The real visual surface, in Chromium: an unchanged document gives back
 // the page's exact bytes, and edits come back as Markdown the reader reads
@@ -115,7 +116,7 @@ async function mount(
   );
   if (first && ref.current) act(() => first(ref.current as EditorSurfaceHandle));
   // The first loads Milkdown, which takes a while under load.
-  await act(() => expect.poll(() => container.querySelectorAll('.ProseMirror').length).toBe(1));
+  await pollActing(() => container.querySelectorAll('.ProseMirror').length).toBe(1);
   const dom = container.querySelector<HTMLElement>('#page-visual');
   if (!ref.current || !dom) throw new Error('The editor did not mount');
   let gone = false;
@@ -501,7 +502,7 @@ describe('the visual surface', () => {
         />,
       ),
     );
-    await act(() => expect.poll(() => container.querySelector('#page-visual')).not.toBeNull());
+    await pollActing(() => container.querySelector('#page-visual')).not.toBeNull();
     const dom = container.querySelector<HTMLElement>('#page-visual');
     if (!dom || !handle) throw new Error('The editor did not mount');
     const view = viewOf(dom);
