@@ -34,6 +34,7 @@ import {
   pageRoutes,
   structureRoutes,
   AttachmentId,
+  overlapPart,
   OverlapsExtension,
   OVERLAPS_NAMESPACE,
   type FolderId,
@@ -368,8 +369,10 @@ async function waitingForReview(
     const opened = await pages
       .openRevisionOf(ctx, page, 'draft', entry.revision as RevisionId)
       .catch(() => null);
-    if (opened?.record.authorId === ctx.identity.public.id) {
-      mine.push({ revisionId: entry.revision, parts: entry.parts });
+    // Only parts of a form the protocol names, and not too many to read.
+    const parts = entry.parts.filter((part) => overlapPart(part) !== null).slice(0, 256);
+    if (opened?.record.authorId === ctx.identity.public.id && parts.length > 0) {
+      mine.push({ revisionId: entry.revision, parts });
     }
   }
   return mine;

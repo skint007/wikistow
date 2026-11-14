@@ -35,6 +35,12 @@ async function agentSaves(cli: Cli, pageId: string, markdown: string) {
   throw new Error('the agent never landed its save');
 }
 
+/** With `PR_SHOTS` set to a directory, a picture of the page there, for a pull request. */
+async function shot(page: Page, name: string) {
+  const dir = process.env['PR_SHOTS'];
+  if (dir) await page.screenshot({ path: `${dir}/${name}.png` });
+}
+
 async function caretAtEndOfFirstLine(page: Page) {
   const source = page.locator('#page-source');
   await source.focus();
@@ -95,6 +101,7 @@ test('an agent’s save during a live session is folded in, and an overlap offer
       timeout: 30_000,
     });
     await expect(note).toContainText('1 change overlaps yours');
+    await shot(page, 'live-note');
     await expectSource(page, /^Simmer the stock\. Add salt to taste, then stir\.\n\nServe hot\.$/);
     await expect(saveStatus(page)).toHaveText('All changes saved', { timeout: 30_000 });
   });
@@ -106,6 +113,7 @@ test('an agent’s save during a live session is folded in, and an overlap offer
     await expect(view).toBeVisible();
     await expect(view).toContainText('The live page');
     await expect(view).toContainText('for an hour');
+    await shot(page, 'live-review');
     await view.getByRole('button', { name: 'Use your agent’s' }).click();
     await view.getByRole('button', { name: 'Apply' }).click();
     await expectSource(page, 'Simmer the stock for an hour.\n\nServe hot.');

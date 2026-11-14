@@ -2,6 +2,7 @@
 // session's `Y.Text` (protocol section 5.10, **The document**): one span,
 // starting and ending between whole code points, never inside a surrogate
 // pair, which Yjs would store as two U+FFFD for everyone else.
+import { diffLines } from 'diff';
 import type * as Y from 'yjs';
 
 /** A change to a text: delete `remove` UTF-16 units at `from`, then insert `insert` there. */
@@ -54,4 +55,50 @@ export function changeText(text: Y.Text, after: string): boolean {
   if (change.remove > 0) text.delete(change.from, change.remove);
   if (change.insert !== '') text.insert(change.from, change.insert);
   return true;
+}
+
+/**
+ * The changes from `before` to `after`, one for each run of lines that
+ * differ, in order, each the smallest change within its lines: so a change
+ * of two places far apart, as a fold or a rename makes, leaves the text
+ * between them as it is, and typing others place there meanwhile stays
+ * where they put it (ADR 0015 decision 8).
+ */
+export function textChanges(before: string, after: string): TextChange[] {
+  if (before === after) return [];
+  const changes: TextChange[] = [];
+  let at = 0;
+  let removed = '';
+  let added = '';
+  const flush = () => {
+    const change = textChange(removed, added);
+    if (change) changes.push({ ...change, from: change.from + at });
+    at += removed.length;
+    removed = '';
+    added = '';
+  };
+  for (const part of diffLines(before, after)) {
+    if (part.removed) removed += part.value;
+    else if (part.added) added += part.value;
+    else {
+      flush();
+      at += part.value.length;
+    }
+  }
+  flush();
+  return changes;
+}
+
+/**
+ * Make `text` read `after`, `after` made well-formed first, changing only
+ * the runs of lines that differ (`textChanges`). Call within a transaction.
+ */
+export function changeTextByLines(text: Y.Text, after: string): boolean {
+  const changes = textChanges(text.toJSON(), after.toWellFormed());
+  // From the end, so each change's place is still where it was worked out.
+  for (const change of changes.toReversed()) {
+    if (change.remove > 0) text.delete(change.from, change.remove);
+    if (change.insert !== '') text.insert(change.from, change.insert);
+  }
+  return changes.length > 0;
 }

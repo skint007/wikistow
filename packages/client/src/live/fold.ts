@@ -308,7 +308,13 @@ export function reviewTarget(
   }
   for (const overlap of picked) {
     if (overlap.part !== 'data' || overlap.namespace === null) continue;
-    extensions[overlap.namespace] = resolved.payload.extensions[overlap.namespace] ?? null;
+    // As an own property, a `__proto__` namespace included.
+    Object.defineProperty(extensions, overlap.namespace, {
+      value: resolved.payload.extensions[overlap.namespace] ?? null,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
   if (Object.keys(extensions).length > 0) target.extensions = extensions;
   return target;

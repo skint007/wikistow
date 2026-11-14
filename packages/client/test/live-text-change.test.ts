@@ -3,7 +3,7 @@
 // surrogate pair, so Yjs never stores a half of one as U+FFFD.
 import * as Y from 'yjs';
 import { describe, expect, it } from 'vite-plus/test';
-import { changeText, textChange } from '../src/live/text-change.ts';
+import { changeText, textChange, textChanges } from '../src/live/text-change.ts';
 
 describe('textChange', () => {
   it('is the span between the common start and end', () => {
@@ -44,5 +44,22 @@ describe('changeText', () => {
     const text = doc.getText('body');
     doc.transact(() => changeText(text, 'cut \ud83d'));
     expect(text.toJSON()).toBe('cut �');
+  });
+});
+
+describe('textChanges', () => {
+  it('changes each run of lines that differs, leaving the lines between alone', () => {
+    const before = 'Intro [[Old]] one.\n\nMiddle.\n\nEnd [[Old]] tail.\n';
+    const after = 'Intro [[New]] one.\n\nMiddle.\n\nEnd [[New]] tail.\n';
+    const changes = textChanges(before, after);
+    expect(changes).toEqual([
+      { from: 8, remove: 3, insert: 'New' },
+      { from: 35, remove: 3, insert: 'New' },
+    ]);
+    let text = before;
+    for (const change of changes.toReversed()) {
+      text = text.slice(0, change.from) + change.insert + text.slice(change.from + change.remove);
+    }
+    expect(text).toBe(after);
   });
 });

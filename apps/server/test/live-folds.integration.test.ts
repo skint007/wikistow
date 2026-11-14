@@ -62,16 +62,22 @@ function gate() {
   return { open, release };
 }
 
-async function join(person: Person, page: Page, { held }: { held?: Promise<void> } = {}) {
+async function join(
+  person: Person,
+  page: Page,
+  { held, landed }: { held?: Promise<void>; landed?: () => void } = {},
+) {
   const draft = await draftOf(person, page);
   const ports = participantPorts(person.ctx, page, () => draft.region, {
     live: { fetch: person.browser.fetch },
   });
-  if (held) {
+  if (held || landed) {
     const save = ports.saveDraft.bind(ports);
     ports.saveDraft = async (input) => {
       await held;
-      return save(input);
+      const result = await save(input);
+      landed?.();
+      return result;
     };
   }
   const joined = await joinLive(ports, draft);
@@ -126,6 +132,41 @@ describe('a draft saved from outside a live session', () => {
     setBody(theirs, `${body(theirs)}After.\n`);
     await expect.poll(() => body(mine)).toContain('After.');
     await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+  });
+
+  it('a newcomer counts a fold placed without a save, and saves on top of it', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const mine = await join(owner, page);
+    const theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    const outside = await saveOutside(editor, page, (now) => `${now}\n\nAdded outside.\n`);
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => body(theirs), { timeout: 30_000 }).toContain('Added outside.');
+    expect((await draftOf(owner, page)).revisionId).toBe(outside);
+    const late = await join(owner, page);
+    expect(body(late)).toBe(body(theirs));
+    await mine.leave();
+    await theirs.leave();
+    setBody(late, `${body(late)}Late.\n`);
+    await expect.poll(() => late.status().saved, { timeout: 40_000 }).toBe(true);
+    expect((await draftOf(owner, page)).payload.markdown).toContain('Late.');
+  });
+
+  it('folds in a session draft whose writer went without sending what it holds', async () => {
+    const { owner, editor, page } = await sharedPage();
+    let crash = () => {};
+    const mine = await join(owner, page, { landed: () => crash() });
+    const theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    // Its save lands, and the app is gone before it sends the change.
+    crash = () => mine.close();
+    expect(await mine.commitOwn({ texts: { body: `${body(mine)}\n\nSaved, never sent.\n` } })).toBe(
+      false,
+    );
+    await expect.poll(() => body(theirs), { timeout: 60_000 }).toContain('Saved, never sent.');
+    expect(theirs.status().state).toEqual({ kind: 'live' });
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    expect((await draftOf(editor, page)).payload.markdown).toContain('Saved, never sent.');
   });
 
   it('folds without a save when the session changed nothing since', async () => {

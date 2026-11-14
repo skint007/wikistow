@@ -59,7 +59,7 @@ import {
   type Folded,
 } from './fold.ts';
 import type { Choice, Merge } from '../merge/index.ts';
-import { sessionState, withLive } from './extension.ts';
+import { draftLive, sessionState, withLive } from './extension.ts';
 import { LiveJoins, type JoinRef, type ListedJoin } from './joins.ts';
 import {
   liveClientId,
@@ -89,7 +89,7 @@ import {
   type OpenedLiveSession,
 } from './session.ts';
 import { openSnapshot } from './snapshot.ts';
-import { changeText, textChange } from './text-change.ts';
+import { changeText, changeTextByLines, textChanges } from './text-change.ts';
 
 /** A draft of the page, opened. */
 export type OpenedDraft = {
@@ -247,6 +247,8 @@ type SessionDraft = {
   openedAt: number;
   /** A draft from outside folded in without a save, by this join's grant (`senderId joinId`). */
   foldedBy?: string;
+  /** The draft as opened, for one that turns out to be from outside (its sender's join gone). */
+  opened?: OpenedDraft;
 };
 
 type Held = {
@@ -465,6 +467,7 @@ async function newcomerFrom(
           backlog,
           verified: [...started],
           grants: served.grants,
+          listed: served.joins,
         }),
       );
     }
@@ -505,6 +508,7 @@ async function newcomerFrom(
         backlog,
         verified: [key(first)],
         grants: served.grants,
+        listed: served.joins,
       }),
     );
   } catch (error) {
@@ -573,6 +577,8 @@ type Opening = {
   verified?: readonly string[];
   /** The fold grants served with the session (section 5.10, **Saving**). */
   grants?: readonly liveRoutes.Grant[];
+  /** The joins served with the session, so its backlog is read knowing which are further joins. */
+  listed?: readonly liveRoutes.Join[];
 };
 
 /** One app's part in a session. Made by `joinLive`; `start` opens its stream. */
@@ -744,6 +750,7 @@ export class LiveParticipant {
     }
     this.#checked = base ? record : (later?.revisionId ?? record);
     this.#lastHead = this.#drafts.get(this.#checked) ?? null;
+    for (const join of opening.listed ?? []) this.#recordJoin(join);
     for (const grant of opening.grants ?? []) this.#grant(grant);
     this.#snapshotNotes = new Map(this.document.map('overlaps').entries());
     this.#snapshotDraft = later?.revisionId ?? record;
@@ -992,7 +999,17 @@ export class LiveParticipant {
    * its files sealed again, to `shape`, and saves what that returns.
    * Whether it went in; nothing went to anyone when it didn't.
    */
-  async restoreThrough(
+  restoreThrough(
+    write: (input: {
+      basedOn: RevisionId;
+      revisionId: RevisionId;
+      shape: (restored: PagePayload) => PagePayload;
+    }) => Promise<{ revisionId: RevisionId; payload: PagePayload }>,
+  ): Promise<boolean> {
+    return this.#tracked(this.#restoreThrough(write));
+  }
+
+  async #restoreThrough(
     write: (input: {
       basedOn: RevisionId;
       revisionId: RevisionId;
@@ -1034,7 +1051,12 @@ export class LiveParticipant {
     const revisionId = newId(RevisionId);
     const base = Y.encodeStateAsUpdate(this.document.doc);
     // Made afresh each time the write asks, as it may again with fresh keys.
-    let made: { copy: LiveDocument; update: Uint8Array; written: PagePayload } | null = null;
+    let made: {
+      copy: LiveDocument;
+      update: Uint8Array;
+      written: PagePayload;
+      message: LiveMessage;
+    } | null = null;
     const shape = (restored: PagePayload): PagePayload => {
       const copy = new LiveDocument(clientId);
       if (copy.apply(base, 'copy').length > 0) throw new Error('The page couldn’t be copied');
@@ -1045,11 +1067,10 @@ export class LiveParticipant {
       const misplaced = copy.edit(() => writeTarget(copy, targetOf(restored)), LOCAL_ORIGIN);
       if (misplaced.length > 0) throw new Error('The version doesn’t fit the live page');
       const written = this.#payload(restored, copy);
-      made = {
-        copy,
-        update: updates.length > 0 ? Y.mergeUpdates(updates) : new Uint8Array([0, 0]),
-        written,
-      };
+      const update = updates.length > 0 ? Y.mergeUpdates(updates) : new Uint8Array([0, 0]);
+      // Sealed before the save, so one too large to send is never saved.
+      const message = seal(2, 'update', Y.getState(copy.doc.store, clientId), update);
+      made = { copy, update, written, message };
       return withLive(written, {
         revision: revisionId,
         session: this.sessionId,
@@ -1074,16 +1095,26 @@ export class LiveParticipant {
       void this.#transport.leave(further).catch(() => {});
       return false;
     }
-    const done = made as { copy: LiveDocument; update: Uint8Array; written: PagePayload } | null;
-    if (!this.#keyed() || !done) {
+    const done = made as {
+      copy: LiveDocument;
+      update: Uint8Array;
+      written: PagePayload;
+      message: LiveMessage;
+    } | null;
+    if (!done) {
       void this.#transport.leave(further).catch(() => {});
       return false;
+    }
+    // It landed: whatever happens next, it is restored, and others fold in what they lack.
+    if (!this.#keyed()) {
+      void this.#transport.leave(further).catch(() => {});
+      return true;
     }
     this.#placing = true;
     try {
       this.document.apply(done.update, COPY_ORIGIN);
       const clock = Y.getState(done.copy.doc.store, clientId);
-      await send(seal(2, 'update', clock, done.update));
+      await send(done.message);
       this.#drafts.set(result.revisionId, {
         ours: true,
         revisionId: result.revisionId,
@@ -1093,9 +1124,9 @@ export class LiveParticipant {
         with: people,
         openedAt: Date.now(),
       });
-      this.#basedOn.set(result.revisionId, headId);
       if (this.#head === headId) this.#head = result.revisionId;
       if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
+      this.#seenOwn(result.revisionId, headId);
       if (!this.#keyed()) return true;
       await send(
         seal(3, 'saved', clock, stateContent(result.revisionId, done.copy.stateBytes())),
@@ -1104,7 +1135,7 @@ export class LiveParticipant {
       void this.#transport.leave(further).catch(() => {});
     } catch {
       this.#stop('a restored version couldn’t be sent', null, true);
-      return false;
+      return true;
     } finally {
       this.#placing = false;
       this.#schedule();
@@ -1121,7 +1152,25 @@ export class LiveParticipant {
    * join once the save has landed, with a Saved notice after it. Its main
    * join sends nothing built on it until it is placed. Whether it went in.
    */
-  async commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
+  commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
+    return this.#tracked(this.#commitOwn(change));
+  }
+
+  // Work whose save may land after it began: leaving waits for it, so its
+  // change goes out with it rather than being claimed by a draft nobody gets.
+  readonly #work = new Set<Promise<unknown>>();
+  #leaving = false;
+
+  #tracked<T>(work: Promise<T>): Promise<T> {
+    this.#work.add(work);
+    void work.then(
+      () => this.#work.delete(work),
+      () => this.#work.delete(work),
+    );
+    return work;
+  }
+
+  async #commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
     // Text given whole is made a change of the text as it is now, anchored
     // in it, so whatever others type meanwhile, around it, stays.
     const make = typeof change === 'function' ? change : this.#anchored(change);
@@ -1208,6 +1257,7 @@ export class LiveParticipant {
       });
       if (this.#head === headId) this.#head = result.revisionId;
       if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
+      this.#seenOwn(result.revisionId, headId);
       if (!this.#keyed()) return true;
       await send(seal(3, 'saved', clock, stateContent(result.revisionId, stateBytes)), covers);
       // Done with: a join has at most two further joins at a time.
@@ -1229,29 +1279,37 @@ export class LiveParticipant {
   #anchored({ texts = {}, entries = [] }: DocumentChange): (document: LiveDocument) => void {
     const spans = (Object.entries(texts) as [TextRoot, string][]).flatMap(([name, target]) => {
       const text = this.document.text(name);
-      const span = textChange(text.toJSON(), target.toWellFormed());
-      if (!span) return [];
-      const from = Y.createRelativePositionFromTypeIndex(text, span.from);
-      // An insertion has one place, which typing there meanwhile goes before.
-      const to =
-        span.remove === 0
-          ? from
-          : Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
-      return [{ name, target, span, from, to }];
+      // Each run of lines that differs, so typing between them stays where it goes.
+      return textChanges(text.toJSON(), target.toWellFormed()).map((span) => {
+        const from = Y.createRelativePositionFromTypeIndex(text, span.from);
+        // An insertion has one place, which typing there meanwhile goes before.
+        const to =
+          span.remove === 0
+            ? from
+            : Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
+        return { name, span, from, to };
+      });
     });
     return (document) => {
-      for (const { name, target, span, from, to } of spans) {
+      // Where each was can't be found: those texts whole, as given.
+      const whole = new Set<TextRoot>();
+      const placed = spans.map(({ name, span, from, to }) => {
         const text = document.text(name);
         const start = Y.createAbsolutePositionFromRelativePosition(from, document.doc);
         const end = Y.createAbsolutePositionFromRelativePosition(to, document.doc);
         if (!start || !end || start.type !== text || end.type !== text || end.index < start.index) {
-          // Where it was can't be found: the whole text, as given.
-          changeText(text, target);
-          continue;
+          whole.add(name);
         }
-        if (end.index > start.index) text.delete(start.index, end.index - start.index);
-        if (span.insert !== '') text.insert(start.index, span.insert);
+        return { name, span, start: start?.index ?? 0, end: end?.index ?? 0 };
+      });
+      // From the end of each text, so each place stays where it was found.
+      for (const { name, span, start, end } of placed.toReversed()) {
+        if (whole.has(name)) continue;
+        const text = document.text(name);
+        if (end > start) text.delete(start, end - start);
+        if (span.insert !== '') text.insert(start, span.insert);
       }
+      for (const name of whole) changeText(document.text(name), texts[name] ?? '');
       applyChange(document, { entries });
     };
   }
@@ -1435,6 +1493,9 @@ export class LiveParticipant {
    */
   async leave(): Promise<boolean> {
     if (this.#status.state.kind === 'left') return this.#status.saved;
+    this.#leaving = true;
+    // A fold, restore, file or rename in flight goes out first, with its change.
+    await withTimeout(Promise.allSettled([...this.#work]), 10_000).catch(() => {});
     let saved = this.#status.saved;
     if (this.#status.state.kind === 'live' && !this.#stopSending && this.#started) {
       saved = await withTimeout(this.saveNow(), 8_000).catch(() => false);
@@ -1543,15 +1604,9 @@ export class LiveParticipant {
 
   #listJoins(joins: readonly liveRoutes.Join[]): void {
     this.#joins.list(listedOf(joins));
-    for (const join of joins) {
-      const ref = { senderId: join.senderId, joinId: join.joinId };
-      this.#order.set(key(ref), join.order);
-      this.#present.set(key(ref), join.present);
-      if (join.parent) {
-        this.#further.add(key(ref));
-        this.#parents.set(key(ref), `${join.senderId} ${join.parent}`);
-      }
-    }
+    for (const join of joins) this.#recordJoin(join);
+    // A join that went may leave the head claiming what it never sent: fold it in.
+    queueMicrotask(() => this.#compare());
     for (const held of this.#held) {
       if (held.reason === 'gap' && this.#present.get(key(held.opened)) === false) {
         // A gap from a join that went can't close.
@@ -1559,6 +1614,17 @@ export class LiveParticipant {
       }
     }
     this.#scheduleSave();
+  }
+
+  // A join as the server lists it: its order, whether it's there, and the join it belongs to.
+  #recordJoin(join: liveRoutes.Join): void {
+    const ref = key({ senderId: join.senderId, joinId: join.joinId });
+    this.#order.set(ref, join.order);
+    this.#present.set(ref, join.present);
+    if (join.parent) {
+      this.#further.add(ref);
+      this.#parents.set(ref, `${join.senderId} ${join.parent}`);
+    }
   }
 
   #open(message: LiveMessage): OpenedLiveMessage {
@@ -1801,6 +1867,10 @@ export class LiveParticipant {
       return;
     }
     this.#basedOn.set(head, draft.basedOn);
+    if (ofAnotherSession(draft, this.sessionId)) {
+      // The server should have ended this session before another saved (section 5.10, **Saving**).
+      return this.#stop('this page was saved by another live session', null, false);
+    }
     const state = sessionState(draft.payload, draft.revisionId, this.sessionId);
     const signer = [...this.#verified].some((join) => join.startsWith(`${draft.authorId} `));
     const ours = state !== null && !isAgentId(draft.authorId) && sameKeys(draft, this.#opened);
@@ -1833,6 +1903,7 @@ export class LiveParticipant {
       compared: false,
       with: withOf(draft.payload),
       openedAt: Date.now(),
+      opened: draft,
     });
   }
 
@@ -1854,6 +1925,10 @@ export class LiveParticipant {
       return;
     }
     if (!sameState(state, head.state)) {
+      // Changes it claims whose sender's join went without sending them: a
+      // draft from outside, folded in (section 5.10, **Saving**).
+      const gone = holdsState(state, head.state) ? null : this.#goneFrom(head, state);
+      if (gone && head.opened) return this.#asOutsider(head, head.opened, gone);
       // The 30 s rule: a draft whose state this app still doesn't hold.
       if (!holdsState(state, head.state) && Date.now() - head.openedAt > HOLD_MS) {
         this.#stop('the saved page claims changes that never came', null, false);
@@ -1890,6 +1965,49 @@ export class LiveParticipant {
   }
 
   // ---- Drafts from outside the session (ADR 0015 decision 8) ----
+
+  // The clients of the changes `draft` claims that `state` lacks, when each
+  // is a join that has gone; null otherwise.
+  #goneFrom(draft: SessionDraft, state: LiveState): number[] | null {
+    const clients = new Set<number>();
+    for (const [client, clock] of draft.state.vector) {
+      if ((state.vector.get(client) ?? 0) < clock) clients.add(client);
+    }
+    for (const [client, ranges] of draft.state.deletes) {
+      const one = { vector: new Map<number, number>(), deletes: new Map([[client, ranges]]) };
+      if (!holdsState(state, one)) clients.add(client);
+    }
+    if (clients.size === 0) return null;
+    for (const client of clients) {
+      const join = this.#joins.joinOf(client);
+      if (!join || this.#present.get(key(join)) !== false) return null;
+    }
+    return [...clients];
+  }
+
+  // Joins whose changes a draft claims but that went without sending them, by that draft.
+  readonly #goneJoins = new Map<RevisionId, number[]>();
+
+  // A session draft holding changes of joins gone without sending them: from outside, folded in.
+  #asOutsider(draft: SessionDraft, opened: OpenedDraft, gone: number[]): void {
+    this.#drafts.delete(draft.revisionId);
+    this.#outsiders.add(draft.revisionId);
+    this.#outsiderDrafts.set(draft.revisionId, opened);
+    this.#goneJoins.set(draft.revisionId, gone);
+    if (this.#lastHead?.revisionId === draft.revisionId) {
+      const before = opened.basedOn;
+      this.#lastHead = (before && this.#drafts.get(before)) || null;
+    }
+    if (this.#checked === draft.revisionId && opened.basedOn) this.#checked = opened.basedOn;
+    void this.#fromOutside(draft.revisionId);
+  }
+
+  // A draft this app saved on `basedOn`, seen as head when it is.
+  #seenOwn(revisionId: RevisionId, basedOn: RevisionId): void {
+    this.#basedOn.set(revisionId, basedOn);
+    const draft = this.#drafts.get(revisionId);
+    if (draft && this.#head === revisionId) this.#sawHead(draft);
+  }
 
   // A session draft is head: what it descends from can't be head again.
   #sawHead(draft: SessionDraft): void {
@@ -1929,10 +2047,15 @@ export class LiveParticipant {
    * keys can't be the session's: this app leaves and says so.
    */
   async #fromOutside(head: RevisionId): Promise<void> {
-    if (this.#folding || !this.#keyed() || this.#head !== head) return;
+    if (this.#folding) return this.#armFold();
+    if (this.#leaving || !this.#keyed() || this.#head !== head) return;
     const draft = this.#outsiderDrafts.get(head);
+    if (this.#outsiderSince?.head !== head) this.#outsiderSince = { head, at: Date.now() };
     // Its fold is placed: its change and Saved notice are on their way.
-    if (!draft || this.#folded.has(head)) return this.#armFold();
+    if (!draft || this.#folded.has(head)) {
+      this.#foldWithoutNotice(head);
+      return this.#armFold();
+    }
     if (!sameKeys(draft, this.#opened)) {
       return this.#stop(
         'this page was saved from outside the live session under other keys',
@@ -1943,7 +2066,6 @@ export class LiveParticipant {
     if (this.#ancestors.has(head)) {
       return this.#stop('the server served an older version of this page', head, false);
     }
-    if (this.#outsiderSince?.head !== head) this.#outsiderSince = { head, at: Date.now() };
     const saver = this.#saver();
     const mine = saver !== null && key(saver) === key(this.#me);
     const grant = this.#grants.get(head);
@@ -1960,7 +2082,25 @@ export class LiveParticipant {
         if (this.#folding === run) this.#folding = null;
       });
     this.#folding = run;
+    void this.#tracked(run);
     await run;
+  }
+
+  /**
+   * A fold placed without a save whose holder's Saved notice hasn't come
+   * in 30 s: it counts from the grant's change alone, its state worked out
+   * as every app works it out, so one member's missing notice can't stop
+   * the session saving for good. Its payload is then compared as any
+   * draft's, and if it differs the holder is what's reported.
+   */
+  #foldWithoutNotice(head: RevisionId): void {
+    const grant = this.#grants.get(head);
+    const since = this.#outsiderSince;
+    if (!grant || grant.position === null || since?.head !== head) return;
+    if (Date.now() - since.at < HOLD_MS || this.#drafts.has(head)) return;
+    const placed = this.#furtherUpdates.get(grant.position);
+    if (!placed || this.#parents.get(placed.join) !== key(grant.holder)) return;
+    void this.#countFold(head, grant, placed.decoded, null);
   }
 
   // Look at a draft from outside again soon: its grant may lapse, or its fold arrive.
@@ -1978,9 +2118,12 @@ export class LiveParticipant {
    * which a fold merges from; 'rollback' when it descends from none this
    * app can find; null when one couldn't be opened just now.
    */
-  async #foldBase(draft: OpenedDraft): Promise<SessionDraft | 'rollback' | null> {
+  async #foldBase(
+    draft: OpenedDraft,
+  ): Promise<SessionDraft | 'rollback' | 'other-session' | 'too-far' | null> {
     let at = draft.basedOn;
-    for (let steps = 0; at && steps < 32; steps++) {
+    for (let steps = 0; at; steps++) {
+      if (steps >= 256) return 'too-far';
       const known = this.#drafts.get(at);
       if (known) return known;
       let opened: OpenedDraft;
@@ -1990,6 +2133,7 @@ export class LiveParticipant {
         return null;
       }
       this.#basedOn.set(at, opened.basedOn);
+      if (ofAnotherSession(opened, this.sessionId)) return 'other-session';
       const state = sessionState(opened.payload, at, this.sessionId);
       const signer = [...this.#verified].some((join) => join.startsWith(`${opened.authorId} `));
       if (state && signer && !isAgentId(opened.authorId) && sameKeys(opened, this.#opened)) {
@@ -2000,6 +2144,7 @@ export class LiveParticipant {
           compared: false,
           with: withOf(opened.payload),
           openedAt: Date.now(),
+          opened,
         };
         this.#drafts.set(at, found);
         return found;
@@ -2033,6 +2178,16 @@ export class LiveParticipant {
     if (base === 'rollback') {
       return this.#stop('this page’s draft doesn’t come from the live session’s', head, false);
     }
+    if (base === 'other-session') {
+      return this.#stop('this page was saved by another live session', null, false);
+    }
+    if (base === 'too-far') {
+      return this.#stop(
+        'too many saves came from outside the live session to fold in',
+        null,
+        false,
+      );
+    }
     if (!holdsState(this.document.state(), base.state)) {
       return this.#stop(
         'the page was saved from outside on changes this app doesn’t have',
@@ -2045,8 +2200,10 @@ export class LiveParticipant {
       return this.#stop('the server served an older version of this page', head, false);
     }
     await this.flush();
-    if (!this.#keyed() || this.#head !== head) return;
-    if (this.#pending.length > 0 || this.#queue.length > 0) return this.#armFold();
+    if (!this.#keyed()) return;
+    if (this.#head !== head || this.#pending.length > 0 || this.#queue.length > 0) {
+      return this.#armFold();
+    }
     const grant = await this.#askGrant(head);
     if (!grant || grant.lapsed || grant.position !== null || key(grant.holder) !== key(this.#me)) {
       return this.#armFold();
@@ -2109,6 +2266,18 @@ export class LiveParticipant {
         ...(extra.fold && { fold: extra.fold }),
       });
     let saved: { revisionId: RevisionId; payload: PagePayload } | null = null;
+    const clock = Y.getState(copy.doc.store, clientId);
+    let placing: LiveMessage;
+    try {
+      // Sealed before the save, so one too large to send is never saved.
+      placing = seal(2, 'update', clock, update);
+    } catch {
+      return this.#stop(
+        'a change made outside the live session is too large to fold in',
+        null,
+        false,
+      );
+    }
     try {
       await send(seal(1, 'update', 0, new Uint8Array([0, 0])));
       if (!this.#keyed()) return;
@@ -2147,8 +2316,7 @@ export class LiveParticipant {
         });
       }
       this.document.apply(update, COPY_ORIGIN);
-      const clock = Y.getState(copy.doc.store, clientId);
-      await send(seal(2, 'update', clock, update), { fold: head });
+      await send(placing, { fold: head });
       const revisionId = saved?.revisionId ?? head;
       this.#drafts.set(revisionId, {
         ours: true,
@@ -2161,6 +2329,11 @@ export class LiveParticipant {
         ...(!saved && { foldedBy: key(this.#me) }),
       });
       this.#outsiders.delete(head);
+      // Its changes are in now: that join's messages are refused from here on.
+      for (const client of this.#goneJoins.get(head) ?? []) {
+        const join = this.#joins.joinOf(client);
+        if (join) this.#joins.refuse(join, 'its changes were folded in after it went');
+      }
       if (saved && this.#head === head) this.#head = saved.revisionId;
       if (saved) this.#basedOn.set(saved.revisionId, head);
       if (this.#drafts.get(revisionId)?.compared) this.#checked = revisionId;
@@ -2203,7 +2376,8 @@ export class LiveParticipant {
     revision: RevisionId,
     grant: liveRoutes.Grant,
     decoded: DecodedUpdate,
-    state: LiveState,
+    /** As its holder's Saved notice says; null when none came, and it is worked out. */
+    noticed: LiveState | null,
   ): Promise<void> {
     let draft = this.#outsiderDrafts.get(revision);
     if (!draft) {
@@ -2214,9 +2388,11 @@ export class LiveParticipant {
       }
       this.#basedOn.set(revision, draft.basedOn);
     }
+    if (!sameKeys(draft, this.#opened)) return;
     const base = await this.#foldBase(draft);
-    if (!base || base === 'rollback' || this.#drafts.has(revision)) return;
-    if (!sameState(plusUpdate(base.state, decoded), state)) return;
+    if (!base || typeof base === 'string' || this.#drafts.has(revision)) return;
+    const state = plusUpdate(base.state, decoded);
+    if (noticed && !sameState(state, noticed)) return;
     this.#drafts.set(revision, {
       revisionId: revision,
       payload: draft.payload,
@@ -2269,7 +2445,7 @@ export class LiveParticipant {
     const item = (map as unknown as { _map: Map<string, Y.Item> })._map.get(revision);
     const join = item ? this.#joins.joinOf(item.id.client) : undefined;
     const grant = this.#grants.get(revision);
-    if (!join?.parent || !grant || key(join.parent) !== key(grant.holder)) return;
+    if (!join?.parent || !grant || grant.lapsed || key(join.parent) !== key(grant.holder)) return;
     if (join.senderId !== grant.holder.senderId) return;
     this.#notes.set(revision, {
       revision,
@@ -2309,9 +2485,11 @@ export class LiveParticipant {
       return;
     }
     if (isAgentId(draft.authorId)) return;
+    const first = this.#snapshotDraft === this.#opened.payload.revisionId;
+    // A session draft only, of an earlier session for the first snapshot's.
+    if (first && draftLive(draft.payload, draft.revisionId).kind !== 'live') return;
     const parsed = OverlapsExtension.safeParse(draft.payload.extensions[OVERLAPS_NAMESPACE]);
     if (!parsed.success) return;
-    const first = this.#snapshotDraft === this.#opened.payload.revisionId;
     for (const [revision, text] of this.#snapshotNotes) {
       const id = RevisionId.safeParse(revision);
       if (!id.success || this.#notes.has(id.data) || this.#notesGone.has(id.data)) continue;
@@ -2366,7 +2544,7 @@ export class LiveParticipant {
       }
     } else {
       const found = await this.#foldBase(theirs);
-      if (!found || found === 'rollback') return null;
+      if (!found || typeof found === 'string') return null;
       base = found.payload;
     }
     // A part naming a namespace the document never holds is ignored.
@@ -2415,7 +2593,16 @@ export class LiveParticipant {
   ): boolean {
     if (!this.#keyed() || !this.#notes.has(opened.revision)) return false;
     const now = reviewMerge(opened.base, this.#payload(), opened.theirs, opened.parts);
-    const target = reviewTarget(now, carryChoices(chosen, choices, now));
+    const carried = carryChoices(chosen, choices, now);
+    // A choice of theirs at a part someone changed meanwhile is asked again, never dropped.
+    const changing = (picked: Readonly<Record<string, Choice>>) =>
+      Object.values(picked).filter((choice) => choice !== 'yours').length;
+    const asked = chosen.overlaps.filter((overlap) => {
+      const choice = choices[overlap.id];
+      return choice !== undefined && choice !== 'yours';
+    }).length;
+    if (changing(carried) < asked) return false;
+    const target = reviewTarget(now, carried);
     if (!target) return false;
     const { extensions = {}, ...texts } = target;
     this.change({
@@ -2579,6 +2766,7 @@ export class LiveParticipant {
       });
       if (this.#head === headId) this.#head = result.revisionId;
       if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
+      this.#seenOwn(result.revisionId, headId);
       this.#saveFailing = null;
       this.#retryAt = 0;
       this.#unsavedSince = holdsState(savedState, this.document.state()) ? null : this.#changedAt;
@@ -2630,9 +2818,16 @@ export class LiveParticipant {
    * document has exactly that draft's state, so the change is of the text
    * everyone has, and typing meanwhile stays where it goes.
    */
-  async #renameLinks(saved: RevisionId): Promise<void> {
+  #renameLinks(saved: RevisionId): Promise<void> {
+    return this.#tracked(this.#renameOnce(saved));
+  }
+
+  async #renameOnce(saved: RevisionId): Promise<void> {
     const ports = this.#ports;
-    if (!ports.renamed || Date.now() - this.#renamedAt < 30_000) return;
+    if (!ports.renamed || Date.now() - this.#renamedAt < 30_000 || this.#leaving) return;
+    // Only the saver renames (section 5.10, **The document**).
+    const saver = this.#saver();
+    if (!saver || key(saver) !== key(this.#me)) return;
     this.#renamedAt = Date.now();
     const draft = this.#drafts.get(saved);
     if (!draft) return;
@@ -2645,7 +2840,7 @@ export class LiveParticipant {
     if (markdown === null) return;
     // The Saved notice of that save goes first.
     await this.flush();
-    if (this.#head !== saved || !this.#keyed()) return;
+    if (this.#head !== saved || !this.#keyed() || this.#leaving) return;
     if (this.#pending.length > 0 || this.#queue.length > 0 || this.#placing) return;
     if (!sameState(this.document.state(), draft.state)) return;
     const { frontmatter, body } = splitFrontmatter(markdown);
@@ -3179,8 +3374,8 @@ function sameJson(a: unknown, b: unknown): boolean {
  */
 function writeTarget(document: LiveDocument, target: FoldTarget): void {
   changeText(document.text('title'), target.title);
-  changeText(document.text('frontmatter'), target.frontmatter);
-  changeText(document.text('body'), target.body);
+  changeTextByLines(document.text('frontmatter'), target.frontmatter);
+  changeTextByLines(document.text('body'), target.body);
   const sync = (root: 'attachments' | 'extensions', wanted: Map<string, unknown>) => {
     const map = document.map(root);
     for (const name of [...map.keys()]) if (!wanted.has(name)) map.delete(name);
@@ -3202,4 +3397,10 @@ function writeTarget(document: LiveDocument, target: FoldTarget): void {
       Object.entries(target.extensions).filter(([namespace]) => !UNHELD_NAMESPACES.has(namespace)),
     ),
   );
+}
+
+// A draft whose own `wikistow.live` names another session (section 5.10, **Saving**).
+function ofAnotherSession(draft: OpenedDraft, sessionId: string): boolean {
+  const live = draftLive(draft.payload, draft.revisionId);
+  return live.kind === 'live' && live.extension.session !== sessionId;
 }

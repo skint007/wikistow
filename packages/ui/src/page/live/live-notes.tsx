@@ -146,7 +146,14 @@ export function useReviewing(session: DraftSession) {
           }
           // "Your agent" reads mid-sentence as "your agent's changes".
           const name = who === 'Your agent' ? 'your agent' : who;
-          const theirs: Theirs = who === 'You' ? { kind: 'self' } : { kind: 'person', name };
+          // A note names who wrote its draft only when it isn't carried: one
+          // carried names who kept it, so the draft's own signer is unnamed here.
+          const theirs: Theirs =
+            note.carried && opened.by !== note.by
+              ? { kind: 'unknown' }
+              : who === 'You'
+                ? { kind: 'self' }
+                : { kind: 'person', name };
           setState({ status: 'ready', opened, merge, theirs });
         },
         () => {
