@@ -2510,7 +2510,10 @@ export class LiveParticipant {
     } catch {
       return;
     }
-    if (markdown === null || this.#head !== saved || !this.#keyed()) return;
+    if (markdown === null) return;
+    // The Saved notice of that save goes first.
+    await this.flush();
+    if (this.#head !== saved || !this.#keyed()) return;
     if (this.#pending.length > 0 || this.#queue.length > 0 || this.#placing) return;
     if (!sameState(this.document.state(), draft.state)) return;
     const { frontmatter, body } = splitFrontmatter(markdown);
