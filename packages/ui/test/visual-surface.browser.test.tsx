@@ -9,7 +9,7 @@ import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
 import type { Found } from '../src/page/find/match.ts';
-import { transformer, writingLiterals } from '../src/page/editor/visual/config.ts';
+import { loadSyntaxNodes, transformer, writingLiterals } from '../src/page/editor/visual/config.ts';
 import { fidelityOf, withLf, writesAsShown } from '../src/page/editor/visual/fidelity.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import { Writer } from '../src/page/editor/visual/writer.ts';
@@ -97,6 +97,9 @@ async function mount(
     list: [picture],
     url: async () => URL.createObjectURL(new Blob([PNG], { type: 'image/png' })),
   };
+  // On screen at once, `first` before the editor's made, once the
+  // syntaxes' editor nodes it waits for have loaded.
+  if (first) await loadSyntaxNodes();
   // Strict Mode makes the editor twice; one stays. It's made a moment later.
   await act(async () =>
     root.render(
@@ -114,7 +117,10 @@ async function mount(
       </StrictMode>,
     ),
   );
-  if (first && ref.current) act(() => first(ref.current as EditorSurfaceHandle));
+  if (first) {
+    if (!ref.current) throw new Error('The editor is not on screen');
+    act(() => first(ref.current as EditorSurfaceHandle));
+  }
   // The first loads Milkdown, which takes a while under load.
   await pollActing(() => container.querySelectorAll('.ProseMirror').length).toBe(1);
   const dom = container.querySelector<HTMLElement>('#page-visual');
