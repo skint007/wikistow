@@ -1,7 +1,7 @@
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, insertNewline } from '@codemirror/commands';
 import {
-  Annotation,
+  Compartment,
   EditorState,
   Transaction,
   type Extension,
@@ -26,10 +26,11 @@ import { fileDrops, withLineBreaks } from './files';
 import { sourceLanguage } from './language';
 import { linkMarks, recheckLinks } from './link-marks';
 import { sourceTheme } from './theme';
+import { liveBinding, remoteChange, sessionChange } from './live';
 import { selectionWraps } from './wrap';
 
 // A change the session made (`replace`), which `onChange` doesn't report.
-const external = Annotation.define<boolean>();
+const external = sessionChange;
 
 /**
  * The source surface: CodeMirror over the page's Markdown, with the text
@@ -52,9 +53,13 @@ export default function CodeMirrorSurface({
   properties,
   otherPages,
   toolbar,
+  live,
   ref,
 }: EditorSurfaceProps) {
   const host = useRef<HTMLDivElement>(null);
+  // The binding to a live session's `body`, which comes and goes with the session.
+  const [binding] = useState(() => new Compartment());
+  const bound = useRef(live ?? null);
   const view = useRef<EditorView | null>(null);
   // The editor is built once; it reads the latest of these when it needs them.
   const latest = useRef({ onChange, links, onFiles, properties, otherPages });
@@ -81,6 +86,7 @@ export default function CodeMirrorSurface({
       state: EditorState.create({
         doc: text.current,
         extensions: extensions({
+          binding: binding.of(bound.current ? liveBinding(bound.current) : []),
           // A line ending the other way stays part of its line, shown as a
           // special character, and is kept byte for byte.
           lineBreak: lineBreakFor(text.current, lineBreak),
@@ -101,6 +107,14 @@ export default function CodeMirrorSurface({
       view.current = null;
     };
   }, []);
+
+  // A live session joined or left.
+  useEffect(() => {
+    const next = live ?? null;
+    if (next === bound.current) return;
+    bound.current = next;
+    view.current?.dispatch({ effects: binding.reconfigure(next ? liveBinding(next) : []) });
+  }, [live, binding]);
 
   // Pages and the link table change as the tree loads and saves land.
   useEffect(() => {
@@ -193,11 +207,13 @@ export default function CodeMirrorSurface({
 }
 
 function extensions({
+  binding,
   lineBreak,
   latest,
   finding,
   changed,
 }: {
+  binding: Extension;
   lineBreak: string;
   latest: () => Pick<EditorSurfaceProps, 'links' | 'onFiles' | 'properties' | 'otherPages'>;
   finding: () => ((found: Found) => void) | null;
@@ -206,6 +222,8 @@ function extensions({
   const assist = () => latest().links;
   return [
     EditorState.lineSeparator.of(lineBreak),
+    // Before the listener below: a live session's `body` hears of an edit first.
+    binding,
     EditorView.clipboardInputFilter.of((text, state) => withLineBreaks(text, state.lineBreak)),
     history(),
     drawSelection(),
@@ -244,7 +262,9 @@ function extensions({
       spellcheck: 'true',
     }),
     EditorView.updateListener.of((update) => {
-      const edited = update.transactions.some((tr) => tr.docChanged && !tr.annotation(external));
+      const edited = update.transactions.some(
+        (tr) => tr.docChanged && !tr.annotation(external) && !tr.annotation(remoteChange),
+      );
       if (edited) changed(update.state.sliceDoc());
     }),
   ];

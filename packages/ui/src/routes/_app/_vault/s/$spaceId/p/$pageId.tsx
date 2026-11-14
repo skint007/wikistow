@@ -117,6 +117,7 @@ import { TableOfContents, useHeadings } from '../../../../../../page/table-of-co
 import { UnpublishDialog } from '../../../../../../page/unpublish-dialog';
 import { isUnpublishedCopy, pageViewModel, type Pill } from '../../../../../../page/view-model';
 import { PageCard, PageColumns, PageToolbar } from '../../../../../../page/page-layout';
+import { LivePeople } from '../../../../../../page/live/live-people';
 import { useAppPlugins } from '../../../../../../plugins/app-plugins';
 import { PagePlugins } from '../../../../../../plugins/page-plugins';
 import { OWN_PANELS, Place, Replaceable, type OpenPanel } from '../../../../../../plugins/places';
@@ -919,6 +920,7 @@ function PageBody({
                   );
                 })}
               </nav>
+              {model.view === 'draft' && <LivePeople ctx={ctx} pageId={page.pageId} />}
               <AssistantButton />
               {OWN_PANELS.map(({ id, label, icon: Icon }) => (
                 <Button key={id} variant="ghost" size="sm" {...needs.click(() => setPanel(id))}>

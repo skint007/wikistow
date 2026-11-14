@@ -8,9 +8,11 @@ import { connect, fileBlobStore, listenForTreeChanges, MIN_VAULT_KDF } from '@wi
 import { sql } from 'drizzle-orm';
 import { createMigratedDatabase } from '@wikistow/server/testing/postgres';
 import { simpleParser } from 'mailparser';
+import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createSecureServer } from 'node:http2';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +23,11 @@ import { SMTPServer } from 'smtp-server';
 const APP_PORT = Number(process.env['E2E_PORT'] ?? 3100);
 const CONTROL_PORT = APP_PORT + 1;
 const SMTP_PORT = APP_PORT + 2;
-const origin = `http://localhost:${APP_PORT}`;
+// E2E_TLS serves the app over HTTPS with HTTP/2, as a deployment's proxy
+// does: browsers join live sessions only over HTTP/2 or later (ADR 0015
+// decision 10). HTTP/1.1 still answers, for the health check.
+const TLS = process.env['E2E_TLS'] === '1';
+const origin = `${TLS ? 'https' : 'http'}://localhost:${APP_PORT}`;
 
 const mails: Mail[] = [];
 const logs: unknown[] = [];
@@ -96,7 +102,47 @@ const treeListener = await listenForTreeChanges(database.url, treeChanges.change
   onComment: commentChanges.changed,
 });
 // Loopback only: the control port can reset accounts and dump the database.
-const server = serve({ fetch: app.fetch, port: APP_PORT, hostname: '127.0.0.1' });
+const server = TLS
+  ? serve({
+      fetch: app.fetch,
+      port: APP_PORT,
+      hostname: '127.0.0.1',
+      createServer: createSecureServer,
+      serverOptions: { ...(await selfSigned()), allowHTTP1: true },
+    })
+  : serve({ fetch: app.fetch, port: APP_PORT, hostname: '127.0.0.1' });
+
+/** A certificate for `localhost` made for this run, which the tests' browsers are told to accept. */
+async function selfSigned(): Promise<{ key: Buffer; cert: Buffer }> {
+  const dir = await mkdtemp(join(tmpdir(), 'wikistow-e2e-tls-'));
+  const [key, cert] = [join(dir, 'key.pem'), join(dir, 'cert.pem')];
+  execFileSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'ec',
+      '-pkeyopt',
+      'ec_paramgen_curve:P-256',
+      '-nodes',
+      '-days',
+      '2',
+      '-subj',
+      '/CN=localhost',
+      '-addext',
+      'subjectAltName=DNS:localhost,IP:127.0.0.1',
+      '-keyout',
+      key,
+      '-out',
+      cert,
+    ],
+    { stdio: 'ignore' },
+  );
+  const read = { key: await readFile(key), cert: await readFile(cert) };
+  await rm(dir, { recursive: true, force: true });
+  return read;
+}
 
 // Test-only: read decoded SMTP mail, the database and the blob folder, and change keys.
 const control = createServer((req, res) => {

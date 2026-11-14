@@ -755,6 +755,11 @@ export class DraftSession {
 
   #participant: LiveParticipant | null = null;
   #unlive: (() => void)[] = [];
+
+  /** The page's live session this draft is in, if any, for the editor's binding. */
+  get participant(): LiveParticipant | null {
+    return this.#participant;
+  }
   #joining = false;
   #rejoin: ReturnType<typeof setTimeout> | null = null;
   #rejoins = 0;

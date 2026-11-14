@@ -107,8 +107,6 @@ export type ParticipantPorts = {
   visible(): boolean;
   /** Which editor shows the page. */
   editor(): 'source' | 'visual';
-  /** The person's cursor in `body`, as Yjs relative positions, if any. */
-  cursor?(): { anchor: Uint8Array; head: Uint8Array } | null;
 };
 
 /** Why an app isn't in a session. */
@@ -679,6 +677,24 @@ export class LiveParticipant {
       }
     });
   }
+
+  /** The origin of the person's own changes, as an editor binding tells them apart. */
+  readonly localOrigin: unknown = LOCAL_ORIGIN;
+
+  /** The person's caret and selection in `body`, as Yjs relative positions, or none. */
+  setCursor(cursor: { anchor: Uint8Array; head: Uint8Array } | null): void {
+    const same =
+      cursor === this.#cursor ||
+      (cursor !== null &&
+        this.#cursor !== null &&
+        equalBytes(cursor.anchor, this.#cursor.anchor) &&
+        equalBytes(cursor.head, this.#cursor.head));
+    if (same) return;
+    this.#cursor = cursor;
+    this.presenceChanged();
+  }
+
+  #cursor: { anchor: Uint8Array; head: Uint8Array } | null = null;
 
   /** The person's presence changed: visible, editor or cursor. */
   presenceChanged(): void {
@@ -1655,7 +1671,7 @@ export class LiveParticipant {
   readonly #clocks = new Map<number, number>();
 
   #presenceNow(): LivePresence {
-    const cursor = this.#ports.cursor?.() ?? null;
+    const cursor = this.#cursor;
     return {
       format: { major: 1, minor: 0 },
       editor: this.#ports.editor(),
@@ -1777,6 +1793,9 @@ function failingCode(error: unknown): string {
   }
   return 'unknown';
 }
+
+const equalBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 function toBase64Url(bytes: Uint8Array): string {
   let text = '';
