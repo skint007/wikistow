@@ -663,13 +663,24 @@ export class LiveParticipant {
     this.document.doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (origin === LOCAL_ORIGIN) this.#own(update);
     });
+    // Yjs doesn't catch what its listeners throw: nothing here may throw past it.
     this.document.doc.on('afterTransaction', (transaction: Y.Transaction) => {
       const { origin } = transaction;
       if (origin !== LOCAL_ORIGIN && origin !== REMOTE_ORIGIN && origin !== COPY_ORIGIN) return;
       if (transaction.changed.size === 0 && transaction.deleteSet.clients.size === 0) return;
       const local = transaction.origin === LOCAL_ORIGIN;
-      this.#changed();
-      for (const listener of this.#changes) listener(local);
+      try {
+        this.#changed();
+      } catch {
+        // Reported by the change's own checks.
+      }
+      for (const listener of this.#changes) {
+        try {
+          listener(local);
+        } catch {
+          // A listener's own failure stays its own.
+        }
+      }
     });
     this.#status = this.#computeStatus({ kind: 'live' });
     // A kept message refused as it joins means it can't take part: that ends the session.
@@ -1369,6 +1380,8 @@ export class LiveParticipant {
       // A hint: what counts is the draft's own `wikistow.live`, opened next.
       void this.#learnHead();
     }
+    // Someone else's later snapshot: the next is due from here.
+    if (opened.kind === 'snapshot' && key(opened) !== key(this.#me)) this.#bytesSinceSnapshot = 0;
     this.#joins.take(opened);
     this.#verified.add(key(opened));
     this.#taken(stored.position);
@@ -1566,8 +1579,10 @@ export class LiveParticipant {
       checkPayloadSize(this.#payload());
       this.#tooLarge = null;
     } catch (error) {
-      if (!(error instanceof PageTooLarge)) throw error;
-      this.#tooLarge = error.message;
+      // A value that doesn't fit the page: the change that placed it stops
+      // the session (`apply`'s misplaced structs), never this listener.
+      if (error instanceof PageTooLarge) this.#tooLarge = error.message;
+      else if (!(error instanceof CryptoError)) throw error;
     }
     this.#scheduleSave();
     if (this.#checkTimer === null) {
@@ -1857,6 +1872,9 @@ export class LiveParticipant {
   #own(update: Uint8Array): void {
     if (this.#stopSending) return;
     this.#pending.push(update);
+    // Yjs tells of the update after the transaction's other listeners: what
+    // shows as saved is worked out again now it is pending.
+    this.#update();
     try {
       for (const [client, ranges] of decodeUpdate(update).deletes) {
         const list = this.#ownDeletes.get(client) ?? [];
