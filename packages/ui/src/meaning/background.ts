@@ -9,6 +9,7 @@ import { Embedder } from './embedder';
 import { dropMeaningIndex, meaningIndexFile } from './meaning-file';
 import { MeaningIndexer, type MeaningStatus } from './meaning-index';
 import { MEANING_MODEL } from './model';
+import { oneTabAtATime } from './one-tab';
 import { searchByMeaning, useMeaningOffer } from './setting';
 
 // Search by meaning in the app (ADR 0016, step 4): the background queue
@@ -75,35 +76,6 @@ export function startMeaningIndex(queryClient: QueryClient, ctx: ClientContext) 
   };
 }
 
-const QUEUE_LOCK = 'wikistow-meaning-queue';
-
-/**
- * Run `start` once this tab holds the queue's Web Lock, which one tab of
- * the browser holds at a time, so one model and one queue run however
- * many tabs are open, and none writes the vectors over another's; another
- * takes over as that one closes or locks. Returns how to let go, or stop
- * waiting. Without Web Locks, at once.
- */
-function oneTabAtATime(start: () => void): () => void {
-  if (typeof navigator === 'undefined' || !navigator.locks) {
-    start();
-    return () => {};
-  }
-  const waiting = new AbortController();
-  let release = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
-  void navigator.locks
-    .request(QUEUE_LOCK, { signal: waiting.signal }, async () => {
-      start();
-      await held;
-    })
-    .catch(() => {});
-  return () => {
-    waiting.abort();
-    release();
-  };
-}
-
 /** The open session's queue, or null while search by meaning isn't running. */
 let running: MeaningIndexer | null = null;
 const listeners = new Set<() => void>();
@@ -148,17 +120,21 @@ export function useMeaningIndex(ctx: ClientContext | null) {
   const on = switchOn && offer === 'offered';
   useEffect(() => {
     if (!ctx || !on) return;
-    let started: ReturnType<typeof startMeaningIndex> | null = null;
-    const leave = oneTabAtATime(() => {
-      started = startMeaningIndex(queryClient, ctx);
+    // Its turn may come after the vault locked and before this effect is
+    // cleaned up: nothing starts with keys that are gone.
+    const epoch = vaultStore.epoch();
+    return oneTabAtATime(() => {
+      if (vaultStore.epoch() !== epoch) return { flush: async () => {}, stop: () => {} };
+      const started = startMeaningIndex(queryClient, ctx);
       setRunning(started.indexer);
+      return {
+        flush: () => started.indexer.flush(),
+        stop() {
+          started.stop();
+          if (running === started.indexer) setRunning(null);
+        },
+      };
     });
-    return () => {
-      leave();
-      if (!started) return;
-      started.stop();
-      if (running === started.indexer) setRunning(null);
-    };
   }, [ctx, on, queryClient]);
   // A phone's layout may be a narrow window, which widens again: kept.
   const unkept = offer !== null && offer !== 'phone' && !on;

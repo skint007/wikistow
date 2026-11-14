@@ -26,6 +26,18 @@ export type EmbedAnswer =
   | { id: number; op: 'count'; counts: number[] }
   | { id: number; op: 'error'; message: string };
 
+/**
+ * The loaded worker failed to embed or count what it was given, as distinct
+ * from the worker stopping or its model failing to load: what was asked may
+ * be at fault.
+ */
+export class EmbedRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmbedRefused';
+  }
+}
+
 type Waiting = { resolve: (answer: EmbedAnswer) => void; reject: (error: Error) => void };
 
 /** How long the worker stays once nothing is asked of it, holding the model's memory. */
@@ -124,7 +136,7 @@ export class Embedder {
     // Stopped between the load and this, which would start a worker with no model.
     if (this.#loaded !== loading) throw new Error('The embedding worker was stopped.');
     const answer = await this.#ask(request);
-    if (answer.op === 'error') throw new Error(answer.message);
+    if (answer.op === 'error') throw new EmbedRefused(answer.message);
     if (answer.op !== request.op) throw new Error('The embedding worker answered out of turn.');
     return answer;
   }

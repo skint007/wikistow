@@ -17,6 +17,7 @@ import {
   type MeaningWork,
 } from '../src/meaning/meaning-index';
 import { KEEP_AT_MOST_MS, KEEP_MS } from '../src/data/index-tracker';
+import { EmbedRefused } from '../src/meaning/embedder';
 
 const home = SpaceId.parse('home');
 const rev = (id: string) => RevisionId.parse(id);
@@ -24,7 +25,15 @@ const rev = (id: string) => RevisionId.parse(id);
 /** How long the fake model takes over each passage. */
 const EMBED_MS = 200;
 
-type Page = { pageId: string; revisionId: string; title: string; text: string; updated?: string };
+type Page = {
+  pageId: string;
+  revisionId: string;
+  title: string;
+  text: string;
+  updated?: string;
+  /** A draft readers don't see, which this person can edit. */
+  draft?: boolean;
+};
 
 /** A word index holding `pages`, each as the index reduces it. */
 function wordIndex(pages: readonly Page[]): searchOperations.PageIndex {
@@ -38,7 +47,7 @@ function wordIndex(pages: readonly Page[]): searchOperations.PageIndex {
         parentId: null,
         folderIds: [],
         path: ['Home'],
-        draft: false,
+        draft: page.draft ?? false,
         unpublished: false,
       },
       {
@@ -100,7 +109,7 @@ function fakeWork() {
         throw new Error('The embedding worker stopped.');
       }
       if (state.failOn && texts.some((text) => text.includes(state.failOn!))) {
-        throw new Error('The model failed.');
+        throw new EmbedRefused('The model failed.');
       }
       embedded.push(...texts);
       return { vectors: texts.map(fakeVector), tokens: texts.map(() => 1) };
@@ -315,6 +324,31 @@ describe('MeaningIndexer', () => {
     expect([...fake.writes.at(-1)!.keys()].sort()).toEqual([rev('beach-d2'), rev('boiler-1')]);
   });
 
+  it('a draft saved elsewhere, as in another tab, waits for its versions to pause too', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    const writes = fake.writes.length;
+    const draft = (n: number) => ({
+      ...beach,
+      revisionId: `beach-d${n}`,
+      text: `A week at the beach, and soup ${n}.`,
+      draft: true,
+    });
+    // No save heard here: only the word index shows each new draft.
+    indexer.indexChanged(wordIndex([draft(1), boiler]));
+    await vi.advanceTimersByTimeAsync(10_000);
+    indexer.indexChanged(wordIndex([draft(2), boiler]));
+    await vi.advanceTimersByTimeAsync(DRAFT_PAUSE_MS - 1_000);
+    expect(fake.embedded).toHaveLength(2);
+    // The version before stood in, so nothing was let go of, or written.
+    expect(indexer.status()).toEqual({ pages: 2, total: 2 });
+    expect(fake.writes).toHaveLength(writes);
+    await settle(1);
+    expect(fake.embedded.at(-1)).toBe('Summer holiday\nA week at the beach, and soup 2.');
+  });
+
   it('a save into the queue, on its base, embeds the page again once saves pause', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);
@@ -482,6 +516,34 @@ describe('MeaningIndexer', () => {
     await settle(2);
     expect(indexer.status()).toBeNull();
     expect(fake.embedded).toHaveLength(0);
+  });
+
+  it('a worker that fails twice on a page is tried again, the page not passed over', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    fake.state.failNext = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    fake.state.failNext = true;
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(fake.embedded).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(fake.embedded).toHaveLength(1);
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+  });
+
+  it('flushes what it made before handing the queue to another tab', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await vi.advanceTimersByTimeAsync(EMBED_MS * 2);
+    expect(fake.writes).toHaveLength(0);
+    await indexer.flush();
+    expect(fake.writes).toHaveLength(1);
+    expect(fake.writes[0]!.size).toBeGreaterThanOrEqual(1);
+    // Nothing waits to be kept: no second write.
+    await indexer.flush();
+    expect(fake.writes).toHaveLength(1);
   });
 
   it('tries again a minute after the worker fails', async () => {

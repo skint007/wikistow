@@ -13,6 +13,7 @@ import {
   type Vector8,
 } from '@wikistow/client';
 import { KEEP_AT_MOST_MS, KEEP_MS, systemClock, type Clock } from '../data/index-tracker';
+import { EmbedRefused } from './embedder';
 
 // Search by meaning's background queue (ADR 0016, decision 4): the vectors
 // of each page the word index holds, made one passage at a time after the
@@ -207,13 +208,21 @@ export class MeaningIndexer {
     const shown = new Map<string, IndexedPage>();
     for (const page of index.pages()) shown.set(keyOf(page.doc.spaceId, page.doc.pageId), page);
     this.#shown = shown;
-    // A version of this person's draft stands in for the page until the one
-    // replacing it is embedded; for any other, nothing does.
+    // A draft, this person's or one the index shows as a draft they can
+    // edit (saved in another tab, say), waits until its versions pause, and
+    // the version before stands in for the page until then; for any other
+    // version, nothing does.
+    const now = this.#clock.now();
     for (const [key, page] of shown) {
       const old = before.get(key)?.doc.revisionId;
       if (!old || old === page.doc.revisionId) continue;
       this.#reuse(key, this.#kept.get(old));
-      if (this.#ownVersions.has(page.doc.revisionId)) {
+      const draft = page.doc.draft || this.#ownVersions.has(page.doc.revisionId);
+      if (page.doc.draft) {
+        this.#savedAt.set(key, Math.max(this.#savedAt.get(key) ?? now, now));
+        this.#wakeIn(DRAFT_PAUSE_MS);
+      }
+      if (draft) {
         const standing = this.#held.get(key) ?? old;
         if (this.#kept.has(standing)) this.#held.set(key, standing);
       } else this.#held.delete(key);
@@ -306,6 +315,14 @@ export class MeaningIndexer {
         score,
       };
     });
+  }
+
+  /** Keep at once what waits to be kept, as before another tab takes the queue over. */
+  async flush(): Promise<void> {
+    if (this.#stopped || !this.#keeping) return;
+    this.#keeping.cancel();
+    this.#keeping = null;
+    await this.#write().catch(() => {});
   }
 
   /** Stop, as at a lock: the vectors and the worker go, and nothing is kept after. */
@@ -539,7 +556,8 @@ export class MeaningIndexer {
         try {
           ({ vectors } = await this.#work.embedder.embed('passage', [passage.text]));
         } catch (error) {
-          throw new PassageFailed(error);
+          // Refused by the model, not the worker stopping: maybe the passage's doing.
+          throw error instanceof EmbedRefused ? new PassageFailed(error) : error;
         }
         const ended = this.#clock.now();
         this.#restUntil = ended + Math.max(REST_AT_LEAST_MS, (ended - started) * REST_SHARE);
