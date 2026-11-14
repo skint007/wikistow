@@ -804,6 +804,35 @@ describe('messages', () => {
 });
 
 describe('ending', () => {
+  it('lets a removal through while the removed member floods the session', async () => {
+    const { owner, editor, lib, shareId } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    // A full batch stored once, then sent again and again: answered as before, costing nothing.
+    const batch = Array.from({ length: liveRoutes.MAX_MESSAGES }, () => me.message('update'));
+    await me.send(batch);
+    let flooding = true;
+    const flood = async () => {
+      while (flooding) {
+        await send(editor, session, me.joinId, batch).catch(() => {});
+      }
+    };
+    const floods = Array.from({ length: 4 }, flood);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const began = Date.now();
+    await sharing.removeMember(owner.ctx, {
+      spaceId: lib.spaceId,
+      shareId,
+      identityId: editor.vault.identity.public.id,
+    });
+    const took = Date.now() - began;
+    flooding = false;
+    await Promise.all(floods);
+    expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
+    expect(took).toBeLessThan(2000);
+  });
+
   it('ends the session in the transaction that removes a member, and takes nothing after but saved', async () => {
     const { owner, reader, editor, lib, shareId } = await sharedLibrary();
     const other = await personWithVault(t);

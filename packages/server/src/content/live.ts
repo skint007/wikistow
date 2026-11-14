@@ -150,11 +150,17 @@ function servedJoins(joins: readonly JoinRow[], now: Date): liveRoutes.Join[] {
 // --- Access ----------------------------------------------------------------
 
 /**
+ * The class of the two-key advisory locks that queue a session's requests,
+ * apart from every one-key advisory lock (quota, items, vault and so on).
+ */
+const LIVE_LOCK_CLASS = 5010;
+
+/**
  * The session `sessionId` and its page, for a person who can edit the page
  * now, or `not-found` for anyone else, an agent included, before anything
- * that shows whether a session exists. With `lock`, under the locks that
- * the transaction that moves the page's permission version takes too: the
- * space's row shared, the page's row FOR SHARE, which waits for (or holds
+ * that shows whether a session exists. With `lock`, in turn with the
+ * session's other requests, and under the locks that the transaction that
+ * moves the page's permission version takes too: the space's row shared, the page's row FOR SHARE, which waits for (or holds
  * up) a change of access, and the session's row FOR UPDATE, so its
  * positions are given one at a time. Access is checked once the page is
  * held, so it is the access that change leaves.
@@ -176,7 +182,16 @@ async function sessionFor(
   if (lock && !canEdit(await requirePageAccess(tx, caller, await requirePage(tx, found.pageId)))) {
     throw new ContentError('not-found');
   }
-  if (lock) await lockSpace(tx, found.spaceId);
+  if (lock) {
+    // One request of the session's at a time holds the page: the rest queue
+    // here, holding nothing a change of access waits on. Otherwise requests
+    // queued on the session's row, each holding the page FOR SHARE, could
+    // overlap without end and hold off a removal while its member floods.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(${LIVE_LOCK_CLASS}::int, hashtext(${sessionId}))`,
+    );
+    await lockSpace(tx, found.spaceId);
+  }
   const page = await requirePage(tx, found.pageId, { lock });
   const access = await requirePageAccess(tx, caller, page);
   if (!canEdit(access)) throw new ContentError('not-found');
