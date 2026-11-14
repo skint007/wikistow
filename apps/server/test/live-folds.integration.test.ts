@@ -173,6 +173,28 @@ describe('a draft saved from outside a live session', () => {
     expect((await draftOf(editor, page)).revisionId).toBe(settled.revisionId);
   });
 
+  it('the app that folded a gone writer’s draft can leave and join again', async () => {
+    const { owner, editor, page } = await sharedPage();
+    let crash = () => {};
+    const mine = await join(owner, page, { landed: () => crash() });
+    let theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    // A save of the session first, so the draft the crash builds on is one of its own.
+    setBody(mine, `${body(mine)}\n\nSaved first.\n`);
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    crash = () => mine.close();
+    await mine.commitOwn({ texts: { body: `${body(mine)}\n\nNever sent.\n` } });
+    await expect.poll(() => body(theirs), { timeout: 60_000 }).toContain('Never sent.');
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    await theirs.leave();
+    theirs = await join(editor, page);
+    expect(body(theirs)).toContain('Never sent.');
+    await new Promise((resolve) => setTimeout(resolve, 6_000));
+    expect(theirs.status().state).toEqual({ kind: 'live' });
+    setBody(theirs, `${body(theirs)}Back.\n`);
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+  }, 180_000);
+
   it('a newcomer after a gone writer’s draft was folded stays in the session', async () => {
     const { owner, editor, page } = await sharedPage();
     let crash = () => {};

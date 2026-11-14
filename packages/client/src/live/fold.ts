@@ -271,7 +271,14 @@ export function reviewTarget(
   merge: Merge,
   choices: Readonly<Record<string, Choice>>,
 ): ReviewTarget | null {
-  const resolved = withinTime(FOLD_MS, () => resolve(merge, choices, { review: false }));
+  return withinTime(FOLD_MS, () => reviewTargetWithin(merge, choices));
+}
+
+function reviewTargetWithin(
+  merge: Merge,
+  choices: Readonly<Record<string, Choice>>,
+): ReviewTarget | null {
+  const resolved = resolve(merge, choices, { review: false });
   if (!resolved.ok) return null;
   const { plan } = merge;
   const changed = (overlap: Overlap) => {

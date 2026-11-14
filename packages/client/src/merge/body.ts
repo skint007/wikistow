@@ -64,6 +64,11 @@ export function withinTime<T>(ms: number, merge: () => T): T {
   }
 }
 
+/** Throw `MergeTooLarge` once the merge running now is past its time (`withinTime`). */
+export function checkTime(): void {
+  if (deadline !== Infinity && Date.now() > deadline) throw new MergeTooLarge();
+}
+
 // The blocks `a` and `b` have in common, in order, as index pairs.
 function common(a: readonly Block[], b: readonly Block[]): [number, number][] {
   const pairs: [number, number][] = [];
@@ -543,6 +548,7 @@ export function writeBody(merge: BlockMerge, picks: ReadonlyMap<number, SegmentP
     return own.quote + own.indent + number + own.marker.slice(-1) + text.slice(head.length);
   };
   entries.forEach((entry, i) => {
+    checkTime();
     const text = entry.adjust
       ? adjusted(entry.block, written, entries.slice(i + 1), {
           ahead: ahead(entry),
@@ -588,6 +594,7 @@ export function writeBody(merge: BlockMerge, picks: ReadonlyMap<number, SegmentP
     return found.length > 0 ? found : [JSON.stringify(kind(x)) === JSON.stringify(kind(y))];
   };
   written.forEach(({ start, entry }, i) => {
+    checkTime();
     if (!entry.check || entry.block.kind !== 'item') return;
     const back = written.slice(0, i).reverse();
     const near = itemNear(depthOf(entry.block.place), back, (w) =>
@@ -603,6 +610,7 @@ export function writeBody(merge: BlockMerge, picks: ReadonlyMap<number, SegmentP
   // And each nested item under the item it is under on a side that has
   // it, which block keys don't say either.
   written.forEach(({ entry }, i) => {
+    checkTime();
     if (!entry.check || entry.block.kind !== 'item') return;
     const depth = depthOf(entry.block.place);
     const lists = depth.flatMap((part, k) => (part === 'list' ? [k] : []));
@@ -647,6 +655,7 @@ function blamed(merge: BlockMerge, entries: readonly Entry[], entry: Entry): num
   if (changed(entry)) return entry.segment;
   const at = entries.indexOf(entry);
   for (let d = 1; d < entries.length; d++) {
+    checkTime();
     for (const other of [entries[at + d], entries[at - d]])
       if (other && changed(other)) return other.check ? other.segment : null;
   }
