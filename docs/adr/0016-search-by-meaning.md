@@ -297,8 +297,8 @@ Step 5 put **By meaning** in the search dialog (`packages/ui/src/meaning/search.
 2. **The model in the build, and a measurement** (built, PR #430; see **Measured in step 2**, which measured no phone). Fetch and check the model at its pinned hash, emit it and the runtime as hashed files with Brotli copies, serve `/assets/*` precompressed, leave the large files and the copies out of the service worker's shell and the copies out of the desktop package, add the licence. The worker and its model cache, with a browser test that embeds a text under the app's policy, offline too. Measure load, a query and a passage in Chromium and the desktop app, and in a real phone's browser, so the phone row of decision 5 rests on numbers.
 3. **Passages and vectors** (built, PR #429) in `packages/client`: cutting a page's reduced text at its headings and paragraphs, 8-bit vectors, the scan, and sealing and opening the kept file, with tests.
 4. **Indexing in the background** (built, PR #450; see **How step 4 turned out**). The queue, kept vectors on unlock, updates when pages change, the 30 s pause for drafts, lock and logout, the desktop bridge's file, and the setting with its rules per device.
-5. **By meaning in the search dialog** (built, PR #STEP5; see **How step 5 turned out**), with filters, the status line, the keyboard and screen reader, and an e2e: a page about a beach holiday is found by "trip to the coast".
-6. **The spec,** marked built (built, PR #STEP5).
+5. **By meaning in the search dialog** (built, PR #472; see **How step 5 turned out**), with filters, the status line, the keyboard and screen reader, and an e2e: a page about a beach holiday is found by "trip to the coast".
+6. **The spec,** marked built (built, PR #472).
 
 Steps 2 and 3 can run in parallel. Step 4 needs both, and step 5 needs step 4.
 
