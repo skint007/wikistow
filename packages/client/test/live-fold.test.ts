@@ -69,6 +69,17 @@ describe('folding a draft from outside', () => {
     expect(folded.target.extensions).toEqual({ 'x.\u{1F600}': 2, 'x.￿': 1 });
   });
 
+  it('numbers a namespace over every one theirs has, those the document never holds too', () => {
+    const links = { 'wikistow.links': { format: 1, links: [] } };
+    const folded = foldPayloads(
+      page('Text.\n', { extensions: { 'x.data': 1 } }),
+      page('Text.\n', { extensions: { 'x.data': 2 } }),
+      page('Text.\n', { extensions: { ...links, 'x.data': 3 } }),
+    );
+    // `wikistow.links` is theirs' first namespace, `x.data` its second.
+    expect(folded.parts).toEqual(['data:1']);
+  });
+
   it('leaves out what the document never holds, on every side', () => {
     const base = page('Text.\n');
     const ours = page('Text.\n');

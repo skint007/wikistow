@@ -74,7 +74,8 @@ export function foldPayloads(base: PagePayload, ours: PagePayload, theirs: PageP
   // A resolve that comes back unfit names more overlaps; picking yours there ends it.
   for (let round = 0; round < 8; round++) {
     for (const overlap of merge.overlaps) {
-      for (const part of partsOf(merge, overlap, held)) parts.add(part);
+      // Numbered over every namespace theirs has, as section 5.5 counts them.
+      for (const part of partsOf(merge, overlap, theirs)) parts.add(part);
     }
     const choices = Object.fromEntries(
       merge.overlaps.map((overlap) => [overlap.id, 'yours' as const]),
@@ -205,7 +206,7 @@ export function reviewMerge(
   const held = heldPayload(theirs);
   const merge = mergePayloads(heldPayload(base), heldPayload(ours), held);
   return narrowMerge(merge, (overlap) =>
-    partsOf(merge, overlap, held).some((part) => named(part, parts)),
+    partsOf(merge, overlap, theirs).some((part) => named(part, parts)),
   );
 }
 

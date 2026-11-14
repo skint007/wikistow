@@ -434,12 +434,15 @@ export class DraftSession {
     const resolved = pageMerge.resolve(merge, {});
     if (!resolved.ok) return false;
     const { title, markdown, attachments } = resolved.payload;
-    this.#reviseLive({
-      title,
-      markdown,
-      attachments,
-      extensions: over(current.extensions, held(resolved.payload.extensions)),
-    });
+    this.#reviseLive(
+      {
+        title,
+        markdown,
+        attachments,
+        extensions: over(current.extensions, held(resolved.payload.extensions)),
+      },
+      { byLines: true },
+    );
     return true;
   }
 
@@ -1303,7 +1306,7 @@ export class DraftSession {
 
   // A change from outside the editor, in a live session: attachments
   // added go in through this app's own save of them, the rest at once.
-  #reviseLive(changes: PayloadChanges) {
+  #reviseLive(changes: PayloadChanges, { byLines = false }: { byLines?: boolean } = {}) {
     const participant = this.#participant;
     if (!participant) return;
     const { extensions = {}, attachments, markdown, title } = changes;
@@ -1327,7 +1330,7 @@ export class DraftSession {
     };
     // The editor shows it as the document takes it in, never before.
     if (added.length === 0) {
-      participant.change({ texts, entries });
+      participant.change({ texts, entries }, { byLines });
       return this.#fromDocument(true);
     }
     // With a file: one change, its text too, saved by this app first (section 5.10, **Files**).
