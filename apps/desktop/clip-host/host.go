@@ -136,19 +136,21 @@ func (h *host) start(open envelope, frame []byte, frames <-chan []byte) (appConn
 }
 
 // relay sends the held frames, then copies frames both ways, unread, until
-// either side goes.
+// either side goes. It reads the app before writing to it: a pipe may hold
+// nothing, as go-winio's doesn't, so a write waits for the app to read,
+// and the app may be writing an answer meanwhile.
 func (h *host) relay(conn appConn, frames <-chan []byte, failed <-chan error, held [][]byte) error {
 	defer conn.Close()
-	for _, frame := range held {
-		if _, err := conn.Write(frame); err != nil {
-			return err
-		}
-	}
 	gone := make(chan error, 1)
 	go func() {
 		_, err := io.Copy(h.out, conn)
 		gone <- err
 	}()
+	for _, frame := range held {
+		if _, err := conn.Write(frame); err != nil {
+			return err
+		}
+	}
 	for {
 		select {
 		case frame, ok := <-frames:
