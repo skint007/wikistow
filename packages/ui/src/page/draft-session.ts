@@ -851,7 +851,8 @@ export class DraftSession {
       return;
     }
     if (!this.#live || this.#ports.epoch() !== epoch || !this.#attach(joined, opening.payload)) {
-      void joined.leave();
+      // Never started, it saved nothing for anyone, and saves nothing now.
+      joined.close();
       if (this.#live) this.#set({ live: { kind: 'not-joined', why: { kind: 'typed-meanwhile' } } });
       return;
     }

@@ -171,6 +171,22 @@ describe('editing a page live', () => {
       .toEqual([owner.vault.identity.public.id]);
   });
 
+  it('puts a change saved by its writer around what others typed meanwhile', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const mine = await join(owner, page);
+    const theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    // Worked out from the text as it is now, as a plugin's change is.
+    const target = `${body(mine)} ![photo](attachment:photo)`;
+    const committing = mine.commitOwn({ texts: { body: target } });
+    theirs.edit((document) => document.text('body').insert(0, 'Early. '));
+    expect(await committing).toBe(true);
+    const both = 'Early. draft words ![photo](attachment:photo)';
+    await expect.poll(() => body(mine)).toBe(both);
+    await expect.poll(() => body(theirs)).toBe(both);
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+  });
+
   it('ends the session for everyone when a member is removed', async () => {
     const { owner, editor, lib, shareId, page } = await sharedPage();
     const mine = await join(owner, page);
