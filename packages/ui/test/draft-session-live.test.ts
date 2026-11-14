@@ -272,6 +272,9 @@ function session(
         marked.push({ version, putIn: live.putIn });
       },
       seen: () => seen ?? null,
+      mergedWith(version) {
+        seen = version;
+      },
       openDraft: async () => entry.payload,
     }),
     async keep(input) {
@@ -299,7 +302,8 @@ function session(
     },
   };
   const draft = new DraftSession(
-    { base: R0, payload, region: OWNER_REGION },
+    // Opened on the change waiting here, as the page opens one, when the view saw it.
+    { base: R0, payload, region: OWNER_REGION, live: seen === null ? null : (entry?.live ?? null) },
     ports,
     { current: surface },
     { debounceMs: 10, maxWaitMs: 10 },
@@ -724,5 +728,28 @@ describe('a change another tab keeps for its live session', () => {
     const { draft, joins } = session(opened, page('A\n\nB\n\nC'), { entry, seen: null });
     await draft.joinLive();
     expect(joins[0]?.document.text('body').toJSON()).toBe('A\n\nB, mine\n\nC');
+    // The change is this view's now: what it keeps next goes into it.
+    expect(draft.participant).not.toBeNull();
+  });
+
+  it('shows the change it can’t put in, for Merge…, when this view opened the draft', async () => {
+    const opened = page('A\n\nB');
+    const entry = {
+      ...waitingEntry(page('A\n\nB, mine'), page('A\n\nB')),
+      basedOn: RevisionId.parse('r-old'),
+    };
+    const { draft, surface } = session(opened, page('A\n\nB, theirs'), { entry, seen: null });
+    await draft.joinLive();
+    expect(draft.snapshot().status).toBe('conflict');
+    expect(surface.text).toBe('A\n\nB, mine');
+    expect((await draft.mergeVersions())?.yours.markdown).toBe('A\n\nB, mine');
+  });
+
+  it('takes no head as a conflict while it shows a change kept for a session, untouched', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft } = session(opened, page('A\n\nB'), { entry, claimed: true });
+    draft.noticeHead(RevisionId.parse('r-someone'));
+    expect(draft.snapshot().status).not.toBe('conflict');
   });
 });

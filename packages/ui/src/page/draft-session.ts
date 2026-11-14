@@ -664,8 +664,11 @@ export class DraftSession {
   /** The page's draft head as last loaded: one this session didn't make means someone else saved. */
   noticeHead(head: RevisionId | null) {
     // In a live session, the session's stream says what the head is; on
-    // the way back into one, what's kept here goes in by block, whatever saved meanwhile.
+    // the way back into one, what's kept here goes in by block, whatever
+    // saved meanwhile. So for a view showing a change kept for a session,
+    // another tab's maybe, that nothing was typed into: the join puts it in.
     if (this.#participant || this.#rejoinHold) return;
+    if (this.#keptLive && !this.#keptLive.putIn && this.#untouched() && this.#ports.live) return;
     // A save in flight may already be the head before its answer arrives.
     if (!head || this.#known.has(head) || this.#saving) return;
     this.#theirs = head;
@@ -1234,6 +1237,8 @@ export class DraftSession {
     if (claimed) {
       this.#claimed = claimed;
       void (this.#markedPutIn ?? Promise.resolve()).finally(() => {
+        // Still kept for this session: held on, as a keeping tab's, until withdrawn.
+        if (this.#claimed === claimed && this.#participant === joined && this.#kept) return;
         if (this.#claimed === claimed) this.#claimed = null;
         claimed();
       });
@@ -1373,6 +1378,8 @@ export class DraftSession {
     if (ours.attachments.some((ref) => !known.has(ref.id))) return 'send';
     const merged = mergeByBlock(base, ours, current, { addsOverlap: true });
     if (!merged) return 'overlap';
+    // This view's from now: what it keeps or saves next goes into that change.
+    if (!holds) this.#ports.mergedWith?.(entry.version);
     // From here the view shows the session's document: what `merged` adds to it is the person's.
     this.#content = {
       title: current.title,
@@ -1440,6 +1447,16 @@ export class DraftSession {
     // Held while the person settles it: the queue sends what they keep, not this.
     this.#conflictHold ??= this.#ports.live?.hold?.() ?? null;
     this.#keptLive = entry.live ?? null;
+    // A view that opened the draft shows the change, which is what's to settle.
+    if (this.#ports.seen && this.#ports.seen() !== entry.version) {
+      const { title, markdown, attachments } = entry.payload;
+      this.#content = { title, markdown, attachments };
+      this.#extensions = over(this.#payload.extensions, held(entry.payload.extensions));
+      if (entry.basedOn) this.#base = entry.basedOn;
+      this.#ports.mergedWith?.(entry.version);
+      if (this.#live) this.#surface.current?.replace(markdown);
+      this.#set({ ...this.#content, links: this.#table() });
+    }
     this.#theirs = head;
     this.#autosave.hold(() => this.#current());
   }
@@ -1514,6 +1531,10 @@ export class DraftSession {
     if (!kept || (!force && !kept.participant.headHolds(kept.state))) return;
     this.#kept = null;
     void this.#ports.withdraw?.(kept.version).catch(() => false);
+    // Nothing kept for the session now: other tabs may take the page's changes.
+    const claimed = this.#claimed;
+    this.#claimed = null;
+    claimed?.();
   }
 
   // Whether what is kept on this device is the document as it is now.

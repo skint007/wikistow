@@ -593,36 +593,31 @@ function PageBody({
   // holds that text from then on, through the change being sent.
   const [draftFrom, setDraftFrom] = useState<DraftFrom | null>(null);
   if (model.view === 'draft' && draftFrom === null && queueRead) {
-    // A change kept for a live session, not stopped: online, its tab may
-    // still be in the session, so this view opens the draft, joins, and
-    // puts it in only if no tab holds it (ADR 0015 decision 1).
-    const keptLive = change?.live && !change.failure && !availability.offline;
-    const opening =
-      change && !keptLive
-        ? {
-            base: change.basedOn ?? change.newPage?.revisionId ?? revisionId,
-            payload: change.payload,
-            region:
-              change.region ??
-              revision?.region ??
-              tree?.pages.find((p) => p.id === page.pageId)?.region ??
-              OWNER_REGION,
-            queued: {
-              version: change.version,
-              sending: change.sending?.revisionId ?? null,
-              live: change.live ?? null,
-              // Someone saved since it was based: it opens as the conflict it came back as.
-              // One kept from a live session merges from its kept base, the head unchanged too.
-              theirs:
-                change.failure?.kind === 'conflict' &&
-                (info.heads.draftHead !== change.basedOn || change.live)
-                  ? info.heads.draftHead
-                  : null,
-            },
-          }
-        : revision && opened?.kind === 'current'
-          ? { base: revisionId, payload: opened.payload, region: revision.region, queued: null }
-          : null;
+    const opening = change
+      ? {
+          base: change.basedOn ?? change.newPage?.revisionId ?? revisionId,
+          payload: change.payload,
+          region:
+            change.region ??
+            revision?.region ??
+            tree?.pages.find((p) => p.id === page.pageId)?.region ??
+            OWNER_REGION,
+          queued: {
+            version: change.version,
+            sending: change.sending?.revisionId ?? null,
+            live: change.live ?? null,
+            // Someone saved since it was based: it opens as the conflict it came back as.
+            // One kept from a live session merges from its kept base, the head unchanged too.
+            theirs:
+              change.failure?.kind === 'conflict' &&
+              (info.heads.draftHead !== change.basedOn || change.live)
+                ? info.heads.draftHead
+                : null,
+          },
+        }
+      : revision && opened?.kind === 'current'
+        ? { base: revisionId, payload: opened.payload, region: revision.region, queued: null }
+        : null;
     if (opening) setDraftFrom(opening);
   }
   const payload =
