@@ -8,6 +8,7 @@ import {
   reviewMerge,
   reviewTarget,
 } from '../src/live/fold.ts';
+import { MergeTooLarge } from '../src/merge/body.ts';
 import { PAYLOAD_FORMAT, type PagePayload } from '../src/payload.ts';
 
 const page = (markdown: string, more: Partial<PagePayload> = {}): PagePayload => ({
@@ -94,6 +95,18 @@ describe('folding a draft from outside', () => {
     const folded = foldPayloads(base, ours, theirs);
     expect(folded.target.extensions).toEqual({});
     expect(folded.parts).toEqual([]);
+  });
+});
+
+describe('a fold too large to make in time', () => {
+  it('is refused within about a second, not worked on for minutes', () => {
+    const lines = (tag: string) =>
+      Array.from({ length: 20_000 }, (_, i) => `${tag} ${i}\n\n`).join('');
+    const started = Date.now();
+    expect(() => foldPayloads(page('base\n'), page(lines('ours')), page(lines('theirs')))).toThrow(
+      MergeTooLarge,
+    );
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
 

@@ -77,7 +77,14 @@ export function textChanges(before: string, after: string): TextChange[] {
     removed = '';
     added = '';
   };
-  for (const part of diffLines(before, after)) {
+  // Very different texts take time that grows with the square of their
+  // size: past a fifth of a second, one span, as `textChange` makes.
+  const parts = diffLines(before, after, { timeout: 200 });
+  if (!parts) {
+    const whole = textChange(before, after);
+    return whole ? [whole] : [];
+  }
+  for (const part of parts) {
     if (part.removed) removed += part.value;
     else if (part.added) added += part.value;
     else {

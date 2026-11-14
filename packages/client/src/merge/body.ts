@@ -37,12 +37,45 @@ type Hunk = { os: number; oe: number; xs: number; xe: number };
 
 const sameKey = (a: Block, b: Block) => a.key === b.key;
 
+/** A merge that ran past its time (`withinTime`): too large to merge here. */
+export class MergeTooLarge extends Error {
+  constructor() {
+    super('This change is too large to merge here');
+    this.name = 'MergeTooLarge';
+  }
+}
+
+// When the merge running now must be done by, if it was given a time.
+let deadline = Infinity;
+
+/**
+ * Run a merge that must be done within `ms`, as one an app makes on its
+ * own for every draft written outside a live session must be: a diff of
+ * very different pages takes time that grows with the square of their
+ * size. Past it, `MergeTooLarge`.
+ */
+export function withinTime<T>(ms: number, merge: () => T): T {
+  const before = deadline;
+  deadline = Math.min(before, Date.now() + ms);
+  try {
+    return merge();
+  } finally {
+    deadline = before;
+  }
+}
+
 // The blocks `a` and `b` have in common, in order, as index pairs.
 function common(a: readonly Block[], b: readonly Block[]): [number, number][] {
   const pairs: [number, number][] = [];
   let i = 0;
   let j = 0;
-  for (const change of diffArrays([...a], [...b], { comparator: sameKey })) {
+  const timeout = deadline === Infinity ? undefined : Math.max(1, deadline - Date.now());
+  const changes = diffArrays([...a], [...b], {
+    comparator: sameKey,
+    ...(timeout !== undefined && { timeout }),
+  });
+  if (!changes) throw new MergeTooLarge();
+  for (const change of changes) {
     if (change.removed) i += change.count;
     else if (change.added) j += change.count;
     else for (let k = 0; k < change.count; k++) pairs.push([i++, j++]);

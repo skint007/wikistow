@@ -883,7 +883,12 @@ export class DraftSession {
 
   /** The merge Review shows for an opened note. */
   reviewMerge(opened: OpenedNote): pageMerge.Merge | null {
-    return this.#participant?.reviewMerge(opened) ?? null;
+    try {
+      return this.#participant?.reviewMerge(opened) ?? null;
+    } catch {
+      // Too large to merge here (`MergeTooLarge`): it can't be reviewed.
+      return null;
+    }
   }
 
   /**
@@ -898,7 +903,12 @@ export class DraftSession {
     const participant = this.#participant;
     if (!participant) return false;
     this.#pull();
-    const applied = participant.applyReview(opened, merge, choices);
+    let applied: boolean;
+    try {
+      applied = participant.applyReview(opened, merge, choices);
+    } catch {
+      applied = false;
+    }
     if (applied) this.#fromDocument(true);
     return applied;
   }

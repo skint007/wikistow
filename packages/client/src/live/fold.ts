@@ -10,7 +10,7 @@
 // theirs, for Review.
 import { COVER_NAMESPACE } from '../cover.ts';
 import { readProperties, splitFrontmatter } from '../markdown/index.ts';
-import { edges, writeBody, type Choice, type SegmentPick } from '../merge/body.ts';
+import { edges, withinTime, writeBody, type Choice, type SegmentPick } from '../merge/body.ts';
 import { mergePayloads, narrowMerge, resolve, type Merge, type Overlap } from '../merge/payload.ts';
 import type { AttachmentRef, PagePayload } from '../payload.ts';
 
@@ -68,6 +68,14 @@ export const targetOf = (payload: PagePayload): FoldTarget => {
  * ours where both did, each such part named by its place in theirs.
  */
 export function foldPayloads(base: PagePayload, ours: PagePayload, theirs: PagePayload): Folded {
+  // Made on its own for every draft from outside: within a second, or not at all.
+  return withinTime(FOLD_MS, () => foldWithin(base, ours, theirs));
+}
+
+/** How long a fold's or Review's merge may take before it is `MergeTooLarge`. */
+export const FOLD_MS = 1_000;
+
+function foldWithin(base: PagePayload, ours: PagePayload, theirs: PagePayload): Folded {
   const held = heldPayload(theirs);
   let merge = mergePayloads(heldPayload(base), heldPayload(ours), held);
   const parts = new Set<string>();
@@ -80,7 +88,7 @@ export function foldPayloads(base: PagePayload, ours: PagePayload, theirs: PageP
     const choices = Object.fromEntries(
       merge.overlaps.map((overlap) => [overlap.id, 'yours' as const]),
     );
-    const resolved = resolve(merge, choices);
+    const resolved = resolve(merge, choices, { review: false });
     if (resolved.ok) return { target: targetOf(resolved.payload), parts: sortParts([...parts]) };
     merge = resolved.merge;
   }
@@ -204,7 +212,9 @@ export function reviewMerge(
   parts: readonly string[],
 ): Merge {
   const held = heldPayload(theirs);
-  const merge = mergePayloads(heldPayload(base), heldPayload(ours), held);
+  const merge = withinTime(FOLD_MS, () =>
+    mergePayloads(heldPayload(base), heldPayload(ours), held),
+  );
   return narrowMerge(merge, (overlap) =>
     partsOf(merge, overlap, theirs).some((part) => named(part, parts)),
   );
@@ -261,7 +271,7 @@ export function reviewTarget(
   merge: Merge,
   choices: Readonly<Record<string, Choice>>,
 ): ReviewTarget | null {
-  const resolved = resolve(merge, choices);
+  const resolved = withinTime(FOLD_MS, () => resolve(merge, choices, { review: false }));
   if (!resolved.ok) return null;
   const { plan } = merge;
   const changed = (overlap: Overlap) => {

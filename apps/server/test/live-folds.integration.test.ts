@@ -173,6 +173,24 @@ describe('a draft saved from outside a live session', () => {
     expect((await draftOf(editor, page)).revisionId).toBe(settled.revisionId);
   });
 
+  it('a newcomer after a gone writer’s draft was folded stays in the session', async () => {
+    const { owner, editor, page } = await sharedPage();
+    let crash = () => {};
+    const mine = await join(owner, page, { landed: () => crash() });
+    const theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    crash = () => mine.close();
+    await mine.commitOwn({ texts: { body: `${body(mine)}\n\nNever sent.\n` } });
+    await expect.poll(() => body(theirs), { timeout: 60_000 }).toContain('Never sent.');
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    const late = await join(owner, page);
+    expect(body(late)).toBe(body(theirs));
+    await new Promise((resolve) => setTimeout(resolve, 35_000));
+    expect(late.status().state).toEqual({ kind: 'live' });
+    setBody(late, `${body(late)}Later.\n`);
+    await expect.poll(() => late.status().saved, { timeout: 30_000 }).toBe(true);
+  }, 180_000);
+
   it('folds without a save when the session changed nothing since', async () => {
     const { owner, editor, page } = await sharedPage();
     const mine = await join(owner, page);

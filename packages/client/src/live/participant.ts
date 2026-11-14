@@ -702,6 +702,7 @@ export class LiveParticipant {
     this.document = opening.document;
     this.#clientId = opening.document.clientId;
     this.sessionId = opening.opened.record.subjectId;
+    this.#inheritedGone = (foldedGone.get(this.sessionId)?.size ?? 0) > 0;
     this.#transport = liveTransport(ports.ctx, this.sessionId, ports.live);
     this.#me = { senderId: ports.ctx.identity.public.id, joinId: opening.joinId };
     this.#joined = key(this.#me) === key(opening.opened.starter);
@@ -933,6 +934,8 @@ export class LiveParticipant {
   }
 
   #recheckFailures = 0;
+  // Whether an earlier join of this app in the session folded a gone join's changes in.
+  readonly #inheritedGone: boolean;
   #stopLater: { why: string; saveOver: RevisionId | null; rejoin: boolean; end: boolean } | null =
     null;
 
@@ -1952,6 +1955,8 @@ export class LiveParticipant {
     const signer = [...this.#verified].some((join) => join.startsWith(`${draft.authorId} `));
     const ours = state !== null && !isAgentId(draft.authorId) && sameKeys(draft, this.#opened);
     if (!ours || !state) {
+      // Counted already, as a fold placed without a save.
+      if (this.#drafts.has(head)) return;
       this.#outsiders.add(head);
       this.#outsiderDrafts.set(head, draft);
       return;
@@ -2013,7 +2018,9 @@ export class LiveParticipant {
           this.#foldedGone.has(client) && (state.vector.get(client) ?? 0) < clock,
       );
       if (again) {
-        return this.#stop('this app can’t catch up with the others', null, true);
+        // Once, it joins again; a join after that which still can't catch up ends the session.
+        const before = this.#inheritedGone;
+        return this.#stop('this app can’t catch up with the others', null, !before, before);
       }
       // The 30 s rule: a draft whose state this app still doesn't hold.
       if (!holdsState(state, head.state) && Date.now() - head.openedAt > HOLD_MS) {
@@ -2076,8 +2083,13 @@ export class LiveParticipant {
 
   // Joins whose changes a draft claims but that went without sending them, by that draft.
   readonly #goneJoins = new Map<RevisionId, number[]>();
-  // The clients of gone joins whose changes a fold put in: once is all (A2).
-  readonly #foldedGone = new Set<number>();
+  // The clients of gone joins whose changes a fold put in: once is all (A2),
+  // for every join of this app in the session, so joining again forgets nothing.
+  get #foldedGone(): Set<number> {
+    let clients = foldedGone.get(this.sessionId);
+    if (!clients) foldedGone.set(this.sessionId, (clients = new Set()));
+    return clients;
+  }
 
   // A session draft holding changes of joins gone without sending them: from outside, folded in.
   #asOutsider(draft: SessionDraft, opened: OpenedDraft, gone: number[]): void {
@@ -2219,7 +2231,7 @@ export class LiveParticipant {
     const grant = this.#grants.get(head);
     const placed = this.#placedAt.get(head);
     if (!grant || grant.position === null || !placed) return;
-    if (Date.now() - placed.at < HOLD_MS || this.#drafts.has(head)) return;
+    if (Date.now() - placed.at < HOLD_MS || this.#drafts.get(head)?.foldedBy) return;
     this.#stop('a change folded in from outside never said it was saved', null, false);
   }
 
@@ -2515,7 +2527,7 @@ export class LiveParticipant {
     // Its change may still be on its way, held: the notice waits for it.
     if (!placed) return void this.#foldNotices.set(revision, { join, state });
     this.#foldNotices.delete(revision);
-    if (placed.join !== join || this.#drafts.has(revision)) return;
+    if (placed.join !== join || this.#drafts.get(revision)?.foldedBy) return;
     void this.#countFold(revision, grant, placed.decoded, state);
   }
 
@@ -2537,7 +2549,8 @@ export class LiveParticipant {
     }
     if (!sameKeys(draft, this.#opened)) return;
     const base = await this.#foldBase(draft);
-    if (!base || typeof base === 'string' || this.#drafts.has(revision)) return;
+    // One filed as a session draft before its join went counts now as the fold says.
+    if (!base || typeof base === 'string' || this.#drafts.get(revision)?.foldedBy) return;
     const state = plusUpdate(base.state, decoded);
     if (!sameState(state, noticed)) return;
     this.#drafts.set(revision, {
@@ -2679,7 +2692,8 @@ export class LiveParticipant {
     }
     if (!sameKeys(theirs, this.#opened)) return null;
     // Not a draft of the session, but one folded in as from outside since its join went.
-    if (sessionState(theirs.payload, revision, this.sessionId) && !this.#goneJoins.has(revision)) {
+    const folded = this.#goneJoins.has(revision) || this.#placedAt.has(revision);
+    if (sessionState(theirs.payload, revision, this.sessionId) && !folded) {
       return null;
     }
     let base: PagePayload | null = null;
@@ -3573,3 +3587,7 @@ function ofAnotherSession(draft: OpenedDraft, sessionId: string): boolean {
   const live = draftLive(draft.payload, draft.revisionId);
   return live.kind === 'live' && live.extension.session !== sessionId;
 }
+
+// Gone joins' clients whose changes a fold put in, by session: kept across
+// this app's joins of a session, so joining again never folds them twice.
+const foldedGone = new Map<string, Set<number>>();

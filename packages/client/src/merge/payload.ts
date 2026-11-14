@@ -347,7 +347,12 @@ export type Resolved =
  * it offers. The body and front matter are read back first: anything that
  * doesn't read as chosen where it went comes back as an overlap.
  */
-export function resolve(merge: Merge, choices: Readonly<Record<string, Choice>>): Resolved {
+export function resolve(
+  merge: Merge,
+  choices: Readonly<Record<string, Choice>>,
+  /** Whether to work out the review of what it changes, which only the merge view shows. */
+  { review = true }: { review?: boolean } = {},
+): Resolved {
   const { plan } = merge;
   const choiceOf = (id: string): Choice => {
     const choice = choices[id];
@@ -429,7 +434,11 @@ export function resolve(merge: Merge, choices: Readonly<Record<string, Choice>>)
     attachments: mergedAttachments(plan, markdown, extensions),
     extensions,
   };
-  return { ok: true, payload, review: reviewOf(plan.theirs, payload) };
+  return {
+    ok: true,
+    payload,
+    review: review ? reviewOf(plan.theirs, payload) : { lines: [], fields: [] },
+  };
 }
 
 // The merged front matter, or undefined where it didn't read as merged.
