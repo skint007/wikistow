@@ -2222,6 +2222,28 @@ export class LiveParticipant {
     if (draft && this.#head === revisionId) this.#sawHead(draft);
   }
 
+  /**
+   * Whether `theirs`, or a draft between it and `base` by signed `basedOn`,
+   * is a session's draft (its own `wikistow.live`), of this session or an
+   * earlier one: one whose sender went, or wasn't heard. It holds the
+   * session's typing as it was, so its fold, and Review of its note, take
+   * both sides adding at one place as an overlap, never both.
+   */
+  async #sessionDraftIn(theirs: OpenedDraft, base: RevisionId | null): Promise<boolean> {
+    let draft: OpenedDraft | null = theirs;
+    for (let steps = 0; draft && draft.revisionId !== base && steps < 256; steps++) {
+      if (draftLive(draft.payload, draft.revisionId).kind === 'live') return true;
+      const next: RevisionId | null = draft.basedOn;
+      if (!next || next === base) return false;
+      try {
+        draft = this.#outsiderDrafts.get(next) ?? (await this.#ports.openDraft(next));
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
   // Whether `ancestor` is in `revision`'s signed `basedOn` chain, as this app has read it.
   #chainHas(revision: RevisionId, ancestor: RevisionId): boolean {
     let at = this.#basedOn.get(revision) ?? null;
@@ -2495,12 +2517,14 @@ export class LiveParticipant {
     }
     for (const [client, range] of goneNow) this.#ignoring.set(client, range);
     this.#unplaced = goneNow;
+    const goneMode = await this.#sessionDraftIn(draft, base.revisionId);
+    if (!this.#keyed() || this.#head !== head) return this.#armFold();
     const before = this.document.state();
     let folded: Folded;
     try {
-      // A gone join's session draft itself, as Review of its note cuts it too.
+      // A session draft's in it, as Review of its note works out too.
       folded = foldPayloads(base.payload, this.#payload(base.payload), draft.payload, {
-        gone: this.#goneJoins.has(head),
+        gone: goneMode,
       });
     } catch {
       return this.#stop(
@@ -2872,6 +2896,7 @@ export class LiveParticipant {
       if (!gone) return null;
     }
     let base: PagePayload | null = null;
+    let goneMode = false;
     if (note.carried) {
       // In the starting draft's own chain: its base is the draft it was saved over.
       let at: RevisionId | null = this.#opened.payload.revisionId;
@@ -2884,10 +2909,12 @@ export class LiveParticipant {
       } catch {
         return null;
       }
+      goneMode = await this.#sessionDraftIn(theirs, theirs.basedOn);
     } else {
       const found = await this.#foldBase(theirs);
       if (!found || typeof found === 'string') return null;
       base = found.payload;
+      goneMode = await this.#sessionDraftIn(theirs, found.revisionId);
     }
     // A part naming a namespace the document never holds is ignored.
     const namespaces = namespacesOf(theirs.payload);
@@ -2904,7 +2931,7 @@ export class LiveParticipant {
       ours: this.#payload(),
       parts,
       by: theirs.authorId,
-      gone: claimed !== null,
+      gone: goneMode,
     };
   }
 
