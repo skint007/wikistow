@@ -144,7 +144,9 @@ export function useReviewing(session: DraftSession) {
               text: 'Nothing there overlaps the page any more.',
             });
           }
-          const theirs: Theirs = who === 'You' ? { kind: 'self' } : { kind: 'person', name: who };
+          // "Your agent" reads mid-sentence as "your agent's changes".
+          const name = who === 'Your agent' ? 'your agent' : who;
+          const theirs: Theirs = who === 'You' ? { kind: 'self' } : { kind: 'person', name };
           setState({ status: 'ready', opened, merge, theirs });
         },
         () => {

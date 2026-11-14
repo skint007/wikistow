@@ -8,7 +8,7 @@ const port = Number(process.env['E2E_PORT'] ?? 3100);
 // HTTP/2, which browsers need to join a live session (ADR 0015 decision
 // 10), on the ports ten above: the app, control and SMTP.
 const livePort = port + 10;
-const LIVE = /live-editing\.spec\.ts/;
+const LIVE = /live-[a-z-]+\.spec\.ts/;
 const env = Object.fromEntries(
   Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
 );

@@ -131,4 +131,16 @@ describe('Review', () => {
     const merge = reviewMerge(base, theirs, theirs, ['body:0-1']);
     expect(merge.overlaps).toEqual([]);
   });
+
+  it('keeps the page’s own ending, with no line break after its last block', () => {
+    const merge = reviewMerge(
+      page('One.\n\nTwo.'),
+      page('One, ours.\n\nTwo.'),
+      page('One, theirs.\n\nTwo.'),
+      ['body:0-1'],
+    );
+    const [overlap] = merge.overlaps;
+    if (!overlap) throw new Error('no overlap');
+    expect(reviewTarget(merge, { [overlap.id]: 'theirs' })?.body).toBe('One, theirs.\n\nTwo.');
+  });
 });

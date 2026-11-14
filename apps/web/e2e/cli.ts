@@ -39,15 +39,28 @@ export async function cleanUpCli() {
 
 export type Run = { code: number | null; stdout: string; stderr: string };
 
-/** One CLI installation: a home of its own, and a way to run the bundle in it. */
-export async function cliInstall(bin: string) {
+/**
+ * One CLI installation: a home of its own, and a way to run the bundle in
+ * it, against `server`, by default the browser tests' own. `selfSigned`
+ * accepts the certificate the HTTPS server made for the run (the `live`
+ * project's), which Node is told to trust for this process alone.
+ */
+export async function cliInstall(
+  bin: string,
+  { server = SERVER, selfSigned = false }: { server?: string; selfSigned?: boolean } = {},
+) {
   const home = await mkdtemp(join(tmpdir(), 'wikistow-e2e-home-'));
   made.push(home);
   await mkdir(join(home, '.config'), { mode: 0o700 });
 
   const start = (args: readonly string[]) => {
     const child = spawn(process.execPath, [bin, ...args, '--passphrase-fd', '3'], {
-      env: { HOME: home, PATH: process.env['PATH'] ?? '/usr/bin:/bin', LANG: 'C.UTF-8' },
+      env: {
+        HOME: home,
+        PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+        LANG: 'C.UTF-8',
+        ...(selfSigned && { NODE_TLS_REJECT_UNAUTHORIZED: '0', NODE_NO_WARNINGS: '1' }),
+      },
       stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
     });
     running.add(child);
@@ -90,7 +103,7 @@ export async function cliInstall(bin: string) {
 
   /** Start enrolling: resolves with the lookup code and the fingerprint the CLI printed. */
   const enroll = async () => {
-    const run = start(['agent', 'enroll', '--server', SERVER, '--fingerprint-answer-from-stdin']);
+    const run = start(['agent', 'enroll', '--server', server, '--fingerprint-answer-from-stdin']);
     const code = await run.waitFor(/Lookup code: ([0-9A-Z]{4}-[0-9A-Z]{4})/);
     return {
       code,

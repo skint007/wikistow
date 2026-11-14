@@ -290,13 +290,17 @@ export function reviewTarget(
       picks.set(index, { choice: choices[id] ?? 'yours', fit: !unfit });
     });
     const segments = writeBody(plan.body, picks).segments;
-    target.body = plan.body.segments
+    const body = plan.body.segments
       .map((segment, index) =>
         bodyPicks.has(index)
           ? (segments[index] ?? '')
           : segment.yours.map((block) => block.text).join(''),
       )
       .join('');
+    // Blocks end with a line break, the last one too: ours ends as it did.
+    const ours = splitFrontmatter(plan.yours.markdown).body;
+    const ends = ours === '' || /\r?\n$/.test(ours);
+    target.body = ends ? body : body.replace(/\r?\n$/, '');
   }
   const extensions: Record<string, Json | null> = {};
   if (picked.some((overlap) => overlap.part === 'banner' || overlap.part === 'icon')) {
