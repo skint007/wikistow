@@ -78,7 +78,13 @@ function fakeWork() {
       writes.push(readMeaningBytes(sealed)!);
     },
   };
-  const state = { busy: false, failNext: false, file: file as MeaningFile | null };
+  const state = {
+    busy: false,
+    failNext: false,
+    /** Fail every passage holding this. */
+    failOn: null as string | null,
+    file: file as MeaningFile | null,
+  };
   const embedder = {
     count: vi.fn(async (words: string[]) => {
       counted.push(words);
@@ -92,6 +98,9 @@ function fakeWork() {
       if (state.failNext) {
         state.failNext = false;
         throw new Error('The embedding worker stopped.');
+      }
+      if (state.failOn && texts.some((text) => text.includes(state.failOn!))) {
+        throw new Error('The model failed.');
       }
       embedded.push(...texts);
       return { vectors: texts.map(fakeVector), tokens: texts.map(() => 1) };
@@ -349,6 +358,55 @@ describe('MeaningIndexer', () => {
     expect(indexer.status()).toEqual({ pages: 1, total: 1 });
   });
 
+  it('a draft of this person’s that leaves is let go of in the file at once too', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    indexer.saved({
+      spaceId: home,
+      pageId: PageId.parse('beach'),
+      revisionId: rev('beach-d1'),
+      basedOn: rev('beach-1'),
+    });
+    indexer.indexChanged(wordIndex([{ ...beach, revisionId: 'beach-d1' }, boiler]));
+    await settle();
+    expect([...fake.writes.at(-1)!.keys()].sort()).toEqual([rev('beach-d1'), rev('boiler-1')]);
+    const writes = fake.writes.length;
+    // Deleted, or its space no longer shared.
+    indexer.indexChanged(wordIndex([boiler]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.writes).toHaveLength(writes + 1);
+    expect([...fake.writes.at(-1)!.keys()]).toEqual([rev('boiler-1')]);
+  });
+
+  it('while the word index is built afresh, as access changes, nothing is found or kept', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    const writes = fake.writes.length;
+    indexer.indexGone();
+    expect(indexer.nearest(Float32Array.from([1, 1, 1, 1]), 5)).toEqual([]);
+    expect(indexer.status()).toBeNull();
+    // A page saved meanwhile waits for the new index.
+    indexer.saved({
+      spaceId: home,
+      pageId: PageId.parse('beach'),
+      revisionId: rev('beach-1'),
+      basedOn: rev('beach-1'),
+    });
+    await settle(2);
+    expect(fake.writes).toHaveLength(writes);
+    expect(fake.embedded).toHaveLength(2);
+    // The new index lost the beach: its vectors go, from the file at once.
+    indexer.indexChanged(wordIndex([boiler]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.writes).toHaveLength(writes + 1);
+    expect([...fake.writes.at(-1)!.keys()]).toEqual([rev('boiler-1')]);
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+  });
+
   it('keeps the file once embedding pauses, and at least once a minute while it goes on', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);
@@ -390,10 +448,40 @@ describe('MeaningIndexer', () => {
     const indexer = new MeaningIndexer(fake.work);
     indexer.indexChanged(wordIndex([beach, boiler]));
     await settle(1);
+    // Counting a page's tokens waits too: the worker is asked nothing.
+    expect(fake.embedder.count).not.toHaveBeenCalled();
     expect(fake.embedder.embed).not.toHaveBeenCalled();
     fake.state.busy = false;
     await settle(1);
     expect(fake.embedded).toHaveLength(2);
+  });
+
+  it('a page whose passage fails twice is passed over, and the others go on', async () => {
+    const fake = fakeWork();
+    fake.state.failOn = 'Cornwall';
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    expect(fake.embedded).toEqual(['The boiler\nThe boiler loses pressure every winter.']);
+    // It can't be found by meaning, so it isn't counted.
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+    // Its next version is tried again.
+    fake.state.failOn = null;
+    indexer.indexChanged(wordIndex([{ ...beach, revisionId: 'beach-2' }, boiler]));
+    await settle();
+    expect(indexer.status()).toEqual({ pages: 2, total: 2 });
+  });
+
+  it('stopped while waiting to try again, it stays stopped', async () => {
+    const fake = fakeWork();
+    fake.state.failNext = true;
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    await vi.advanceTimersByTimeAsync(1_000);
+    indexer.stop();
+    await settle(2);
+    expect(indexer.status()).toBeNull();
+    expect(fake.embedded).toHaveLength(0);
   });
 
   it('tries again a minute after the worker fails', async () => {

@@ -56,7 +56,10 @@ export function useMeaningOffer(): MeaningOffer | null {
   return meaningOffer({ device, onDisk, everyPage });
 }
 
-/** What Settings says of it: how far it has got, what it does, or what it needs. */
+/**
+ * What Settings says of it: how far it has got, or that every page is
+ * indexed, in the tab running the queue; what it does; or what it needs.
+ */
 export function meaningSettingState(
   offer: MeaningOffer,
   { on, desktop, status }: { on: boolean; desktop: boolean; status: MeaningStatus | null },
@@ -75,8 +78,14 @@ export function meaningSettingState(
         return `${does} Downloads 26 MB once, then indexes your pages in the background on this device.`;
       }
       const progress = on ? meaningProgress(status) : null;
+      const done =
+        on && status && status.total > 0 && !progress
+          ? status.total === 1
+            ? '1 page indexed.'
+            : `All ${status.total.toLocaleString('en')} pages indexed.`
+          : null;
       return [
-        progress && `${progress}.`,
+        progress ? `${progress}.` : done,
         does,
         'Nothing you search for or write leaves this device.',
       ]

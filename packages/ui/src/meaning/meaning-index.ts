@@ -156,6 +156,11 @@ export class MeaningIndexer {
   /** When the rest after the last passage ends. */
   #restUntil = 0;
   #wakeAt: { at: number; cancel: () => void } | null = null;
+  /** A write came while no word index was shown: it follows the next. */
+  #deferred = false;
+  /** Pages passed over as their passages failed twice, by the version that failed, and the first failure. */
+  readonly #failed = new Map<string, RevisionId>();
+  #failing: { key: string; revisionId: RevisionId } | null = null;
   #keeping: { since: number; now: boolean; cancel: () => void } | null = null;
 
   constructor(work: MeaningWork) {
@@ -215,9 +220,29 @@ export class MeaningIndexer {
     }
     for (const key of this.#held.keys()) if (!shown.has(key)) this.#held.delete(key);
     for (const key of this.#reusable.keys()) if (!shown.has(key)) this.#reusable.delete(key);
-    if (this.#prune()) this.#keep(true);
+    // A version let go of goes from the file at once, as from memory: its
+    // page left, or another's version replaced it. Only a draft this person
+    // saved over waits, which happens once its next version is embedded.
+    const letGo = this.#prune();
+    if (letGo || this.#deferred) this.#keep(letGo);
+    this.#deferred = false;
     this.#plan();
     this.#wake();
+  }
+
+  /**
+   * The word index went, as when access changes and it is built afresh
+   * (`refreshAccess`): until the next, no page is found or embedded, and
+   * nothing is kept, since what it held may no longer be this person's to
+   * read. The vectors stay in memory, for the versions the next still shows.
+   */
+  indexGone() {
+    if (this.#stopped || !this.#index) return;
+    this.#index = null;
+    this.#shown = new Map();
+    this.#todo = [];
+    this.#cursor = 0;
+    this.#setStatus(null);
   }
 
   /** A draft this person saved: it waits until their saves of the page pause. */
@@ -341,15 +366,10 @@ export class MeaningIndexer {
     for (const { hash, vector } of passages) this.#byHash.set(hash, vector);
   }
 
-  /**
-   * Let go of every version no page shows, and no draft stands in on: true
-   * if any went that wasn't this person's own draft saved over, which the
-   * file then lets go of at once.
-   */
+  /** Let go of every version no page shows, and no draft stands in on: true if any went. */
   #prune(): boolean {
     const wanted = new Set<RevisionId>(this.#held.values());
     for (const page of this.#shown.values()) wanted.add(page.doc.revisionId);
-    let letGo = false;
     let any = false;
     for (const revisionId of this.#kept.keys()) {
       if (wanted.has(revisionId)) continue;
@@ -357,7 +377,6 @@ export class MeaningIndexer {
       this.#madeFrom.delete(revisionId);
       this.#rewritten.delete(revisionId);
       any = true;
-      if (!this.#ownVersions.has(revisionId)) letGo = true;
     }
     if (any) {
       this.#byHash.clear();
@@ -365,21 +384,28 @@ export class MeaningIndexer {
         for (const { hash, vector } of passages) this.#byHash.set(hash, vector);
       }
     }
-    return letGo;
+    return any;
   }
 
   /** The pages left to embed, most recently changed first, and the status. */
   #plan() {
     const left: IndexedPage[] = [];
     let pages = 0;
+    let total = 0;
     for (const [key, page] of this.#shown) {
+      // One that can't be embedded can't be found by meaning: not counted.
+      const failed = this.#failed.get(key);
+      if (failed !== undefined && failed !== page.doc.revisionId) this.#failed.delete(key);
+      if (this.#failed.has(key)) continue;
+      total++;
       if (this.#standing(key, page)) pages++;
       if (!this.#done(page)) left.push(page);
     }
+    for (const key of this.#failed.keys()) if (!this.#shown.has(key)) this.#failed.delete(key);
     left.sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''));
     this.#todo = left.map((page) => keyOf(page.doc.spaceId, page.doc.pageId));
     this.#cursor = 0;
-    this.#setStatus({ pages, total: this.#shown.size });
+    this.#setStatus({ pages, total });
   }
 
   #setStatus(status: MeaningStatus | null) {
@@ -396,7 +422,7 @@ export class MeaningIndexer {
     while (this.#cursor < this.#todo.length) {
       const key = this.#todo[this.#cursor]!;
       const page = this.#shown.get(key);
-      if (!page || this.#done(page)) {
+      if (!page || this.#done(page) || this.#failed.has(key)) {
         this.#cursor++;
         continue;
       }
@@ -422,7 +448,7 @@ export class MeaningIndexer {
       at,
       cancel: this.#clock.after(ms, () => {
         this.#wakeAt = null;
-        if (this.#stopped) return;
+        if (this.#stopped || !this.#index) return;
         this.#plan();
         this.#wake();
       }),
@@ -451,11 +477,24 @@ export class MeaningIndexer {
         }
         try {
           await this.#embedPage(page);
-        } catch {
-          // The worker failed: try again later, from the page it was on.
+        } catch (error) {
           if (this.#stopped) break;
+          // A passage that fails twice, the page passed over until its
+          // version changes; else the worker failed: try again later.
+          if (error instanceof PassageFailed) {
+            const key = keyOf(page.doc.spaceId, page.doc.pageId);
+            const again =
+              this.#failing?.key === key && this.#failing.revisionId === page.doc.revisionId;
+            this.#failing = again ? null : { key, revisionId: page.doc.revisionId };
+            if (again) {
+              this.#failed.set(key, page.doc.revisionId);
+              this.#plan();
+              continue;
+            }
+          }
           await this.#sleep(RETRY_MS);
-          this.#plan();
+          if (this.#stopped) break;
+          if (this.#index) this.#plan();
         }
       }
     } finally {
@@ -478,7 +517,10 @@ export class MeaningIndexer {
   async #embedPage(page: IndexedPage) {
     const key = keyOf(page.doc.spaceId, page.doc.pageId);
     const { revisionId } = page.doc;
-    // Passages are cut by the model's own count of each word's tokens.
+    // Passages are cut by the model's own count of each word's tokens,
+    // asked of the worker at the queue's pace, as each passage is.
+    await this.#pace();
+    if (this.#given(key, page)) return;
     const words = [...new Set([...`${page.title}\n${page.text}`.matchAll(WORD)].map(([w]) => w))];
     const counts = await this.#work.embedder.count(words);
     if (this.#given(key, page)) return;
@@ -493,10 +535,15 @@ export class MeaningIndexer {
         await this.#pace();
         if (this.#given(key, page)) return;
         const started = this.#clock.now();
-        const { vectors } = await this.#work.embedder.embed('passage', [passage.text]);
+        let vectors: Float32Array[];
+        try {
+          ({ vectors } = await this.#work.embedder.embed('passage', [passage.text]));
+        } catch (error) {
+          throw new PassageFailed(error);
+        }
         const ended = this.#clock.now();
         this.#restUntil = ended + Math.max(REST_AT_LEAST_MS, (ended - started) * REST_SHARE);
-        if (!vectors[0]) throw new Error('The embedding worker gave no vector.');
+        if (!vectors[0]) throw new PassageFailed('The embedding worker gave no vector.');
         vector = quantizeVector(vectors[0]);
         if (this.#given(key, page)) {
           if (!this.#stopped) this.#reuse(key, [...made, { hash: passage.hash, vector }]);
@@ -557,6 +604,18 @@ export class MeaningIndexer {
     if (file && !this.#stopped) await this.#work.idle();
     // Stopped meanwhile, the keys may be gone: nothing is sealed with them.
     if (!file || this.#stopped) return;
+    // Built afresh as access changed: kept once the next index lets go.
+    if (!this.#index) {
+      this.#deferred = true;
+      return;
+    }
     await file.write(this.#work.seal(this.#kept));
+  }
+}
+
+/** Embedding a passage failed, which may be the passage's doing, not the worker's. */
+class PassageFailed extends Error {
+  constructor(cause: unknown) {
+    super('A passage couldn’t be embedded', { cause });
   }
 }

@@ -26,6 +26,12 @@ describe('where search by meaning is offered (ADR 0016, decision 5)', () => {
     ).toBe(
       'By meaning: 3 of 10 pages so far. Finds pages close in meaning to what you search for, below the pages with its words. Nothing you search for or write leaves this device.',
     );
+    expect(
+      meaningSettingState('offered', { on: true, desktop: false, status: { pages: 2, total: 2 } }),
+    ).toMatch(/^All 2 pages indexed\. Finds pages/);
+    expect(
+      meaningSettingState('offered', { on: true, desktop: false, status: { pages: 1, total: 1 } }),
+    ).toMatch(/^1 page indexed\. /);
     expect(meaningSettingState('every-page', { on: true, desktop: false, status: null })).toBe(
       'Needs Keep for offline on Every page: indexing again each session would take minutes.',
     );

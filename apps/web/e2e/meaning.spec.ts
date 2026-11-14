@@ -235,9 +235,11 @@ test('indexes by meaning in the background, typing and searching staying respons
     await expect(
       page.getByText(/Nothing you search for or write leaves this device/),
     ).toBeVisible();
-    // Long enough for the word index and the kept vectors to open.
-    await page.waitForTimeout(5_000);
-    await expect(row).not.toHaveAccessibleDescription(/so far/);
+    // Every page has its vectors as soon as the kept ones open.
+    await expect(row).toHaveAccessibleDescription(/^All 2 pages indexed\./, { timeout: 30_000 });
+    // And stays so, with nothing for the worker to do.
+    await page.waitForTimeout(3_000);
+    await expect(row).toHaveAccessibleDescription(/^All 2 pages indexed\./);
     expect(workers.filter((url) => url.includes('embed.worker'))).toEqual([]);
   });
 

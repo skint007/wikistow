@@ -4,7 +4,7 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { desktop } from '../desktop';
 import { onDraftSaved, searchIndexKey, searchIndexQuery } from '../data/queries';
 import { useDeviceSwitch } from '../shell/device-switch';
-import { PLAIN } from '../vault/store';
+import { PLAIN, vaultStore } from '../vault/store';
 import { Embedder } from './embedder';
 import { dropMeaningIndex, meaningIndexFile } from './meaning-file';
 import { MeaningIndexer, type MeaningStatus } from './meaning-index';
@@ -36,18 +36,32 @@ const OPENING = [[PLAIN, 'revision'], [PLAIN, 'page'], searchIndexKey] as const;
  */
 export function startMeaningIndex(queryClient: QueryClient, ctx: ClientContext) {
   const embedder = new Embedder({ keep: !desktop });
+  // Locking zeroes the keys before anything here hears of it: nothing is
+  // sealed or opened with them after (a seal under zeros wouldn't throw).
+  const epoch = vaultStore.epoch();
+  const unlocked = () => {
+    if (vaultStore.epoch() !== epoch) throw new Error('The vault locked');
+  };
   const indexer = new MeaningIndexer({
     embedder,
     file: () => meaningIndexFile().catch(() => null),
-    seal: (kept) => sealMeaningIndex(ctx, kept, MODEL_HASH),
-    open: (sealed) => openMeaningIndex(ctx, sealed, MODEL_HASH),
+    seal: (kept) => {
+      unlocked();
+      return sealMeaningIndex(ctx, kept, MODEL_HASH);
+    },
+    open: (sealed) => {
+      unlocked();
+      return openMeaningIndex(ctx, sealed, MODEL_HASH);
+    },
     busy: () => OPENING.some((queryKey) => queryClient.isFetching({ queryKey }) > 0),
     idle,
   });
   const unsaved = onDraftSaved(queryClient, (save) => indexer.saved(save));
   const observer = new QueryObserver(queryClient, searchIndexQuery(ctx, queryClient));
+  // Reset as access changed (`refreshAccess`), it has no index until rebuilt.
   const unfollow = observer.subscribe(({ data }) => {
     if (data) indexer.indexChanged(data);
+    else indexer.indexGone();
   });
   const shown = observer.getCurrentResult().data;
   if (shown) indexer.indexChanged(shown);
@@ -58,6 +72,35 @@ export function startMeaningIndex(queryClient: QueryClient, ctx: ClientContext) 
       unsaved();
       indexer.stop();
     },
+  };
+}
+
+const QUEUE_LOCK = 'wikistow-meaning-queue';
+
+/**
+ * Run `start` once this tab holds the queue's Web Lock, which one tab of
+ * the browser holds at a time, so one model and one queue run however
+ * many tabs are open, and none writes the vectors over another's; another
+ * takes over as that one closes or locks. Returns how to let go, or stop
+ * waiting. Without Web Locks, at once.
+ */
+function oneTabAtATime(start: () => void): () => void {
+  if (typeof navigator === 'undefined' || !navigator.locks) {
+    start();
+    return () => {};
+  }
+  const waiting = new AbortController();
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  void navigator.locks
+    .request(QUEUE_LOCK, { signal: waiting.signal }, async () => {
+      start();
+      await held;
+    })
+    .catch(() => {});
+  return () => {
+    waiting.abort();
+    release();
   };
 }
 
@@ -105,9 +148,14 @@ export function useMeaningIndex(ctx: ClientContext | null) {
   const on = switchOn && offer === 'offered';
   useEffect(() => {
     if (!ctx || !on) return;
-    const started = startMeaningIndex(queryClient, ctx);
-    setRunning(started.indexer);
+    let started: ReturnType<typeof startMeaningIndex> | null = null;
+    const leave = oneTabAtATime(() => {
+      started = startMeaningIndex(queryClient, ctx);
+      setRunning(started.indexer);
+    });
     return () => {
+      leave();
+      if (!started) return;
       started.stop();
       if (running === started.indexer) setRunning(null);
     };
