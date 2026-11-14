@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   findLinks,
   findWikilinks,
+  linkSpans,
   placedWikilinks,
   resolveWikilinks,
   rewriteAddressLinks,
@@ -155,5 +156,29 @@ describe('rewriting links to page and folder addresses', () => {
       ['escaped', 'notes', false],
       ['by reference', 'notes', true],
     ]);
+  });
+});
+
+describe('where images are written', () => {
+  it('spans each image from its ! to its ), after the frontmatter', () => {
+    const markdown = '---\na: 1\n---\nSee ![a [b] *c*](https://x.test/a.png "T") and [l](/l).\n';
+    const images = linkSpans(markdown).urls.filter((url) => url.image);
+    expect(images).toHaveLength(1);
+    const [image] = images;
+    expect(markdown.slice(image!.imageSpan!.start, image!.imageSpan!.end)).toBe(
+      '![a [b] *c*](https://x.test/a.png "T")',
+    );
+    expect(markdown.slice(image!.destination!.start, image!.destination!.end)).toBe(
+      'https://x.test/a.png',
+    );
+    expect(linkSpans(markdown).urls.find((url) => !url.image)?.imageSpan).toBeUndefined();
+  });
+
+  it('spans an image inside a link’s text', () => {
+    const markdown = '[![alt](a.png)](https://x.test/)';
+    const image = linkSpans(markdown).urls.find((url) => url.image);
+    expect(markdown.slice(image!.imageSpan!.start, image!.imageSpan!.end)).toBe('![alt](a.png)');
+    expect(image?.inLink).toBe(true);
+    expect(linkSpans('![alt](a.png)').urls[0]?.inLink).toBeUndefined();
   });
 });

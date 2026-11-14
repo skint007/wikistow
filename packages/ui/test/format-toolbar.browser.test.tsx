@@ -17,6 +17,7 @@ import {
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
+import { pollActing } from './acting.ts';
 
 // The visual editor's formatting toolbar, in Chromium: each control, on
 // any page and selection, leaves a document the write-time guard takes.
@@ -60,11 +61,9 @@ async function mount(initial: string): Promise<HTMLElement> {
     ),
   );
   // The first loads Milkdown, which takes a while under load.
-  await act(() =>
-    expect
-      .poll(() => container.querySelectorAll('.ProseMirror').length, { timeout: 10_000 })
-      .toBe(1),
-  );
+  await pollActing(() => container.querySelectorAll('.ProseMirror').length, {
+    timeout: 10_000,
+  }).toBe(1);
   const dom = container.querySelector<HTMLElement>('#page-visual');
   if (!ref.current || !dom) throw new Error('The editor did not mount');
   unmounts.push(() => {

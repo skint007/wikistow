@@ -2,6 +2,7 @@
 // is bundled on its own as CommonJS and may only use `electron`.
 import {
   DESKTOP_CHANNELS,
+  type ClipRequest,
   type DesktopBridge,
   type DesktopResult,
   type WindowState,
@@ -75,6 +76,17 @@ const bridge: DesktopBridge = {
   },
   clipping: () => call(DESKTOP_CHANNELS.clipping),
   setClipping: (on) => call(DESKTOP_CHANNELS.setClipping, on),
+  setClipState: (state) => call(DESKTOP_CHANNELS.setClipState, state),
+  onClipRequest: (listener) => {
+    const heard = (_event: unknown, request: ClipRequest) => listener(request);
+    ipcRenderer.on(DESKTOP_CHANNELS.onClipRequest, heard);
+    return () => void ipcRenderer.off(DESKTOP_CHANNELS.onClipRequest, heard);
+  },
+  waitingClips: () => call(DESKTOP_CHANNELS.waitingClips),
+  clipMade: (clipId, page) => call(DESKTOP_CHANNELS.clipMade, clipId, page),
+  clipDone: (clipId, outcome) => call(DESKTOP_CHANNELS.clipDone, clipId, outcome),
+  clipFolders: (requestId, folders) => call(DESKTOP_CHANNELS.clipFolders, requestId, folders),
+  clipImage: (clipId, url) => call(DESKTOP_CHANNELS.clipImage, clipId, url),
 };
 
 contextBridge.exposeInMainWorld('wikistowDesktop', bridge);

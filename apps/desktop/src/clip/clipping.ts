@@ -1,8 +1,8 @@
 // Browser clipping in the desktop app (docs/adr/0017-web-clipper.md): the
 // setting, the socket or pipe the extension's helper reaches the app on,
-// and the host manifests that let the browser start the helper. Main makes
-// one at launch and starts it before the window loads. This step only
-// answers the extension: saving a clip is ADR 0017's step 4.
+// the host manifests that let the browser start the helper, and the desk
+// that hands clips to the page (desk.ts). Main makes one at launch and
+// starts it before the window loads.
 import type { ClipBrowser, ClippingState, desktopRoutes } from '@wikistow/contracts';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -10,6 +10,8 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { packagedFolder } from '../install.ts';
+import { clipDesk } from './desk.ts';
+import { imageFetcher, type Resolve } from './images.ts';
 import { clipListener, type ClipConnection, type ClipEndpoint } from './listener.ts';
 import {
   HOST_NAMES,
@@ -21,7 +23,7 @@ import {
   withExtension,
   type Registry,
 } from './manifests.ts';
-import { PROTOCOLS, type ClipAppState, type Message } from './protocol.ts';
+import { PROTOCOLS, type Message } from './protocol.ts';
 
 /** How long an `open` keeps telling the extension of each change, at most. */
 const OPEN_WATCH_MS = 10 * 60_000;
@@ -41,11 +43,15 @@ export type ClippingOptions = {
   version: string;
   /** The launch's switches: `--clip-manifests` and `--clip-extension=…`. */
   argv: readonly string[];
-  /** The app's state, as far as main knows it. */
-  state: () => ClipAppState;
+  /** What main knows of the app's state itself; the page tells it the vault's. */
+  session: () => 'starting' | 'signed-out' | 'signed-in';
   /** Bring the window forward. */
   show: () => void;
+  /** The user agent images are fetched with. */
+  userAgent: string;
   registry?: Registry;
+  /** How the image fetcher looks names up; the system's by default. */
+  resolve?: Resolve;
 };
 
 const Setting = z.object({ on: z.boolean() });
@@ -90,6 +96,14 @@ export function desktopClipping(options: ClippingOptions) {
   const xdgConfig = env['XDG_CONFIG_HOME'];
   const configHome = xdgConfig && isAbsolute(xdgConfig) ? xdgConfig : join(options.home, '.config');
   const targets = manifestTargets({ platform, home: options.home, configHome, userData, hostName });
+  const desk = clipDesk({
+    session: options.session,
+    show: options.show,
+    fetcher: imageFetcher({
+      userAgent: options.userAgent,
+      ...(options.resolve && { resolve: options.resolve }),
+    }),
+  });
   const listener = clipListener({
     endpoint: endpoint(),
     hostFile: hostFile(),
@@ -133,7 +147,12 @@ export function desktopClipping(options: ClippingOptions) {
     return development ? 'development' : null;
   }
 
-  const state = (): ClippingState => ({ on, problem: problem(), browsers: on ? browsers : [] });
+  const state = (): ClippingState => ({
+    on,
+    problem: problem(),
+    browsers: on ? browsers : [],
+    recent: desk.recent(),
+  });
 
   /** The manifests as the setting says, for the helper this copy ships. */
   /**
@@ -164,8 +183,8 @@ export function desktopClipping(options: ClippingOptions) {
     return {
       id,
       type: 'status',
-      app: options.state(),
-      offline: false,
+      app: desk.state(),
+      offline: desk.offline(),
       appVersion: options.version,
       protocols: PROTOCOLS,
     };
@@ -179,22 +198,17 @@ export function desktopClipping(options: ClippingOptions) {
         options.show();
         return watch(message.id, connection);
       default:
-        return connection.reply({
-          id: message.id,
-          type: 'error',
-          code: 'failed',
-          message: 'This version of WikiStow can’t save clips yet. Update the app to clip.',
-        });
+        return desk.answer(message, connection);
     }
   }
 
   /** Answer `open` with the state, then again each time it changes, until `ready`. */
   function watch(id: string, connection: ClipConnection) {
-    let last = options.state();
+    let last = desk.state();
     connection.reply(status(id));
     if (last === 'ready') return;
     const timer = setInterval(() => {
-      const now = options.state();
+      const now = desk.state();
       if (now === last) return;
       last = now;
       connection.reply(status(id));
@@ -236,6 +250,8 @@ export function desktopClipping(options: ClippingOptions) {
     },
     /** As the app quits: delete clip-host.json and the socket, so the helper finds it closed. */
     stopNow: () => listener.removeFiles(),
+    /** The clips, folder searches and images the page deals with (desk.ts). */
+    desk,
   };
 }
 

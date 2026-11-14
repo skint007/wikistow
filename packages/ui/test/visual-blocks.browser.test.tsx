@@ -18,6 +18,7 @@ import { inText, spansOf } from '../src/page/editor/visual/sources.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
+import { pollActing } from './acting.ts';
 
 // The visual editor by block (ADR 0015 decision 3, step 2): each top-level
 // block keeps the source it was read from until it's edited, and text from
@@ -99,7 +100,7 @@ async function mount(initial: string, lineBreak?: '\r\n' | '\n'): Promise<Mounte
       </StrictMode>,
     );
   await act(async () => draw(lineBreak));
-  await act(() => expect.poll(() => container.querySelectorAll('.ProseMirror').length).toBe(1));
+  await pollActing(() => container.querySelectorAll('.ProseMirror').length).toBe(1);
   const dom = container.querySelector<HTMLElement>('#page-visual');
   if (!ref.current || !dom) throw new Error('The editor did not mount');
   // Made, and its first idle work done.
