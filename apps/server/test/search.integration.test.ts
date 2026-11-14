@@ -358,6 +358,46 @@ describe('a search index', () => {
     expect(paths).toEqual(['/api/spaces/:spaceId/tree']);
   });
 
+  it('takes a change waiting on this device over a draft, until the server answers for the page (#423)', async () => {
+    const { ed, lib } = await shared();
+    const index = await search.indexSpaces(ed.ctx);
+    const basedOn = await draftHead(ed, lib.page);
+    expect(index.page(lib.spaceId, lib.page.pageId)).toMatchObject({ draft: true });
+    // As `OfflineQueue.drafts` gives it: on its base, named as the version.
+    const waiting = (markdown: string) => ({
+      ...lib.page,
+      basedOn,
+      revisionId: basedOn,
+      payload: { title: 'Plan', markdown, extensions: {} },
+    });
+    const paths = calls(ed.ctx);
+    const typed = await search.updateIndex(ed.ctx, index, {
+      spaces: [],
+      saved: [waiting('typedzebra words')],
+    });
+    expect(paths).toEqual([]);
+    expect(found(typed, 'typedzebra')).toEqual([lib.page.pageId]);
+    expect(found(typed, DRAFT_ONLY)).toEqual([]);
+    expect(search.keptPages(typed).has(basedOn)).toBe(false);
+    // Listed again while the page is still at that version, as when the
+    // change was discarded: the draft as the server has it.
+    const listed = await search.updateIndex(ed.ctx, typed, { spaces: [lib.spaceId] });
+    expect(found(listed, 'typedzebra')).toEqual([]);
+    expect(held(listed)).toEqual(held(await search.indexSpaces(ed.ctx)));
+    expect(search.keptPages(listed).has(basedOn)).toBe(true);
+    // Sent: saved over its base, then heard of for its space.
+    const written = await pages.editDraft(ed.ctx, lib.page, { markdown: 'typedzebra sent' });
+    const sent = await search.updateIndex(ed.ctx, typed, {
+      spaces: [],
+      saved: [{ ...lib.page, basedOn, revisionId: written.revisionId, payload: written.payload }],
+    });
+    expect(sent.page(lib.spaceId, lib.page.pageId)?.revisionId).toBe(written.revisionId);
+    expect(held(sent)).toEqual(held(await search.indexSpaces(ed.ctx)));
+    const echo = await search.updateIndex(ed.ctx, typed, { spaces: [lib.spaceId] });
+    expect(echo.page(lib.spaceId, lib.page.pageId)?.revisionId).toBe(written.revisionId);
+    expect(held(echo)).toEqual(held(await search.indexSpaces(ed.ctx)));
+  });
+
   it('drops a page saved into the index once its editor loses it', async () => {
     const { alice, ed, lib, shareId } = await shared();
     let index = await search.indexSpaces(ed.ctx);
