@@ -10,6 +10,7 @@ import { inertHost } from '../src/page/editor/visual/host.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import { viewOf } from './editor-view.ts';
 import { PAGE_REF } from './page-view.ts';
+import { pollActing } from './acting.ts';
 
 // What the visual editor makes of what's pasted into it, in Chromium.
 
@@ -47,11 +48,9 @@ async function mount(initial: string): Promise<Mounted> {
     ),
   );
   // The first loads Milkdown, which takes a while under load.
-  await act(() =>
-    expect
-      .poll(() => container.querySelectorAll('.ProseMirror').length, { timeout: 10_000 })
-      .toBe(1),
-  );
+  await pollActing(() => container.querySelectorAll('.ProseMirror').length, {
+    timeout: 10_000,
+  }).toBe(1);
   const dom = container.querySelector<HTMLElement>('#page-visual');
   if (!ref.current || !dom) throw new Error('The editor did not mount');
   dom.focus();

@@ -6,6 +6,7 @@ import { htmlMarkdown } from '../src/page/editor/visual/html-markdown.ts';
 import { inertHost } from '../src/page/editor/visual/host.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import WORD from './word-paste.html?raw';
+import { pollActing } from './acting.ts';
 
 // HTML made Markdown with no editor open, as a clip is (ADR 0017 step 3),
 // against the same HTML pasted into an empty page in the visual editor, in
@@ -43,7 +44,7 @@ async function pasted(html: string, text: string): Promise<string> {
     act(() => root.unmount());
     container.remove();
   });
-  await act(() => expect.poll(() => container.querySelectorAll('.ProseMirror').length).toBe(1));
+  await pollActing(() => container.querySelectorAll('.ProseMirror').length).toBe(1);
   const dom = container.querySelector<HTMLElement>('#page-visual');
   const handle = ref.current;
   if (!handle || !dom) throw new Error('The editor did not mount');
