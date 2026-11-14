@@ -132,8 +132,17 @@ class FakeParticipant {
   close() {
     this.closed = true;
   }
-  async commitOwn(change: (document: LiveDocument) => void) {
-    this.document.edit(() => change(this.document), 'copy');
+  async commitOwn(change: Parameters<LiveParticipant['commitOwn']>[0]) {
+    this.document.edit(() => {
+      if (typeof change === 'function') return change(this.document);
+      for (const [name, text] of Object.entries(change.texts ?? {})) {
+        changeText(this.document.text(name as 'body'), text as string);
+      }
+      for (const { root, key, value } of change.entries ?? []) {
+        if (value === null) this.document.map(root).delete(key);
+        else this.document.map(root).set(key, value);
+      }
+    }, 'copy');
     for (const listener of this.#changes) listener(false);
     return true;
   }
@@ -171,11 +180,14 @@ function session(
       } satisfies pageOperations.Written;
     },
     async uploadAttachment(file): Promise<AttachmentRef> {
+      // A whole ref, as the document takes only those.
       return {
-        id: `a-${file.name}`,
+        id: `a-${file.name.replace(/[^\w-]/g, '_')}`,
         name: file.name,
         mediaType: file.mediaType,
         size: 1,
+        key: 'A'.repeat(43),
+        blobHash: 'A'.repeat(43),
       } as AttachmentRef;
     },
     draftHead: async () => R0,
@@ -309,8 +321,8 @@ describe('a draft session in a live session', () => {
     await draft.joinLive();
     draft.attach([new File(['x'], 'photo.png', { type: 'image/png' })]);
     await draft.flush();
-    expect([...(joins[0]?.document.map('attachments').keys() ?? [])]).toEqual(['a-photo.png']);
-    expect(joins[0]?.document.text('body').toJSON()).toContain('(attachment:a-photo.png)');
+    expect([...(joins[0]?.document.map('attachments').keys() ?? [])]).toEqual(['a-photo_png']);
+    expect(joins[0]?.document.text('body').toJSON()).toContain('(attachment:a-photo_png)');
   });
 
   it('keeps body text that reads like frontmatter in the body', async () => {

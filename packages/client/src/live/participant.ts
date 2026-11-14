@@ -675,26 +675,8 @@ export class LiveParticipant {
    * change in one transaction: each text by its smallest change, each map
    * entry set to its JSON text or, as null, deleted.
    */
-  change({
-    texts = {},
-    entries = [],
-  }: {
-    texts?: Partial<Record<TextRoot, string>>;
-    entries?: readonly { root: MapRoot; key: string; value: string | null }[];
-  }): void {
-    this.edit((document) => {
-      for (const [name, text] of Object.entries(texts) as [TextRoot, string][]) {
-        changeText(document.text(name), text);
-      }
-      for (const { root, key: entry, value } of entries) {
-        const map = document.map(root);
-        if (value === null) {
-          if (map.has(entry)) map.delete(entry);
-        } else if (map.get(entry) !== value) {
-          map.set(entry, value.toWellFormed());
-        }
-      }
-    });
+  change(spec: DocumentChange): void {
+    this.edit((document) => applyChange(document, spec));
   }
 
   /** The origin of the person's own changes, as an editor binding tells them apart. */
@@ -823,7 +805,11 @@ export class LiveParticipant {
    * join once the save has landed, with a Saved notice after it. Its main
    * join sends nothing built on it until it is placed. Whether it went in.
    */
-  async commitOwn(change: (document: LiveDocument) => void): Promise<boolean> {
+  async commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
+    const make =
+      typeof change === 'function'
+        ? change
+        : (document: LiveDocument) => applyChange(document, change);
     if (!this.#keyed()) return false;
     await this.flush();
     await this.#ensureHead();
@@ -848,7 +834,7 @@ export class LiveParticipant {
     copy.doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (origin === LOCAL_ORIGIN) updates.push(update);
     });
-    if (copy.edit(() => change(copy), LOCAL_ORIGIN).length > 0 || updates.length === 0) {
+    if (copy.edit(() => make(copy), LOCAL_ORIGIN).length > 0 || updates.length === 0) {
       return false;
     }
     const update = Y.mergeUpdates(updates);
@@ -922,6 +908,7 @@ export class LiveParticipant {
    */
   async #sendAgain(body: Parameters<LiveTransport['send']>[0]) {
     for (let tries = 0; ; tries++) {
+      if (!this.#accessHolds()) throw new CryptoError('key-version', 'Access to the page changed');
       try {
         return await this.#transport.send(body);
       } catch (error) {
@@ -962,7 +949,7 @@ export class LiveParticipant {
    * the head is the base; otherwise the latest draft it compared is, and a
    * save on it meets the conflict, with **Merge…**.
    */
-  async settle(): Promise<{
+  async settle({ save = false }: { save?: boolean } = {}): Promise<{
     base: { revisionId: RevisionId; payload: PagePayload } | null;
     payload: PagePayload | null;
     saved: boolean;
@@ -987,6 +974,7 @@ export class LiveParticipant {
     } catch {
       payload = null;
     }
+    if (save && mine && !provisional && payload) await this.#saveOnLeaving(payload);
     const head = this.#head ? this.#drafts.get(this.#head) : undefined;
     let state: LiveState | null = null;
     try {
@@ -1008,6 +996,68 @@ export class LiveParticipant {
       };
     }
     return { base: this.checkedDraft, payload, saved: false, mine, provisional };
+  }
+
+  /**
+   * At the session's end (section 5.10, **Ending**): save this app's own
+   * document on top of the head, unless the head is a session draft it has
+   * compared, or one with exactly its document's state that compares equal
+   * now. A `stale-head` counts as done when the new head is such a draft;
+   * one the document holds is saved on top of again. Anything else is left
+   * to the editor, which meets the conflict.
+   */
+  async #saveOnLeaving(payload: PagePayload): Promise<void> {
+    for (let tries = 0; tries < 3; tries++) {
+      const headId = this.#head;
+      if (!headId) return;
+      if (!this.#drafts.has(headId) && !this.#outsiders.has(headId)) await this.#openHead(headId);
+      const head = this.#drafts.get(headId);
+      if (!head) return;
+      let state: LiveState;
+      try {
+        state = this.document.state();
+      } catch {
+        return;
+      }
+      if (!holdsState(state, head.state)) return;
+      if (sameState(state, head.state)) {
+        if (!head.compared)
+          head.compared = samePayload(this.document.payload(head.payload), head.payload);
+        if (head.compared) return;
+      }
+      const revisionId = newId(RevisionId);
+      try {
+        const result = await this.#ports.saveDraft({
+          basedOn: headId,
+          revisionId,
+          payload: withLive(payload, {
+            revision: revisionId,
+            session: this.sessionId,
+            state: this.document.stateBytes(),
+            with: [...new Set<IdentityId>([...head.with, ...this.#typed])],
+          }),
+          linkChoices: new Map(),
+        });
+        this.#drafts.set(result.revisionId, {
+          revisionId: result.revisionId,
+          payload: result.payload,
+          state,
+          compared: samePayload(payload, result.payload),
+          with: head.with,
+          openedAt: Date.now(),
+        });
+        this.#head = result.revisionId;
+        this.#checked = result.revisionId;
+        return;
+      } catch (error) {
+        const detail =
+          error instanceof ApiError && error.code === 'stale-head' ? error.detail : null;
+        const next = RevisionId.safeParse((detail as { draftHead?: unknown } | null)?.draftHead);
+        if (!next.success) return;
+        // Another app saved first, its end save maybe: look at what it holds.
+        this.#head = next.data;
+      }
+    }
   }
 
   /** Send everything typed here that isn't sent yet. */
@@ -1155,7 +1205,10 @@ export class LiveParticipant {
       this.#presence.set(key(ref), { visible: false, saveFailing: null, shown: null });
       return;
     }
-    if (this.#joins.check(opened).kind !== 'take') return;
+    if (this.#joins.check(opened).kind !== 'take') {
+      this.#presence.set(key(ref), { visible: false, saveFailing: null, shown: null });
+      return;
+    }
     this.#verified.add(key(ref));
     this.#presence.set(key(ref), readPresence(opened.content));
   }
@@ -1306,7 +1359,8 @@ export class LiveParticipant {
     await this.#opening;
     if (this.#head && this.#outsiders.has(this.#head)) {
       // A draft written outside the session: folding it in is step 7's.
-      return this.#stop('someone saved this page from outside the live session', null, false);
+      // Until then nobody in the session can save over it: the session ends.
+      return this.#stop('someone saved this page from outside the live session', null, false, true);
     }
     // A save waiting for the head can go now; and the 20 s a save may wait start again.
     const opened = this.#drafts.get(head);
@@ -1352,7 +1406,7 @@ export class LiveParticipant {
       const since = (this.#unknownSigner ??= { head, at: Date.now() });
       if (since.head !== head) this.#unknownSigner = { head, at: Date.now() };
       else if (Date.now() - since.at > HOLD_MS) this.#outsiders.add(head);
-      else if (!this.#checkTimer) {
+      else if (!this.#checkTimer && this.#status.state.kind === 'live') {
         this.#lastCheckAt = 0;
         this.#checkTimer = setTimeout(() => {
           this.#checkTimer = null;
@@ -1361,6 +1415,8 @@ export class LiveParticipant {
       }
       return;
     }
+    // One this app saved itself, and so compared, stays as it is.
+    if (this.#drafts.has(head)) return;
     this.#drafts.set(head, {
       revisionId: head,
       payload: draft.payload,
@@ -1403,11 +1459,11 @@ export class LiveParticipant {
     }
     if (!equal) {
       // A provisional newcomer saves nothing over it: its snapshot may be what's wrong.
-      return this.#stop(
-        'the saved page differs from what everyone typed',
-        this.#provisional ? null : head.revisionId,
-        false,
-      );
+      // A provisional newcomer can't take part, and ends the session; any
+      // other app saves its own document over the draft, and joins again.
+      return this.#provisional
+        ? this.#stop('the saved page differs from what everyone typed', null, false, true)
+        : this.#stop('the saved page differs from what everyone typed', head.revisionId, true);
     }
     head.compared = true;
     this.#checked = head.revisionId;
@@ -1778,9 +1834,8 @@ export class LiveParticipant {
           continue;
         }
         if (error instanceof ApiError && error.code === 'forbidden') {
-          // The session ended: its stream says so.
-          this.#stopSending = true;
-          return;
+          // The session ended: go on outside it, whether or not its stream says so.
+          return this.#stop('the live session ended', null, true);
         }
         const code = error instanceof ApiError ? error.code : 'unknown';
         return this.#stop(`the session refused a change (${code})`, null, true);
@@ -1812,13 +1867,17 @@ export class LiveParticipant {
 
   // ---- Status ----
 
-  #stop(why: string, saveOver: RevisionId | null, rejoin: boolean): void {
+  /**
+   * Leave the session, going on outside it. `end` ends it for everyone, as
+   * an app that can't take part does, so the next start makes a fresh one;
+   * otherwise only this app leaves (section 5.10, **Saving**).
+   */
+  #stop(why: string, saveOver: RevisionId | null, rejoin: boolean, end = false): void {
     if (this.#status.state.kind !== 'live') return;
     this.#stopSending = true;
     const state: ParticipantState = { kind: 'stopped', why, saveOver, rejoin };
     this.#close(state);
-    // Ending it, so the next start makes a fresh one, when it can't take part.
-    if (!rejoin) void this.#transport.end().catch(() => {});
+    if (end) void this.#transport.end().catch(() => {});
   }
 
   #ownState(): LiveState {
@@ -1876,6 +1935,26 @@ export class LiveParticipant {
   #update(state: ParticipantState = this.#status.state): void {
     this.#status = this.#computeStatus(state);
     for (const listener of this.#listeners) listener();
+  }
+}
+
+/** A change of the document's text parts and maps: each text by its smallest change, each entry set or, as null, deleted. */
+export type DocumentChange = {
+  texts?: Partial<Record<TextRoot, string>>;
+  entries?: readonly { root: MapRoot; key: string; value: string | null }[];
+};
+
+function applyChange(document: LiveDocument, { texts = {}, entries = [] }: DocumentChange): void {
+  for (const [name, text] of Object.entries(texts) as [TextRoot, string][]) {
+    changeText(document.text(name), text);
+  }
+  for (const { root, key: entry, value } of entries) {
+    const map = document.map(root);
+    if (value === null) {
+      if (map.has(entry)) map.delete(entry);
+    } else if (map.get(entry) !== value) {
+      map.set(entry, value.toWellFormed());
+    }
   }
 }
 
