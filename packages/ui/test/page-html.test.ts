@@ -61,6 +61,46 @@ describe('a page’s HTML', () => {
   });
 });
 
+describe('a page’s highlights and colours', () => {
+  const PAGE = [
+    'A ==highlight==, <span data-color="red">red **text**</span> and <mark data-color="blue">a blue highlight</mark>.',
+    '',
+    '<span data-color="pink">no colour</span> <span data-color="red" style="color: #f00" onclick="run()">red</span> <mark data-color="url(x)" style="background: red">plain</mark> <span data-color=" red">x</span>',
+    '',
+    '<div data-color="red">box</div> <b data-color="red">bold</b>',
+  ].join('\n');
+
+  it('render as `<mark>` and the theme’s colours, and only those, in the app', () => {
+    const html = render(PAGE);
+    expect(html).toContain(
+      'A <mark>highlight</mark>, <span data-color="red">red <strong>text</strong></span> and <mark data-color="blue">a blue highlight</mark>.',
+    );
+    // HTML the reader doesn't read as colour keeps a colour from the list, on a span or a mark, and nothing else.
+    expect(html).toContain(
+      '<span>no colour</span> <span data-color="red">red</span> <mark>plain</mark> <span>x</span>',
+    );
+    expect(html).toContain('<div>box</div> <b>bold</b>');
+    expect(html).not.toMatch(/style=|onclick/);
+    // A page with no other HTML isn't parsed again, and keeps them too.
+    expect(render('==a== <span data-color="green">b</span>\n')).toBe(
+      '<p><mark>a</mark> <span data-color="green">b</span></p>',
+    );
+  });
+
+  it('render the same on a public page, which is always sanitized', () => {
+    const processor = unified().use(remarkRehype, { allowDangerousHtml: true });
+    const tree = processor.runSync(markdownJobs.body(PAGE));
+    const html = toHtml(sanitizedPage(tree));
+    expect(html).toContain(
+      'A <mark>highlight</mark>, <span data-color="red">red <strong>text</strong></span> and <mark data-color="blue">a blue highlight</mark>.',
+    );
+    expect(html).toContain(
+      '<span>no colour</span> <span data-color="red">red</span> <mark>plain</mark>',
+    );
+    expect(html).not.toMatch(/style=|onclick|<div data-color/);
+  });
+});
+
 describe('a page’s tasks', () => {
   it('mark each checkbox with where its item starts in the whole page, and label it', () => {
     const frontmatter = '---\ntitle: List\n---\n';

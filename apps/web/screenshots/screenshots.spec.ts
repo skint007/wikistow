@@ -1067,3 +1067,69 @@ test('capture math: inline and block, in the reader, the visual editor, its TeX 
   }).toPass();
   await visitor.screenshot({ path: 'screenshots/math-public-page.png', fullPage: true });
 });
+
+test('capture highlights and colours: in the reader, the visual editor, its colour menu, the source and the public page', async ({
+  page,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  const shoot = bothPalettes(page, 'highlights-');
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newPage(page, 'Reading notes');
+  await fillSource(
+    page,
+    [
+      '## Chapter 3',
+      'The ==main argument== is that soil holds water best with ==**plenty of organic matter**==, not sand.',
+      '- <span data-color="red">Disagree:</span> the drainage figures look low.',
+      '- <span data-color="green">Agree:</span> <mark data-color="green">mulch twice a year</mark>.',
+      '- <span data-color="blue">Look up</span> the <mark data-color="purple">1998 trial</mark> it cites.',
+      'Every colour: <mark data-color="red">red</mark> <mark data-color="orange">orange</mark> <mark data-color="yellow">yellow</mark> <mark data-color="green">green</mark> <mark data-color="blue">blue</mark> <mark data-color="purple">purple</mark>, and text in <span data-color="red">red</span> <span data-color="orange">orange</span> <span data-color="yellow">yellow</span> <span data-color="green">green</span> <span data-color="blue">blue</span> <span data-color="purple">purple</span>.',
+      'Links take the colour too: <span data-color="red">[the drainage table](https://example.com)</span> and [<span data-color="purple">the trial</span>](https://example.com).',
+      'A comparison like a == b stays as written.',
+      '',
+    ].join('\n\n'),
+  );
+  await waitForSave(page);
+  // From the page's top.
+  await page.keyboard.press('Control+Home');
+  await shoot('source', page.locator('.cm-editor').first());
+  await showIn(page, 'Visual');
+  const visual = page.locator('#page-visual');
+  await expect(visual.locator('mark')).toHaveCount(10);
+  // The cursor in a highlight, and the colour menu open beside the Highlight button.
+  await visual.getByText('plenty of organic matter').click();
+  await page.getByRole('button', { name: 'Highlight and text colour' }).click();
+  await expect(page.getByRole('group', { name: 'Text colour' })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await shoot('visual-menu', page);
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole('button', { name: 'Publish', exact: true }).click();
+  await expect(page.getByText('Published v1')).toBeVisible();
+  await expect(page.locator('.page-body').first().locator('mark')).toHaveCount(10);
+  await shoot('reader', page);
+
+  await openLinkDialog(page, 'Reading notes');
+  const dialog = page.getByRole('dialog', { name: 'Share “Reading notes” with a public link?' });
+  await dialog.getByRole('button', { name: 'Turn on public link' }).click();
+  const link = page
+    .getByRole('dialog', { name: 'Public link for “Reading notes”' })
+    .getByLabel('Public link');
+  await expect(link).toHaveValue(/\/p\/[\w-]{22}$/);
+  const url = await link.inputValue();
+  const visitor = await freshPage();
+  await visitor.setViewportSize({ width: 1280, height: 800 });
+  await expect(async () => {
+    await visitor.goto(url);
+    await expect(visitor.locator('mark')).toHaveCount(10, { timeout: 2_000 });
+  }).toPass();
+  for (const scheme of ['light', 'dark'] as const) {
+    await visitor.emulateMedia({ colorScheme: scheme });
+    await visitor.screenshot({
+      path: `screenshots/highlights-public-page-${scheme}.png`,
+      fullPage: true,
+    });
+  }
+});

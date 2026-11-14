@@ -1,6 +1,7 @@
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { tags as t } from '@lezer/highlight';
+import { highlightTag } from './language';
 
 // The source editor's look. It sits in a shadow root, where the app's
 // stylesheet doesn't reach, so every rule is CodeMirror's own; the colors
@@ -103,6 +104,8 @@ const highlight = HighlightStyle.define([
   { tag: t.strong, fontWeight: '700' },
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strikethrough, textDecoration: 'line-through' },
+  // A highlight's text, in the reader's colour for it; its `==` as other marks.
+  { tag: highlightTag, backgroundColor: 'var(--highlight)', borderRadius: '3px' },
   { tag: [t.link, t.url], color: 'var(--primary-ink)' },
   { tag: t.monospace, color: 'var(--subtle-foreground)' },
   { tag: t.quote, color: 'var(--subtle-foreground)' },
