@@ -27,8 +27,11 @@ export type BoundEditor = {
   show(text: string): true | 'composing';
   /** The fidelity check of a whole text, as a page opening has. */
   check(text: string): Promise<{ visual: boolean; reason: string | null }>;
-  /** It can't show `body`, which `by` changed last (null: the person, from elsewhere). */
-  cantShow(by: string | null, reason: string): void;
+  /**
+   * It can't show `body`, which those in `by` changed since it last could:
+   * each a person's identity, or null for the person, from elsewhere.
+   */
+  cantShow(by: readonly (string | null)[], reason: string): void;
   /** It shows `body` again, after it couldn't. */
   canShow(): void;
 };
@@ -40,6 +43,8 @@ export type BoundText = {
   edit(change: () => void): void;
   /** Hear just before someone else's change goes into the document, with who sent it. */
   onBeforeRemote(listener: (senderId: string) => void): () => void;
+  /** Whether the session still takes the person's changes: not once it has been left. */
+  active(): boolean;
 };
 
 // Others' changes arriving this close together go in together; a change
@@ -50,6 +55,9 @@ export const WHOLE_MS = 1_000;
 const WHOLE_SHARE = 2;
 // How often a take-in waiting on a composition looks again, in case its end went unheard.
 const COMPOSING_MS = 500;
+// A whole read whose text changed while it was checked checks the newer
+// text, at most this many times more, before it shows the one it checked.
+const RECHECKS = 2;
 
 const MINE = Symbol('visual-binding');
 
@@ -70,12 +78,10 @@ export class VisualBinding {
   #reading = false;
   /** A change came while one was: once it's done, go again. */
   #again = false;
-  /** What was shown last included text no check saw, which a whole read checks next. */
-  #recheck = false;
   /** It said it can't show `body`. */
   #blocked = false;
-  /** Who sent the last change the editor hasn't taken in; null for the person's own. */
-  #by: string | null = null;
+  /** Who changed `body` since the editor last caught up with it; null for the person, from elsewhere. */
+  readonly #by = new Set<string | null>();
   /** Who sent the change going into the document now. */
   #sending: string | null = null;
   #destroyed = false;
@@ -86,12 +92,17 @@ export class VisualBinding {
     this.#held = editor.written();
     const observer = (_event: Y.YTextEvent, transaction: Y.Transaction) => {
       if (transaction.meta.get(MINE) === this) return;
-      this.#by = this.#sending;
-      this.#sending = null;
+      this.#by.add(this.#sending);
       this.#schedule();
     };
     body.text.observe(observer);
     this.#stops.push(() => body.text.unobserve(observer));
+    // A sender counts for the one transaction its change goes in with: after
+    // its observers, whether it touched `body` or not.
+    const doc = body.text.doc;
+    const done = () => void (this.#sending = null);
+    doc?.on('afterTransaction', done);
+    this.#stops.push(() => doc?.off('afterTransaction', done));
     this.#stops.push(
       body.onBeforeRemote((senderId) => {
         // Its own edit goes in first, as the change of the text it was made on.
@@ -181,13 +192,12 @@ export class VisualBinding {
     if (this.#destroyed) return;
     if (this.#reading) return void (this.#again = true);
     this.#again = false;
+    // Left, its typing goes nowhere: nothing goes in over it.
+    if (!this.#body.active()) return;
     // The editor's own edit, before others' changes go in over it.
     this.write();
     const text = this.#body.text.toJSON();
-    if (text === this.#held) {
-      if (this.#recheck) return this.#whole(text);
-      return this.#caughtUp();
-    }
+    if (text === this.#held) return this.#caughtUp();
     const taking = this.#editor.take(text);
     if (taking instanceof Promise) {
       this.#reading = true;
@@ -203,7 +213,7 @@ export class VisualBinding {
   }
 
   #took(text: string, took: Taking) {
-    if (this.#destroyed) return;
+    if (this.#destroyed || !this.#body.active()) return;
     if (took === 'composing') return this.#schedule(COMPOSING_MS);
     if (!took) return this.#whole(text);
     this.#held = this.#editor.written();
@@ -212,29 +222,31 @@ export class VisualBinding {
   }
 
   #caughtUp() {
-    this.#by = null;
+    this.#by.clear();
     if (this.#blocked) {
       this.#blocked = false;
       this.#editor.canShow();
     }
   }
 
-  // `text` read whole, checked first, at its pace: before then, by block again.
-  #whole(text: string) {
+  // `text` read whole, checked first, at its pace: before then, by block
+  // again. If `body` changed while it was checked, the newer text is checked
+  // at once, a few times; past that, the text checked goes in, and what came
+  // since follows as any change does. Only checked text is ever read whole.
+  #whole(text: string, rechecks = 0) {
     const due = this.#wholeAt - performance.now();
-    if (due > 0) return this.#schedule(due);
+    if (rechecks === 0 && due > 0) return this.#schedule(due);
     const started = performance.now();
     this.#wholeAt = started + WHOLE_MS;
     this.#reading = true;
-    this.#recheck = false;
-    const by = this.#by;
+    const by = [...this.#by];
     void this.#editor
       .check(text)
       .catch(() => ({ visual: false, reason: null }))
       .then((fidelity) => {
         this.#reading = false;
         this.#wholeAt = started + Math.max(WHOLE_MS, WHOLE_SHARE * (performance.now() - started));
-        if (this.#destroyed) return;
+        if (this.#destroyed || !this.#body.active()) return;
         if (!fidelity.visual) {
           this.#blocked = true;
           this.#editor.cantShow(by, fidelity.reason ?? '');
@@ -242,17 +254,13 @@ export class VisualBinding {
           if (this.#again) this.#schedule();
           return;
         }
-        // Typing went on meanwhile, the person's and others': `body` as it is now.
+        // Typing went on meanwhile, the person's and others'.
         this.write();
         const now = this.#body.text.toJSON();
-        if (this.#editor.show(now) === 'composing') {
-          this.#recheck = now !== text;
-          return this.#schedule(COMPOSING_MS);
-        }
+        if (now !== text && rechecks < RECHECKS) return this.#whole(now, rechecks + 1);
+        if (this.#editor.show(text) === 'composing') return this.#schedule(COMPOSING_MS);
         this.#held = this.#editor.written();
-        // What came in meanwhile is checked as the next whole read.
-        this.#recheck = now !== text;
-        if (this.#again || this.#recheck || this.behind) return this.#schedule();
+        if (this.#again || this.behind) return this.#schedule();
         this.#caughtUp();
       });
   }

@@ -70,6 +70,7 @@ const UNFAITHFUL =
 // In a live session, someone gave a block what the visual editor can't
 // read back the same (ADR 0015 decision 3, **What it can't show**).
 const cantShowBy = (name: string) => `${name} added something the visual editor can’t show.`;
+const CANT_SHOW_OTHERS = 'Others added something the visual editor can’t show.';
 
 const NOT_LOADED: Fidelity = {
   visual: false,
@@ -211,8 +212,12 @@ export function PageEditor({
     if (handle && handle.read() !== body.current) handle.replace(body.current);
   });
   const setMode = (next: Shown) => {
-    // The editor the page reads is going: text given now is for the next.
-    if (mainOf(next) !== mainOf(modeNow.current)) surface.current = null;
+    // The editor the page reads is going: text given now is for the next,
+    // and a visual editor made next holds nothing back yet.
+    if (mainOf(next) !== mainOf(modeNow.current)) {
+      surface.current = null;
+      liveHeld.current = false;
+    }
     if (next !== 'split' && syncing.current) {
       clearTimeout(syncing.current.timer);
       syncing.current = null;
@@ -266,8 +271,14 @@ export function PageEditor({
       setNote(null);
       return;
     }
-    // The visual editor holds the body already: only the source beside it comes or goes.
-    if (mainOf(modeNow.current) === 'visual' && surface.current && given.current === null) {
+    // The visual editor holds the body already: only the source beside it
+    // comes or goes. Not one holding back text it can't show, which is checked again.
+    if (
+      mainOf(modeNow.current) === 'visual' &&
+      surface.current &&
+      given.current === null &&
+      !liveHeld.current
+    ) {
       setMode(next);
       setNote(null);
       return;
@@ -553,11 +564,18 @@ export function PageEditor({
    * mode, saying who, as for an edit it couldn't write; in split, its side
    * takes no edit, saying so, until the text is one it can show.
    */
-  const cantShow = (by: string | null, reason: string) => {
-    const said = by === null ? reason : cantShowBy(assist.live?.nameOf?.(by) ?? 'Someone');
+  const cantShow = (by: readonly (string | null)[], reason: string) => {
+    // Named only when one other person changed it since it could show it.
+    const others = by.filter((id): id is string => id !== null);
+    const own = others.length === 0;
+    const said = own
+      ? reason
+      : others.length === 1 && by.length === 1
+        ? cantShowBy(assist.live?.nameOf?.(others[0] ?? '') ?? 'Someone')
+        : CANT_SHOW_OTHERS;
     if (modeNow.current === 'split') {
       liveHeld.current = true;
-      return setNote(by === null ? onHold(reason) : `The visual side is on hold. ${said}`);
+      return setNote(own ? onHold(reason) : `The visual side is on hold. ${said}`);
     }
     if (modeNow.current !== 'visual') return;
     asked.current++;
@@ -572,9 +590,18 @@ export function PageEditor({
     liveHeld.current = false;
     if (modeNow.current === 'split') setNote(null);
   };
-  // Out of a session, its split takes the source's text as it did.
+  // In a session, split's visual side takes the shared text from its
+  // binding: the source's text waiting for it is the binding's to take. Out
+  // of one, the split takes the source's text as it did.
   useEffect(() => {
-    if (!assist.live) liveHeld.current = false;
+    liveHeld.current = false;
+    if (!assist.live || modeNow.current !== 'split') return;
+    if (syncing.current) clearTimeout(syncing.current.timer);
+    syncing.current = null;
+    if (given.current !== null) {
+      given.current = null;
+      setNote(null);
+    }
   }, [assist.live]);
 
   // The source editor too, which an edit the visual editor can't write turns to.

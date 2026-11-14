@@ -88,6 +88,7 @@ export function useLiveSource(
       },
       onBeforeRemote: (listener) => participant.onBeforeRemote(listener),
       nameOf: (id) => names.current?.get(id)?.name ?? 'Someone',
+      active: () => participant.status().state.kind === 'live',
     };
   }, [participant, pageId]);
 }

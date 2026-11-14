@@ -28,8 +28,8 @@ test('one person in the visual editor, one in source mode: both see both, no con
   test.setTimeout(300_000);
   const adminPage = await adminTab(freshPage, admin.email);
   const editor = await freshPage();
-  await memberWithVault(owner, adminPage, 'Olive Owner');
-  const { email: editorEmail } = await memberWithVault(editor, adminPage, 'Eddie Editor');
+  await memberWithVault(owner, adminPage, 'Sara Source');
+  const { email: editorEmail } = await memberWithVault(editor, adminPage, 'Vic Visual');
 
   await test.step('the owner shares a page, and both open its draft', async () => {
     await newSpace(owner, 'Family');
@@ -43,8 +43,8 @@ test('one person in the visual editor, one in source mode: both see both, no con
     await openShared(editor, 'Garden', 'Planting plan');
     await editor.getByRole('button', { name: 'Edit' }).click();
     await expectSource(editor, 'Beans in May.\n\nCompost in March.');
-    await expect(owner.getByRole('img', { name: 'Eddie Editor is editing' })).toBeVisible();
-    await expect(editor.getByRole('img', { name: 'Olive Owner is editing' })).toBeVisible();
+    await expect(owner.getByRole('img', { name: 'Vic Visual is editing' })).toBeVisible();
+    await expect(editor.getByRole('img', { name: 'Sara Source is editing' })).toBeVisible();
   });
 
   await test.step('the editor turns to the visual editor while the owner edits', async () => {
@@ -71,13 +71,13 @@ test('one person in the visual editor, one in source mode: both see both, no con
   await test.step('each sees where the other is', async () => {
     await typeAtEndOfSource(owner, ' Rake.');
     // The source typist as a bar beside their block, in the visual editor.
-    const bar = visual(editor).locator('.live-block[data-live-block="Olive Owner"]');
+    const bar = visual(editor).locator('.live-block[data-live-block="Sara Source"]');
     await expect(bar).toBeVisible();
     await expect(bar).toContainText('Compost in March. Peas in June. Rake.');
     // The visual typist's caret, by name, in source mode.
     await caretAtEndOf(beans(editor));
     await editor.keyboard.type('!', { delay: 15 });
-    await expect(owner.locator('[data-live-caret]', { hasText: 'Eddie Editor' })).toBeVisible();
+    await expect(owner.locator('[data-live-caret]', { hasText: 'Vic Visual' })).toBeVisible();
     await expectSource(
       owner,
       'Beans in May. Water daily.!\n\nCompost in March. Peas in June. Rake.',
@@ -95,7 +95,7 @@ test('one person in the visual editor, one in source mode: both see both, no con
     // A link definition nothing uses, which the visual editor would drop.
     await typeAtEndOfSource(owner, '\n\n[unused]: https://example.test');
     await expect(
-      editor.getByText('Olive Owner added something the visual editor can’t show.'),
+      editor.getByText('Sara Source added something the visual editor can’t show.'),
     ).toBeVisible({ timeout: 15_000 });
     await expect(editor.locator('#page-source')).toBeVisible();
     await expect(visual(editor)).toHaveCount(0);

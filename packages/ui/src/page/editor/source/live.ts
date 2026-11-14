@@ -74,6 +74,8 @@ export type LiveSource = {
   onBeforeRemote?(listener: (senderId: string) => void): () => void;
   /** The name a person is shown by, as their caret is. */
   nameOf?(id: string): string;
+  /** Whether the session still takes the person's changes: not once it has been left. */
+  active?(): boolean;
 };
 
 // Others' changes, which aren't reported as the person's edits.

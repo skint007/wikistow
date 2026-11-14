@@ -44,6 +44,8 @@ type Session = {
   carets: RemoteCaret[];
   setCarets: (carets: RemoteCaret[]) => void;
   sent: { cursor: { anchor: Uint8Array; head: Uint8Array } | null; editor: string | undefined }[];
+  /** Whether the session still takes the person's changes. */
+  active: boolean;
 };
 
 function session(initial: string): Session {
@@ -59,6 +61,7 @@ function session(initial: string): Session {
     text,
     carets: [],
     sent: [],
+    active: true,
     setCarets: (carets) => {
       s.carets = carets;
       for (const listener of listeners) listener();
@@ -72,7 +75,10 @@ function session(initial: string): Session {
     },
     live: {
       text,
-      edit: (change) => doc.transact(change, LOCAL),
+      edit: (change) => {
+        if (s.active) doc.transact(change, LOCAL);
+      },
+      active: () => s.active,
       localOrigin: LOCAL,
       carets: () => s.carets,
       onCarets(listener) {
@@ -94,7 +100,7 @@ type Mounted = {
   handle: EditorSurfaceHandle;
   dom: HTMLElement;
   changes: string[];
-  cantShow: (string | null)[];
+  cantShow: (readonly (string | null)[])[];
   behind: string[];
   /** Draw it again, bound to `live` (or none). */
   rebind: (live: LiveSource | null) => void;
@@ -112,7 +118,7 @@ async function mount(s: Session): Promise<Mounted> {
   const root = createRoot(container);
   const ref = createRef<EditorSurfaceHandle>();
   const changes: string[] = [];
-  const cantShow: (string | null)[] = [];
+  const cantShow: (readonly (string | null)[])[] = [];
   const behind: string[] = [];
   const attachments = { list: [], url: async () => null };
   const draw = (live: LiveSource | null) =>
@@ -263,7 +269,20 @@ describe('others’ changes', () => {
     const m = await mount(s);
     // A link definition nothing uses, which the visual editor would drop.
     s.theirs('sam', (text) => text.insert(text.length, '\n[unused]: https://example.com\n'));
-    await expect.poll(() => m.cantShow).toEqual(['sam']);
+    await expect.poll(() => m.cantShow).toEqual([['sam']]);
+  });
+
+  it('left a session, shows the text the page is given, not body’s', async () => {
+    const s = session('One.\n\nTwo.\n');
+    const m = await mount(s);
+    s.theirs('sam', (text) => text.insert(0, 'Unsaved. '));
+    await expect.poll(() => shownText(m)).toBe('Unsaved. One.Two.');
+    s.active = false;
+    act(() => m.handle.replace('One.\n\nTwo.\n'));
+    await expect.poll(() => shownText(m)).toBe('One.Two.');
+    // And it reports its edits as its own text, not body's.
+    type(m, 'Two', '!', 4);
+    await expect.poll(() => m.changes.at(-1)).toBe('One.\n\nTwo.!\n');
   });
 
   it('left a session, what wasn’t taken in yet goes to the page', async () => {

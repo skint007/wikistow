@@ -335,7 +335,28 @@ describe('in a live session', () => {
     await expect
       .poll(() => m.container.textContent)
       .toContain('The visual side is on hold. Sam added something the visual editor can’t show.');
-    theirs('sam', (body) => body.delete(body.toJSON().indexOf('\n[r]'), 27));
+    theirs('sam', (body) => body.delete(body.toJSON().indexOf('\n[r]'), 28));
     await expect.poll(() => m.container.textContent).not.toContain('on hold');
+  });
+
+  it('takes typing again once it turns from a held split to the visual editor', async () => {
+    const { text, live, theirs } = liveBody('One.\n\nTwo.\n');
+    const m = mount('One.\n\nTwo.\n', 'split', live);
+    await expect.poll(() => !!visual(m) && !!sourceView(m)).toBe(true);
+    theirs('sam', (body) => body.insert(body.length, '\n[r]: https://example.test/\n'));
+    await expect.poll(() => m.container.textContent).toContain('on hold');
+    const button = (name: string) =>
+      [...m.container.querySelectorAll('button')].find((b) => b.textContent === name);
+    // Source, then the line goes, then Visual: nothing still holds it back.
+    act(() => button('Source')?.click());
+    await expect.poll(() => shown(m)).toBe('source');
+    theirs('sam', (body) => body.delete(body.toJSON().indexOf('\n[r]'), 28));
+    act(() => button('Visual')?.click());
+    await expect.poll(() => shown(m)).toBe('visual');
+    const editor = visual(m);
+    if (!editor) throw new Error('No visual editor');
+    const view = viewOf(editor);
+    act(() => view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1)));
+    await expect.poll(() => text.toJSON()).toBe('One.\n\nTwo.!\n');
   });
 });

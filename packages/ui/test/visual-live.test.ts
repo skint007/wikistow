@@ -153,7 +153,7 @@ class FakeEditor implements BoundEditor {
   byBlock = true;
   visual = true;
   checkMs = 0;
-  cantShows: (string | null)[] = [];
+  cantShows: (readonly (string | null)[])[] = [];
   canShows = 0;
   constructor(text: string) {
     this.shown = text;
@@ -180,7 +180,7 @@ class FakeEditor implements BoundEditor {
       setTimeout(() => resolve({ visual: this.visual, reason: 'raw HTML' }), this.checkMs),
     );
   }
-  cantShow(by: string | null) {
+  cantShow(by: readonly (string | null)[]) {
     this.cantShows.push(by);
   }
   canShow() {
@@ -196,6 +196,7 @@ describe('the binding', () => {
   let before: Set<(sender: string) => void>;
   let editor: FakeEditor;
   let binding: VisualBinding;
+  let active: boolean;
 
   // Someone else's change, as the participant applies it: its listeners hear first.
   const theirs = (sender: string, change: (text: Y.Text) => void) => {
@@ -214,14 +215,18 @@ describe('the binding', () => {
     Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
     before = new Set();
     editor = new FakeEditor('One.\n\nTwo.\n');
+    active = true;
     binding = new VisualBinding(
       {
         text,
-        edit: (change) => doc.transact(change, LOCAL),
+        edit: (change) => {
+          if (active) doc.transact(change, LOCAL);
+        },
         onBeforeRemote: (listener) => {
           before.add(listener);
           return () => void before.delete(listener);
         },
+        active: () => active,
       },
       editor,
     );
@@ -313,10 +318,37 @@ describe('the binding', () => {
     theirs('sam', (body) => body.insert(0, '```\n'));
     await vi.advanceTimersByTimeAsync(TAKE_MS + 100);
     editor.shown = 'One.\n\nTwo!\n';
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(400);
     await settle();
     expect(text.toJSON()).toBe('```\nOne.\n\nTwo!\n');
+    // Changed while it was checked: the newer text is checked before it goes in.
+    expect(editor.checks).toEqual(['```\nOne.\n\nTwo.\n', '```\nOne.\n\nTwo!\n']);
+    expect(editor.wholes).toEqual([]);
+    await vi.advanceTimersByTimeAsync(500);
+    await settle();
+    expect(editor.wholes).toEqual(['```\nOne.\n\nTwo!\n']);
     expect(editor.shown).toBe('```\nOne.\n\nTwo!\n');
+  });
+
+  it('shows only text it checked, while others type on through every check', async () => {
+    editor.byBlock = false;
+    editor.checkMs = 300;
+    theirs('sam', (body) => body.insert(0, '```\n'));
+    await vi.advanceTimersByTimeAsync(TAKE_MS);
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(150);
+      theirs('sam', (body) => body.insert(body.length, String(i)));
+      await vi.advanceTimersByTimeAsync(150);
+      await settle();
+    }
+    // Three checks, each of newer text, then the last one checked goes in.
+    expect(editor.checks).toHaveLength(3);
+    expect(editor.wholes).toEqual([editor.checks[2]]);
+    expect(text.toJSON()).not.toBe(editor.checks[2]);
+    // The rest follows, checked in turn.
+    await vi.advanceTimersByTimeAsync(WHOLE_MS * 3);
+    await settle();
+    expect(editor.shown).toBe(text.toJSON());
   });
 
   it('says who added what it can’t show, and when it can again', async () => {
@@ -325,7 +357,7 @@ describe('the binding', () => {
     theirs('sam', (body) => body.insert(0, '<b>\n'));
     await vi.advanceTimersByTimeAsync(TAKE_MS + 1);
     await settle();
-    expect(editor.cantShows).toEqual(['sam']);
+    expect(editor.cantShows).toEqual([['sam']]);
     editor.visual = true;
     editor.byBlock = true;
     theirs('rita', (body) => body.delete(0, 4));
@@ -341,7 +373,30 @@ describe('the binding', () => {
     doc.transact(() => text.insert(0, '<b>\n'), LOCAL);
     await vi.advanceTimersByTimeAsync(TAKE_MS + 1);
     await settle();
-    expect(editor.cantShows).toEqual([null]);
+    expect(editor.cantShows).toEqual([[null]]);
+  });
+
+  it('names everyone who changed it since it could show it, never a sender gone before', async () => {
+    editor.byBlock = false;
+    editor.visual = false;
+    // Sam's change that touches only the title primes nobody.
+    for (const listener of before) listener('sam');
+    doc.transact(() => doc.getText('title').insert(0, 'T'), 'remote');
+    doc.transact(() => text.insert(0, '<b>\n'), LOCAL);
+    theirs('rita', (body) => body.insert(body.length, ' Rita'));
+    await vi.advanceTimersByTimeAsync(TAKE_MS + 1);
+    await settle();
+    expect(editor.cantShows).toEqual([[null, 'rita']]);
+  });
+
+  it('takes nothing in over typing once the session is left', async () => {
+    theirs('sam', (body) => body.insert(0, 'Sam. '));
+    editor.shown = 'One.\n\nTwo!\n';
+    active = false;
+    expect(binding.write()).toBe('Sam. One.\n\nTwo!\n');
+    await vi.advanceTimersByTimeAsync(TAKE_MS * 3);
+    expect(editor.taken).toEqual([]);
+    expect(editor.shown).toBe('One.\n\nTwo!\n');
   });
 
   it('doesn’t take its own writes back in', async () => {
@@ -353,7 +408,7 @@ describe('the binding', () => {
 
   it('gives what the page holds even when the session takes no more changes', () => {
     const refusing = new VisualBinding(
-      { text, edit: () => {}, onBeforeRemote: () => () => {} },
+      { text, edit: () => {}, onBeforeRemote: () => () => {}, active: () => false },
       editor,
     );
     editor.shown = 'One.\n\nTwo!\n';

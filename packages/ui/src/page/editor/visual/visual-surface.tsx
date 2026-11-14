@@ -204,11 +204,12 @@ export type VisualSurfaceProps = EditorSurfaceProps & {
   /** Whether it takes no edit for now, as text it's to be given is checked. */
   holding?: () => boolean;
   /**
-   * In a live session (`live`), it can't show the shared `body`, which `by`
-   * changed last (null: the person, from elsewhere, as the other pane of
-   * split), and why, as a page that opens so would say.
+   * In a live session (`live`), it can't show the shared `body`, which
+   * those in `by` changed since it last could (null: the person, from
+   * elsewhere, as the other pane of split), and why, as a page that opens
+   * so would say.
    */
-  onCantShow?: (by: string | null, reason: string) => void;
+  onCantShow?: (by: readonly (string | null)[], reason: string) => void;
   /** In a live session, it shows `body` again after it couldn't. */
   onCanShow?: () => void;
   /**
@@ -698,11 +699,19 @@ function Surface({
     }
     const view = viewNow();
     if (!next || !view || !writer.current) return;
+    // Typed since the session took the page's text and before it's bound:
+    // that goes in as the page's text did, so it's in `body` already.
+    if (edited.current) {
+      waiting.current?.();
+      waiting.current = null;
+      surface.report();
+    }
     const binding = new VisualBinding(
       {
         text: next.text,
         edit: (change) => next.edit(change),
         onBeforeRemote: (listener) => next.onBeforeRemote?.(listener) ?? (() => {}),
+        active: () => next.active?.() ?? true,
       },
       {
         written: () => surface.read(),
@@ -719,6 +728,7 @@ function Surface({
     const stops: (() => void)[] = [];
     // Others' bars, drawn again as their carets or the text move.
     let drawing: ReturnType<typeof setTimeout> | null = null;
+    let drawn = false;
     const draw = () => {
       drawing = null;
       const view = viewNow();
@@ -726,6 +736,12 @@ function Surface({
       const given = origin.current;
       if (bound.current?.binding !== binding || !view || !write || !given) return;
       const { doc } = view.state;
+      // Nobody else's caret, and none drawn: nothing to work out.
+      if (next.carets().length === 0) {
+        if (drawn) view.dispatch(setBars(view.state.tr, barDecorations(doc, [])));
+        drawn = false;
+        return;
+      }
       // Once the writer has the page, as idle time gives it.
       if (!write.ready(doc)) return void (drawing = setTimeout(draw, 200));
       const { runs, spans } = write.layout(doc, endsInLine(given.markdown));
@@ -739,19 +755,25 @@ function Surface({
       });
       const shown = barsOf(carets, (at) => blockAt(runs, spans, doc.childCount, at));
       view.dispatch(setBars(view.state.tr, barDecorations(doc, shown)));
+      drawn = shown.length > 0;
     };
     bars.redraw = () => {
       drawing ??= setTimeout(draw, 50);
     };
     // The person's caret, where the writer puts it in the shared text.
     let sending: ReturnType<typeof setTimeout> | null = null;
+    // Tries left for a caret the writer can't place yet, as before it has the page.
+    let tries = 0;
     const send = () => {
       sending = null;
       const view = viewNow();
       if (bound.current?.binding !== binding || !view) return;
       if (!view.hasFocus()) return next.cursor(null, 'visual');
       const caret = surface.caret();
-      if (caret === null) return void (sending = setTimeout(send, 200));
+      if (caret === null) {
+        if (tries-- > 0) sending = setTimeout(send, 200);
+        return;
+      }
       const written = surface.read();
       const body = next.text.toJSON();
       const at = body === written ? caret : new Mapping(written, body).toBody(caret);
@@ -761,6 +783,7 @@ function Surface({
       next.cursor({ anchor: position, head: position }, 'visual');
     };
     bars.moved = () => {
+      tries = 5;
       sending ??= setTimeout(send, CURSOR_MS);
     };
     stops.push(next.onCarets(() => bars.redraw?.()));
@@ -897,11 +920,15 @@ function Surface({
       // In a live session, `body`, its own edit in it: the page holds that,
       // and the binding takes text from it, never from what it's given.
       read: () => bound.current?.binding.write() ?? surface.read(),
+      // Text given in a session that has been left is the page's from now
+      // on, whatever `body` holds: the binding goes first.
       replace: (markdown: string) => {
+        if (bound.current?.live.active?.() === false) bind(null, false);
         if (bound.current) bound.current.binding.nudge();
         else surface.replace(markdown);
       },
       take: (markdown: string) => {
+        if (bound.current?.live.active?.() === false) bind(null, false);
         if (!bound.current) return surface.take(markdown);
         bound.current.binding.nudge();
         return true;
