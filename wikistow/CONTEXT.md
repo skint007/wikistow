@@ -152,7 +152,7 @@ A draft, new page or new folder made, a folder renamed, a page or folder deleted
 _Avoid_: Outbox, pending sync.
 
 **Clip**
-What the WikiStow browser extension hands the person's desktop app to save: a link with a note, the selected text, a simplified article, the whole page, or a screenshot, with the folder, title and tags chosen in its popup. The app makes it a new page as a **draft**, as the signed-in person, sealed like any page, with the address as its `source` property; a clip never publishes. Accepted in ADR 0017; the app answers the extension but saves no clip yet.
+What the WikiStow browser extension hands the person's desktop app to save: a link with a note, the selected text, a simplified article, the whole page, or a screenshot, with the folder, title and tags chosen in its popup. The app makes it a new page as a **draft**, as the signed-in person, sealed like any page, with the address as its `source` property; a clip never publishes. Accepted in ADR 0017; the app saves clips (step 4), and the extension isn't built yet.
 _Avoid_: Bookmark, capture, snippet.
 
 **Clip host**

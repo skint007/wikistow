@@ -2,6 +2,7 @@
 // decisions 1 and 4): the browser's framing, the token's challenge with
 // wikistow-clip-host (clip-host/connect.go), and the messages the
 // extension sends through it.
+import { FolderId, PageId, SpaceId } from '@wikistow/contracts';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 
@@ -136,10 +137,30 @@ const Id = z.string().min(1).max(100);
 /** What every message from the extension carries, read first. */
 export const Envelope = z.object({ v: z.number(), id: Id, type: z.string().max(20) });
 
-/**
- * The messages this app answers so far. A `clip` is only acknowledged
- * here; its fields are checked once the app saves clips (ADR 0017, step 4).
- */
+/** At most this much HTML in a clip, or plain text (ADR 0017, decision 4). */
+export const MAX_CLIP_HTML = 16 * 1024 * 1024;
+/** A tab's address, at most: longer than any browser keeps in its address bar. */
+const MAX_URL = 32 * 1024;
+
+/** One of the extension's clips, every field held to its limit (ADR 0017, decisions 4 and 5). */
+const Clip = z.strictObject({
+  v: z.literal(1),
+  id: Id,
+  type: z.literal('clip'),
+  mode: z.enum(['link', 'selection', 'article', 'page']),
+  url: z.string().min(1).max(MAX_URL),
+  title: z.string().max(500),
+  note: z.string().max(10_000).default(''),
+  tags: z.array(z.string().max(100)).max(20).default([]),
+  html: z.string().max(MAX_CLIP_HTML).default(''),
+  text: z.string().max(MAX_CLIP_HTML).default(''),
+  byline: z.string().max(500).nullable().default(null),
+  siteName: z.string().max(500).nullable().optional(),
+  folder: z.strictObject({ spaceId: SpaceId, folderId: FolderId.nullable() }),
+});
+export type ClipMessage = z.infer<typeof Clip>;
+
+/** The messages this app answers. */
 export const Message = z.discriminatedUnion('type', [
   z.strictObject({
     v: z.literal(1),
@@ -155,13 +176,13 @@ export const Message = z.discriminatedUnion('type', [
     type: z.literal('folders'),
     query: z.string().max(200),
   }),
-  z.object({ v: z.literal(1), id: Id, type: z.literal('clip') }),
+  Clip,
   z.strictObject({
     v: z.literal(1),
     id: Id,
     type: z.literal('show'),
-    spaceId: z.string().max(100),
-    pageId: z.string().max(100),
+    spaceId: SpaceId,
+    pageId: PageId,
   }),
 ]);
 export type Message = z.infer<typeof Message>;

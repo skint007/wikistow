@@ -18,6 +18,17 @@ export function keptFile(path: string) {
   return {
     /** What was kept, or null if nothing (or nothing readable) was. */
     read: () => queue.then(() => readFile(path).catch(() => null)),
+    /**
+     * What was kept, or null if nothing was; a file there that can't be
+     * read fails, so its reader can leave it be rather than write over it.
+     */
+    readIfThere: () =>
+      queue.then(() =>
+        readFile(path).catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+          throw error;
+        }),
+      ),
     // Written whole, then moved into place, so a crash never leaves half a file.
     write: (sealed: Uint8Array) =>
       run(async () => {

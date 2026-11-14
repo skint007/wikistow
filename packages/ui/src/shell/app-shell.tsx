@@ -16,6 +16,7 @@ import { onSignedOutElsewhere } from '../data/kept-store';
 import { OfflinePill } from './offline-pill';
 import { useOfflineChanges } from '../data/offline-changes';
 import { useTreeChanges } from '../data/tree-changes';
+import { useMeaningIndex } from '../meaning/background';
 import { useCommentChanges } from '../comments/changes';
 import { OfflineChangesNote } from './offline-changes-note';
 import { desktopUpdateQuery } from '../desktop';
@@ -72,6 +73,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   useCommentChanges(confirmed ? ctx : null);
   // Changes made offline go once the server answers and the session is confirmed.
   useOfflineChanges(ctx, confirmed);
+  // Search by meaning's vectors, made in the background where it is on
+  // (ADR 0016): from what the word index holds, so offline too.
+  useMeaningIndex(ctx);
   // Another tab signing out deletes what's kept: this one stops keeping first.
   useEffect(() => onSignedOutElsewhere(() => vaultStore.lock()), []);
   const { signOut, signOutHere, failed: signOutFailed } = useSignOut();
