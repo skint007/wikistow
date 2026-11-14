@@ -687,6 +687,30 @@ describe('putting a waiting change in, carefully', () => {
     expect(withdrawn).toEqual([5]);
   });
 
+  it('keeps showing a change still kept when a join with nothing new lapses', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    // The session holds the change already: putting it in adds nothing.
+    const { draft, joins, surface, withdrawn } = session(opened, opened, { entry });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.holds = false;
+    live.settled = {
+      base: { revisionId: R0, payload: page('A\n\nB') },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: false,
+      provisional: false,
+      atHead: true,
+    };
+    live.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+    await settle();
+    // Not the head without it: the change as it waits, for the next join to put in.
+    expect(surface.text).toBe('A\n\nB, mine');
+    expect(withdrawn).toEqual([]);
+  });
+
   it('withdraws a change put in when leaving saves it, before the page showed it saved', async () => {
     const opened = page('A\n\nB, mine');
     const entry = waitingEntry(opened, page('A\n\nB'));

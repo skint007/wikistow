@@ -722,6 +722,7 @@ export class DraftSession {
     this.#base = revisionId;
     // What comes next grows from what landed, not from a session's base.
     this.#keptLive = null;
+    this.#putBack = null;
     this.#region = null;
     // The change waiting on this device is sent: the session can be joined now.
     this.#joinTries = 0;
@@ -1188,6 +1189,9 @@ export class DraftSession {
       if (waiting && own) {
         this.#claimed = null;
         kept = own;
+      } else if (own && !waiting) {
+        // What it was kept for is gone: nothing to hold other tabs off for.
+        this.#releaseClaim();
       }
       claim = waiting ? (own ?? (live.claim ? await live.claim() : () => {})) : null;
       const theirs = waiting && !claim;
@@ -1791,6 +1795,24 @@ export class DraftSession {
               extensions: {},
             }
           : before;
+        // Nothing of the person's typed in this join: a change kept or put in
+        // that the head holds goes. One it doesn't is still theirs, waiting
+        // here: the view shows it as it waits, and the next join puts it in.
+        this.#withdrawKept();
+        const kept = this.#kept;
+        const waiting = kept ? await this.#ports.entryNow?.().catch(() => null) : null;
+        if (kept && waiting?.version === kept.version) {
+          this.#base = waiting.basedOn ?? this.#base;
+          this.#known.add(this.#base);
+          this.#keptLive = waiting.live ?? null;
+          const { title, markdown, attachments } = waiting.payload;
+          this.#content = { title, markdown, attachments };
+          this.#extensions = over(this.#payload.extensions, held(waiting.payload.extensions));
+          if (this.#rejoinHold) this.#rejoinKept = true;
+          if (this.#live) this.#surface.current?.replace(markdown);
+          this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
+          return false;
+        }
         if (back) {
           this.#base = back.base;
           this.#known.add(back.base);
@@ -1798,10 +1820,6 @@ export class DraftSession {
           this.#content = back.content;
           this.#extensions = back.extensions;
           this.#region = null;
-          // Nothing of the person's: a change kept or put in that the head holds goes;
-          // one it doesn't goes back in on the next join, the queue held till then.
-          this.#withdrawKept();
-          if (this.#kept && this.#rejoinHold) this.#rejoinKept = true;
           if (this.#live) this.#surface.current?.replace(this.#content.markdown);
           this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
           return true;
