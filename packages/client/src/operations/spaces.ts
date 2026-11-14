@@ -276,6 +276,7 @@ export async function createFolder(
     look,
     picture,
     extensions = {},
+    folderId = newId(FolderIdSchema),
   }: {
     spaceId: SpaceId;
     parentId: FolderId | null;
@@ -283,11 +284,12 @@ export async function createFolder(
     look?: FolderLook;
     picture?: FolderPicture;
     extensions?: NodeMetadata['extensions'];
+    /** Its ID, new unless given, as for a folder sent again under the same one. */
+    folderId?: FolderId;
   },
 ): Promise<FolderId> {
   const made = newFolderMetadata(name, look, picture);
   const metadata = { ...made, extensions: { ...made.extensions, ...extensions } };
-  const folderId = newId(FolderIdSchema);
   await createFolderAs(ctx, { spaceId, parentId, folderId, metadata });
   return folderId;
 }
