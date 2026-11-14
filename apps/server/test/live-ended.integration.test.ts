@@ -150,8 +150,11 @@ describe('an ended live session with unsaved typing', () => {
     expect(caught).toMatchObject([{ kind: 'saved', overlapped: 0 }]);
     const head = await draftOf(owner, page);
     expect(head.payload.markdown).toContain('Never saved.');
-    // Saved as an ordinary draft: no session claims it.
-    expect(head.payload.extensions['wikistow.live']).toBeUndefined();
+    // Naming the ended session, so no later catch-up puts it in again; none of its drafts, by its signer.
+    expect(head.payload.extensions['wikistow.live']).toMatchObject({
+      session: theirs.sessionId,
+      revision: head.revisionId,
+    });
     // Its Saved notice lets the server delete it.
     await expect.poll(async () => (await liveOf(owner, page.pageId)).ended).toBeNull();
 

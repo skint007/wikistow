@@ -7,7 +7,7 @@
 // from it, takes the server's grant so nobody else puts it in too, saves
 // what the head doesn't hold, and sends a Saved notice, so the server
 // deletes it.
-import { JoinId, RevisionId, liveRoutes, type PageId } from '@wikistow/contracts';
+import { IdentityId, JoinId, RevisionId, liveRoutes, type PageId } from '@wikistow/contracts';
 import * as Y from 'yjs';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
@@ -20,7 +20,7 @@ import type { PagePayload } from '../payload.ts';
 import { sameRegion } from '../regions.ts';
 import { decodeUpdate, holdsState, sameState, type LiveState } from './decode.ts';
 import { LiveDocument, samePayload } from './document.ts';
-import { draftLive, sessionState, withoutLive } from './extension.ts';
+import { draftLive, sessionState, withLive, withoutLive } from './extension.ts';
 import { heldPayload } from './fold.ts';
 import { LiveJoins, type ListedJoin } from './joins.ts';
 import {
@@ -125,7 +125,14 @@ export async function catchUpEnded(
     };
   }
   try {
-    const built = await build(ports, served, opened);
+    // Checked against the latest notice that names a draft of the session,
+    // or, when the document never has its state (someone else's message
+    // stored between what it covers and its sender's own), an earlier one.
+    let built: Awaited<ReturnType<typeof build>> = { kind: 'unchecked' };
+    for (let skip = 0; built.kind === 'unchecked' && skip < NOTICES_TRIED; skip++) {
+      built = await build(ports, served, opened, skip);
+    }
+    if (built.kind === 'unchecked') return lasting('it doesn’t check against its last save');
     if (built.kind === 'cant') return built;
     return await putIn(ports, served, opened, built, head);
   } catch (error) {
@@ -176,7 +183,9 @@ async function build(
   ports: ParticipantPorts,
   served: liveRoutes.ServedSession,
   opened: OpenedLiveSession,
-): Promise<Built | { kind: 'cant'; why: string; lasting: boolean }> {
+  /** How many of the notices naming a draft of the session to pass over. */
+  skip: number,
+): Promise<Built | { kind: 'cant'; why: string; lasting: boolean } | { kind: 'unchecked' }> {
   const { ctx, page } = ports;
   // What a fetch cut short leaves to the stream: past what an ended session's unsaved typing comes to.
   if (!served.complete) return lasting('it holds more than one fetch serves');
@@ -278,6 +287,7 @@ async function build(
     .filter((one) => one.message.kind === 'saved')
     .sort((a, b) => b.position - a.position)
     .slice(0, NOTICES_TRIED);
+  let skipped = 0;
   for (const one of notices) {
     const read = readSaved((opens.get(one) as OpenedLiveMessage).content);
     if (read.kind === 'newer-format') return lasting('it is of a newer format: update the app');
@@ -287,9 +297,12 @@ async function build(
     });
     const state = draft && sessionState(draft.payload, draft.revisionId, sessionId);
     if (!draft || !state || !sessionDraft(draft, opened, senders)) continue;
+    if (skipped++ < skip) continue;
     notice = { covers: one.covers ?? 0, position: one.position, draft, state };
     break;
   }
+  // Every notice passed over: none checks.
+  if (!notice && skip > 0) return { kind: 'unchecked' };
   // With none, only a document built from the first snapshot alone is checked.
   if (!notice && served.snapshot) {
     return lasting('no Saved notice checks what its later snapshot holds');
@@ -322,7 +335,7 @@ async function build(
     latest = { revisionId: draft.revisionId, payload: draft.payload, state };
     return true;
   };
-  const unchecked = () => lasting('it doesn’t check against its last save');
+  const unchecked = () => ({ kind: 'unchecked' as const });
 
   // A fold's change placed for a revision whose fold was placed already is never placed.
   const placedAt = new Map<string, number>();
@@ -395,14 +408,13 @@ async function build(
         else held.push(next);
       }
     }
-    if (!checked && stored.position >= covers && held.length === 0) checked = check();
   }
   if (!checked && !check()) return unchecked();
   if (held.length > 0 || document.pending) {
     return lasting('messages it holds are missing');
   }
   const at = latest as Built['latest'] | null;
-  if (!at) return lasting('it doesn’t check against its last save');
+  if (!at) return unchecked();
   // A draft of the session its notice's sender saved: that sender counts as one who signed in it.
   for (const message of opens.values()) signers.add(message.senderId);
   if (!start) {
@@ -530,7 +542,14 @@ async function saveAndNotice(
       const saved = await ports.saveDraft({
         basedOn: head,
         revisionId,
-        payload: target.payload,
+        // Naming the ended session and what of it the draft holds, so a later
+        // catch-up's walk stops here and never puts it in again.
+        payload: withLive(target.payload, {
+          revision: revisionId,
+          session: sessionId,
+          state: document.stateBytes(),
+          with: [...built.signers].filter((id) => IdentityId.safeParse(id).success) as IdentityId[],
+        }),
         linkChoices: linkChoices(document),
       });
       result = {
@@ -636,9 +655,16 @@ async function targetOn(
       break;
     }
     const state = sessionState(at.payload, at.revisionId, sessionId);
-    if (state && sessionDraft(at, opened, built.signers)) {
-      base = { payload: at.payload, state };
-      break;
+    if (state) {
+      // The first draft naming this session stops the walk: one of its drafts is the base.
+      if (sessionDraft(at, opened, built.signers)) {
+        base = { payload: at.payload, state };
+        break;
+      }
+      // A catch-up's own save, which names it: caught up already when it holds the ended document.
+      if (sameState(state, document.state())) return { kind: 'held' };
+      // Or a draft of it whose signer's messages weren't served: never walked past.
+      return { kind: 'cant', why: 'a draft of it since can’t be checked', lasting: true };
     }
     at = at.basedOn ? await ports.openDraft(at.basedOn) : null;
   }

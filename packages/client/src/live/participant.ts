@@ -367,7 +367,7 @@ export async function joinLive(
       if (error instanceof ApiError && error.code === 'not-found') return { kind: 'older-server' };
       throw error;
     }
-    if (served.ended) {
+    if (served.ended && !caughtFrom.has(served.ended.sessionId)) {
       // Kept with changes nobody saved: caught up from first, by one app.
       // Whatever it comes to, joining goes on.
       const id = served.ended.sessionId;
@@ -383,8 +383,11 @@ export async function joinLive(
               }),
             );
       const waitingSince = known?.waitingSince ?? Date.now();
-      if (caught.kind === 'saved' || caught.kind === 'held') triedFrom.delete(id);
-      else if (caught !== known?.caught) {
+      if (caught.kind === 'saved' || caught.kind === 'held') {
+        triedFrom.delete(id);
+        // Once a run: a server serving it again after its notice gets nothing more.
+        caughtFrom.add(id);
+      } else if (caught !== known?.caught) {
         // Not tried again this run once the session fails its checks; otherwise in a minute.
         const lasts = caught.kind === 'cant' && caught.lasting;
         triedFrom.set(id, {
@@ -4366,6 +4369,8 @@ const foldedGone = new Map<string, Map<number, GoneRange>>();
 
 /** The clocks of a gone join's client a fold put in, from what the folding app held to what the draft claimed. */
 type GoneRange = { from: number; to: number };
+// Ended sessions this app caught up from.
+const caughtFrom = new Set<string>();
 // Ended sessions this app couldn't catch up from, and until when that stands.
 const triedFrom = new Map<string, { caught: CaughtUp; until: number; waitingSince: number }>();
 const TRY_AGAIN_MS = 60_000;
