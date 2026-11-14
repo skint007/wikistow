@@ -847,7 +847,8 @@ void app.whenReady().then(async () => {
   handle('dropSearchIndex', async () => {
     await searchIndex.remove();
   });
-  handle('meaningIndex', async () => (store?.secure ? meaningIndex.read() : null));
+  // One that can't be read fails, so the pages don't write over it (ADR 0016).
+  handle('meaningIndex', async () => (store?.secure ? meaningIndex.readIfThere() : null));
   handle('keepMeaningIndex', async (sealed) => {
     if (store?.secure) await meaningIndex.write(z.instanceof(Uint8Array).parse(sealed));
   });

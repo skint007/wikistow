@@ -223,6 +223,17 @@ describe('MeaningIndexer', () => {
     expect(fake.embedded).toHaveLength(2);
   });
 
+  it('a clock set back doesn’t hold the queue up for as long', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await vi.advanceTimersByTimeAsync(EMBED_MS + 1);
+    expect(fake.embedded).toHaveLength(1);
+    vi.setSystemTime(Date.now() - 3_600_000);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fake.embedded).toHaveLength(2);
+  });
+
   it('cuts passages by the count the tokenizer gives', async () => {
     const fake = fakeWork();
     // Each word three tokens: the boiler's 7 words and title fit; the book's sections don't.

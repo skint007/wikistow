@@ -32,6 +32,7 @@ export const DRAFT_PAUSE_MS = 30_000;
  */
 export const REST_SHARE = 0.5;
 export const REST_AT_LEAST_MS = 20;
+export const REST_AT_MOST_MS = 5_000;
 
 /** How long the queue waits before looking again while a page opens or the word index updates. */
 export const BUSY_WAIT_MS = 250;
@@ -413,7 +414,10 @@ export class MeaningIndexer {
   /** How long until this person's saves of the page have paused for `DRAFT_PAUSE_MS`, or 0. */
   #pauseLeft(key: string): number {
     const at = this.#savedAt.get(key);
-    return at === undefined ? 0 : Math.max(0, at + DRAFT_PAUSE_MS - this.#clock.now());
+    // At most the pause, should the clock be set back.
+    return at === undefined
+      ? 0
+      : Math.min(DRAFT_PAUSE_MS, Math.max(0, at + DRAFT_PAUSE_MS - this.#clock.now()));
   }
 
   /** Keep `passages`' vectors for `key`'s next version (`#reusable`). */
@@ -630,7 +634,8 @@ export class MeaningIndexer {
 
   /** Rest after the last passage, then wait while a page opens or the index updates, and for a moment free. */
   async #pace() {
-    const rest = this.#restUntil - this.#clock.now();
+    // At most a rest's longest, should the clock be set back.
+    const rest = Math.min(REST_AT_MOST_MS, this.#restUntil - this.#clock.now());
     if (rest > 0) await this.#sleep(rest);
     while (!this.#stopped && this.#work.busy()) await this.#sleep(BUSY_WAIT_MS);
     if (!this.#stopped) await this.#work.idle();
