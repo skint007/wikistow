@@ -1,4 +1,4 @@
-import type { Mark } from '@milkdown/kit/prose/model';
+import type { Mark, Node } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { act, createRef } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -6,7 +6,7 @@ import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { EditorSurfaceHandle } from '../src/page/editor/surface.ts';
 import { loadSyntaxNodes, transformer } from '../src/page/editor/visual/config.ts';
-import { fidelityOf } from '../src/page/editor/visual/fidelity.ts';
+import { fidelityOf, writesAsShown } from '../src/page/editor/visual/fidelity.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
@@ -143,8 +143,9 @@ describe('highlights and colours in the visual editor', () => {
   it('turn `==text==` typed into a highlight, and leave other `=` as typed', async () => {
     const m = await mount('');
     m.dom.focus();
-    await userEvent.keyboard('==hi== then a == b and x==y');
-    await reported(m, '==hi== then a == b and x\\=\\=y\n');
+    await userEvent.keyboard('==hi== then a == b ==> c and x==y');
+    await reported(m, '==hi== then a == b ==> c and x==y\n');
+
     expect(m.dom.querySelector('mark')?.textContent).toBe('hi');
     expect(m.unfaithful).toEqual([]);
   });
@@ -190,6 +191,29 @@ describe('highlights and colours in the visual editor', () => {
       await reported(m, expected);
       expect(fidelityOf(expected, t).visual, expected).toBe(true);
       unmounts.pop()?.();
+    }
+  });
+
+  it('escape `==` in text only where it would pair with another', async () => {
+    const t = await transformer();
+    const { schema } = t.parse('x').type;
+    const highlight = schema.marks['highlight']?.create();
+    if (!highlight) throw new Error('No highlight');
+    const paragraph = (...content: Node[]) =>
+      schema.topNodeType.create(null, schema.node('paragraph', null, content));
+    for (const [doc, written] of [
+      [paragraph(schema.text('a ==> b')), 'a ==> b\n'],
+      [paragraph(schema.text('if x==y then')), 'if x==y then\n'],
+      // These two would make a highlight of `> b and x`.
+      [paragraph(schema.text('a ==> b and x==y')), 'a \\=\\=> b and x\\=\\=y\n'],
+      [paragraph(schema.text('x==y a==b c==d')), 'x\\=\\=y a\\=\\=b c\\=\\=d\n'],
+      [
+        paragraph(schema.text('x==y a'), schema.text('b c', [highlight]), schema.text('d')),
+        'x\\=\\=y a==b c==d\n',
+      ],
+    ] as const) {
+      expect(t.serialize(doc)).toBe(written);
+      expect(writesAsShown(doc, written, t.parse)).toBe(true);
     }
   });
 
