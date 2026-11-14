@@ -76,7 +76,9 @@ test('an agent’s save during a live session is folded in, and an overlap offer
 
   await test.step('the agent adds a paragraph, and the open page takes it in', async () => {
     await agentSaves(cli, pageId, 'Simmer the stock.\n\nServe hot.');
-    await expect.poll(() => sourceOf(page), { timeout: 30_000 }).toBe('Simmer the stock.\n\nServe hot.');
+    await expect
+      .poll(() => sourceOf(page), { timeout: 30_000 })
+      .toBe('Simmer the stock.\n\nServe hot.');
     await expect(saveStatus(page)).toHaveText('All changes saved', { timeout: 30_000 });
     await expect(page.getByText(/Someone else (saved|changed)/)).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Merge…' })).toHaveCount(0);
