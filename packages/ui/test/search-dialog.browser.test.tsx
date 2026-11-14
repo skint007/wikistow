@@ -1,6 +1,7 @@
 import {
   FolderId,
   PageId,
+  quantizeVector,
   RevisionId,
   searchOperations,
   SpaceId,
@@ -41,6 +42,8 @@ import {
   withoutSearchHash,
 } from '../src/shell/search-link.tsx';
 import { isApple, SEARCH_HELP } from '../src/shell/search-model.ts';
+import { setReader } from '../src/meaning/running.ts';
+import { MEANING_PAUSE_MS, MeaningReader } from '../src/meaning/search.ts';
 import { vaultStore } from '../src/vault/store.ts';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -89,7 +92,10 @@ const PAGES = {
 
 let queryClient: QueryClient;
 let cleanup = () => {};
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  setReader(null);
+});
 
 async function mount(
   query = '',
@@ -343,4 +349,125 @@ it('turns into the command palette with >, listing what can run here, recent fir
   expect(box().value).toBe('>');
   await key(isApple() ? { key: 'k', metaKey: true } : { key: 'k', ctrlKey: true });
   expect(box().value).toBe('');
+});
+
+/** Each page's passages' vectors, as the queue kept them: by revision, with where each starts. */
+const VECTORS: Record<string, [number, number[]][]> = {
+  'bean-soup': [[0, [1, 0, 0]]],
+  'pea-soup': [[0, [0.9, 0.3, 0]]],
+  bread: [[0, [0, 1, 0]]],
+  'soup-notes': [[5, [0.95, 0, 0.3]]],
+};
+
+/** Search by meaning on, from the vectors kept, with a model that knows these words. */
+function meaningOn(vectors = VECTORS) {
+  const kept = new Map(
+    Object.entries(vectors).map(([id, passages]) => [
+      RevisionId.parse(`${id}-r1`),
+      passages.map(([start, vector]) => ({
+        hash: `${id}-${start}`,
+        start,
+        vector: quantizeVector(Float32Array.from(vector)),
+      })),
+    ]),
+  );
+  const asked: string[] = [];
+  const reader = new MeaningReader({
+    embedder: {
+      embed: async (_kind, texts) => {
+        asked.push(...texts);
+        return { vectors: texts.map(() => Float32Array.from([1, 0, 0])) };
+      },
+      load: async () => ({}),
+      stop: () => {},
+    },
+    file: async () => ({ read: async () => new Uint8Array([1]), write: async () => {} }),
+    open: () => kept,
+    idle: async () => {},
+  });
+  setReader(reader);
+  return asked;
+}
+
+const group = () => document.querySelector('[role="listbox"] [role="group"]');
+const meaningTitles = () =>
+  [...(group()?.querySelectorAll('[role="option"]') ?? [])].map(
+    (option) => option.querySelector('.font-extrabold')?.textContent,
+  );
+const statusLine = () => document.querySelector('[role="status"]')?.parentElement?.textContent;
+
+it('lists pages by meaning below the word matches, one list for the keys', async () => {
+  const asked = meaningOn();
+  await mount();
+  await type('stock');
+  // Word matches first, as they were; then the other page close in meaning.
+  await expect.poll(titles).toEqual(['Bean soup', 'Bread', 'Pea soup', 'Soup notes']);
+  expect(meaningTitles()).toEqual(['Soup notes']);
+  expect(asked).toEqual(['stock']);
+  // Its label names the group, and isn't a row of its own.
+  expect(group()?.getAttribute('aria-label')).toBe('By meaning');
+  expect(status()).toBe('3 pages with these words · 1 more by meaning');
+  // No word marked: its snippet is its passage's start.
+  const row = group()?.querySelector('[role="option"]');
+  expect(row?.querySelector('mark')).toBeNull();
+  expect(row?.textContent).toContain('without tags.');
+  for (let i = 0; i < 3; i++) await press('ArrowDown');
+  expect(active()).toBe('Soup notes');
+  expect(input().getAttribute('aria-activedescendant')).toBe(
+    group()?.querySelector('[role="option"]')?.id,
+  );
+  await press('ArrowDown');
+  expect(active()).toBe('Soup notes');
+});
+
+it('lists by meaning alone where no words match, narrowed by filters', async () => {
+  meaningOn();
+  await mount();
+  await type('warming');
+  // Above the floor and near the best: not the bread.
+  await expect.poll(meaningTitles).toEqual(['Bean soup', 'Soup notes', 'Pea soup']);
+  expect(status()).toBe('No pages with these words · 3 by meaning');
+  // The first is chosen, and Enter opens it.
+  expect(active()).toBe('Bean soup');
+  await type('tag:soup warming');
+  await expect.poll(meaningTitles).toEqual(['Bean soup', 'Pea soup']);
+  await type('tag:winter warming');
+  await expect.poll(meaningTitles).toEqual(['Bean soup']);
+  // Not for filters alone, nor words too short.
+  await type('tag:soup');
+  await expect.poll(titles).toEqual(['Bean soup', 'Pea soup']);
+  expect(group()).toBeNull();
+  await type('wa');
+  await expect.poll(group).toBeNull();
+});
+
+it('embeds the query once typing pauses, and says how far the vectors have got', async () => {
+  const { bread: _, ...most } = VECTORS;
+  const asked = meaningOn(most);
+  await mount();
+  await type('warm');
+  await type('warming');
+  await expect.poll(meaningTitles).toEqual(['Bean soup', 'Soup notes', 'Pea soup']);
+  await new Promise((wait) => setTimeout(wait, MEANING_PAUSE_MS * 2));
+  expect(asked).toEqual(['warming']);
+  // Shown, but not announced: it changes with each page indexed.
+  expect(statusLine()).toBe(
+    'No pages with these words · 3 by meaning · By meaning: 3 of 4 pages so far',
+  );
+  expect(status()).toBe('No pages with these words · 3 by meaning');
+});
+
+it('leaves the command palette and word search alone', async () => {
+  meaningOn();
+  await mount('>');
+  const box = () => document.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+  await act(() => userEvent.fill(box(), '>warming'));
+  await new Promise((wait) => setTimeout(wait, MEANING_PAUSE_MS * 2));
+  expect(group()).toBeNull();
+  expect(statusLine()).not.toContain('By meaning');
+  // Off, the status says what it did.
+  act(() => setReader(null));
+  await act(() => userEvent.fill(box(), 'stock'));
+  await expect.poll(titles).toEqual(['Bean soup', 'Bread', 'Pea soup']);
+  expect(status()).toBe('3 pages');
 });
