@@ -40,6 +40,7 @@ export function HistorySheet({
   canRestore,
   showing,
   beforeRestore,
+  restoreLive,
   onRestored,
 }: {
   ctx: ClientContext;
@@ -50,6 +51,12 @@ export function HistorySheet({
   showing: RevisionId | null;
   /** Runs first; throwing stops the restore. */
   beforeRestore?: (() => Promise<void> | undefined) | undefined;
+  /**
+   * Restores through the page's live session first, as the person's change
+   * (ADR 0015 decision 8); false when it can't, and the restore goes as
+   * from outside the session.
+   */
+  restoreLive?: ((revisionId: RevisionId) => Promise<boolean>) | undefined;
   /** Runs once the restored version is the draft. */
   onRestored?: (() => Promise<void>) | undefined;
 }) {
@@ -123,6 +130,13 @@ export function HistorySheet({
     setRestoring(revisionId);
     setError(null);
     try {
+      if (await restoreLive?.(revisionId)) {
+        // In the session already: the draft view goes on, everyone seeing it.
+        await contentChanged(queryClient, ctx, page);
+        onOpenChange(false);
+        void navigate({ to: '/s/$spaceId/p/$pageId', params: page, search: { view: 'draft' } });
+        return;
+      }
       await beforeRestore?.();
       await pageOperations.restorePublished(ctx, page, revisionId, { read: readWikilinks });
       await onRestored?.();

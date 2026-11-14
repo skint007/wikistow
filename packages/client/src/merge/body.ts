@@ -37,12 +37,68 @@ type Hunk = { os: number; oe: number; xs: number; xe: number };
 
 const sameKey = (a: Block, b: Block) => a.key === b.key;
 
+/** A merge that ran past its time (`withinTime`): too large to merge here. */
+export class MergeTooLarge extends Error {
+  constructor() {
+    super('This change is too large to merge here');
+    this.name = 'MergeTooLarge';
+  }
+}
+
+// When the merge running now must be done by, if it was given a time.
+let deadline = Infinity;
+// Whether two sides adding at one place keep both (`union`), or overlap.
+let unions = true;
+
+/**
+ * Run a merge in which both sides adding blocks at one place is an
+ * overlap, not both kept: as when theirs is a session draft whose sender
+ * went without sending part of it, which holds typing the page holds too,
+ * and has since gone on with, so keeping both would put it in twice.
+ */
+export function addsOverlap<T>(merge: () => T): T {
+  const before = unions;
+  unions = false;
+  try {
+    return merge();
+  } finally {
+    unions = before;
+  }
+}
+
+/**
+ * Run a merge that must be done within `ms`, as one an app makes on its
+ * own for every draft written outside a live session must be: a diff of
+ * very different pages takes time that grows with the square of their
+ * size. Past it, `MergeTooLarge`.
+ */
+export function withinTime<T>(ms: number, merge: () => T): T {
+  const before = deadline;
+  deadline = Math.min(before, Date.now() + ms);
+  try {
+    return merge();
+  } finally {
+    deadline = before;
+  }
+}
+
+/** Throw `MergeTooLarge` once the merge running now is past its time (`withinTime`). */
+export function checkTime(): void {
+  if (deadline !== Infinity && Date.now() > deadline) throw new MergeTooLarge();
+}
+
 // The blocks `a` and `b` have in common, in order, as index pairs.
 function common(a: readonly Block[], b: readonly Block[]): [number, number][] {
   const pairs: [number, number][] = [];
   let i = 0;
   let j = 0;
-  for (const change of diffArrays([...a], [...b], { comparator: sameKey })) {
+  const timeout = deadline === Infinity ? undefined : Math.max(1, deadline - Date.now());
+  const changes = diffArrays([...a], [...b], {
+    comparator: sameKey,
+    ...(timeout !== undefined && { timeout }),
+  });
+  if (!changes) throw new MergeTooLarge();
+  for (const change of changes) {
     if (change.removed) i += change.count;
     else if (change.added) j += change.count;
     else for (let k = 0; k < change.count; k++) pairs.push([i++, j++]);
@@ -249,7 +305,9 @@ const keysOf = (blocks: readonly Block[]) => blocks.map((block) => block.key).jo
  */
 export function mergeBlocks(base: string, yours: string, theirs: string): BlockMerge {
   const o = blocksOf(ended(base));
+  checkTime();
   const sides = { yours: blocksOf(ended(yours)), theirs: blocksOf(ended(theirs)) };
+  checkTime();
   const aligned = { yours: align(o, sides.yours), theirs: align(o, sides.theirs) };
   keepApart(o, [aligned.yours, sides.yours], [aligned.theirs, sides.theirs]);
   type Side = keyof typeof sides;
@@ -308,7 +366,9 @@ export function mergeBlocks(base: string, yours: string, theirs: string): BlockM
     if (of('theirs').length === 0) segments.push({ ...at, taken: y, from: 'yours' });
     else if (of('yours').length === 0) segments.push({ ...at, taken: t, from: 'theirs' });
     else if (keysOf(y) === keysOf(t)) segments.push({ ...at, taken: t, from: 'both' });
-    else if (g.os === g.oe) segments.push({ ...at, taken: union(t, y), from: 'union' });
+    else if (g.os === g.oe && extends_(t, y)) segments.push({ ...at, taken: t, from: 'both' });
+    else if (g.os === g.oe && extends_(y, t)) segments.push({ ...at, taken: y, from: 'both' });
+    else if (g.os === g.oe && unions) segments.push({ ...at, taken: union(t, y), from: 'union' });
     else segments.push({ ...at, taken: null, from: 'overlap' });
     i = g.oe;
   }
@@ -317,6 +377,17 @@ export function mergeBlocks(base: string, yours: string, theirs: string): BlockM
 }
 
 const isReal = (blocks: readonly Block[]) => blocks.some((block) => block.kind !== 'blank');
+
+// Whether `longer`, added at a place, holds every block `shorter` added
+// there, at its start or its end: one side went on from the other, so
+// taking the longer puts nothing in twice.
+function extends_(longer: readonly Block[], shorter: readonly Block[]): boolean {
+  const solid = (blocks: readonly Block[]) => blocks.filter((block) => block.kind !== 'blank');
+  const [l, s] = [solid(longer), solid(shorter)];
+  if (s.length === 0 || s.length >= l.length) return false;
+  const same = (from: number) => s.every((block, i) => block.key === l[from + i]?.key);
+  return same(0) || same(l.length - s.length);
+}
 
 /**
  * Two additions at one place, theirs first. Blocks both start with, or
@@ -510,6 +581,7 @@ export function writeBody(merge: BlockMerge, picks: ReadonlyMap<number, SegmentP
     return own.quote + own.indent + number + own.marker.slice(-1) + text.slice(head.length);
   };
   entries.forEach((entry, i) => {
+    checkTime();
     const text = entry.adjust
       ? adjusted(entry.block, written, entries.slice(i + 1), {
           ahead: ahead(entry),
@@ -555,6 +627,7 @@ export function writeBody(merge: BlockMerge, picks: ReadonlyMap<number, SegmentP
     return found.length > 0 ? found : [JSON.stringify(kind(x)) === JSON.stringify(kind(y))];
   };
   written.forEach(({ start, entry }, i) => {
+    checkTime();
     if (!entry.check || entry.block.kind !== 'item') return;
     const back = written.slice(0, i).reverse();
     const near = itemNear(depthOf(entry.block.place), back, (w) =>
@@ -570,6 +643,7 @@ export function writeBody(merge: BlockMerge, picks: ReadonlyMap<number, SegmentP
   // And each nested item under the item it is under on a side that has
   // it, which block keys don't say either.
   written.forEach(({ entry }, i) => {
+    checkTime();
     if (!entry.check || entry.block.kind !== 'item') return;
     const depth = depthOf(entry.block.place);
     const lists = depth.flatMap((part, k) => (part === 'list' ? [k] : []));
@@ -614,6 +688,7 @@ function blamed(merge: BlockMerge, entries: readonly Entry[], entry: Entry): num
   if (changed(entry)) return entry.segment;
   const at = entries.indexOf(entry);
   for (let d = 1; d < entries.length; d++) {
+    checkTime();
     for (const other of [entries[at + d], entries[at - d]])
       if (other && changed(other)) return other.check ? other.segment : null;
   }

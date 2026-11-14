@@ -47,6 +47,14 @@ page in its folder.
 \`--base\`. On exit 3 someone saved in between: read again and make your edit
 on their version.
 
+A page people are editing together, live, saves every second or so while
+they type, so an edit that takes you a few seconds may meet exit 3 again
+and again. Keep edits quick, or wait for a pause, or leave a comment for
+the editors instead. When your save lands, their app folds it into what
+they are typing. Where you both changed the same part, theirs stays, and
+\`page read --draft\` lists your draft under \`waitingForReview\` with
+those parts: your change isn't lost, so don't make it again.
+
 Give each change a new \`--idempotency-key\`, and reuse a key only to retry
 its own change.
 

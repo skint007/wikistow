@@ -77,7 +77,20 @@ export type Merge = {
   readonly combined: { readonly yours: number; readonly theirs: number };
   /** How each part merges. Only `resolve` reads it. */
   readonly plan: Plan;
+  /**
+   * The overlaps offered, where only some are (`narrowMerge`): every other
+   * overlap is resolved as yours.
+   */
+  readonly only?: (overlap: Overlap) => boolean;
 };
+
+/**
+ * `merge` offering only the overlaps `only` keeps, the others resolved as
+ * yours, as Review offers only the parts a note names (ADR 0015 decision 8).
+ */
+export function narrowMerge(merge: Merge, only: (overlap: Overlap) => boolean): Merge {
+  return { ...merge, overlaps: merge.overlaps.filter(only), only };
+}
 
 // A field merged whole: the value taken, or an overlap.
 type Field<T> = { taken: T } | { overlap: { base: T; yours: T; theirs: T } };
@@ -154,7 +167,9 @@ export function mergePayloads(base: PagePayload, yours: PagePayload, theirs: Pag
   );
   for (const namespace of namespaces) {
     if (namespace === COVER_NAMESPACE || namespace === LINKS_NAMESPACE) continue;
-    const value = (payload: PagePayload) => payload.extensions[namespace] ?? null;
+    // Its own value only: a namespace named `__proto__` that a side lacks is none.
+    const value = (payload: PagePayload) =>
+      Object.hasOwn(payload.extensions, namespace) ? (payload.extensions[namespace] ?? null) : null;
     data.set(namespace, field(value(base), value(yours), value(theirs)));
   }
   const plan: Plan = {
@@ -334,11 +349,19 @@ export type Resolved =
  * it offers. The body and front matter are read back first: anything that
  * doesn't read as chosen where it went comes back as an overlap.
  */
-export function resolve(merge: Merge, choices: Readonly<Record<string, Choice>>): Resolved {
+export function resolve(
+  merge: Merge,
+  choices: Readonly<Record<string, Choice>>,
+  /** Whether to work out the review of what it changes, which only the merge view shows. */
+  { review = true }: { review?: boolean } = {},
+): Resolved {
   const { plan } = merge;
   const choiceOf = (id: string): Choice => {
     const choice = choices[id];
-    const offers = merge.overlaps.find((other) => other.id === id)?.offers ?? [];
+    const listed = merge.overlaps.find((other) => other.id === id);
+    // Not offered in a narrowed merge: yours, which every overlap offers.
+    if (!listed && merge.only) return 'yours';
+    const offers = listed?.offers ?? [];
     if (choice === undefined || !offers.includes(typeof choice === 'object' ? 'edit' : choice))
       throw new Error(`No choice made for ${id}.`);
     return choice;
@@ -372,7 +395,14 @@ export function resolve(merge: Merge, choices: Readonly<Record<string, Choice>>)
       });
     }
     if (plan.frontmatterFits && !next.frontmatterFits) uncount(plan.frontmatter.combined);
-    return { ok: false, merge: { overlaps: overlapsOf(next), combined, plan: next } };
+    const overlaps = overlapsOf(next);
+    const only = merge.only;
+    return {
+      ok: false,
+      merge: only
+        ? { overlaps: overlaps.filter(only), combined, plan: next, only }
+        : { overlaps, combined, plan: next },
+    };
   }
   const title = pick('title', plan.title, (typed) => typed);
   const noEdit = () => {
@@ -381,7 +411,14 @@ export function resolve(merge: Merge, choices: Readonly<Record<string, Choice>>)
   const extensions = { ...plan.theirs.extensions };
   const set = (namespace: string, value: Json | null) => {
     if (value === null) delete extensions[namespace];
-    else extensions[namespace] = value;
+    // As an own property, a `__proto__` namespace included.
+    else
+      Object.defineProperty(extensions, namespace, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
   };
   for (const [namespace, merged] of plan.data)
     set(namespace, pick(`data:${namespace}`, merged, noEdit));
@@ -406,7 +443,11 @@ export function resolve(merge: Merge, choices: Readonly<Record<string, Choice>>)
     attachments: mergedAttachments(plan, markdown, extensions),
     extensions,
   };
-  return { ok: true, payload, review: reviewOf(plan.theirs, payload) };
+  return {
+    ok: true,
+    payload,
+    review: review ? reviewOf(plan.theirs, payload) : { lines: [], fields: [] },
+  };
 }
 
 // The merged front matter, or undefined where it didn't read as merged.

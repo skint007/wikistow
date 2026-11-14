@@ -698,6 +698,51 @@ async function twoSpaces() {
   };
 }
 
+describe('a draft a live session folded in', () => {
+  it('names the parts of the agent’s change waiting for review, so it isn’t made again', async () => {
+    const { alice, lib, run } = await bobsAgent();
+    const before = await pages.loadPage(alice.ctx, lib.page.pageId);
+    const wrote = await run(
+      ['page', 'draft', lib.page.pageId, '--base', String(before.heads.draftHead), '--file', '-'],
+      { stdin: 'From the agent.' },
+    );
+    expect(wrote.code, wrote.stderr).toBe(0);
+    const agentRevision = wrote.json().revisionId as string;
+    // As a live session's saver writes it, after keeping the session's text there.
+    const draft = await pages.loadPage(alice.ctx, lib.page.pageId);
+    const opened = await pages.openRevisionOf(
+      alice.ctx,
+      lib.page,
+      'draft',
+      draft.heads.draftHead as never,
+    );
+    if (opened.opened.kind !== 'current') throw new Error('newer format');
+    await pages.saveDraft(alice.ctx, {
+      page: lib.page,
+      basedOn: draft.heads.draftHead as never,
+      payload: {
+        ...opened.opened.payload,
+        markdown: 'From the session.',
+        extensions: {
+          'wikistow.overlaps': {
+            format: 1,
+            revisions: [
+              { revision: agentRevision, parts: ['body:0-1'] },
+              { revision: before.heads.draftHead, parts: ['title'] },
+            ],
+          },
+        },
+      },
+    });
+    const read = await run(['page', 'read', lib.page.pageId, '--draft']);
+    expect(read.code, read.stderr).toBe(0);
+    // Only the agent's own draft: the other is someone else's.
+    expect(read.json().waitingForReview).toEqual([
+      { revisionId: agentRevision, parts: ['body:0-1'] },
+    ]);
+  });
+});
+
 describe('publishing into another space', () => {
   it('copies the version and files it names, and never publishes over a copy unseen', async () => {
     const { alice, page, board, pinned, agentId, run, files, published, draft } = await twoSpaces();

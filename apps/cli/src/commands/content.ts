@@ -34,6 +34,9 @@ import {
   pageRoutes,
   structureRoutes,
   AttachmentId,
+  overlapPart,
+  OverlapsExtension,
+  OVERLAPS_NAMESPACE,
   type FolderId,
   type PageId,
   type RevisionId,
@@ -349,10 +352,39 @@ async function openVersion(ctx: ClientContext, args: VersionArgs) {
   return { info, page, audience, opened, payload: current(opened) } as const;
 }
 
+/**
+ * The notes of a draft's `wikistow.overlaps` that name a draft the caller
+ * signed: what of its change a live session kept for review (ADR 0015
+ * decision 9). None for a publication, which never carries them.
+ */
+async function waitingForReview(
+  ctx: ClientContext,
+  { audience, page, payload }: Awaited<ReturnType<typeof openVersion>>,
+): Promise<{ revisionId: string; parts: string[] }[]> {
+  if (audience !== 'draft') return [];
+  const parsed = OverlapsExtension.safeParse(payload.extensions[OVERLAPS_NAMESPACE]);
+  if (!parsed.success) return [];
+  const mine: { revisionId: string; parts: string[] }[] = [];
+  for (const entry of parsed.data.revisions.slice(0, 32)) {
+    const opened = await pages
+      .openRevisionOf(ctx, page, 'draft', entry.revision as RevisionId)
+      .catch(() => null);
+    // Only parts of a form the protocol names, and not too many to read.
+    const parts = entry.parts.filter((part) => overlapPart(part) !== null).slice(0, 256);
+    if (opened?.record.authorId === ctx.identity.public.id && parts.length > 0) {
+      mine.push({ revisionId: entry.revision, parts });
+    }
+  }
+  return mine;
+}
+
 /** `page read`: one version's title, Markdown and attachments. */
 export async function readPage(io: Io, out: Printer, args: ContentArgs & VersionArgs, deps: Deps) {
-  const read = await withAgent(io, out, args, deps, ({ ctx }) => openVersion(ctx, args));
-  const { info, audience, opened, payload } = read;
+  const read = await withAgent(io, out, args, deps, async ({ ctx }) => {
+    const version = await openVersion(ctx, args);
+    return { ...version, waiting: await waitingForReview(ctx, version) };
+  });
+  const { info, audience, opened, payload, waiting } = read;
   out.result(
     {
       pageId: info.pageId,
@@ -373,6 +405,10 @@ export async function readPage(io: Io, out: Printer, args: ContentArgs & Version
       permissionVersion: info.permissionVersion,
       role: info.role,
       canPublish: info.canPublish,
+      // Drafts of the reader's own a live session folded in, whose parts
+      // that overlapped the session's typing wait for someone to review
+      // (ADR 0015 decision 9): the change isn't lost, so don't make it again.
+      ...(waiting.length > 0 && { waitingForReview: waiting }),
     },
     () => out.raw(payload.markdown),
   );

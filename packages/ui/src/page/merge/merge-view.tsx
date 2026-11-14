@@ -44,11 +44,21 @@ export type MergePictures = {
 };
 
 /**
+ * Review of a note in a live session (ADR 0015 decision 8): the merge
+ * view offers only the parts the note names, ours being the live page,
+ * and hands the choices to `onApply` as they are, with no review step,
+ * since they go in as changes to those parts alone.
+ */
+export type ReviewMode = {
+  onApply: (merge: Merge, choices: Choices) => void;
+};
+
+/**
  * Merging the person's edit with theirs (ADR 0013, decisions 6 and 7), in
  * place of the editor: choosing at each place both changed, then reviewing
  * what saving changes in theirs. Nothing is saved before **Save merged
  * draft**, which hands the payload to `onSave`; **Cancel** leaves
- * everything as it was.
+ * everything as it was. With `review`, Review of a live session's note.
  */
 export function MergeView({
   merge: merged,
@@ -56,12 +66,14 @@ export function MergeView({
   pictures,
   onSave,
   onCancel,
+  review: reviewMode,
 }: {
   merge: Merge;
   theirs: Theirs;
   pictures: MergePictures;
   onSave: (payload: PagePayload) => void;
   onCancel: () => void;
+  review?: ReviewMode;
 }) {
   const words = theirsWords(theirs);
   // With nothing to choose, straight to the review.
@@ -80,8 +92,18 @@ export function MergeView({
   useLayoutEffect(() => heading.current?.focus(), [step]);
 
   const toReview = () => {
-    const resolved = pageMerge.resolve(merge, choices);
-    if (resolved.ok) setState({ merge, review: resolved, unfit: false });
+    // Review puts the choices in part by part, with no review of the whole,
+    // and within a second: one too large to settle here goes as chosen.
+    let resolved: pageMerge.Resolved;
+    try {
+      resolved = reviewMode
+        ? pageMerge.withinTime(1_000, () => pageMerge.resolve(merge, choices, { review: false }))
+        : pageMerge.resolve(merge, choices);
+    } catch {
+      return reviewMode?.onApply(merge, choices);
+    }
+    if (resolved.ok && reviewMode) reviewMode.onApply(merge, choices);
+    else if (resolved.ok) setState({ merge, review: resolved, unfit: false });
     else {
       // Some blocks didn't read as chosen where they went: choose there.
       setChoices(keptChoices(resolved.merge, choices));
@@ -99,9 +121,9 @@ export function MergeView({
           tabIndex={-1}
           className="text-xl font-extrabold outline-none"
         >
-          Merge your changes with {words.with}
+          {reviewMode ? `Review ${words.whose} changes` : `Merge your changes with ${words.with}`}
         </h2>
-        <ol aria-label="Steps" className="flex gap-2 text-sm">
+        <ol aria-label="Steps" className={cn('flex gap-2 text-sm', reviewMode && 'hidden')}>
           {(['choose', 'review'] as const).map((name, index) => (
             <li
               key={name}
@@ -130,7 +152,9 @@ export function MergeView({
           <p className="text-sm text-muted-foreground">
             {state.unfit
               ? 'Some changes didn’t fit where they went. Choose what each should say.'
-              : summaryOf(merge, theirs)}
+              : reviewMode
+                ? `These changes overlapped yours, and the live page kept yours. Choose what each part should say.`
+                : summaryOf(merge, theirs)}
           </p>
           <ol className="grid gap-3">
             {merge.overlaps.map((overlap, index) => (
@@ -140,6 +164,7 @@ export function MergeView({
                 number={`${index + 1} of ${merge.overlaps.length}`}
                 theirs={theirs}
                 pictures={pictures}
+                live={reviewMode !== undefined}
                 choice={choices[overlap.id]}
                 onChoose={(choice) => setChoices((before) => ({ ...before, [overlap.id]: choice }))}
               />
@@ -154,7 +179,7 @@ export function MergeView({
                 Cancel
               </Button>
               <Button disabled={chosen < merge.overlaps.length} onClick={toReview}>
-                Review merged draft
+                {reviewMode ? 'Apply' : 'Review merged draft'}
               </Button>
             </div>
           </div>
@@ -170,6 +195,7 @@ function OverlapCard({
   number,
   theirs,
   pictures,
+  live = false,
   choice,
   onChoose,
 }: {
@@ -177,6 +203,8 @@ function OverlapCard({
   number: string;
   theirs: Theirs;
   pictures: MergePictures;
+  /** Ours is the live page, as Review shows it. */
+  live?: boolean;
   choice: Choice | undefined;
   onChoose: (choice: Choice) => void;
 }) {
@@ -207,7 +235,7 @@ function OverlapCard({
         <p className={cn(MONO, 'text-muted-foreground')}>{overlap.before}</p>
       )}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Side title="Yours">
+        <Side title={live ? 'The live page' : 'Yours'}>
           <Value overlap={overlap} side="yours" pictures={pictures} />
         </Side>
         <Side title={words.side}>
@@ -230,7 +258,7 @@ function OverlapCard({
         />
       )}
       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        {button('yours', 'Use yours', () => 'yours')}
+        {button('yours', live ? 'Keep the live page’s' : 'Use yours', () => 'yours')}
         {button('theirs', words.use, () => 'theirs')}
         {button('both', 'Use both', () => 'both')}
         {button('edit', editing ? 'Edited' : 'Edit…', () => ({ edit: edited ?? draft }))}

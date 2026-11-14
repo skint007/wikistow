@@ -15,7 +15,7 @@ import {
 import { ApiError, outcomeUnknown, type Fetch } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { parseJsonText } from '../json.ts';
-import { openRevisionOf, saveDraft } from '../operations/pages.ts';
+import { openRevisionOf, renamedLinks, saveDraft } from '../operations/pages.ts';
 import { keyTargetFor, treeTarget, withFreshKeys } from '../operations/records.ts';
 import { spaceKeys } from '../operations/keys.ts';
 import type { ClientContext } from '../operations/session.ts';
@@ -203,7 +203,9 @@ export type LiveTransport = {
     joinId: JoinId;
     messages: { message: LiveMessage; covers?: number }[];
     parent?: JoinId;
-  }): Promise<{ positions: (number | null)[] }>;
+    /** A fold grant to ask for, from a main join, or to place, from a further join (section 5.10). */
+    fold?: RevisionId;
+  }): Promise<{ positions: (number | null)[]; grant?: liveRoutes.Grant | null }>;
   snapshot(body: {
     joinId: JoinId;
     parent?: JoinId;
@@ -383,6 +385,7 @@ export function participantPorts(
         revisionId,
         payload: opened.opened.payload,
         authorId: opened.record.authorId,
+        basedOn: opened.record.basedOn,
         region: opened.region,
         keyVersion: opened.keyVersion,
       };
@@ -415,6 +418,8 @@ export function participantPorts(
         }
       }
     },
+    renamed: (payload, basedOn) =>
+      renamedLinks(ctx, { page, basedOn, payload, ...(read && { read }) }),
     access: (refresh) => liveAccess(ctx, page.spaceId, region(), { refresh }),
     visible,
     editor,

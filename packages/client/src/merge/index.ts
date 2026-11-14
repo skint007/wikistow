@@ -40,10 +40,20 @@
 // `mergeFrontmatter` and `writeFrontmatter` the front matter.
 
 export { blocksOf, type Block, type BlockKind, type Container } from './blocks.ts';
-export { mergeBlocks, writeBody, type BlockMerge, type Choice, type Segment } from './body.ts';
+export {
+  mergeBlocks,
+  addsOverlap,
+  MergeTooLarge,
+  withinTime,
+  writeBody,
+  type BlockMerge,
+  type Choice,
+  type Segment,
+} from './body.ts';
 export { mergeFrontmatter, writeFrontmatter, type FrontmatterMerge } from './frontmatter.ts';
 export {
   mergePayloads,
+  narrowMerge,
   resolve,
   reviewOf,
   type Merge,

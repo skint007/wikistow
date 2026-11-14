@@ -959,6 +959,46 @@ export async function saveDraft(
 }
 
 /**
+ * The Markdown a draft save of `payload` on `basedOn` would write once its
+ * links name their pages' current titles (`writeLinks`), or null when no
+ * link would be renamed. A live session's saver saves with no renames, and
+ * makes these in a save's own join (protocol section 5.10, **The
+ * document**), so its drafts never differ from what everyone's document holds.
+ */
+export async function renamedLinks(
+  ctx: ClientContext,
+  {
+    page,
+    basedOn,
+    payload,
+    tree,
+    read,
+  }: {
+    page: PageRef;
+    basedOn: RevisionId;
+    payload: PagePayload;
+    tree?: LinkTree;
+    read?: ReadWikilinks;
+  },
+): Promise<string | null> {
+  const { value: repaired } = repairText(withoutChange(payload));
+  const linkTree = linkTreeFor(ctx, page.spaceId, tree);
+  const opened = await openRevisionOf(ctx, page, 'draft', basedOn);
+  const region = writeRegion({ kind: 'based-on', basedOn: opened.region });
+  const { payload: linked, renamed } = await writeLinks(repaired, {
+    page: { id: page.pageId },
+    audience: 'draft',
+    region,
+    tableRegion: region,
+    tree: linkTree,
+    published: publicationsFor(ctx, page.spaceId),
+    ...(read ? { read } : {}),
+    renames: true,
+  });
+  return renamed.length > 0 && linked.markdown !== repaired.markdown ? linked.markdown : null;
+}
+
+/**
  * The region of the draft `basedOn`. One no longer there was saved over long
  * ago, and draft retention removed it: that is `stale-head` with the page's
  * heads, as for any save on an old base, so the editor offers to keep both.
@@ -1410,10 +1450,27 @@ export async function restorePublished(
   ctx: ClientContext,
   page: PageRef,
   publishedId: RevisionId,
-  { read }: { read?: ReadWikilinks } = {},
+  {
+    read,
+    basedOn,
+    revisionId: given,
+    shape,
+  }: {
+    read?: ReadWikilinks;
+    /** The draft to restore on top of; by default the draft head as loaded now. */
+    basedOn?: RevisionId;
+    /** The version's ID, as a save sent again after a lost answer keeps it. */
+    revisionId?: RevisionId;
+    /**
+     * The payload saved, made from the restored one, its files sealed again
+     * for the draft: a live session's restorer adds `wikistow.live` and the
+     * text as its document then holds it (protocol section 5.10, **Restoring**).
+     */
+    shape?: (restored: PagePayload) => PagePayload;
+  } = {},
 ): Promise<Written> {
   const generation = ctx.revisions.generation;
-  const { heads } = await loadPage(ctx, page.pageId);
+  const { heads } = basedOn ? { heads: { draftHead: basedOn } } : await loadPage(ctx, page.pageId);
   if (!heads.draftHead) throw new ApiError(404, 'not-found', 'There is no draft to restore into');
   const published = await openRevisionOf(ctx, page, 'published', publishedId);
   const draft = await openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true });
@@ -1440,18 +1497,20 @@ export async function restorePublished(
     ...(read ? { read } : {}),
   });
   const written = await writePage(ctx, page, async (keys, target) => {
-    const restored = await resealAll(ctx, page, payload, {
+    const resealed = await resealAll(ctx, page, payload, {
       from: 'published',
       to: 'draft',
       earlier,
       writing: writingFor(ctx, keys, region, target),
     });
+    const restored = shape ? shape(resealed) : resealed;
     const commit = commitFor(ctx, keys, page, {
       audience: 'draft',
       basedOn: heads.draftHead,
       payload: restored,
       region,
       target,
+      ...(given && { revisionId: given }),
     });
     const result = await ctx.api.call(pageRoutes.saveDraft, {
       params: { pageId: page.pageId },

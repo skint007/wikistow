@@ -16,7 +16,9 @@ import * as pages from './operations/pages.ts';
 import { indexSpaces, nameOf, readableSpaces } from './operations/search.ts';
 import type { ClientContext } from './operations/session.ts';
 import * as spaces from './operations/spaces.ts';
-import { checkPayloadSize, newPayload, revisePayload } from './payload.ts';
+import { withinTime } from './merge/body.ts';
+import { mergePayloads, resolve } from './merge/payload.ts';
+import { checkPayloadSize, newPayload, revisePayload, type PagePayload } from './payload.ts';
 import { shownTitle, treeInOrder } from './tree.ts';
 
 type Tree = Awaited<ReturnType<typeof spaces.loadTree>>;
@@ -493,23 +495,40 @@ export async function applyProposal(
       case 'edit-page': {
         const { spaceId, pageId, base } = proposal;
         const info = await pages.loadPage(ctx, pageId);
-        if (info.heads.draftHead !== base) return CHANGED;
         const stale = await placeChanged(ctx, { ...proposal, parentId: info.parentId });
         if (stale) return stale;
         const page = { spaceId, pageId };
         const opened = await pages.openRevisionOf(ctx, page, 'draft', base, { fresh: true });
-        await pages.saveDraft(ctx, {
-          page,
-          basedOn: base,
-          basedOnRegion: opened.region,
-          // Everything else in the draft, attachments and extensions included, is carried over
-          // (but `wikistow.change`, which only a publication holds).
-          payload: revisePayload(opened.opened, {
-            title: proposal.title,
-            markdown: proposal.markdown,
-          }),
+        // Everything else in the draft, attachments and extensions included, is carried over
+        // (but `wikistow.change`, which only a publication holds).
+        let edit = revisePayload(opened.opened, {
+          title: proposal.title,
+          markdown: proposal.markdown,
         });
-        return { status: 'done', spaceId, pageId, folderId: null };
+        let from = base;
+        let head = info.heads.draftHead;
+        // While people edit the page live its head moves every few seconds: the
+        // edit is merged onto the head from the draft it was made on, and onto
+        // each newer head from the last (ADR 0015 decision 8).
+        for (let tries = 0; tries < 5 && head; tries++) {
+          const onto = head === from ? null : await mergedOnto(ctx, page, from, edit, head);
+          if (onto === 'changed') return CHANGED;
+          try {
+            await pages.saveDraft(ctx, {
+              page,
+              basedOn: head,
+              ...(onto === null && { basedOnRegion: opened.region }),
+              payload: onto?.payload ?? edit,
+            });
+            return { status: 'done', spaceId, pageId, folderId: null };
+          } catch (error) {
+            if (!(error instanceof ApiError && error.code === 'stale-head')) throw error;
+            if (onto) edit = onto.payload;
+            from = head;
+            head = (await pages.loadPage(ctx, pageId)).heads.draftHead;
+          }
+        }
+        return CHANGED;
       }
       case 'move': {
         const { spaceId, nodeId, parentId, fromParentId } = proposal.preview;
@@ -528,6 +547,44 @@ export async function applyProposal(
     }
   } catch (error) {
     return failure(error);
+  }
+}
+
+/**
+ * `edit`, made on the draft `from`, merged onto the draft `head` by block
+ * (ADR 0013), when `head` descends from `from` and nothing overlaps;
+ * 'changed' otherwise, and the agent proposes again.
+ */
+async function mergedOnto(
+  ctx: ClientContext,
+  page: { spaceId: SpaceId; pageId: PageId },
+  from: RevisionId,
+  edit: PagePayload,
+  head: RevisionId,
+): Promise<{ payload: PagePayload } | 'changed'> {
+  let at: RevisionId | null = head;
+  let theirs: PagePayload | null = null;
+  for (let steps = 0; at && at !== from && steps < 64; steps++) {
+    const opened = await pages.openRevisionOf(ctx, page, 'draft', at);
+    if (opened.opened.kind !== 'current') return 'changed';
+    theirs ??= opened.opened.payload;
+    at = opened.record.basedOn as RevisionId | null;
+  }
+  if (at !== from || !theirs) return 'changed';
+  const base = await pages.openRevisionOf(ctx, page, 'draft', from);
+  if (base.opened.kind !== 'current') return 'changed';
+  const was = base.opened.payload;
+  const onto = theirs;
+  // Within a second, as a fold's: one too large to merge here is proposed again.
+  try {
+    return withinTime(1_000, () => {
+      const merge = mergePayloads(was, edit, onto);
+      if (merge.overlaps.length > 0) return 'changed' as const;
+      const resolved = resolve(merge, {}, { review: false });
+      return resolved.ok ? { payload: resolved.payload } : ('changed' as const);
+    });
+  } catch {
+    return 'changed';
   }
 }
 

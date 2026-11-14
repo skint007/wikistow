@@ -74,6 +74,7 @@ class FakeParticipant {
       tooLarge: null,
       people: [],
       provisional: false,
+      notes: [],
     };
   }
   start() {}

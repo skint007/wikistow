@@ -60,8 +60,10 @@ export type PagePanelProps = {
   draft: {
     flush: () => Promise<void>;
     reopen: () => Promise<void>;
-    /** Save, and leave the page's live session, before a version is restored (ADR 0015 step 6). */
+    /** Save, and leave the page's live session, before a version is restored from outside it. */
     beforeRestore?: () => Promise<void>;
+    /** Restore the published version through the page's live session; false when it can't. */
+    restoreLive?: (publishedId: RevisionId) => Promise<boolean>;
   } | null;
 };
 
@@ -85,6 +87,7 @@ export const OWN_PANELS: readonly OwnPanel[] = [
         canRestore={editor}
         showing={published}
         beforeRestore={draft?.beforeRestore ?? draft?.flush}
+        restoreLive={draft?.restoreLive}
         onRestored={draft?.reopen}
       />
     ),

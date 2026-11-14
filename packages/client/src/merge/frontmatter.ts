@@ -8,7 +8,7 @@ import {
   type Property,
   type PropertyScalar,
 } from '../markdown/index.ts';
-import type { Choice } from './body.ts';
+import { checkTime, type Choice } from './body.ts';
 
 /** A front matter block as `splitFrontmatter` gives it, or null for none. */
 type Block = string | null;
@@ -136,6 +136,7 @@ export function mergeFrontmatter(base: Block, yours: Block, theirs: Block): Fron
   const combined = { yours: 0, theirs: 0 };
   const names = [...new Set([...y.entries, ...t.entries, ...b.entries].map(({ key }) => key))];
   for (const key of names) {
+    checkTime();
     const [be, ye, te] = [find(b, key), find(y, key), find(t, key)];
     const yoursChanged = ye?.value !== be?.value;
     const theirsChanged = te?.value !== be?.value;
@@ -195,6 +196,7 @@ export function writeFrontmatter(
   );
   let edited = false;
   for (const change of merge.keys) {
+    checkTime();
     if (change.from === 'items') {
       const edit = setProperty(
         block,
@@ -273,4 +275,40 @@ export function frontmatterPieces(block: Block): { text: string; key: string }[]
     })),
     { text: block.slice(read.closeStart), key: 'close' },
   ];
+}
+
+/**
+ * `ours` with the lines of each of `keys` as `from` has them, or taken out
+ * where `from` has no such key, and every other line as it is: as Review
+ * puts in theirs at the properties chosen, and nothing else. Undefined
+ * where either block isn't keys, or `ours` has no block to put one in.
+ */
+export function takeKeys(ours: Block, from: Block, keys: readonly string[]): Block | undefined {
+  // No block on the page: one made of the chosen keys' lines alone.
+  if (ours === null) {
+    const f = readKeys(from);
+    if (!f) return undefined;
+    const lines = f.entries
+      .filter((entry) => keys.includes(entry.key))
+      .map((entry) => entry.lines.replace(/(?<!\n)$/, '\n'));
+    return lines.length > 0 ? `---\n${lines.join('')}---\n` : null;
+  }
+  const [o, f] = [readKeys(ours), readKeys(from)];
+  if (!o || !f) return undefined;
+  type Edit = { start: number; end: number; text: string };
+  const edits: Edit[] = [];
+  for (const key of new Set(keys)) {
+    const have = o.entries.find((entry) => entry.key === key);
+    const want = f.entries.find((entry) => entry.key === key);
+    const lines = want ? want.lines.replace(/(?<!\n)$/, '\n') : '';
+    if (have) edits.push({ start: have.start, end: have.end, text: lines });
+    else if (want) edits.push({ start: o.closeStart, end: o.closeStart, text: lines });
+  }
+  let block = ours;
+  for (const { start, end, text } of edits.sort((a, b) => b.start - a.start || b.end - a.end)) {
+    block = block.slice(0, start) + text + block.slice(end);
+  }
+  // A block left with no keys, where it had some, goes, as a whole merge drops it.
+  const left = readKeys(block);
+  return left && left.entries.length === 0 && o.entries.length > 0 ? null : block;
 }

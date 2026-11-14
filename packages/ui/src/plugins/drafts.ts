@@ -69,15 +69,25 @@ export function editorDrafts() {
     await draft.flush();
     await sentFirst(page);
     const head = draft.saved();
-    if (head === null || (base !== null && base !== head)) {
+    const changes = payloadChanges(caller, change);
+    const behind = head === null || (base !== null && base !== head);
+    // In a live session the draft moves while people type: a change made on
+    // an older draft is merged from it, unless it overlaps (ADR 0015 decision 8).
+    if (behind && (base === null || !draft.reviseFrom)) {
       throw new PluginError('conflict', 'This draft changed since that revision; read it again');
     }
-    const changes = payloadChanges(caller, change);
     // Refused before the editor gets it, which would hold it unsaved.
     draft.fits(changes);
     savingFor.set(page.pageId, caller.id);
     try {
-      draft.revise(changes);
+      if (behind && base !== null && draft.reviseFrom) {
+        if (!(await draft.reviseFrom(base, changes))) {
+          throw new PluginError(
+            'conflict',
+            'This draft changed since that revision; read it again',
+          );
+        }
+      } else draft.revise(changes);
       await draft.flush();
     } finally {
       // A change the draft already had saves nothing, and must not mark the next save.

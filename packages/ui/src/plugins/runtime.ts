@@ -75,6 +75,13 @@ export type OpenDraft = {
   fits: (changes: PayloadChanges) => void;
   /** Change the draft as the person's own edit, which the editor shows and saves. */
   revise: (changes: PayloadChanges) => void;
+  /**
+   * In a live session, change the draft as the person's own edit made on
+   * the older draft `base`, merged from it into the page as it is now
+   * (ADR 0015 decision 8). False when it overlaps what changed since, or
+   * the draft isn't in a session.
+   */
+  reviseFrom?: (base: string, changes: PayloadChanges) => Promise<boolean>;
   /** What is selected where the cursor is, as Markdown, or `''`. */
   selection: () => string;
   /** Put Markdown in at the cursor as the person's own edit. */

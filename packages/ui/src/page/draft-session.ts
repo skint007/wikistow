@@ -22,9 +22,11 @@ import { ApiError } from '@wikistow/client/api';
 import type {
   LiveParticipant,
   NotJoined,
+  OpenedNote,
   ParticipantState,
   ParticipantStatus,
 } from '@wikistow/client/live';
+import { pageMerge } from '@wikistow/client';
 import { ATTACHMENT_SCHEME } from './attachments';
 import { Autosave, type SaveStatus } from './autosave';
 import { lineBreakOf, type EditorSurfaceHandle, type MarkdownParts } from './editor/surface';
@@ -413,6 +415,43 @@ export class DraftSession {
     if (content.markdown !== undefined && content.markdown !== this.#content.markdown)
       this.#surface.current?.replace(content.markdown);
     this.#change(content);
+  }
+
+  /**
+   * In a live session, a change made on an older draft, whose payload was
+   * `base`, merged by block from it into the page as it is now, as the
+   * person's change (ADR 0015 decision 8). False, changing nothing, where
+   * it overlaps what changed since.
+   */
+  reviseFrom(base: PagePayload, changes: PayloadChanges): boolean {
+    if (!this.#participant) return false;
+    this.#pull();
+    const current = this.#current();
+    const strip = (payload: PagePayload) => ({ ...payload, extensions: held(payload.extensions) });
+    const yours = revisePayload({ kind: 'current', payload: base }, changes);
+    // Within a second, as a fold's: one too large to merge here is refused.
+    let resolved: pageMerge.Resolved;
+    try {
+      resolved = pageMerge.withinTime(1_000, () => {
+        const merge = pageMerge.mergePayloads(strip(base), strip(yours), strip(current));
+        if (merge.overlaps.length > 0) return { ok: false, merge } as const;
+        return pageMerge.resolve(merge, {}, { review: false });
+      });
+    } catch {
+      return false;
+    }
+    if (!resolved.ok) return false;
+    const { title, markdown, attachments } = resolved.payload;
+    this.#reviseLive(
+      {
+        title,
+        markdown,
+        attachments,
+        extensions: over(current.extensions, held(resolved.payload.extensions)),
+      },
+      { byLines: true },
+    );
+    return true;
   }
 
   removeAttachment(id: string) {
@@ -828,6 +867,65 @@ export class DraftSession {
     void this.#autosave.flush();
   }
 
+  /**
+   * Restore a version through the page's live session, when this draft is
+   * in one (protocol section 5.10, **Restoring**): `write` restores it with
+   * the shape and base the session gives. Whether it did; when it didn't,
+   * nothing changed, and the restore goes as from outside the session.
+   */
+  async restoreLive(write: Parameters<LiveParticipant['restoreThrough']>[0]): Promise<boolean> {
+    const participant = this.#participant;
+    if (!participant) return false;
+    this.#pull();
+    const restored = await participant.restoreThrough(write);
+    if (restored) this.#fromDocument(true);
+    return restored;
+  }
+
+  // ---- Notes waiting for review (ADR 0015 decision 8) ----
+
+  /** Open a note of the live session for Review; null when it can't be, or this draft isn't in one. */
+  async openNote(revision: RevisionId): Promise<OpenedNote | null> {
+    return (await this.#participant?.openNote(revision)) ?? null;
+  }
+
+  /** The merge Review shows for an opened note. */
+  reviewMerge(opened: OpenedNote): pageMerge.Merge | null {
+    try {
+      return this.#participant?.reviewMerge(opened) ?? null;
+    } catch {
+      // Too large to merge here (`MergeTooLarge`): it can't be reviewed.
+      return null;
+    }
+  }
+
+  /**
+   * Put Review's choices in as the person's change to those parts of the
+   * page, and show it in the editor. False when they no longer fit.
+   */
+  applyReview(
+    opened: OpenedNote,
+    merge: pageMerge.Merge,
+    choices: Readonly<Record<string, pageMerge.Choice>>,
+  ): boolean {
+    const participant = this.#participant;
+    if (!participant) return false;
+    this.#pull();
+    let applied: boolean;
+    try {
+      applied = participant.applyReview(opened, merge, choices);
+    } catch {
+      applied = false;
+    }
+    if (applied) this.#fromDocument(true);
+    return applied;
+  }
+
+  /** Dismiss a note: theirs in its parts is dropped for good. */
+  dismissNote(revision: RevisionId) {
+    this.#participant?.dismissNote(revision);
+  }
+
   /** The vault locked: leave the live session at once, its key wiped, saving nothing more. */
   lock() {
     const participant = this.#participant;
@@ -1226,7 +1324,7 @@ export class DraftSession {
 
   // A change from outside the editor, in a live session: attachments
   // added go in through this app's own save of them, the rest at once.
-  #reviseLive(changes: PayloadChanges) {
+  #reviseLive(changes: PayloadChanges, { byLines = false }: { byLines?: boolean } = {}) {
     const participant = this.#participant;
     if (!participant) return;
     const { extensions = {}, attachments, markdown, title } = changes;
@@ -1250,7 +1348,7 @@ export class DraftSession {
     };
     // The editor shows it as the document takes it in, never before.
     if (added.length === 0) {
-      participant.change({ texts, entries });
+      participant.change({ texts, entries }, { byLines });
       return this.#fromDocument(true);
     }
     // With a file: one change, its text too, saved by this app first (section 5.10, **Files**).

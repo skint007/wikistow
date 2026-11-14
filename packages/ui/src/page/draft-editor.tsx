@@ -5,12 +5,13 @@ import {
   mayReferOtherPages,
   PageId,
   type ClientContext,
-  type pageOperations,
+  pageOperations,
   type PagePayload,
   type PayloadChanges,
   type Region,
   type RevisionId,
 } from '@wikistow/client';
+import { RevisionId as RevisionIdSchema } from '@wikistow/contracts';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { Paperclip, Trash2 } from 'lucide-react';
@@ -48,8 +49,9 @@ import { useMovedLinks } from './moved-links';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession, type Queued } from './use-draft-session';
-import type { DraftSnapshot } from './draft-session';
+import type { DraftSession, DraftSnapshot } from './draft-session';
 import { useLiveSource } from './live/use-live-source';
+import { LiveNotes, useReviewing } from './live/live-notes';
 import { peopleQuery } from '../sharing/people';
 import { MergeView } from './merge/merge-view';
 import { openOnlineMerge, openWindowMerge, type OpenedMerge } from './merge/open-merge';
@@ -70,8 +72,20 @@ export type DraftEditorHandle = {
    * again on it, joining a new one (ADR 0015 step 6).
    */
   beforeRestore(): Promise<void>;
+  /**
+   * Restore a version through the page's live session, as this person's
+   * change (ADR 0015 decision 8); false when this draft isn't in one, or it
+   * didn't go in, and the restore goes as before.
+   */
+  restoreLive(write: Parameters<DraftSession['restoreLive']>[0]): Promise<boolean>;
   /** Change the draft from outside the editor, as the cover pickers do, given the draft as it is now. */
   revise(changes: (current: PagePayload) => PayloadChanges): void;
+  /**
+   * In a live session, a change made on the older draft `base`, merged
+   * from it into the page as it is now; false where it overlaps, or the
+   * draft isn't in a session.
+   */
+  reviseFrom(base: string, changes: PayloadChanges): Promise<boolean>;
   /** Work saves and leaving wait for, as for a file uploading: a banner image, say. */
   track(work: Promise<unknown>): void;
   /**
@@ -226,7 +240,18 @@ export function DraftEditor({
         await session.leaveLive();
         await session.saveOrThrow();
       },
+      restoreLive: (write) => session.restoreLive(write),
       revise: (changes) => session.revise(changes),
+      reviseFrom: async (base, changes) => {
+        if (!session.participant) return false;
+        const parsed = RevisionIdSchema.safeParse(base);
+        if (!parsed.success) return false;
+        const opened = await pageOperations
+          .openRevisionOf(ctx, page, 'draft', parsed.data)
+          .catch(() => null);
+        if (opened?.opened.kind !== 'current') return false;
+        return session.reviseFrom(opened.opened.payload, changes);
+      },
       track: (work) => session.track(work),
       checkSize: (changes) => session.checkSize(changes),
       saved: () => session.savedRevision(),
@@ -246,6 +271,8 @@ export function DraftEditor({
   const mine = session.hasUnsaved() || draftWaiting;
   const canMerge = snapshot.status === 'conflict' && mine;
   const merge = merging.state?.status === 'ready' ? merging.state.opened : null;
+  const reviewing = useReviewing(session);
+  const review = reviewing.state?.status === 'ready' ? reviewing.state : null;
   const mergeButton = useRef<HTMLButtonElement>(null);
   // Once the conflict is resolved another way, a merge that failed is forgotten.
   const { cancel: forgetMerge } = merging;
@@ -273,6 +300,21 @@ export function DraftEditor({
           }}
         />
       )}
+      {review && (
+        <MergeView
+          key={review.opened.revision}
+          merge={review.merge}
+          theirs={review.theirs}
+          pictures={{
+            ctx,
+            page,
+            attachments: [...review.opened.ours.attachments, ...review.opened.theirs.attachments],
+          }}
+          onCancel={reviewing.cancel}
+          onSave={() => {}}
+          review={{ onApply: reviewing.apply }}
+        />
+      )}
       {merging.state?.status === 'loading' && (
         <p role="status" className="text-sm text-muted-foreground">
           Merging…
@@ -282,7 +324,7 @@ export function DraftEditor({
       <div
         className={cn(
           'flex flex-1 flex-col gap-4',
-          merging.state?.status !== 'failed' && merging.state && 'hidden',
+          ((merging.state?.status !== 'failed' && merging.state) || review) && 'hidden',
         )}
       >
         {/* Until it saves, or someone else's save stops it saving. */}
@@ -377,6 +419,18 @@ export function DraftEditor({
           }
         />
         <LiveNote ctx={ctx} live={snapshot.live} />
+        <LiveNotes
+          ctx={ctx}
+          notes={snapshot.live?.kind === 'live' ? snapshot.live.status.notes : []}
+          busy={reviewing.state?.status === 'opening' ? reviewing.state.revision : null}
+          onReview={reviewing.start}
+          onDismiss={(note) => session.dismissNote(note.revision)}
+        />
+        {reviewing.state?.status === 'message' && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {reviewing.state.text}
+          </p>
+        )}
         {links.error && (
           <p role="alert" className="text-sm text-destructive">
             {links.error}
