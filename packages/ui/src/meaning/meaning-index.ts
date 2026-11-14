@@ -163,8 +163,8 @@ export class MeaningIndexer {
   #unsure = false;
   /** Reading the kept file failed: this session writes nothing over it. */
   #unread = false;
-  /** A write came while no word index was shown: it follows the next. */
-  #deferred = false;
+  /** A write came while no whole word index was shown: it follows the next, at once if it was to be. */
+  #deferred: 'now' | 'later' | null = null;
   /** Pages passed over as their passages failed twice, by the version that failed, and the first failure. */
   readonly #failed = new Map<string, RevisionId>();
   #failing: { key: string; revisionId: RevisionId } | null = null;
@@ -255,8 +255,8 @@ export class MeaningIndexer {
     // page left, or another's version replaced it. Only a draft this person
     // saved over waits, which happens once its next version is embedded.
     const letGo = !partial && this.#prune();
-    if (letGo || this.#deferred) this.#keep(letGo);
-    this.#deferred = false;
+    if (letGo || this.#deferred) this.#keep(letGo || this.#deferred === 'now');
+    this.#deferred = null;
     this.#plan();
     this.#wake();
   }
@@ -344,9 +344,10 @@ export class MeaningIndexer {
   async flush(): Promise<void> {
     if (this.#stopped) return;
     if (this.#keeping) {
+      const { now } = this.#keeping;
       this.#keeping.cancel();
       this.#keeping = null;
-      void this.#writeNow();
+      void this.#writeNow(now);
     }
     await this.#writing;
   }
@@ -577,7 +578,11 @@ export class MeaningIndexer {
       let vector = this.#byHash.get(passage.hash) ?? this.#reusable.get(key)?.get(passage.hash);
       if (!vector) {
         await this.#pace();
-        if (this.#given(key, page)) return;
+        if (this.#given(key, page)) {
+          // What it made so far serves the page's next version.
+          if (!this.#stopped) this.#reuse(key, made);
+          return;
+        }
         const started = this.#clock.now();
         const { vectors } = await this.#work.embedder.embed('passage', [passage.text]);
         const ended = this.#clock.now();
@@ -633,7 +638,7 @@ export class MeaningIndexer {
       now,
       cancel: this.#clock.after(wait, () => {
         this.#keeping = null;
-        void this.#writeNow();
+        void this.#writeNow(now);
       }),
     };
   }
@@ -642,9 +647,9 @@ export class MeaningIndexer {
   #writing: Promise<void> | null = null;
 
   /** Write now, after any write under way, so one never overtakes another. */
-  #writeNow(): Promise<void> {
+  #writeNow(now: boolean): Promise<void> {
     const after = this.#writing ?? Promise.resolve();
-    const writing = after.then(() => this.#write()).catch(() => {});
+    const writing = after.then(() => this.#write(now)).catch(() => {});
     this.#writing = writing;
     void writing.then(() => {
       if (this.#writing === writing) this.#writing = null;
@@ -652,18 +657,22 @@ export class MeaningIndexer {
     return writing;
   }
 
-  async #write() {
+  /**
+   * Seal and keep the vectors. Sealing takes some milliseconds a thousand
+   * pages, so in a moment free, unless `now`: a version let go of goes from
+   * the file before a lock can come and leave it there.
+   */
+  async #write(now: boolean) {
     await this.#opened;
     const file = await this.#work.file();
-    // Sealing takes some milliseconds a thousand pages: in a moment free.
-    if (file && !this.#stopped) await this.#work.idle();
+    if (file && !this.#stopped && !now) await this.#work.idle();
     // Stopped meanwhile, the keys may be gone: nothing is sealed with them.
     if (!file || this.#stopped) return;
     // Kept file unread: nothing written over it, this session.
     if (this.#unread) return;
     // Built afresh as access changed: kept once a whole index lets go.
     if (!this.#index || this.#unsure) {
-      this.#deferred = true;
+      this.#deferred = now || this.#deferred === 'now' ? 'now' : 'later';
       return;
     }
     await file.write(this.#work.seal(this.#kept));

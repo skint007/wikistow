@@ -387,11 +387,35 @@ describe('MeaningIndexer', () => {
     expect([...fake.writes.at(-1)!.keys()]).toEqual([rev('soups-2')]);
   });
 
-  it('a page that leaves takes its vectors with it, and the file is written at once', async () => {
+  it('a page edited between its passages embeds only the passage that changed', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([soupBook]));
+    // The first passage done, resting before the second.
+    await vi.advanceTimersByTimeAsync(EMBED_MS + 10);
+    expect(fake.embedded).toHaveLength(1);
+    const changed = {
+      ...soupBook,
+      revisionId: 'soups-2',
+      text: [section('Bean soup', 'soup', 180), section('Pea soup', 'soup', 180)].join('\n'),
+    };
+    indexer.indexChanged(wordIndex([changed]));
+    await settle();
+    expect(fake.embedded).toHaveLength(2);
+    expect(fake.embedded[1]).toMatch(/^Soups\n# Pea soup\n/);
+  });
+
+  it('a page that leaves takes its vectors with it, and the file is written at once', async () => {
+    const fake = fakeWork();
+    let idle = true;
+    const indexer = new MeaningIndexer({
+      ...fake.work,
+      // At once means without waiting for a moment free.
+      idle: () => (idle ? Promise.resolve() : new Promise(() => {})),
+    });
     indexer.indexChanged(wordIndex([beach, boiler]));
     await settle();
+    idle = false;
     const writes = fake.writes.length;
     indexer.indexChanged(wordIndex([boiler]));
     await vi.advanceTimersByTimeAsync(0);

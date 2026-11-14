@@ -5,7 +5,7 @@ import { desktop } from '../desktop';
 import { builtFromKept, onDraftSaved, searchIndexKey, searchIndexQuery } from '../data/queries';
 import { useDeviceSwitch } from '../shell/device-switch';
 import { PLAIN, vaultStore } from '../vault/store';
-import { Embedder } from './embedder';
+import { Embedder, forgetModel } from './embedder';
 import { dropMeaningIndex, meaningIndexFile } from './meaning-file';
 import { MeaningIndexer, type MeaningStatus } from './meaning-index';
 import { MEANING_MODEL } from './model';
@@ -111,7 +111,8 @@ export function useMeaningStatus(): MeaningStatus | null {
  * Run the queue while `ctx` is open and search by meaning is on here; stop
  * it, dropping the vectors and the worker, when the vault locks or it goes
  * off. Where it is off or not offered, but for a phone's layout, the
- * vectors kept go too.
+ * vectors kept go too, and where it is off, the model's files a browser
+ * kept.
  */
 export function useMeaningIndex(ctx: ClientContext | null) {
   const queryClient = useQueryClient();
@@ -137,8 +138,13 @@ export function useMeaningIndex(ctx: ClientContext | null) {
     });
   }, [ctx, on, queryClient]);
   // A phone's layout may be a narrow window, which widens again: kept.
+  // In every tab, after its own queue stopped above, so none puts back
+  // what goes: the vectors, and when it is off, the model's files.
   const unkept = dropsKeptVectors(offer, on);
   useEffect(() => {
     if (unkept) void dropMeaningIndex();
   }, [unkept]);
+  useEffect(() => {
+    if (!switchOn) void forgetModel().catch(() => {});
+  }, [switchOn]);
 }

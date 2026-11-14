@@ -31,8 +31,6 @@ import { askBeforeMoves, useAskBeforeMoves } from '../../../page/ask-before-move
 import { showProperties, useShowProperties } from '../../../page/properties-shown';
 import { TableOfContents, type Heading } from '../../../page/table-of-contents';
 import { useMeaningStatus } from '../../../meaning/background';
-import { forgetModel } from '../../../meaning/embedder';
-import { dropMeaningIndex } from '../../../meaning/meaning-file';
 import { meaningSettingState, searchByMeaning, useMeaningOffer } from '../../../meaning/setting';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
@@ -312,10 +310,9 @@ function SearchByMeaning() {
   const on = useDeviceSwitch(searchByMeaning());
   const offer = useMeaningOffer();
   const status = useMeaningStatus();
-  function change(next: boolean) {
-    searchByMeaning().set(next);
-    if (!next) void Promise.all([dropMeaningIndex(), forgetModel().catch(() => {})]);
-  }
+  // Turned off, each tab stops its queue, then deletes the vectors kept and
+  // the model's files (`useMeaningIndex`).
+  const change = (next: boolean) => searchByMeaning().set(next);
   // Not on phones yet; where it needs Every page, it says so, with no switch.
   if (offer === null || offer === 'phone') return null;
   return (
