@@ -148,15 +148,17 @@ const text: Handle = (node: Text, parent, state, info) => {
     const bare = slashes.length % 2 === 0;
     return bare && (node.data?.nearMath || !/\d/.test(next)) ? `${slashes}\\$` : dollar;
   });
-  if (equals.bare) return priced;
+  // The top-level block it's in.
+  const block = state.indexStack[0] ?? -1;
+  if (equals.bare.has(block)) return priced;
   const safe = escapeEquals(priced, info.before, info.after);
-  equals.escaped ||= safe !== priced;
+  if (safe !== priced) equals.escaped.add(block);
   return safe;
 };
 
-// Whether `text` is to leave each `=` as it is, and whether it escaped one
-// (`whole`).
-const equals = { bare: false, escaped: false };
+// The top-level blocks whose text `text` is to leave each `=` in as it is,
+// and those it escaped one in (`whole`).
+const equals = { bare: new Set<number>(), escaped: new Set<number>() };
 
 // Whether `node`, not text, is or holds a dollar that could close math
 // opened in the text before it: inline math, or a dollar in code, a link's
@@ -258,29 +260,48 @@ function autolinked(node: Link, state: State): boolean {
 
 // The document, with no link split (`wholeLinks`).
 type RootArgs = Parameters<typeof defaultHandlers.root>;
-// Its text marked where it's near inline math (`markNearMath`). Where text
-// had a `=` escaped that could make a highlight (`escapeEquals`), it's
-// written with none escaped instead if that reads the same, as it does
-// unless another `==` in the block pairs with it: `a ==> b` and `x==y`
-// stay as typed.
+
+/**
+ * Its text marked where it's near inline math (`markNearMath`). A block
+ * whose text had a `=` escaped that could make a highlight
+ * (`escapeEquals`) is written with none escaped instead if, written alone
+ * so, it reads the same, as it does unless another `==` in it pairs with
+ * one: `a ==> b` and `x==y` stay as typed, each block as it reads itself.
+ * Writing it again starts from the state remark had, so a list's bullet
+ * is the one it would have been.
+ */
 function whole(...[node, parent, state, info]: RootArgs) {
   const tree = wholeLinks(node) as Root;
   markNearMath(tree);
-  equals.escaped = false;
-  const written = defaultHandlers.root(tree, parent, state, info);
-  if (!equals.escaped) return written;
-  equals.bare = true;
-  let bare: string;
-  try {
-    bare = defaultHandlers.root(tree, parent, state, info);
-  } finally {
-    equals.bare = false;
-  }
-  try {
-    return meaningOf(bare) === meaningOf(written) ? bare : written;
-  } catch {
-    return written;
-  }
+  const bullets = { current: state.bulletCurrent, last: state.bulletLastUsed };
+  const write = (root: Root, bare: Iterable<number>) => {
+    state.bulletCurrent = bullets.current;
+    state.bulletLastUsed = bullets.last;
+    equals.bare = new Set(bare);
+    equals.escaped = new Set();
+    try {
+      return defaultHandlers.root(root, parent, state, info);
+    } finally {
+      equals.bare = new Set();
+    }
+  };
+  const written = write(tree, []);
+  const escaped = [...equals.escaped];
+  const after = { current: state.bulletCurrent, last: state.bulletLastUsed };
+  const bare = escaped.filter((i) => {
+    const block = tree.children[i];
+    if (!block) return false;
+    const alone: Root = { type: 'root', children: [block] };
+    try {
+      return meaningOf(write(alone, [0])) === meaningOf(write(alone, []));
+    } catch {
+      return false;
+    }
+  });
+  if (bare.length > 0) return write(tree, bare);
+  state.bulletCurrent = after.current;
+  state.bulletLastUsed = after.last;
+  return written;
 }
 
 // Otherwise `<…>` where its text is its address and that reads as it,

@@ -215,6 +215,14 @@ describe('highlights and colours in the visual editor', () => {
       expect(t.serialize(doc)).toBe(written);
       expect(writesAsShown(doc, written, t.parse)).toBe(true);
     }
+    // Each block as it reads itself, and lists with the bullets they'd have.
+    for (const page of [
+      'if x==y then\n\na \\=\\=> b and x\\=\\=y\n',
+      '- a==b\n- c==d\n',
+      '1. x==y\n2. z\n',
+      '- a\n\nx==y\n\n- b\n',
+    ])
+      expect(t.serialize(t.parse(page))).toBe(page);
   });
 
   it('leave a held space out of a mark before a soft line break', async () => {
