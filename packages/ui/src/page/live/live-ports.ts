@@ -121,9 +121,13 @@ export function livePorts(
       // Marks, keys and owners another tab changed, or this one.
       if (ctx.kept) stops.push(ctx.kept.onChange(() => void participant.recheck()));
       // Offline: a stream may hang rather than break, so it is taken as broken at once.
+      let online = connection.get().online;
       stops.push(
         connection.subscribe(() => {
-          if (!connection.get().online) participant.offline();
+          const now = connection.get().online;
+          // As it goes offline, once: a stream opened since is the server answering.
+          if (online && !now) participant.offline();
+          online = now;
         }),
       );
       // Who saves: visible tabs first.

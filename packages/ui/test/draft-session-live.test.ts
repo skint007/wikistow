@@ -178,6 +178,12 @@ class FakeParticipant {
   placedThrough() {
     return 0;
   }
+  readonly startedFrom = R0;
+  /** Whether a compared head holds a document's state: here, once the session shows saved. */
+  holds: boolean | null = null;
+  headHolds() {
+    return this.holds ?? this.#status.saved;
+  }
   async sentThrough() {
     return { joinId: this.ownJoin, seq: 9 };
   }
@@ -555,9 +561,9 @@ describe('putting typing back from a live session', () => {
     expect(held()).toBe(0);
   });
 
-  it('leaves a waiting change based on the head to the queue, for the saver to fold in', async () => {
+  it('leaves a change made with no session, on the head, to the queue, for the saver to fold in', async () => {
     const opened = page('A\n\nB, mine');
-    const entry = waitingEntry(opened, page('A\n\nB'));
+    const entry = { ...waitingEntry(opened, page('x')), live: null, payload: page('A\n\nB') };
     const { draft, joins, held } = session(opened, page('A\n\nB, theirs'), { entry });
     await draft.joinLive();
     expect(joins[0]?.closed).toBe(true);
@@ -656,6 +662,23 @@ describe('putting a waiting change in, carefully', () => {
     expect(held()).toBe(0);
   });
 
+  it('keeps a change put in until a compared draft holds all it put in, not only this join’s', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, withdrawn } = session(opened, page('A\n\nB\n\nC'), { entry });
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    // Saved, as this join counts it, but the old join's typing isn't in a draft yet.
+    live.holds = false;
+    live.set({ saved: true });
+    expect(withdrawn).toEqual([]);
+    expect(draft.hasUnsaved()).toBe(false);
+    live.holds = true;
+    live.set({ saved: true });
+    expect(withdrawn).toEqual([5]);
+  });
+
   it('withdraws a change put in when leaving saves it, before the page showed it saved', async () => {
     const opened = page('A\n\nB, mine');
     const entry = waitingEntry(opened, page('A\n\nB'));
@@ -664,8 +687,9 @@ describe('putting a waiting change in, carefully', () => {
     const live = joins[0];
     if (!live) throw new Error('not joined');
     expect(live.status().saved).toBe(false);
-    // Leaving's own save lands it.
+    // Leaving's own save lands it, in a draft that holds what was put in.
     live.leave = async () => true;
+    live.holds = true;
     draft.close();
     await settle();
     expect(withdrawn).toEqual([5]);

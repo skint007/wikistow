@@ -1664,11 +1664,32 @@ export class LiveParticipant {
     return this.#me.joinId;
   }
 
+  /** The draft the session started from (its record's `revisionId`). */
+  get startedFrom(): RevisionId {
+    return this.#opened.payload.revisionId;
+  }
+
+  /**
+   * Whether the draft head is a session draft this app compared whose state
+   * holds `state`, as a document's state once a change was kept or put in:
+   * then that change is saved, and what was kept of it on the device may go.
+   */
+  headHolds(state: LiveState): boolean {
+    const head = this.#head ? this.#drafts.get(this.#head) : undefined;
+    if (!head?.compared) return false;
+    try {
+      return holdsState(head.state, state);
+    } catch {
+      return false;
+    }
+  }
+
   /** The `seq` of this join's latest message sealed, once everything typed is sent: what a change put in now went out as. */
   async sentThrough(): Promise<{ joinId: JoinId; seq: number } | null> {
     await this.flush();
     if (this.#pending.length > 0 || this.#queue.length > 0) return null;
-    return { joinId: this.#me.joinId, seq: this.#sentSeq };
+    // Its latest change, never a Saved notice, which a newcomer doesn't count as placed.
+    return { joinId: this.#me.joinId, seq: this.#ownLog.at(-1)?.seq ?? 0 };
   }
 
   // The highest `seq` up to which `state` holds every update this join sent, message by message.

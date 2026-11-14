@@ -952,9 +952,8 @@ export class DraftSession {
         .then(async (saved) => {
           // One being kept now goes first, so the one withdrawn is the latest.
           await this.#keeping?.catch(() => false);
-          const kept = this.#kept;
           if (!saved) await this.#keepNow(participant);
-          else if (kept) await this.#ports.withdraw?.(kept.version);
+          else this.#withdrawKept();
         })
         .catch(() => {})
         .finally(release);
@@ -1055,7 +1054,12 @@ export class DraftSession {
   #putBack: PutBack | null = null;
   // The change kept on this device for the session, or put into it,
   // withdrawn once a compared draft of the session holds it.
-  #kept: { version: number } | null = null;
+  #kept: {
+    version: number;
+    /** The participant whose document it was kept or put in from, and that document's state then. */
+    participant: LiveParticipant;
+    state: ReturnType<LiveParticipant['document']['state']>;
+  } | null = null;
   #keepTimer: ReturnType<typeof setTimeout> | null = null;
   // The page's live lock while a waiting change that overlapped the session waits for Merge….
   #conflictHold: (() => void) | null = null;
@@ -1205,11 +1209,11 @@ export class DraftSession {
       // Never started, it saved nothing for anyone, and saves nothing now.
       joined.close();
       release();
-      // On the head it was based on, the queue sends it, and the saver folds it in.
-      if (
-        attached === 'send' ||
-        (attached === 'overlap' && opening.revisionId === entry?.basedOn)
-      ) {
+      // A change made with no session, on the head it was based on, or with
+      // files kept here: the queue sends it, and the saver folds it in.
+      const onBase = opening.revisionId === entry?.basedOn && !entry?.live;
+      if (attached === 'send' || (attached === 'overlap' && onBase)) {
+        this.#releaseRejoinHold();
         return;
       }
       if (attached === 'overlap' && entry) return this.#overlapping(entry, opening.revisionId);
@@ -1377,7 +1381,7 @@ export class DraftSession {
       },
       { byLines: true },
     );
-    this.#kept = { version: entry.version };
+    this.#kept = { version: entry.version, participant, state: participant.document.state() };
     this.#putBack = null;
     this.#keptLive = null;
     // Recorded beside it once sent, so a later join doesn't put it in again; withdrawn once saved.
@@ -1480,10 +1484,14 @@ export class DraftSession {
   }
 
   // A change kept on this device, or put in, that a saved draft holds: it goes.
-  #withdrawKept() {
+  // Only once a compared draft holds the document as it was kept or put in
+  // (section 5.10, **Saving**), or the head's text is that change's
+  // (`force`): not just this join's typing, as the old join's may be unsaved yet.
+  #withdrawKept({ force = false }: { force?: boolean } = {}) {
     const kept = this.#kept;
+    if (!kept || (!force && !kept.participant.headHolds(kept.state))) return;
     this.#kept = null;
-    if (kept) void this.#ports.withdraw?.(kept.version).catch(() => false);
+    void this.#ports.withdraw?.(kept.version).catch(() => false);
   }
 
   // Whether what is kept on this device is the document as it is now.
@@ -1503,13 +1511,18 @@ export class DraftSession {
       const putBack = participant.putBack();
       if (!putBack.ours || !putBack.outside) return false;
       try {
+        const { provisional, checked } = participant.status();
+        const state = participant.document.state();
         const version = await ports.keep!({
-          basedOn: participant.status().checked,
+          // Never whole over a draft it hasn't compared (section 5.10): a
+          // provisional document goes on the draft the session started from,
+          // so a send meets the conflict, and Merge… counts only the person's typing.
+          basedOn: provisional ? participant.startedFrom : checked,
           region: this.#tableRegion,
           payload: putBack.ours,
           live: liveKept(putBack, putBack.ours, putBack.outside),
         });
-        this.#kept = { version };
+        this.#kept = { version, participant, state };
         this.#keptFresh = this.#participant === participant;
         return true;
       } catch {
@@ -1562,9 +1575,7 @@ export class DraftSession {
       // A compared draft of the session holds what was kept here, or put in: it goes.
       if (this.#keepTimer) clearTimeout(this.#keepTimer);
       this.#keepTimer = null;
-      const kept = this.#kept;
-      this.#kept = null;
-      if (kept) void this.#ports.withdraw?.(kept.version).catch(() => false);
+      this.#withdrawKept();
     } else if (!this.#keepTimer && this.#ports.keep) {
       // "Saving…" for 10 s: the document is kept on this device too, so a tab closed loses nothing.
       this.#keepTimer = setTimeout(() => {
@@ -1820,7 +1831,7 @@ export class DraftSession {
     if (same) {
       this.#keptLive = null;
       this.#set({ status: 'saved' });
-      this.#withdrawKept();
+      this.#withdrawKept({ force: true });
     } else this.#schedule();
     return true;
   }
