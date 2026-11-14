@@ -17,6 +17,7 @@ import {
 } from '../../packages/contracts/src/security.ts';
 import { MATH_FONT, PAGE_FONTS } from '../../packages/server/src/public-links/fonts.ts';
 import { REACT_FILES } from '../../packages/ui/src/workshop/library.ts';
+import { meaningFile, meaningModel, meaningModule } from './meaning.ts';
 
 const ui = (path: string) => fileURLToPath(new URL(`../../packages/ui/${path}`, import.meta.url));
 
@@ -176,15 +177,26 @@ const diagramFrame = {
 /**
  * The service worker, `/sw.js` (ADR 0009, decision 6), written once the
  * build is on disk: `sw/sw.ts` with the files it keeps named before it.
- * It keeps the files at the top of the build but the plugin frame's own,
- * and everything under `/assets/` but source maps, Workshop's esbuild,
- * which only an online Workshop loads, and the diagram frame's files. The
+ * It keeps the files at the top of the build but the plugin frame's own
+ * and ONNX Runtime's notices,
+ * and everything under `/assets/` but source maps, Brotli copies,
+ * Workshop's esbuild, which only an online Workshop loads, the model's
+ * files, which only someone who turns on search by meaning loads and the
+ * embedding worker keeps itself (ADR 0016, decision 3), and the diagram
+ * frame's files. The
  * frame's opaque origin is never the worker's, so the worker only fetches
  * those once, into the browser's own cache, where the frame finds them
  * (`warm`). Its cache is named by a hash of the files it keeps, so each
  * build that changes one installs again.
  */
-const LEFT_TO_SERVER = new Set([PLUGIN_HOST_PAGE, PLUGIN_HOST_SCRIPT]);
+// ONNX Runtime's notices, 330 KB, which only someone reading them needs.
+const LEFT_TO_SERVER = new Set([
+  PLUGIN_HOST_PAGE,
+  PLUGIN_HOST_SCRIPT,
+  '/third-party-notices-onnxruntime.txt',
+]);
+/** The largest file the service worker keeps; the largest bundle is about 1 MB. */
+const SHELL_FILE_LIMIT = 4 * 1024 * 1024;
 const appShell = () => {
   let outDir = '';
   return {
@@ -203,13 +215,23 @@ const appShell = () => {
           ? !LEFT_TO_SERVER.has(file) && file !== '/sw.js'
           : file.startsWith('/assets/') &&
             !file.startsWith(DIAGRAM_FILES) &&
+            !meaningFile(file) &&
             !file.endsWith('.map') &&
+            !file.endsWith('.br') &&
             !/\/esbuild-[^/]*\.wasm$/.test(file);
         if (kept) files.push(file);
       }
       files.sort();
       const hash = createHash('sha256');
-      for (const file of files) hash.update(file).update(await readFile(join(outDir, file)));
+      for (const file of files) {
+        const bytes = await readFile(join(outDir, file));
+        // Every visitor downloads what it keeps, so a large file left in by
+        // mistake (a model's, a runtime's WebAssembly) fails the build.
+        if (bytes.byteLength > SHELL_FILE_LIMIT) {
+          throw new Error(`The service worker would keep ${file}, of ${bytes.byteLength} bytes`);
+        }
+        hash.update(file).update(bytes);
+      }
       const shell = {
         cache: `wikistow-app-${hash.digest('hex').slice(0, 16)}`,
         files,
@@ -244,6 +266,8 @@ export default {
     tailwindcss(),
     // For the dev server; a build bundles workers with `worker.plugins`.
     library,
+    meaningModule,
+    meaningModel,
     publicPageFonts,
     diagramFrame,
     appShell(),
@@ -256,7 +280,18 @@ export default {
   // The API runs separately in development (`pnpm --filter @wikistow/server-app dev`).
   // Library plugins' files are the server's too (ADR 0002).
   server: { proxy: { '/api': 'http://127.0.0.1:3000', '/plugins/': 'http://127.0.0.1:3000' } },
-  build: { outDir: 'dist', sourcemap: true },
+  build: {
+    outDir: 'dist',
+    sourcemap: true,
+    rollupOptions: {
+      // The embedder is an entry of its own until the app uses it (ADR 0016,
+      // step 4), so the build has its worker, which the browser tests run.
+      input: {
+        index: fileURLToPath(new URL('index.html', import.meta.url)),
+        embedder: ui('src/meaning/embedder.ts'),
+      },
+    },
+  },
   // The vault worker imports libsodium; ES modules let it share chunks.
-  worker: { format: 'es', plugins: () => [library] },
+  worker: { format: 'es', plugins: () => [library, meaningModule] },
 };

@@ -125,6 +125,8 @@ jobs:
           name="wikistow-desktop-$version"
           mkdir -p "release/$name"
           cp apps/desktop/out/app.asar LICENSE "release/$name/"
+          # The web clipper's helper, which the AUR packages install beside app.asar.
+          install -m 755 apps/desktop/out/clip-host/linux-amd64/wikistow-clip-host "release/$name/"
           # The beta's launcher entry and icons too: the AUR's beta package
           # installs the same archive under the beta's names.
           cp apps/desktop/packaging/wikistow-desktop apps/desktop/packaging/wikistow-desktop.desktop \

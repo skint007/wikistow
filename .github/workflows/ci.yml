@@ -115,6 +115,23 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+      # The web clipper's helper, for every package's system, from here
+      # (apps/desktop/scripts/clip-host.sh). Go fetches its modules over TLS,
+      # which the slim image has no certificates for.
+      - run: apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates >/dev/null
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/desktop/clip-host/go.mod
+          cache-dependency-path: apps/desktop/clip-host/go.sum
+      # The search model the web build fetches from Hugging Face and checks
+      # against its pinned hashes, and its Brotli copies, which take a minute
+      # to make (apps/web/meaning.ts). Kept by hash, so a stale entry is
+      # never used.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache/wikistow-meaning
+          key: meaning-${{ hashFiles('packages/ui/src/meaning/model.ts', 'pnpm-lock.yaml') }}
+          restore-keys: meaning-
       - run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then export WIKISTOW_RELEASE="${GITHUB_REF_NAME#v}"; fi
           cp packages/ui/src/routeTree.gen.ts "$RUNNER_TEMP/routeTree.committed.ts"
@@ -122,8 +139,10 @@ jobs:
           ./node_modules/.bin/vp -C apps/cli pack
           ./node_modules/.bin/vp -C apps/web build
           ./node_modules/.bin/vp -C apps/desktop pack
-          # What the desktop release ships: the bundles and pages in one app.asar.
+          # What the desktop release ships: the bundles and pages in one app.asar,
+          # and the helper beside it.
           node apps/desktop/scripts/asar.ts
+          (cd apps/desktop && scripts/clip-host.sh)
           cmp packages/ui/src/routeTree.gen.ts "$RUNNER_TEMP/routeTree.committed.ts"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -136,6 +155,35 @@ jobs:
             apps/desktop/out
           if-no-files-found: error
           retention-days: 7
+
+  # The web clipper's helper on each system it ships for, against a fake
+  # app: on Windows over a named pipe, read and written at once, with its
+  # owner checked; on a Mac with LOCAL_PEERCRED (docs/adr/0017-web-clipper.md).
+  # The race detector needs a C compiler, which only Linux is sure to have.
+  clip-host:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, windows-2025, macos-15]
+    name: clip-host (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop/clip-host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/desktop/clip-host/go.mod
+          cache-dependency-path: apps/desktop/clip-host/go.sum
+      # Once: Windows checks files out with CRLF endings, which gofmt reports.
+      - if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test -count=1 -timeout 3m $([ "$RUNNER_OS" = Linux ] && echo -race) ./...
 
   # Boot the exact bundles the image ships against a fresh database. They run
   # from a copy laid out like the image, outside the workspace, so a dependency
@@ -231,6 +279,8 @@ jobs:
           name: build
           path: apps
       - run: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends gnome-keyring dbus-x11 >/dev/null
+      # The clipper's test starts the helper from the build, whose artifact keeps no modes.
+      - run: chmod 755 apps/desktop/out/clip-host/linux-amd64/wikistow-clip-host
       - run: ./e2e/with-keyring.sh xvfb-run -a -s '-screen 0 1600x1000x24' ./node_modules/.bin/playwright test
         working-directory: apps/desktop
         env:
@@ -321,7 +371,9 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           scripts/macos-app.sh "$(node ../../scripts/version.ts)" "$ARCH" out/macos
-          [ "$(lipo -archs out/macos/WikiStow.app/Contents/MacOS/WikiStow)" = "$(echo "$ARCH" | sed s/x64/x86_64/)" ]
+          for file in WikiStow wikistow-clip-host; do
+            [ "$(lipo -archs "out/macos/WikiStow.app/Contents/MacOS/$file")" = "$(echo "$ARCH" | sed s/x64/x86_64/)" ]
+          done
       - working-directory: apps/desktop
         run: MAC_APP="$PWD/out/macos/WikiStow.app" ./node_modules/.bin/playwright test
         env:
@@ -372,6 +424,9 @@ jobs:
             source=rpm
           fi
           [ "$(cat /usr/lib/wikistow-desktop/install-source)" = "$source" ]
+          # The clipper's helper runs, and with no app running answers for it.
+          printf '\037\000\000\000{"v":1,"id":"a","type":"hello"}' |
+            /usr/lib/wikistow-desktop/wikistow-clip-host | tail -c +5 | grep -F '"app":"closed"'
           for file in /usr/lib/wikistow-desktop/wikistow-desktop /usr/lib/wikistow-desktop/*.so*; do
             ldd -r "$file" 2>&1
           done | grep -E 'not found|undefined symbol' && exit 1
@@ -444,7 +499,19 @@ jobs:
   passed:
     name: CI passed
     if: always()
-    needs: [check, test, test-integration, test-browser, build, smoke, e2e, e2e-desktop, macos-app]
+    needs:
+      [
+        check,
+        test,
+        test-integration,
+        test-browser,
+        clip-host,
+        build,
+        smoke,
+        e2e,
+        e2e-desktop,
+        macos-app,
+      ]
     runs-on: ubuntu-24.04
     steps:
       - env:

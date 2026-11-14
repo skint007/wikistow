@@ -38,6 +38,7 @@ export * from './restore.ts';
 export * from './revision.ts';
 export * from './revision-cache.ts';
 export * from './rotation.ts';
+export * from './meaning.ts';
 export * from './search.ts';
 export * from './trust.ts';
 export * from './templates.ts';
@@ -46,6 +47,7 @@ export * from './tree-changes.ts';
 export * from './vault.ts';
 export * as pageOperations from './operations/pages.ts';
 export * as trashOperations from './operations/trash.ts';
+export { patient } from './operations/patience.ts';
 export {
   agentContactsMark,
   closeSession,

@@ -121,16 +121,24 @@ export class SearchIndex<T> {
 
   /**
    * Index a page as another index read it (`pages`): its title, its text
-   * already reduced, its properties and its links, none if left out. Only while the
-   * index is built: not once it is derived (`with`), or derived from.
+   * already reduced and where its headings start in it, its properties and
+   * its links, none if left out, and when its version was saved, null if
+   * left out. Only while the index is built: not once it is derived
+   * (`with`), or derived from.
    */
-  addText(doc: T, { title, text, properties = [], links = [] }: IndexedText): void {
+  addText(
+    doc: T,
+    { title, text, headings = [], properties = [], links = [], updated = null }: IndexedText,
+  ): void {
     if (this.#frozen) throw new Error('An index derived, or derived from, doesn’t change');
-    this.#base.add({ doc, title, text, properties, links });
+    this.#base.add({ doc, title, text, headings, properties, links, updated });
     this.#held = null;
   }
 
-  /** Each page it holds, with its text as reduced for search, its properties and links. */
+  /**
+   * Each page it holds, with its text as reduced for search and where its
+   * headings start in it, its properties and links.
+   */
   pages(): readonly Readonly<IndexedPage<T>>[] {
     if (this.#removed.size === 0 && this.#added.pages.length === 0) return this.#base.pages;
     return (this.#held ??= [...this.#base.pages, ...this.#added.pages].filter(
@@ -431,14 +439,18 @@ function after(sorted: readonly string[], term: string): number {
 
 /**
  * A page as an index holds it: what its hits return, its title, its reduced
- * text, its properties and its links.
+ * text and where its headings start in it (`reducedText`), its properties
+ * and its links, and when its version was saved.
  */
 export type IndexedPage<T> = {
   doc: T;
   title: string;
   text: string;
+  headings: readonly number[];
   properties: readonly Readonly<PropertyData>[];
   links: readonly Readonly<IndexedLink>[];
+  /** When the server took the version indexed (`OpenedRevision.createdAt`), or null if unknown. */
+  updated: string | null;
 };
 
 /**
@@ -453,18 +465,24 @@ export type IndexedLink = { key: string; pageId: string | null };
 export type IndexedText = {
   title: string;
   text: string;
+  headings?: readonly number[];
   properties?: readonly Readonly<PropertyData>[];
   links?: readonly Readonly<IndexedLink>[];
+  updated?: string | null;
 };
 
-/** What the index keeps of a page's Markdown: its text for search, and its properties. */
+/**
+ * What the index keeps of a page's Markdown: its text for search, where its
+ * headings start in it, and its properties.
+ */
 export function indexedContent(markdown: string): {
   text: string;
+  headings: number[];
   properties: PropertyData[];
 } {
   const properties = propertyData(splitFrontmatter(markdown).frontmatter);
   return {
-    text: searchText(markdown),
+    ...reducedText(markdown),
     // Copied: a string cut from the page's Markdown can hold all of it in memory.
     properties:
       properties.length > 0 ? (JSON.parse(JSON.stringify(properties)) as PropertyData[]) : [],
@@ -863,8 +881,30 @@ const clip = (text: string, length: number) =>
  */
 export function searchText(
   markdown: string,
-  { limit = TEXT_LIMIT, lineLimit = LINE_LIMIT }: { limit?: number; lineLimit?: number } = {},
+  limits: { limit?: number; lineLimit?: number } = {},
 ): string {
+  return reducedText(markdown, limits).text;
+}
+
+/**
+ * Markdown as `searchText` reads it, and where in that text each of the
+ * page's own headings starts (UTF-16 offsets, in order), so its text can be
+ * cut into sections (ADR 0016, decision 4). A page's own headings are the
+ * ATX and setext headings outside quotes and list items, but for the
+ * frontmatter's closing fence; one with no text is none.
+ */
+export function reducedText(
+  markdown: string,
+  { limit = TEXT_LIMIT, lineLimit = LINE_LIMIT }: { limit?: number; lineLimit?: number } = {},
+): { text: string; headings: number[] } {
+  // The lines of the page's frontmatter, its fences included, as the loop
+  // splits them: a comment in it is no heading, nor its closing fence an
+  // underline.
+  const front = splitFrontmatter(markdown).frontmatter;
+  const frontLines =
+    front === null ? 0 : front.split(/\r\n?|\n/).length - (front.endsWith('\n') ? 1 : 0);
+  let lineAt = -1;
+  const headings: number[] = [];
   // The footnotes the page defines: a reference to any other is text.
   const notes = new Set<string>();
   for (const [, label = ''] of markdown.matchAll(FOOTNOTE_DEFINITION)) notes.add(noteLabel(label));
@@ -892,13 +932,14 @@ export function searchText(
   // line), how its lines read, and the quotes and list items it's in, which
   // it ends with.
   let html: { end: string; read: HtmlReading; quoted: number; items: number } | null = null;
-  const keep = (text: string) => {
+  const keep = (text: string, heading = false) => {
     if (!text) return;
+    if (heading) headings.push(length);
     kept.push(text);
     length += text.length + 1;
   };
-  const end = () => {
-    keep(inline(paragraph.slice(defined).join('\n'), notes));
+  const end = (heading = false) => {
+    keep(inline(paragraph.slice(defined).join('\n'), notes), heading);
     paragraph = [];
     size = 0;
     defined = 0;
@@ -918,7 +959,19 @@ export function searchText(
     heldSize += line.length + 1;
   };
   for (const whole of markdown.split(/\r\n?|\n/)) {
+    lineAt++;
     if (length >= limit) break;
+    if (lineAt === frontLines && frontLines > 0) {
+      // The frontmatter is YAML: what reads as opened in it ends with it,
+      // as after a `...` fence, which reads as text.
+      if (html !== null) release(html.read);
+      html = null;
+      fence = null;
+      end();
+      table = false;
+      items.length = 0;
+      empty = false;
+    }
     const line = clip(whole, lineLimit);
     // Block syntax is looked for past every quote marker, indent and list
     // marker, so a block in a quote or list item ends a paragraph too.
@@ -988,6 +1041,12 @@ export function searchText(
     const text = withoutClosingHashes(
       (listed ? content.replace(/^\[[ xX]\]\s+/, '') : content).replace(/^#{1,6}\s+/, ''),
     );
+    // Whether a heading here is the page's own: out of the frontmatter,
+    // quotes and list items. And whether the line is a setext underline,
+    // making the paragraph above it, out of those too, a heading.
+    const own = lineAt >= frontLines && quoted === 0 && matched === 0;
+    const underlines =
+      own && !table && depth === 0 && nested === 0 && paragraph.length > 0 && SETEXT.test(line);
     // Whether the line carried on the paragraph, so stays in the list items
     // it's lazily left of.
     let carried = false;
@@ -996,7 +1055,7 @@ export function searchText(
     let opened: HtmlBlock | null = null;
     read: {
       if (breaks) {
-        end();
+        end(underlines);
         table = false;
         break read;
       }
@@ -1024,7 +1083,7 @@ export function searchText(
         run !== undefined ||
         (!deep && /^(?:(?:-\s*)+|=+\s*|([*_])\s*(?:\1\s*){2,})$/.test(content))
       ) {
-        end();
+        end(!code && run === undefined && underlines);
         table = false;
         if (code) keep(content.trim());
         break read;
@@ -1059,7 +1118,8 @@ export function searchText(
         paragraph.push(text);
         size += text.length + 1;
         if (waiting === 'label' || waiting === 'title') defined = paragraph.length;
-        if (heading) end();
+        // `#` alone is a heading with no text, which is none.
+        if (heading) end(own && opens === null && /^#{1,6}\s/.test(content));
       }
     }
     if (!carried) {
@@ -1072,8 +1132,12 @@ export function searchText(
   }
   if (html !== null) release(html.read);
   end();
-  return clip(kept.join('\n'), limit);
+  const text = clip(kept.join('\n'), limit);
+  return { text, headings: headings.filter((at) => at < text.length) };
 }
+
+/** A setext heading's underline. */
+const SETEXT = /^ {0,3}(?:=+|-+)[ \t]*$/;
 
 /** A line of a rule or setext underline. */
 const BREAK = /^ {0,3}(?:([-*_])\s*(?:\1\s*){2,}|=+\s*|--+\s*)$/;

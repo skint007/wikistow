@@ -24,6 +24,17 @@ cask "wikistow" do
 
   app "WikiStow.app"
 
+  # The web clipper's host manifests, which the app writes at each launch
+  # for the browsers it finds (docs/desktop.md). They name the app's helper,
+  # so they go with it; they aren't the person's data.
+  uninstall delete: [
+    "~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/io.github.skint007.wikistow.json",
+    "~/Library/Application Support/Chromium/NativeMessagingHosts/io.github.skint007.wikistow.json",
+    "~/Library/Application Support/Google/Chrome/NativeMessagingHosts/io.github.skint007.wikistow.json",
+    "~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/io.github.skint007.wikistow.json",
+    "~/Library/Application Support/Mozilla/NativeMessagingHosts/io.github.skint007.wikistow.json",
+  ]
+
   zap trash: [
     "~/Library/Application Support/WikiStow",
     "~/Library/Preferences/io.github.skint007.wikistow.plist",

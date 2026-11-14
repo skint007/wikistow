@@ -187,6 +187,16 @@ describe('the search index’s changes', () => {
     expect(index.updates[2]?.changes.saved?.[1]?.basedOn).toBe('own-1');
   });
 
+  it('keeps a save’s time when one into this device’s queue stands in for it', () => {
+    const index = indexQuery();
+    const at = '2026-11-13T09:30:00.000Z';
+    index.tracker.note({ saved: { ...save('r1', 'own-1'), updated: at } });
+    // The connection went: the next autosave is queued, on its base.
+    index.tracker.note({ saved: save('own-1', 'own-1') });
+    index.advance(GATHER_MS);
+    expect(index.updates[0]?.changes.saved).toEqual([{ ...save('r1', 'own-1'), updated: at }]);
+  });
+
   it('keeps no draft’s text from an update given up as nothing shows it', () => {
     const index = indexQuery();
     index.hide();
