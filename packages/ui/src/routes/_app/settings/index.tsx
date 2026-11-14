@@ -33,6 +33,7 @@ import { TableOfContents, type Heading } from '../../../page/table-of-contents';
 import { useMeaningStatus } from '../../../meaning/background';
 import { meaningSettingState, searchByMeaning, useMeaningOffer } from '../../../meaning/setting';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
+import { BrowserClipping } from '../../../settings/browser-clipping';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
 import { ThemePicker } from '../../../theme/theme-picker';
 import { IDLE_DELAYS, idleLockDelay, useIdleLockDelay } from '../../../vault/idle-lock';
@@ -101,6 +102,7 @@ function Settings() {
               <ShowProperties />
               <KeepForOffline />
               <SearchByMeaning />
+              {desktop && <BrowserClipping desktop={desktop} />}
             </SettingsGroup>
             <SettingsGroup id="plugins" title="Plugins" note="What plugins add to WikiStow">
               <PluginsSummary />

@@ -12,7 +12,8 @@ GitHub Actions checks every change and publishes the server image and the deskto
 | `test` | The client and unit tests |
 | `test-integration` | The integration tests against a Postgres 17 service, including the backup and restore drill |
 | `test-browser` | The protocol vectors and editor surfaces in Chromium |
-| `build` | The server, CLI, web and desktop bundles and the desktop `app.asar`. The committed route tree must not change |
+| `clip-host` | The web clipper's [helper](#the-clippers-helper), vetted and tested against a fake app on Linux, Windows and macOS |
+| `build` | The server, CLI, web and desktop bundles, the desktop `app.asar`, and the clipper's helper for every system. The committed route tree must not change |
 | `smoke` | The server and CLI bundles, run outside the workspace as the image runs them |
 | `e2e` | The web app's browser tests against the built pages |
 | `e2e-desktop` | The desktop app's tests under a virtual display, with GNOME Keyring |
@@ -174,6 +175,7 @@ sha256sum -c --ignore-missing SHA256SUMS
 | File | Installed as |
 | --- | --- |
 | `app.asar` | `/usr/lib/wikistow-desktop/app.asar` |
+| `wikistow-clip-host` | `/usr/lib/wikistow-desktop/wikistow-clip-host`, the web clipper's [helper](#the-clippers-helper) |
 | `wikistow-desktop` | `/usr/bin/wikistow-desktop`, which runs the app on the system `electron44` |
 | `wikistow-desktop.desktop` | `/usr/share/applications/wikistow-desktop.desktop` |
 | `wikistow-desktop.svg`, `wikistow-desktop.png` | The app's icons |
@@ -181,6 +183,10 @@ sha256sum -c --ignore-missing SHA256SUMS
 | `LICENSE` | `/usr/share/licenses/wikistow-desktop-bin/LICENSE` |
 
 The archive is built the same way every time, from the commit's files and time.
+
+### The clipper's helper
+
+Every desktop package carries `wikistow-clip-host`, the program the browser starts for the web clipper ([desktop](desktop.md#clipping-from-your-browser), [ADR 0017](adr/0017-web-clipper.md)). It is Go, in `apps/desktop/clip-host`. `apps/desktop/scripts/clip-host.sh` builds it in CI's `build` job for every system a package ships on (Linux x86_64, Windows x64 and arm64, macOS arm64 and x64), into `apps/desktop/out/clip-host/<GOOS>-<GOARCH>/`, where each package takes it from; a CI artifact keeps no file modes, so each sets the mode itself. The same Go and source give the same bytes: no paths, build IDs or symbol tables go in. `go.mod` names the Go version CI installs; raise it on purpose. The `.deb` and `.rpm` check that their copy runs and answers.
 
 ## The CLI downloads
 
@@ -214,7 +220,7 @@ scripts/binaries.sh "$(node ../../scripts/version.ts)" dist/binaries
 
 ## The .deb and .rpm
 
-`apps/desktop/scripts/linux-packages.sh` builds both with [nfpm](https://nfpm.goreleaser.com), from `apps/desktop/packaging/nfpm.yaml`. They hold the same files as the archive, with Electron in `/usr/lib/wikistow-desktop`, renamed `wikistow-desktop`, and the app as its `resources/app.asar`. The launcher starts that Electron when it's there. Chromium's sandbox helper, `chrome-sandbox`, is setuid root. Each package also writes the [install source](desktop.md#how-it-was-installed), as the PKGBUILD does. Like the archive, both come out the same every time from the same commit.
+`apps/desktop/scripts/linux-packages.sh` builds both with [nfpm](https://nfpm.goreleaser.com), from `apps/desktop/packaging/nfpm.yaml`. They hold the same files as the archive, the clipper's helper included, with Electron in `/usr/lib/wikistow-desktop`, renamed `wikistow-desktop`, and the app as its `resources/app.asar`. The launcher starts that Electron when it's there. Chromium's sandbox helper, `chrome-sandbox`, is setuid root. Each package also writes the [install source](desktop.md#how-it-was-installed), as the PKGBUILD does. Like the archive, both come out the same every time from the same commit.
 
 The Electron is the one `apps/desktop/package.json` pins, which the desktop tests run on. Arch's `electron44` gets security fixes from Arch, but this copy only changes when WikiStow releases. So:
 
@@ -236,9 +242,9 @@ CI pins nfpm's version and checksum in `linux-packages`.
 
 ## The Windows installers
 
-`apps/desktop/scripts/windows-packages.sh` builds both on Linux, as the app has no native modules. For each architecture it downloads Electron's Windows build of the pinned version, checked against the checksums the `electron` package ships, renames `electron.exe` to `WikiStow.exe` and gives it the app's icon and name (`scripts/windows-exe.ts`, with [resedit](https://github.com/jet2jet/resedit-js)), adds `app.asar` and the [install source](desktop.md#how-it-was-installed), and packs it with [NSIS](https://nsis.sourceforge.io) from `apps/desktop/packaging/windows.nsi`. The installer is per-user, so it needs no administrator, and adds the Start menu entry, the `wikistow://` links and the uninstaller. Compressing takes a few minutes per architecture, so CI builds them in parallel jobs. Unlike the Linux packages, they don't come out byte for byte the same each time.
+`apps/desktop/scripts/windows-packages.sh` builds both on Linux, as the app has no native modules. For each architecture it downloads Electron's Windows build of the pinned version, checked against the checksums the `electron` package ships, renames `electron.exe` to `WikiStow.exe` and gives it the app's icon and name (`scripts/windows-exe.ts`, with [resedit](https://github.com/jet2jet/resedit-js)), adds `app.asar`, the [install source](desktop.md#how-it-was-installed) and the clipper's helper, and packs it with [NSIS](https://nsis.sourceforge.io) from `apps/desktop/packaging/windows.nsi`. The installer is per-user, so it needs no administrator, and adds the Start menu entry, the `wikistow://` links and the uninstaller. Compressing takes a few minutes per architecture, so CI builds them in parallel jobs. Unlike the Linux packages, they don't come out byte for byte the same each time.
 
-`windows-packages-check` runs `scripts/windows-check.ts` on GitHub's Windows x64 and Windows 11 Arm runners: a silent install, the app's sign-in page, DPAPI as its secret store, a second launch handing over a `wikistow://` link, and a silent uninstall that leaves nothing behind.
+`windows-packages-check` runs `scripts/windows-check.ts` on GitHub's Windows x64 and Windows 11 Arm runners: a silent install, the app's sign-in page, DPAPI as its secret store, a second launch handing over a `wikistow://` link, the clipper's helper reaching the app over its pipe and answering for it once it's closed, and a silent uninstall that leaves nothing behind, the host manifests and their keys included.
 
 The installers aren't signed, so SmartScreen warns until people choose **More info → Run anyway** ([desktop](desktop.md#windows)). Signing them needs a code-signing certificate, kept outside this repository like the AUR key.
 
@@ -251,9 +257,9 @@ scripts/windows-packages.sh "$(node ../../scripts/version.ts)" out/windows-packa
 
 ## The Mac app
 
-`apps/desktop/scripts/macos-app.sh` builds `WikiStow.app` for one kind of Mac, on a Mac, and zips it. It takes Electron's own darwin build at the version `apps/desktop/package.json` pins, checked against the checksums in its npm package, renames it WikiStow, puts the tested `app.asar` in its `Resources`, with `install-source` and the icon (`packaging/wikistow-desktop.icns`), and sets its `Info.plist`: its name, `io.github.skint007.wikistow`, the release's version, and the `wikistow` scheme. Changing the bundle breaks Electron's signature, and Apple silicon runs nothing unsigned, so it signs the app again ad hoc (`codesign --sign -`), which names nobody. There is no Apple Developer ID or notarization, so Gatekeeper asks the person to allow it ([desktop](desktop.md#the-first-time-it-opens)).
+`apps/desktop/scripts/macos-app.sh` builds `WikiStow.app` for one kind of Mac, on a Mac, and zips it. It takes Electron's own darwin build at the version `apps/desktop/package.json` pins, checked against the checksums in its npm package, renames it WikiStow, puts the tested `app.asar` in its `Resources`, with `install-source` and the icon (`packaging/wikistow-desktop.icns`), and the clipper's helper beside its executable in `MacOS`, and sets its `Info.plist`: its name, `io.github.skint007.wikistow`, the release's version, and the `wikistow` scheme. Changing the bundle breaks Electron's signature, and Apple silicon runs nothing unsigned, so it signs the helper and then the app again ad hoc (`codesign --sign -`), which names nobody. There is no Apple Developer ID or notarization, so Gatekeeper asks the person to allow it ([desktop](desktop.md#the-first-time-it-opens)).
 
-CI's `macos-app` job builds each on a Mac of its own kind, checks the binary's architecture, and starts the app it built with Playwright and no server (`MAC_APP`, `e2e/packed.spec.ts`): its pages, its menu bar, the Keychain as its secret store, and no window buttons of its own. It runs on every pull request, since nothing else starts the Mac app. The release publishes the two zips it made. Raising Electron raises the Mac app's too.
+CI's `macos-app` job builds each on a Mac of its own kind, checks the app's and the helper's architecture, and starts the app it built with Playwright and no server (`MAC_APP`, `e2e/packed.spec.ts`): its pages, its menu bar, the Keychain as its secret store, no window buttons of its own, and the helper reaching it on its socket. It runs on every pull request, since nothing else starts the Mac app. The release publishes the two zips it made. Raising Electron raises the Mac app's too.
 
 ## The Homebrew cask
 
