@@ -17,7 +17,15 @@ import type { Nodes } from 'mdast';
 import { parse, stringify } from 'yaml';
 import { cleanPath, macOsExtra, type ImportFile } from './import-archive.ts';
 import { foldTitle, resolveWikilinks, type LinkablePage, type PageIndex } from './links.ts';
-import { linkSpans, markdownText, parseMarkdown, splitFrontmatter } from './markdown/index.ts';
+import {
+  COLORS,
+  linkSpans,
+  markdownNodes,
+  markdownText,
+  parseMarkdown,
+  splitFrontmatter,
+  type ColorName,
+} from './markdown/index.ts';
 
 /** The app notes are imported from. */
 export type ImportFrom = 'joplin' | 'obsidian';
@@ -515,7 +523,7 @@ export async function readObsidianVault(files: readonly ImportFile[]): Promise<I
       parent: parent === '' ? null : parent,
       title: name.slice(0, -'.md'.length),
       path: file.path,
-      markdown: await textOf(file),
+      markdown: themeColors(await textOf(file)),
       html: false,
     });
   }
@@ -547,6 +555,86 @@ export async function readObsidianVault(files: readonly ImportFile[]): Promise<I
     },
     wikilink: (note, target) => find(target, note.path),
   };
+}
+
+// What Obsidian's colour plugins write, plainly one style on a span or a
+// mark: Colored Text's `<span style="color: #e03e2d">`, and Highlightr's
+// `<mark style="background: #FF5582A6;">`.
+const STYLED = /^<(span|mark)\s+style\s*=\s*(["'])\s*([a-z-]+)\s*:\s*([^;"']+?)\s*;?\s*\2\s*>$/i;
+const PROPERTY = { span: ['color'], mark: ['background', 'background-color'] } as const;
+
+/** `#rgb`, `#rrggbb`, with or without alpha, or `rgb()` and `rgba()`, as red, green and blue from 0 to 1. */
+function rgbOf(value: string): [number, number, number] | null {
+  const hex = /^#([\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.exec(value)?.[1];
+  if (hex) {
+    const long = hex.length <= 4 ? hex.replace(/./g, '$&$&') : hex;
+    const [r = 0, g = 0, b = 0] = [0, 2, 4].map((at) => parseInt(long.slice(at, at + 2), 16) / 255);
+    return [r, g, b];
+  }
+  const rgb =
+    /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*[\d.]+%?\s*)?\)$/i.exec(value);
+  if (!rgb) return null;
+  const [r = 0, g = 0, b = 0] = rgb.slice(1, 4).map((part) => Math.min(255, Number(part)) / 255);
+  return [r, g, b];
+}
+
+/**
+ * The theme's colour nearest a CSS colour: one it names, or the one whose
+ * hues it falls among. A grey, or one near black or white, has none.
+ */
+function nearestColor(value: string): ColorName | null {
+  const named = value.toLowerCase();
+  if ((COLORS as readonly string[]).includes(named)) return named as ColorName;
+  const rgb = rgbOf(value);
+  if (!rgb) return null;
+  const max = Math.max(...rgb);
+  const min = Math.min(...rgb);
+  const lightness = (max + min) / 2;
+  const chroma = max - min;
+  const saturation = chroma === 0 ? 0 : chroma / (1 - Math.abs(2 * lightness - 1));
+  if (saturation < 0.2 || lightness < 0.1 || lightness > 0.97) return null;
+  const [r, g, b] = rgb;
+  const sector =
+    max === r
+      ? ((g - b) / chroma + 6) % 6
+      : max === g
+        ? (b - r) / chroma + 2
+        : (r - g) / chroma + 4;
+  const hue = sector * 60;
+  if (hue < 15 || hue >= 330) return 'red';
+  if (hue < 40) return 'orange';
+  if (hue < 70) return 'yellow';
+  if (hue < 165) return 'green';
+  if (hue < 255) return 'blue';
+  return 'purple';
+}
+
+/**
+ * A vault note's Markdown with what a colour plugin wrote (`STYLED`) naming
+ * the theme's nearest colour instead (`nearestColor`): `<span
+ * data-color="red">` and `<mark data-color="red">`, which the reader shows
+ * in the theme's colours. Any other HTML, a colour with none near it, and
+ * what's in code or the front matter stay as written.
+ */
+export function themeColors(markdown: string): string {
+  if (!/<(?:span|mark)\s/i.test(markdown)) return markdown;
+  const { frontmatter, body } = splitFrontmatter(markdown);
+  const edits: { start: number; end: number; text: string }[] = [];
+  for (const node of markdownNodes(parseMarkdown(body))) {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (node.type !== 'html' || start === undefined || end === undefined) continue;
+    const [, tag = '', , property = '', value = ''] = STYLED.exec(body.slice(start, end)) ?? [];
+    const kind = tag.toLowerCase();
+    if (kind !== 'span' && kind !== 'mark') continue;
+    if (!(PROPERTY[kind] as readonly string[]).includes(property.toLowerCase())) continue;
+    const color = nearestColor(value);
+    if (color) edits.push({ start, end, text: `<${kind} data-color="${color}">` });
+  }
+  let out = body;
+  for (const { start, end, text } of edits.reverse())
+    out = out.slice(0, start) + text + out.slice(end);
+  return (frontmatter ?? '') + out;
 }
 
 /**

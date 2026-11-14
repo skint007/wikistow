@@ -1,7 +1,10 @@
 import type { MilkdownPlugin } from '@milkdown/kit/ctx';
 import {
+  colorHighlightReading,
+  highlightReading,
   inlineMathReading,
   mathReading,
+  textColorReading,
   wikilinkReading,
   type SyntaxReading,
 } from '@wikistow/client/reader';
@@ -26,8 +29,12 @@ import { WikilinkReader } from './page/wikilinks';
  */
 export type MarkdownSyntax = SyntaxReading & {
   id: string;
-  /** Shows one of its nodes in a page body, inside the reader's page context. */
-  render: (node: RootContent) => ReactElement | null;
+  /**
+   * Shows one of its nodes in a page body, inside the reader's page
+   * context; none for a syntax whose nodes are HTML the page draws itself
+   * (`data.hName`), as a highlight is a `<mark>`.
+   */
+  render?: (node: RootContent) => ReactElement | null;
   /**
    * Its node in the visual editor, with its view: Milkdown plugins, loaded
    * with that editor. A body holding a node type no syntax has stays in
@@ -80,4 +87,11 @@ export const markdownSyntaxes: readonly MarkdownSyntax[] = [
     Reader: MathReader,
     editorNode: async () => (await import('./page/editor/visual/math-node')).inlineMathEditorNode,
   }),
+  // Highlights and the theme's colours (#403), drawn as the HTML they are:
+  // `<mark>`, and a span or mark naming a colour. Their marks are the
+  // editor's own (`visualPlugins`), ranked ahead of bold and the rest; a
+  // coloured highlight is a highlight there too.
+  { id: 'highlight', ...highlightReading, editorNode: async () => () => [] },
+  { id: 'color-highlight', ...colorHighlightReading, editorNode: async () => () => [] },
+  { id: 'text-color', ...textColorReading, editorNode: async () => () => [] },
 ];

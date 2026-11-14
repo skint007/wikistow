@@ -106,6 +106,7 @@ export const APP_SHORTCUTS: Readonly<Record<string, string>> = Object.fromEntrie
     'Mod-b': 'Bold',
     'Mod-i': 'Italic',
     'Mod-e': 'Code',
+    'Mod-Shift-h': 'Highlight',
     'Mod-Alt-x': 'Strikethrough',
     'Mod-Shift-b': 'Quote',
     'Mod-Alt-c': 'Code block',

@@ -7,6 +7,7 @@ import type { EditorSurfaceHandle } from '../src/page/editor/surface.ts';
 import { loadSyntaxNodes, transformer } from '../src/page/editor/visual/config.ts';
 import { fidelityOf, withLf, writesAsShown } from '../src/page/editor/visual/fidelity.ts';
 import { FORMATS, heading, quoteAs, type Format } from '../src/page/editor/visual/formatting.ts';
+import { setColor } from '../src/page/editor/visual/highlight-marks.ts';
 import {
   insertAttachment,
   insertLink,
@@ -108,6 +109,18 @@ it('leaves no page the editor opens in a state the write-time guard refuses', as
     removeLink: { active: inLink, run: removeLink },
     image: { active: inLink, run: insertAttachment(PHOTO) },
     file: { active: inLink, run: insertAttachment(NOTES) },
+    ...Object.fromEntries(
+      (['plain', 'red', null] as const).map((color) => [
+        `highlight-${String(color)}`,
+        { active: () => false, run: setColor('highlight', color) },
+      ]),
+    ),
+    ...Object.fromEntries(
+      (['blue', null] as const).map((color) => [
+        `text-${String(color)}`,
+        { active: () => false, run: setColor('text', color) },
+      ]),
+    ),
   };
   const refused: string[] = [];
   for (const [path, markdown] of Object.entries(corpus)) {
