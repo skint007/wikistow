@@ -1,6 +1,7 @@
 import {
   FolderId,
   PageId,
+  propertyText,
   RevisionId,
   searchOperations,
   SpaceId,
@@ -207,6 +208,44 @@ describe('a query table in the reader', () => {
         ['Page', 'Servings', 'Last made', 'Evil'],
         ['Lemon tart', '8', '', ''],
       ]);
+  });
+
+  it('shows when each page was saved in the viewer’s zone, beside a property named updated (#427)', async () => {
+    const index = new searchOperations.PageIndex();
+    for (const [id, title, updated, properties] of [
+      [
+        'p-a',
+        'Apple',
+        '2026-11-13T09:30:41.000Z',
+        [{ key: 'updated', type: 'text', value: 'by hand' }],
+      ],
+      ['p-b', 'Bread', '2026-11-14T08:05:00.000Z', []],
+      ['p-c', 'Cake', null, []],
+    ] as const)
+      index.addText(
+        {
+          spaceId,
+          pageId: PageId.parse(id),
+          revisionId: RevisionId.parse(`r-${id}`),
+          parentId: null,
+          folderIds: [],
+          path: [],
+          draft: false,
+          unpublished: false,
+        },
+        { title, text: '', properties: [...properties], updated },
+      );
+    const source = '```wikistow-query\nshow: saved, updated\nsort: saved desc\n```\n';
+    const container = await read(source, client(index));
+    await expect.poll(() => cells(container).length).toBe(4);
+    const shown = (iso: string) => propertyText({ type: 'date', value: `${iso.slice(0, 16)}Z` });
+    expect(cells(container)).toEqual([
+      ['Page', 'Saved', 'Updated'],
+      ['Bread', shown('2026-11-14T08:05'), ''],
+      ['Apple', shown('2026-11-13T09:30'), 'by hand'],
+      ['Cake', '', ''],
+    ]);
+    expect(container.querySelector('.query-table figcaption')?.textContent).toBe('3 pages.');
   });
 
   it('says so while the index is building', async () => {
