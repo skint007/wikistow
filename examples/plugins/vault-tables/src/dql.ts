@@ -9,8 +9,9 @@
 //     LIMIT 10
 //
 // Anything else, such as FROM with OR, file.* fields but file.name and
-// file.mtime, or expressions, gives a line saying what isn't read, and the
-// block shows its text. The host reads file.mtime as `updated` in a
+// file.mtime, WHERE or SORT on a property named updated, which the host
+// reads as when the page was saved, or expressions, gives a line saying
+// what isn't read, and the block shows its text. The host reads file.mtime as `updated` in a
 // plugin's query; an app from before it did refuses the query.
 
 import type { PageQuery } from '@wikistow/plugin-sdk';
@@ -66,6 +67,16 @@ function fieldName(field: string): string | null {
   return /^[\p{L}\p{N}][\p{L}\p{M}\p{N} _-]*$/u.test(name) ? name : null;
 }
 
+/**
+ * A field as the host's query reads it, or null for a property named
+ * `updated`, which the host reads as when the page was saved: in Dataview
+ * it is the property, so it would filter or sort by the wrong thing.
+ */
+function queriedName(field: string): string | null {
+  const name = fieldName(field);
+  return name !== null && name.toLowerCase().replace(/[_\s-]+/g, ' ') === 'updated' ? null : name;
+}
+
 /** A value as wikistow-query writes it: a quoted text, a number, true or false, or a date. */
 function valueOf(written: string): string | null {
   const value = written.trim();
@@ -79,13 +90,13 @@ function valueOf(written: string): string | null {
 function condition(text: string): string | null {
   const contains = /^contains\(\s*([^,]+?)\s*,\s*(.+?)\s*\)$/i.exec(text);
   if (contains?.[1] && contains[2]) {
-    const name = fieldName(contains[1]);
+    const name = queriedName(contains[1]);
     const value = valueOf(contains[2]);
     return name && name !== 'title' && value ? `${name} has ${value}` : null;
   }
   const compared = /^(.+?)\s*(!=|<=|>=|=|<|>)\s*(.+)$/.exec(text);
   if (!compared?.[1] || !compared[2] || !compared[3]) return null;
-  const name = fieldName(compared[1]);
+  const name = queriedName(compared[1]);
   const value = valueOf(compared[3]);
   return name && name !== 'title' && value ? `${name} ${compared[2]} ${value}` : null;
 }
@@ -121,8 +132,11 @@ export function readDql(source: string): Dql {
       query.where = conditions.join(', ');
     } else if (keyword === 'SORT') {
       const sort = /^(.+?)(?:\s+(ASC|DESC|ASCENDING|DESCENDING))?$/i.exec(body);
-      const name = sort?.[1] ? fieldName(sort[1]) : null;
-      if (!name) return fail('SORT takes one field, then ASC or DESC.');
+      const name = sort?.[1] ? queriedName(sort[1]) : null;
+      if (!name)
+        return fail(
+          'SORT takes one field, then ASC or DESC; for when a page was saved, file.mtime.',
+        );
       query.sort = `${name} ${sort?.[2]?.toUpperCase().startsWith('DESC') ? 'desc' : 'asc'}`;
     } else {
       const limit = /^\d{1,3}$/.test(body) ? Number(body) : NaN;

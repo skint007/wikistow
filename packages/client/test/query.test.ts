@@ -439,8 +439,18 @@ describe('when each page was saved (#427)', () => {
     ]);
   });
 
-  it('stands for the time saved, not a property of that name', () => {
+  it('stands for the time saved, not a property of that name, and says so', () => {
     expect(titles('where: updated = "by hand"', timed)).toEqual([]);
+    const shadows = (source: string, pages = timed) => {
+      const result = run(source, pages);
+      return result.ok && result.shadowed;
+    };
+    // Apple has a property named updated.
+    expect(shadows('sort: updated')).toBe(true);
+    expect(shadows('show: Updated')).toBe(true);
+    expect(shadows('where: updated > 2026-01-01')).toBe(true);
+    expect(shadows('sort: title')).toBe(false);
+    expect(shadows('sort: updated', timed.slice(1))).toBe(false);
   });
 
   it('takes Dataview’s file.mtime for it only where asked, as plugins’ queries do', () => {

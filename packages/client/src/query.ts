@@ -324,6 +324,12 @@ export type QueryResult<P> =
       rows: QueryRow<P>[];
       /** How many pages it found, its limit aside. */
       total: number;
+      /**
+       * The query names `updated` (`SAVED_TIME`), and a page it found has a
+       * property of that name too, which the query doesn't read: for the
+       * table to say so.
+       */
+      shadowed: boolean;
     }
   | { ok: false; error: string };
 
@@ -361,8 +367,15 @@ export function runPageQuery<P extends QueryPage>(
       ),
     })),
     total: meets.length,
+    shadowed: namesSaved(query) && listed.some((page) => findProperty(page.properties, SAVED_TIME)),
   };
 }
+
+/** Whether `query` names `updated` (`SAVED_TIME`) anywhere. */
+const namesSaved = (query: PageQuery) =>
+  query.where.some(({ name }) => isSavedTime(name)) ||
+  query.show.some(isSavedTime) ||
+  (query.sort !== null && query.sort.by !== 'title' && isSavedTime(query.sort.by.name));
 
 /**
  * `page`'s value named `name`: its property, or for `updated` (`SAVED_TIME`)
