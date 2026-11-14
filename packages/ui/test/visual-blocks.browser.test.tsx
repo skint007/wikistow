@@ -499,36 +499,43 @@ describe('text taken in by block', () => {
   it('joins a line to the table, list or quote before it as reading whole does, keeping it as written', async () => {
     // Beside a long paragraph, the page is read whole (`show`).
     const long = 'Long text. '.repeat(1_600);
-    // Each with the blank line before `B` and with it gone, as a row, an item's line or the quote's.
+    // Each with the blank line before `B` gone, as a row, an item's line or
+    // the quote's, and with it.
     for (const [joined, apart] of [
       ['| a |\n| - |\n| x |\nB', '| a |\n| - |\n| x |\n\nB'],
       ['- x\n- y\nB', '- x\n- y\n\nB'],
       ['> x\n> y\nB', '> x\n> y\n\nB'],
       ['> | a |\n> | - |\n> | x |\n> B', '> | a |\n> | - |\n> | x |\n>\n> B'],
-    ])
+    ] as const)
       for (const [after, byBlock] of [
         ['', true],
         [`\n\n${long}`, false],
       ] as const) {
-        const page = `A\n\n${apart}${after}\n\nC\n`;
-        const next = `A\n\n${joined}${after}\n\nC\n`;
-        const m = await mount(page);
+        const page = (block: string) => `A\n\n${block}${after}\n\nC\n`;
+        const m = await mount(page(apart));
         const view = viewOf(m.dom);
-        const cursor = (at: number) =>
-          act(() =>
-            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at))),
-          );
-        cursor(find(view.state.doc, 'x'));
+        // The person's edit, in what reads the same, and the cursor there.
+        await typeAt(m, find(view.state.doc, 'x') + 1, 'z');
+        const at = find(view.state.doc, 'xz');
+        act(() =>
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at))),
+        );
+        const next = page(joined.replace('x', 'xz'));
         expect(await takeIn(m, next), next).toBe(byBlock);
         if (!byBlock) await replaceWith(m, next);
         expect(m.handle.read()).toBe(next);
         expect(await showsAsRead(m, next), next).toBe(true);
-        // The cursor stays where it was, in what reads the same.
+        // The cursor stays where it was.
         const { head } = view.state.selection;
-        expect(view.state.doc.textBetween(head, head + 1), next).toBe('x');
+        expect(view.state.doc.textBetween(head, head + 2), next).toBe('xz');
         // An edit elsewhere leaves it as it was given.
         const written = await typeAt(m, find(view.state.doc, 'C') + 1, '!');
         expect(written, next).toBe(next.replace(/C\n$/, 'C!\n'));
+        // And undo takes back the person's edits, there too.
+        act(() => {
+          while (undo(view.state, view.dispatch));
+        });
+        expect(await showsAsRead(m, page(joined)), next).toBe(true);
         m.unmount();
       }
   });

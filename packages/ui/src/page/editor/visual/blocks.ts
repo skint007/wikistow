@@ -1,6 +1,6 @@
 import type { Node, Slice } from '@milkdown/kit/prose/model';
 import type { Transaction } from '@milkdown/kit/prose/state';
-import { StepMap, Transform } from '@milkdown/kit/prose/transform';
+import { Transform } from '@milkdown/kit/prose/transform';
 import { normalizeIdentifier } from 'micromark-util-normalize-identifier';
 import { BLOCK_TIMED, withLf } from './fidelity';
 import { inText, spansOf, type Span } from './sources';
@@ -45,82 +45,132 @@ export function unnumbered(doc: Node): Node {
 const linkOf = (node: Node | null | undefined) =>
   node?.marks.find((mark) => mark.type.name === 'link');
 
-// `next` from `start` to `b`, to stand for `doc` from `start` to `a`, with
+// `next` from `b` to `bEnd`, to stand for `doc` from `a` to `aEnd`, with
 // each link running on past either end given the id it has there in `doc`,
 // so text changed inside a link leaves it one.
-function inPlace(doc: Node, next: Node, start: number, a: number, b: number): Slice {
+function inPlace(doc: Node, next: Node, [a, aEnd]: Range, [b, bEnd]: Range): Slice {
   const ids = new Map<unknown, unknown>();
   for (const [kept, read] of [
-    [doc.resolve(start).nodeBefore, next.resolve(start).nodeBefore],
-    [doc.resolve(a).nodeAfter, next.resolve(b).nodeAfter],
+    [doc.resolve(a).nodeBefore, next.resolve(b).nodeBefore],
+    [doc.resolve(aEnd).nodeAfter, next.resolve(bEnd).nodeAfter],
   ]) {
     const [mine, theirs] = [linkOf(kept), linkOf(read)];
     if (mine && theirs) ids.set(theirs.attrs['id'], mine.attrs['id']);
   }
   const tr = new Transform(next);
-  next.nodesBetween(start, b, (node, pos) => {
+  next.nodesBetween(b, bEnd, (node, pos) => {
     const link = linkOf(node);
     const id = link && ids.get(link.attrs['id']);
     if (!link || id === undefined) return;
-    const [from, to] = [Math.max(pos, start), Math.min(pos + node.nodeSize, b)];
+    const [from, to] = [Math.max(pos, b), Math.min(pos + node.nodeSize, bEnd)];
     tr.addMark(from, to, link.type.create({ ...link.attrs, id }));
   });
-  return tr.doc.slice(start, b);
+  return tr.doc.slice(b, bEnd);
 }
 
-/** A change that makes a document show as another reading (`replacement`). */
-export type Change = {
-  /** From `from` to `to` in the document, `slice` in their place. */
-  readonly from: number;
-  readonly to: number;
-  readonly slice: Slice;
-  /** Where whole blocks go in, the least change: from `from`, `size` replaced by `next` of the reading. */
-  readonly least: { readonly from: number; readonly size: number; readonly next: number } | null;
-};
+type Range = readonly [from: number, to: number];
 
-/**
- * The least change that makes `doc` show as `next`, a reading of other
- * text, links it changes inside keeping their ids; null if they show the
- * same. Where ProseMirror would fit that into something else, the
- * top-level blocks it's in instead, their links as read. Put in with
- * `replaceIn`, it gives `next`.
- */
-export function replacement(doc: Node, next: Node): Change | null {
-  const mine = unnumbered(doc);
-  const read = unnumbered(next);
+/** Part of a document, from `from` to `to`, and what goes in its place. */
+export type Edit = { readonly from: number; readonly to: number; readonly slice: Slice };
+
+// Where `mine` and `read`, with no link ids, differ in `content`: the
+// range in each, null if they don't.
+function differing(mine: Node, read: Node): [Range, Range] | null {
   const start = mine.content.findDiffStart(read.content);
   const end = mine.content.findDiffEnd(read.content);
   if (start === null || !end) return null;
   let { a, b } = end;
   const overlap = start - Math.min(a, b);
   if (overlap > 0) [a, b] = [a + overlap, b + overlap];
-  // ProseMirror fits a slice open inside a node into what's there, and that
-  // can make nodes neither had: a row a table takes in where the blank line
-  // after it went comes as a second table, with an empty header and row.
-  // Where it would, the top-level blocks the change is in go in whole.
-  if (new Transform(mine).replace(start, a, read.slice(start, b)).doc.eq(read))
-    return { from: start, to: a, slice: inPlace(doc, next, start, a, b), least: null };
-  // What's before `start`, and after `a` and `b`, is the same in each, so
-  // the blocks they're in begin, and end, as far from each end.
-  const [$start, $a, $b] = [mine.resolve(start), mine.resolve(a), read.resolve(b)];
-  const from = $start.depth > 0 ? $start.before(1) : start;
-  const [to, past] = $a.depth > 0 ? [$a.after(1), $b.after(1)] : [a, b];
-  const least = { from: start, size: a - start, next: b - start };
-  return { from, to, slice: inPlace(doc, next, from, to, past), least };
+  return [
+    [start, a],
+    [start, b],
+  ];
+}
+
+// The edits, each of whole nodes or of a textblock's inline content, that
+// make `mine`'s content, from `at` in `doc`, `read`'s, from `from` in
+// `next`. Children the same at either end are left; a first or last of the
+// same kind as `read`'s there is changed inside, and those between go in
+// whole. Each fits as it is, so nothing is made that neither has.
+function closed(
+  [doc, mine, at]: readonly [Node, Node, number],
+  [next, read, from]: readonly [Node, Node, number],
+  edits: Edit[],
+) {
+  if (mine.isTextblock) {
+    const range = differing(mine, read);
+    if (!range) return;
+    const [[a, aEnd], [b, bEnd]] = range;
+    const [kept, put]: [Range, Range] = [
+      [at + a, at + aEnd],
+      [from + b, from + bEnd],
+    ];
+    edits.push({ from: kept[0], to: kept[1], slice: inPlace(doc, next, kept, put) });
+    return;
+  }
+  const child = (node: Node, i: number) => node.child(i);
+  let [first, endA, endB] = [0, mine.childCount, read.childCount];
+  let [a, b] = [at, from];
+  while (first < endA && first < endB && child(mine, first).eq(child(read, first))) {
+    a += child(mine, first).nodeSize;
+    b += child(read, first).nodeSize;
+    first++;
+  }
+  let [aEnd, bEnd] = [at + mine.content.size, from + read.content.size];
+  while (endA > first && endB > first && child(mine, endA - 1).eq(child(read, endB - 1))) {
+    endA--;
+    endB--;
+    aEnd -= child(mine, endA).nodeSize;
+    bEnd -= child(read, endB).nodeSize;
+  }
+  const alike = (i: number, j: number) =>
+    !child(mine, i).isLeaf && child(mine, i).sameMarkup(child(read, j));
+  if (first < endA && first < endB && alike(first, first)) {
+    closed([doc, child(mine, first), a + 1], [next, child(read, first), b + 1], edits);
+    a += child(mine, first).nodeSize;
+    b += child(read, first).nodeSize;
+    first++;
+  }
+  const last: Edit[] = [];
+  if (endA > first && endB > first && alike(endA - 1, endB - 1)) {
+    endA--;
+    endB--;
+    aEnd -= child(mine, endA).nodeSize;
+    bEnd -= child(read, endB).nodeSize;
+    closed([doc, child(mine, endA), aEnd + 1], [next, child(read, endB), bEnd + 1], last);
+  }
+  if (a < aEnd || b < bEnd) edits.push({ from: a, to: aEnd, slice: next.slice(b, bEnd) });
+  edits.push(...last);
 }
 
 /**
- * `tr` with `change`, of the document from `at` in it, put in; the
- * selection where the least change would leave it, so a cursor in what
- * reads the same stays there.
+ * The edits, in order, that make `doc` show as `next`, a reading of other
+ * text, links they change inside keeping their ids; null if they show the
+ * same. One, where the characters that differ can simply be replaced; but
+ * ProseMirror fits a slice open inside a node into what's there, which can
+ * make nodes neither has: a row a table takes in where the blank line after
+ * it went came as a second table, with an empty header and row. There, each
+ * edit is of whole nodes, or inside a textblock, so the rest of the
+ * document, and what's mapped through the change, stays where it was.
  */
-export function replaceIn(tr: Transaction, change: Change, at = 0): Transaction {
-  const { selection } = tr;
-  tr.replace(at + change.from, at + change.to, change.slice);
-  const { least } = change;
-  if (!least) return tr;
-  const moved = new StepMap([at + least.from, least.size, least.next]);
-  return tr.setSelection(selection.map(tr.doc, moved));
+export function replacement(doc: Node, next: Node): readonly Edit[] | null {
+  const mine = unnumbered(doc);
+  const read = unnumbered(next);
+  const range = differing(mine, read);
+  if (!range) return null;
+  const [[a, aEnd], [b, bEnd]] = range;
+  if (new Transform(mine).replace(a, aEnd, read.slice(b, bEnd)).doc.eq(read))
+    return [{ from: a, to: aEnd, slice: inPlace(doc, next, range[0], range[1]) }];
+  const edits: Edit[] = [];
+  closed([doc, mine, 0], [next, read, 0], edits);
+  return edits;
+}
+
+/** `tr` with `edits`, of the document from `at` in it, put in. */
+export function replaceIn(tr: Transaction, edits: readonly Edit[], at = 0): Transaction {
+  for (const edit of edits.toReversed()) tr.replace(at + edit.from, at + edit.to, edit.slice);
+  return tr;
 }
 
 /** Whether two blocks show the same, whatever ids their links were given. */
