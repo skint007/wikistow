@@ -1793,12 +1793,16 @@ export class LiveParticipant {
     let pause = 500;
     let brokeAt: number | null = null;
     while (!this.#abort.signal.aborted && this.#status.state.kind === 'live') {
+      let stopStream = () => {};
       try {
         const kept =
           this.#kept !== undefined && this.#position < this.#kept ? this.#kept : undefined;
+        // Its own, which leaving or going offline aborts.
         const stream = new AbortController();
         this.#streamAbort = stream;
-        const signal = AbortSignal.any([this.#abort.signal, stream.signal]);
+        stopStream = () => stream.abort();
+        this.#abort.signal.addEventListener('abort', stopStream, { once: true });
+        const { signal } = stream;
         for await (const line of this.#transport.stream(
           { after: this.#position, joinId: this.#me.joinId, ...(kept !== undefined && { kept }) },
           signal,
@@ -1825,6 +1829,8 @@ export class LiveParticipant {
           // refused: it joins again as a newcomer, putting its typing back.
           return this.#stop(`the session’s stream was refused (${error.code})`, null, true);
         }
+      } finally {
+        this.#abort.signal.removeEventListener('abort', stopStream);
       }
       if (this.#abort.signal.aborted || this.#status.state.kind !== 'live') return;
       if (this.#connected) {
@@ -2066,8 +2072,8 @@ export class LiveParticipant {
     if (opened.kind === 'snapshot' && key(opened) !== key(this.#me)) this.#bytesSinceSnapshot = 0;
     this.#joins.take(opened);
     this.#verified.add(key(opened));
-    // Placed by this document itself, from what the session served.
-    if (opened.kind !== 'presence') this.#placedSeq.set(key(opened), opened.seq);
+    // A change placed by this document itself, from what the session served.
+    if (opened.kind === 'update') this.#placedSeq.set(key(opened), opened.seq);
     this.#taken(stored.position);
     // What it held up may fit now.
     const waiting = this.#held;

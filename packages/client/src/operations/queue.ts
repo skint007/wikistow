@@ -573,9 +573,10 @@ export class OfflineQueue {
             // nor is the base its text was merged from.
             ...(rebased && { basedOn, failure: null, sending: null, live: null }),
             ...(live !== undefined && { live }),
-            // Saved into after it was put into a session: the session holds the
-            // change as it was then, which is the base of what's new.
+            // Saved into by a view outside the session after it was put in: the
+            // session holds the change as it was then, the base of what's new.
             ...(!rebased &&
+              live === undefined &&
               before.live?.putIn && {
                 live: {
                   base: before.payload,

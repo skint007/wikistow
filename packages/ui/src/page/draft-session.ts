@@ -730,6 +730,7 @@ export class DraftSession {
     this.#region = null;
     this.#theirs = null;
     this.#keptLive = null;
+    this.#releaseConflictHold();
     this.#autosave.resume();
     this.#schedule();
     await this.#autosave.flush();
@@ -814,6 +815,7 @@ export class DraftSession {
     }
     this.#region = null;
     this.#theirs = null;
+    this.#releaseConflictHold();
     this.#set({ title, markdown, attachments, links: this.#table() });
     this.#autosave.resume();
     this.#schedule();
@@ -937,6 +939,7 @@ export class DraftSession {
     this.#live = false;
     if (this.#rejoin) clearTimeout(this.#rejoin);
     this.#releaseRejoinHold();
+    this.#releaseConflictHold();
     if (this.#joinTimer) clearTimeout(this.#joinTimer);
     this.#unwait?.();
     const participant = this.#participant;
@@ -1054,6 +1057,14 @@ export class DraftSession {
   // withdrawn once a compared draft of the session holds it.
   #kept: { version: number } | null = null;
   #keepTimer: ReturnType<typeof setTimeout> | null = null;
+  // The page's live lock while a waiting change that overlapped the session waits for Merge….
+  #conflictHold: (() => void) | null = null;
+
+  #releaseConflictHold() {
+    const release = this.#conflictHold;
+    this.#conflictHold = null;
+    release?.();
+  }
   // Recording the change put in from the queue, and the claim held on it until then.
   #markedPutIn: Promise<void> | null = null;
   #claimed: (() => void) | null = null;
@@ -1194,6 +1205,13 @@ export class DraftSession {
       // Never started, it saved nothing for anyone, and saves nothing now.
       joined.close();
       release();
+      // On the head it was based on, the queue sends it, and the saver folds it in.
+      if (
+        attached === 'send' ||
+        (attached === 'overlap' && opening.revisionId === entry?.basedOn)
+      ) {
+        return;
+      }
       if (attached === 'overlap' && entry) return this.#overlapping(entry, opening.revisionId);
       if (this.#live) {
         this.#set({ live: { kind: 'not-joined', why: { kind: 'typed-meanwhile' } } });
@@ -1288,7 +1306,7 @@ export class DraftSession {
     participant: LiveParticipant,
     entry: QueuedPage,
     basedOn: PagePayload | null,
-  ): 'in' | 'overlap' | 'failed' {
+  ): 'in' | 'overlap' | 'send' | 'failed' {
     if (this.#theirs || this.#autosave.isStopped() || this.#autosave.isSaving()) return 'failed';
     // The view must hold the change as it waits: one saved into from elsewhere since is theirs.
     if (this.#ports.seen && this.#ports.seen() !== entry.version) return 'failed';
@@ -1336,9 +1354,10 @@ export class DraftSession {
       base = kept?.base ?? basedOn;
     }
     if (!base) return 'failed';
-    // Files added on this device are there only: they go up as the queue sends the change.
+    // Files added on this device are there only: the queue sends the change,
+    // uploading them, and the saver folds it in.
     const known = new Set([...base.attachments, ...current.attachments].map((ref) => ref.id));
-    if (ours.attachments.some((ref) => !known.has(ref.id))) return 'overlap';
+    if (ours.attachments.some((ref) => !known.has(ref.id))) return 'send';
     const merged = mergeByBlock(base, ours, current, { addsOverlap: true });
     if (!merged) return 'overlap';
     // From here the view shows the session's document: what `merged` adds to it is the person's.
@@ -1370,14 +1389,19 @@ export class DraftSession {
       baseSeq: 0,
       seq: null,
     };
-    this.#markedPutIn = participant
-      .sentThrough()
-      .then(async (sent) => {
-        if (!sent || sent.seq < 1) return;
-        const putIn = { sessionId: participant.sessionId, joinId: sent.joinId, seq: sent.seq };
-        await this.#ports.markPutIn?.(entry.version, { ...live, putIn });
-      })
-      .catch(() => {});
+    // Until it is recorded, or the participant goes, no other tab puts it in.
+    this.#markedPutIn = (async () => {
+      while (participant.status().state.kind === 'live') {
+        const sent = await participant.sentThrough().catch(() => null);
+        if (participant.status().state.kind !== 'live') return;
+        if (sent && sent.seq >= 1) {
+          const putIn = { sessionId: participant.sessionId, joinId: sent.joinId, seq: sent.seq };
+          await this.#ports.markPutIn?.(entry.version, { ...live, putIn });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    })().catch(() => {});
     // A publish waiting with it isn't sent: others are editing, so the person publishes again.
     void this.#ports
       .dropPublish?.()
@@ -1400,6 +1424,8 @@ export class DraftSession {
   #overlapping(entry: QueuedPage, head: RevisionId) {
     this.#releaseRejoinHold();
     if (!this.#live) return;
+    // Held while the person settles it: the queue sends what they keep, not this.
+    this.#conflictHold ??= this.#ports.live?.hold?.() ?? null;
     this.#keptLive = entry.live ?? null;
     this.#theirs = head;
     this.#autosave.hold(() => this.#current());

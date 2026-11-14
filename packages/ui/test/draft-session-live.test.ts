@@ -524,9 +524,9 @@ describe('putting typing back from a live session', () => {
     const live = joins[0];
     if (!live) throw new Error('not joined');
     expect(live.document.text('body').toJSON()).toBe('A\n\nB, mine\n\nC');
-    expect(marked).toEqual([
-      { version: 5, putIn: { sessionId: 'session-1', joinId: 'join-1', seq: 9 } },
-    ]);
+    await expect
+      .poll(() => marked)
+      .toEqual([{ version: 5, putIn: { sessionId: 'session-1', joinId: 'join-1', seq: 9 } }]);
     // Held back from the queue while in the session.
     expect(held()).toBe(1);
     expect(withdrawn).toEqual([]);
@@ -541,15 +541,29 @@ describe('putting typing back from a live session', () => {
 
   it('doesn’t put a waiting change in where it overlaps the session: Merge… instead', async () => {
     const opened = page('A\n\nB, mine');
-    const entry = waitingEntry(opened, page('A\n\nB'));
+    const entry = { ...waitingEntry(opened, page('A\n\nB')), basedOn: RevisionId.parse('r-old') };
     const { draft, joins, held } = session(opened, page('A\n\nB, theirs'), { entry });
     await draft.joinLive();
     expect(joins[0]?.closed).toBe(true);
     expect(joins[0]?.typed).toBe(false);
     expect(draft.participant).toBeNull();
-    expect(held()).toBe(0);
     expect(draft.snapshot().status).toBe('conflict');
     expect((await draft.mergeVersions())?.basePayload?.markdown).toBe('A\n\nB');
+    // Held while the person settles it, so the queue doesn't send it meanwhile.
+    expect(held()).toBe(1);
+    draft.close();
+    expect(held()).toBe(0);
+  });
+
+  it('leaves a waiting change based on the head to the queue, for the saver to fold in', async () => {
+    const opened = page('A\n\nB, mine');
+    const entry = waitingEntry(opened, page('A\n\nB'));
+    const { draft, joins, held } = session(opened, page('A\n\nB, theirs'), { entry });
+    await draft.joinLive();
+    expect(joins[0]?.closed).toBe(true);
+    expect(draft.participant).toBeNull();
+    expect(draft.snapshot().status).not.toBe('conflict');
+    expect(held()).toBe(0);
   });
 
   it('puts in a waiting change made with no session from the version it was based on', async () => {
