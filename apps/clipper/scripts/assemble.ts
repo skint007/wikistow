@@ -29,7 +29,9 @@ const builds: { name: string; target: Target; options: ManifestOptions; zip: boo
   {
     name: 'chrome-test',
     target: 'chrome',
-    options: { version, test: { key: TEST_KEY, hosts: ['http://127.0.0.1/*'] } },
+    // `<all_urls>`, not the tests' site alone: the browser's screenshot
+    // takes it or `activeTab`, which only the toolbar's click grants.
+    options: { version, test: { key: TEST_KEY, hosts: ['<all_urls>'] } },
     zip: false,
   },
 ];
@@ -58,7 +60,7 @@ for (const build of builds) {
   const out = join(dist, build.name);
   await rm(out, { recursive: true, force: true });
   await mkdir(out, { recursive: true });
-  for (const script of ['background', 'capture', 'popup']) {
+  for (const script of ['background', 'capture', 'area', 'popup']) {
     await cp(join(dist, 'scripts', `${script}.iife.js`), join(out, `${script}.js`));
   }
   await cp(join(root, 'src', 'popup', 'popup.html'), join(out, 'popup.html'));

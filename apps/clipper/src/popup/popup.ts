@@ -1,5 +1,5 @@
 // The toolbar button's popup (ADR 0017, decisions 6 and 7; ui-design.md,
-// Web clipper): the mode, the title, a note for a link, tags and the
+// Web clipper): the mode, the title, a note for a link or a screenshot, tags and the
 // folder, then Save to WikiStow. It asks the background for everything,
 // which talks to the app; folder names it hears stay in this page, and the
 // last folder only in `storage.session`. What the person typed survives
@@ -12,13 +12,14 @@ import {
   type Calls,
   type ClipView,
   type Draft,
+  type FormMode,
   type FromBackground,
   type LocalState,
   type Probe,
   type SessionState,
   type View,
 } from '../messages.ts';
-import { parseTags, type ClipMode, type Folder } from '../protocol.ts';
+import { parseTags, type Folder } from '../protocol.ts';
 
 const element = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -94,8 +95,12 @@ let searchError: string | null = null;
 let openFailed: string | null = null;
 
 const inFlight = () => clip?.phase === 'sending' || clip?.phase === 'waiting';
-const mode = (): ClipMode =>
-  (modes.find((input) => input.checked)?.value as ClipMode | undefined) ?? 'link';
+const mode = (): FormMode =>
+  (modes.find((input) => input.checked)?.value as FormMode | undefined) ?? 'link';
+/** The modes with a note: a link's, or a screenshot's caption. */
+const noted = (chosen: FormMode) => chosen === 'link' || chosen === 'visible' || chosen === 'area';
+/** Whether this popup sent a clip, which it closes for, to let the person choose an area. */
+let saving = false;
 const samePlace = (a: Folder, b: Folder) => a.spaceId === b.spaceId && a.folderId === b.folderId;
 
 function showNotice(text: string, action: string | null = null) {
@@ -142,14 +147,15 @@ function render() {
 function renderForm() {
   const selection = probed.selection?.trim() ?? '';
   for (const input of modes) {
+    // A link, or the browser's own screenshot, needs no script in the page.
     input.disabled =
       (input.value === 'selection' && !selection) ||
-      (input.value !== 'link' && probed.selection === null);
+      (input.value !== 'link' && input.value !== 'visible' && probed.selection === null);
   }
   if (modes.find((input) => input.checked)?.disabled) {
     modes.find((input) => input.value === 'link')!.checked = true;
   }
-  noteField.hidden = mode() !== 'link';
+  noteField.hidden = !noted(mode());
   const app = view && 'host' in view ? view.app : null;
   save.disabled =
     !chosen || inFlight() || app === null || app === 'signed-out' || tabId === undefined;
@@ -205,6 +211,11 @@ function renderClip() {
   result.dataset['tone'] = clip?.phase ?? '';
   if (!clip) return;
   switch (clip.phase) {
+    case 'choosing':
+      resultText.textContent = 'Drag over the page to choose the area. Esc cancels.';
+      // Out of the way, for the person to drag on the page.
+      if (saving) window.close();
+      break;
     case 'sending':
       resultText.textContent = 'Sending to WikiStow…';
       break;
@@ -344,12 +355,13 @@ for (const input of hosts) {
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   if (!chosen || tabId === undefined || save.disabled) return;
+  saving = true;
   void call('save', {
     tabId,
     form: {
       mode: mode(),
       title: titleInput.value,
-      note: mode() === 'link' ? noteInput.value : '',
+      note: noted(mode()) ? noteInput.value : '',
       tags: parseTags(tagsInput.value),
       folder: chosen,
     },
@@ -373,7 +385,7 @@ async function start() {
   titleInput.value = draft?.title ?? probed.title;
   noteInput.value = draft?.note ?? '';
   tagsInput.value = draft?.tags ?? '';
-  const first: ClipMode =
+  const first: FormMode =
     draft?.mode ??
     (probed.selection?.trim() ? 'selection' : probed.selection === null ? 'link' : 'article');
   for (const input of modes) input.checked = input.value === first;

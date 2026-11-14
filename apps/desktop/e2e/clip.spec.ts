@@ -394,4 +394,33 @@ test('the extension clips a page into the app from its popup', async ({
   await expect
     .poll(() => sourceOf(desktop!.window))
     .toMatch(/^## The story\n\n(Some words[^\n]+\n\n){4}!\[A cat\]\(attachment:[\w-]{22}\)\n$/);
+
+  // A screenshot of the story as shown, from a popup over its tab, saved
+  // as the draft's image, sealed, above the link.
+  await story.bringToFront();
+  const again = await browser.newPage();
+  await again.goto(`${ORIGIN}popup.html?tab=${tabId}`);
+  await again.getByRole('radio', { name: 'Visible area' }).check();
+  await again.getByLabel('Title').fill('The story, as shown');
+  await again.getByLabel('Note').fill('As it looked');
+  await expect(again.getByRole('radio', { name: 'Personal' })).toBeChecked();
+  await story.bringToFront();
+  await again.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(desktop.window.getByText('Saved “The story, as shown” to Personal')).toBeVisible();
+  await again.getByRole('button', { name: 'Open in WikiStow' }).click();
+  await expect(desktop.window.locator('#page-title')).toHaveValue('The story, as shown');
+  await expect
+    .poll(() => sourceOf(desktop!.window))
+    .toMatch(
+      new RegExp(
+        `^As it looked\\n\\n!\\[Screenshot\\]\\(attachment:[\\w-]{22}\\)\\n\\n\\[The story, as shown\\]\\(${origin.replaceAll('.', '\\.')}/story\\)\\n$`,
+      ),
+    );
+  // The app opens the sealed screenshot as the PNG the browser took.
+  await expect(desktop.window.getByText('Screenshot.png')).toBeVisible();
+  await desktop.window.getByRole('button', { name: 'Visual' }).click();
+  const shown = desktop.window.getByRole('img', { name: 'Screenshot' }).first();
+  await expect
+    .poll(() => shown.evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBeGreaterThan(100);
 });

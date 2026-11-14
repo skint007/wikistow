@@ -50,6 +50,17 @@ ${Array.from({ length: 6 }, () => `<p>${WORDS.repeat(4)}</p>`).join('\n')}
 <script>var secret = 'A script';</script>
 </article></body></html>`;
 
+// A long page with a box, half blue and half green, 300 by 150, far enough
+// down that it's seen only once scrolled.
+const SHOT = `<!doctype html><html><head><title>Boxes</title></head>
+<body style="margin: 0; background: #fff">
+<div style="height: 1200px"></div>
+<div id="box" style="display: flex; width: 300px; height: 150px; margin-left: 100px">
+<div style="flex: 1; background: #0000ff"></div><div style="flex: 1; background: #00ff00"></div>
+</div>
+<div style="height: 2000px"></div>
+</body></html>`;
+
 type Folder = { spaceId: string; folderId: string | null; path: string };
 const PERSONAL: Folder = { spaceId: 'space1', folderId: null, path: 'Personal' };
 const RECIPES: Folder = { spaceId: 'space1', folderId: 'folder1', path: 'Personal / Recipes' };
@@ -81,7 +92,7 @@ async function serve() {
       return response.end(PNG);
     }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(ARTICLE);
+    response.end(request.url === '/shot' ? SHOT : ARTICLE);
   });
   await new Promise<void>((resolve) => site!.listen(0, '127.0.0.1', resolve));
   return `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
@@ -91,7 +102,10 @@ async function serve() {
  * Chromium with the tests' build, and a fake host for each app named,
  * through the manifests a person's app would write in their profile.
  */
-async function launch(apps: Partial<Record<HostKey, Scenario>>) {
+async function launch(
+  apps: Partial<Record<HostKey, Scenario>>,
+  { scale }: { scale?: number } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), 'wikistow-clipper-'));
   const profile = join(dir, 'profile');
   await mkdir(join(profile, 'NativeMessagingHosts'), { recursive: true });
@@ -116,7 +130,14 @@ async function launch(apps: Partial<Record<HostKey, Scenario>>) {
   }
   context = await chromium.launchPersistentContext(profile, {
     channel: 'chromium',
-    args: [`--disable-extensions-except=${EXTENSION}`, `--load-extension=${EXTENSION}`],
+    args: [
+      `--disable-extensions-except=${EXTENSION}`,
+      `--load-extension=${EXTENSION}`,
+      // A high-DPI screen for real, rather than Playwright's emulation, which
+      // the browser's own screenshot doesn't see.
+      ...(scale ? [`--force-device-scale-factor=${scale}`, '--window-size=1000,800'] : []),
+    ],
+    ...(scale ? { viewport: null } : {}),
   });
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
   return {
@@ -158,6 +179,14 @@ async function popupFor(
   await popup.setViewportSize({ width: 360, height: 640 });
   await popup.goto(`chrome-extension://${TEST_ID}/popup.html?tab=${tabId}`);
   return { page, popup, tabId: tabId! };
+}
+
+/** The popup again, for the tab `tabId`, as the toolbar button opens it. */
+async function reopen(tabId: number) {
+  const popup = await context!.newPage();
+  await popup.setViewportSize({ width: 360, height: 640 });
+  await popup.goto(`chrome-extension://${TEST_ID}/popup.html?tab=${tabId}`);
+  return popup;
 }
 
 const ready: Scenario = {
@@ -416,4 +445,270 @@ test('an app’s refusal shows in the popup and on the button', async () => {
     popup.getByText('That folder is gone, or you can’t add pages to it. Choose another.'),
   ).toBeVisible();
   expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('!');
+});
+
+/** A screenshot's size, and the colour at each of `points`, in its own pixels. */
+async function pixels(page: Page, base64: string, points: [number, number][]) {
+  return page.evaluate(
+    async ([base64, points]) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${base64}`;
+      await image.decode();
+      const canvas = new OffscreenCanvas(image.naturalWidth, image.naturalHeight);
+      const drawn = canvas.getContext('2d')!;
+      drawn.drawImage(image, 0, 0);
+      const hex = (x: number, y: number) =>
+        `#${[...drawn.getImageData(x, y, 1, 1).data.slice(0, 3)]
+          .map((n) => n.toString(16).padStart(2, '0'))
+          .join('')}`;
+      return {
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        colours: points.map(([x, y]) => hex(x, y)),
+      };
+    },
+    [base64, points] as const,
+  );
+}
+
+test('a screenshot of the visible area is the tab as shown, scrolled, in its device pixels', async () => {
+  const { worker, got } = await launch({ stable: ready }, { scale: 2 });
+  const origin = await serve();
+  const first = await popupFor(worker, origin, undefined, '/shot');
+  const { page, tabId } = first;
+  await page.evaluate(() => scrollTo(0, 1000));
+  // Choosing an area first, then the visible area instead: the overlay is
+  // gone from the screenshot.
+  await expect(first.popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await first.popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const closed = first.popup.waitForEvent('close');
+  await first.popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+
+  const popup = await reopen(tabId);
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Visible area' }).check();
+  await expect(popup.getByLabel('Note')).toBeVisible();
+  await popup.getByLabel('Note').fill('The boxes');
+  if (SCREENSHOTS) {
+    await popup.getByText('Drag over the page to choose the area. Esc cancels.').waitFor();
+    await popup.evaluate(() => (document.getElementById('result')!.hidden = true));
+    await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-screenshot.png') });
+  }
+  // The toolbar's popup opens over the tab it clips, which stays the one shown.
+  await page.bringToFront();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
+
+  const [clip] = await got('stable', 'clip');
+  expect(clip).toMatchObject({
+    mode: 'screenshot',
+    url: `${origin}/shot`,
+    title: 'Boxes',
+    note: 'The boxes',
+    html: '',
+    text: '',
+    folder: { spaceId: 'space1', folderId: null },
+  });
+  const view = await page.evaluate(() => ({
+    width: innerWidth,
+    height: innerHeight,
+    ratio: devicePixelRatio,
+  }));
+  expect(view.ratio).toBe(2);
+  // The box is at 100, 200 in the tab once scrolled 1000 down.
+  const shot = await pixels(page, String(clip!['screenshot']), [
+    [175 * 2, 275 * 2],
+    [325 * 2, 275 * 2],
+    [50 * 2, 275 * 2],
+  ]);
+  expect(shot).toEqual({
+    width: view.width * 2,
+    height: view.height * 2,
+    colours: ['#0000ff', '#00ff00', '#ffffff'],
+  });
+});
+
+test('a screenshot of an area is the part dragged over, scrolled, in its device pixels', async () => {
+  const { worker, got } = await launch({ stable: ready }, { scale: 2 });
+  const origin = await serve();
+  const { page, popup, tabId } = await popupFor(worker, origin, undefined, '/shot');
+  await page.evaluate(() => scrollTo(0, 1000));
+  // A dialog the page has open, modal, which makes the rest of it inert,
+  // away from the box and with no backdrop, takes nothing from the overlay.
+  await page.evaluate(() => {
+    const style = document.createElement('style');
+    style.textContent =
+      'dialog::backdrop { background: transparent } #modal { margin: 0; inset: 20px 20px auto auto }';
+    const modal = document.createElement('dialog');
+    modal.id = 'modal';
+    modal.innerHTML = '<button>A button</button>';
+    document.head.append(style);
+    document.body.append(modal);
+    modal.showModal();
+  });
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  // The popup goes, for the person to drag over the page.
+  const closed = popup.waitForEvent('close');
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  const again = await reopen(tabId);
+  await expect(
+    again.getByText('Drag over the page to choose the area. Esc cancels.'),
+  ).toBeVisible();
+  await page.bringToFront();
+  expect(await got('stable', 'clip')).toEqual([]);
+  // The person may take a while: Chrome stops the idle service worker, and
+  // the overlay's message wakes it again, with the area chosen kept.
+  const devtools = await context!.newCDPSession(again);
+  await devtools.send('ServiceWorker.enable');
+  await devtools.send('ServiceWorker.stopAllWorkers');
+
+  // Exactly over the box, at 100, 200 in the tab.
+  await page.mouse.move(100, 200);
+  await page.mouse.down();
+  await page.mouse.move(250, 300, { steps: 5 });
+  await page.mouse.move(400, 350, { steps: 5 });
+  if (SCREENSHOTS) await page.screenshot({ path: join(SCREENSHOTS, 'area-choosing.png') });
+  await page.mouse.up();
+  await expect(again.getByText('Saved to Personal / Recipes')).toBeVisible();
+  // The overlay was gone before the screenshot, and is gone from the page.
+  expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
+  expect(await page.evaluate(() => scrollY)).toBe(1000);
+
+  const [clip] = await got('stable', 'clip');
+  expect(clip).toMatchObject({ mode: 'screenshot', url: `${origin}/shot`, html: '' });
+  const shot = await pixels(page, String(clip!['screenshot']), [
+    [0, 0],
+    [299, 150],
+    [300, 150],
+    [599, 299],
+  ]);
+  expect(shot).toEqual({
+    width: 600,
+    height: 300,
+    colours: ['#0000ff', '#0000ff', '#00ff00', '#00ff00'],
+  });
+});
+
+test('an area matches what was drawn on a page with a CSS zoom of its own', async () => {
+  const { worker, got } = await launch({ stable: ready }, { scale: 1 });
+  const origin = await serve();
+  const { page, popup } = await popupFor(worker, origin, undefined, '/shot');
+  // The box is 240 by 120 at 0.8; brought to 80, 160 in the tab.
+  const box = await page.evaluate(() => {
+    document.documentElement.style.zoom = '0.8';
+    const found = document.getElementById('box')!;
+    scrollTo(0, 0);
+    scrollTo(0, found.getBoundingClientRect().top - 160);
+    const { left, top, width, height } = found.getBoundingClientRect();
+    return { left, top, width, height };
+  });
+  expect(box).toEqual({ left: 80, top: 160, width: 240, height: 120 });
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const closed = popup.waitForEvent('close');
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  await page.mouse.move(80, 160);
+  await page.mouse.down();
+  await page.mouse.move(200, 220, { steps: 5 });
+  // The rectangle drawn is where the pointer is.
+  const drawn = await page.evaluate(() => {
+    const frame = document.documentElement.lastElementChild!;
+    const { left, top, width, height } = frame.getBoundingClientRect();
+    return { frame: { left, top, width, height }, tab: { width: innerWidth, height: innerHeight } };
+  });
+  expect(drawn.frame).toEqual({ left: 0, top: 0, ...drawn.tab });
+  await page.mouse.move(320, 280, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await got('stable', 'clip')).length).toBe(1);
+  const [clip] = await got('stable', 'clip');
+  const shot = await pixels(page, String(clip!['screenshot']), [
+    [0, 0],
+    [119, 60],
+    [120, 60],
+    [239, 119],
+  ]);
+  expect(shot).toEqual({
+    width: 240,
+    height: 120,
+    colours: ['#0000ff', '#0000ff', '#00ff00', '#00ff00'],
+  });
+});
+
+test('a clip from another tab takes off the overlay left on the first', async () => {
+  const { worker, got } = await launch({ stable: ready }, { scale: 1 });
+  const origin = await serve();
+  const first = await popupFor(worker, origin, undefined, '/shot');
+  await expect(first.popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await first.popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await first.page.bringToFront();
+  const closed = first.popup.waitForEvent('close');
+  await first.popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  await expect
+    .poll(() => first.page.evaluate(() => document.documentElement.children.length))
+    .toBe(3);
+
+  // The person clips from another tab instead. (Headless Chromium keeps
+  // every tab visible, so this can't show that a hidden one, which draws
+  // no frames, doesn't hold the clip up.)
+  const second = await popupFor(worker, origin, undefined, '/bread');
+  await second.page.bringToFront();
+  await second.popup.getByRole('radio', { name: 'Link' }).check();
+  await second.popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(second.popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await got('stable', 'clip')).toMatchObject([{ mode: 'link', url: `${origin}/bread` }]);
+  expect(await first.page.evaluate(() => document.documentElement.children.length)).toBe(2);
+});
+
+test('Escape stops choosing an area, sending nothing', async () => {
+  const { worker, got } = await launch({ stable: ready });
+  const origin = await serve();
+  const { page, popup, tabId } = await popupFor(worker, origin, undefined, '/shot');
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const closed = popup.waitForEvent('close');
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  const again = await reopen(tabId);
+  await expect(
+    again.getByText('Drag over the page to choose the area. Esc cancels.'),
+  ).toBeVisible();
+  await page.bringToFront();
+  // A click alone isn't an area: it keeps choosing.
+  await page.mouse.click(300, 300);
+  expect(await page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  await page.keyboard.press('Escape');
+  await expect(again.getByText('Drag over the page to choose the area. Esc cancels.')).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
+  expect(await got('stable', 'clip')).toEqual([]);
+  expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+
+  // An overlay that went with its page leaves the popup nothing to wait for.
+  const third = await reopen(tabId);
+  await third.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const gone = third.waitForEvent('close');
+  await third.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await gone;
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  await page.reload();
+  const fourth = await reopen(tabId);
+  await expect(fourth.getByRole('button', { name: 'Save to WikiStow' })).toBeVisible();
+  await expect
+    .poll(() => worker.evaluate(() => chrome.storage.session.get(['clip', 'choosing'])))
+    .toEqual({});
+  await expect(
+    fourth.getByText('Drag over the page to choose the area. Esc cancels.'),
+  ).toBeHidden();
 });

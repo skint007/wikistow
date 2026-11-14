@@ -2,15 +2,19 @@
 // background script (ADR 0017, decisions 4 to 7). It alone talks to the
 // desktop app, so a clip waiting for the app to open or unlock goes on
 // when the popup closes. It takes calls only from its own popup, over a
-// port: no other extension or page can reach it, and the content script
-// it injects answers as the injection's result, never by message.
+// port: no other extension or page can reach it. The content script it
+// injects answers as the injection's result; the one message it takes is
+// the area overlay's (area.ts), from the tab it was injected in, naming
+// the nonce it was given there.
 import { api } from './api.ts';
 import type { Captured } from './capture.ts';
+import { base64, cropPng, dataBytes, isAreaMessage, type Area, type ViewSize } from './shot.ts';
 import { ask, converse, find, HostGone, TimedOut, type Found } from './host.ts';
 import {
   POPUP_PORT,
   type Call,
   type Calls,
+  type Choosing,
   type ClipView,
   type Failure,
   type Form,
@@ -27,14 +31,15 @@ import {
   MAX_NAME,
   MAX_NOTE,
   MAX_QUERY,
+  MAX_SCREENSHOT_CHARS,
   MAX_TITLE,
   MAX_URL,
   PROTOCOL,
   speaks,
   type Clip,
-  type ClipMode,
   type Folder,
   type Saved,
+  type TextMode,
 } from './protocol.ts';
 
 /** How long a clip waits for the app to open or unlock, or to save it, before the extension stops waiting. */
@@ -43,6 +48,8 @@ const WAIT_MS = 10 * 60_000;
 const SEND_MS = 2 * 60_000;
 /** How long the toolbar button shows its check after a save. */
 const CHECK_MS = 4_000;
+/** How long the person has to drag out an area, as the overlay waits. */
+const CHOOSE_MS = 5 * 60_000;
 
 /** The app found last, which searches and shows go to. */
 let found: Found | null = null;
@@ -143,11 +150,11 @@ async function probe(tabId: number): Promise<Calls['probe']['result']> {
   return { url: tab.url ?? '', title: tab.title ?? '', selection };
 }
 
-async function capture(tabId: number, mode: ClipMode): Promise<Captured> {
+async function capture(tabId: number, mode: TextMode): Promise<Captured> {
   await api.scripting.executeScript({ target: { tabId }, files: ['capture.js'] });
   const [ran] = await api.scripting.executeScript({
     target: { tabId },
-    func: (mode: ClipMode) => globalThis.wikistowCapture!(mode),
+    func: (mode: TextMode) => globalThis.wikistowCapture!(mode),
     args: [mode],
   });
   if (!ran?.result) throw new Error('Nothing captured');
@@ -176,6 +183,13 @@ function badge(text: '' | '✓' | '!') {
     unbadge = setTimeout(() => void api.action.setBadgeText({ text: '' }), CHECK_MS);
 }
 
+function clearClip() {
+  current = null;
+  void api.storage.session.remove('clip');
+  push({ push: 'clip', clip: null });
+  badge('');
+}
+
 function setClip(next: ClipView) {
   current = next;
   void api.storage.session.set({ clip: next });
@@ -189,6 +203,115 @@ const fail = (code: Failure, message: string) => setClip({ phase: 'failed', code
 
 const TOO_LONG =
   'This is too long to clip. Try Article, or select part of it and clip the selection.';
+
+/** Why a screenshot couldn't be taken, in the popup's words. */
+class NoShot extends Error {
+  readonly code: Failure;
+  constructor(code: Failure, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+/**
+ * The tab as shown, as PNG base64, or the part of it under `part`: the
+ * browser's own screenshot of the visible area, which `activeTab` allows
+ * for the tab the person clicked in, cut here for a part.
+ */
+async function screenshot(
+  tab: chrome.tabs.Tab,
+  part: { area: Area; view: ViewSize } | null,
+): Promise<string> {
+  if (!tab.active) throw new NoShot('capture', 'Switch to that tab, then try again.');
+  let png: Uint8Array | null;
+  try {
+    png = dataBytes(await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }), 'image/png');
+  } catch {
+    png = null;
+  }
+  if (!png) throw new NoShot('capture', 'WikiStow can’t take a screenshot of this page.');
+  if (part) png = await cropPng(png, part.area, part.view);
+  const shot = base64(png);
+  if (shot.length > MAX_SCREENSHOT_CHARS) {
+    throw new NoShot(
+      'too-long',
+      part
+        ? 'This screenshot is too large to clip. Choose a smaller area.'
+        : 'This screenshot is too large to clip. Try Choose an area.',
+    );
+  }
+  return shot;
+}
+
+/** The area being chosen, as `storage.session` keeps it, which outlives a sleeping background. */
+async function choosing(): Promise<Choosing | null> {
+  return ((await api.storage.session.get('choosing')) as SessionState).choosing ?? null;
+}
+
+/** Whether the overlay is still on its page: one that went with its page, or was taken off, isn't. */
+async function overlayShown(tabId: number): Promise<boolean> {
+  try {
+    const [ran] = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => globalThis.wikistowAreaShown?.() ?? false,
+    });
+    return ran?.result === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Stop choosing an area, taking the overlay off its page, which is drawn again without it once this is done. */
+async function stopChoosing() {
+  const was = await choosing();
+  if (!was) return;
+  await api.storage.session.remove('choosing');
+  await api.scripting
+    .executeScript({ target: { tabId: was.tabId }, func: () => globalThis.wikistowAreaStop?.() })
+    .catch(() => {});
+}
+
+/**
+ * Put the overlay on the tab, for the person to drag out an area. It names
+ * `nonce` when they have (`areaChosen`), and the screenshot is taken then.
+ */
+async function choose(tabId: number, form: Form) {
+  await stopChoosing();
+  const nonce = crypto.randomUUID();
+  const next: Choosing = { nonce, tabId, form, until: Date.now() + CHOOSE_MS };
+  await api.storage.session.set({ choosing: next });
+  let started: unknown;
+  try {
+    await api.scripting.executeScript({ target: { tabId }, files: ['area.js'] });
+    const [ran] = await api.scripting.executeScript({
+      target: { tabId },
+      func: (nonce: string) => globalThis.wikistowArea!(nonce),
+      args: [nonce],
+    });
+    started = ran?.result;
+  } catch {
+    started = null;
+  }
+  if (started === 'choosing') return setClip({ phase: 'choosing' });
+  await api.storage.session.remove('choosing');
+  if (started === 'zoomed') {
+    return fail('capture', 'Pinch the page back to its usual size, then choose an area.');
+  }
+  fail('capture', 'WikiStow can’t take a screenshot of this page.');
+}
+
+/** The overlay's message: the area the person dragged out, or that they stopped. */
+async function areaChosen(message: unknown, sender: chrome.runtime.MessageSender) {
+  if (sender.id !== api.runtime.id || sender.frameId !== 0 || sender.tab?.id === undefined) return;
+  // A content script's sender is its page, never one of the extension's own.
+  if (!sender.url || sender.url.startsWith(api.runtime.getURL(''))) return;
+  if (!isAreaMessage(message)) return;
+  const was = await choosing();
+  if (!was || was.nonce !== message.nonce || was.tabId !== sender.tab.id) return;
+  await api.storage.session.remove('choosing');
+  if (!message.area || Date.now() > was.until) return clearClip();
+  await send(was.tabId, was.form, { area: message.area, view: message.view });
+}
 
 /** The clip's JSON is within the app's limit: counted exactly only when it might not be. */
 function fits(message: object) {
@@ -211,29 +334,46 @@ async function forgetDraft(url: string) {
   if (draft?.url === url) await api.storage.session.remove('draft');
 }
 
+const NOTHING: Captured = { url: '', title: '', html: '', text: '', byline: null, siteName: null };
+
 /**
  * Capture the tab as `form` says and send it to the app: with the app
  * closed, `open` first, which the helper holds the clip behind until the
- * app listens. How it goes is `current`, which open popups hear.
+ * app listens. How it goes is `current`, which open popups hear. An area's
+ * screenshot starts with the overlay (`choose`), and is taken and sent
+ * here once the person has dragged it out (`part`).
  */
-async function send(tabId: number, form: Form) {
+async function send(tabId: number, form: Form, part: { area: Area; view: ViewSize } | null = null) {
   if (sending) return fail('busy', 'A clip is still on its way to WikiStow.');
+  if (form.mode === 'area' && !part) return choose(tabId, form);
   sending = true;
   setClip({ phase: 'sending' });
   try {
+    if (!part) await stopChoosing();
     const tab = await api.tabs.get(tabId);
     let captured: Captured;
-    try {
-      captured = await capture(tabId, form.mode);
-    } catch {
-      // A link needs no script: the browser's own pages can still be linked.
-      if (form.mode !== 'link') {
-        return fail('capture', 'WikiStow can’t clip this page. Try Link.');
+    let shot: string | undefined;
+    if (form.mode === 'visible' || form.mode === 'area') {
+      captured = NOTHING;
+      try {
+        shot = await screenshot(tab, part);
+      } catch (error) {
+        if (error instanceof NoShot) return fail(error.code, error.message);
+        throw error;
       }
-      captured = { url: '', title: '', html: '', text: '', byline: null, siteName: null };
+    } else {
+      try {
+        captured = await capture(tabId, form.mode);
+      } catch {
+        // A link needs no script: the browser's own pages can still be linked.
+        if (form.mode !== 'link') {
+          return fail('capture', 'WikiStow can’t clip this page. Try Link.');
+        }
+        captured = NOTHING;
+      }
     }
     const clip: Clip = {
-      mode: form.mode,
+      mode: shot === undefined ? (form.mode as TextMode) : 'screenshot',
       url: tab.url || captured.url,
       title: (form.title.trim() || tab.title || captured.title).slice(0, MAX_TITLE),
       note: form.note.slice(0, MAX_NOTE),
@@ -243,6 +383,7 @@ async function send(tabId: number, form: Form) {
       byline: captured.byline?.slice(0, MAX_NAME) ?? null,
       siteName: captured.siteName?.slice(0, MAX_NAME) ?? null,
       folder: { spaceId: form.folder.spaceId, folderId: form.folder.folderId },
+      ...(shot === undefined ? {} : { screenshot: shot }),
     };
     if (!clip.url) return fail('capture', 'WikiStow can’t read this tab’s address.');
     if (clip.url.length > MAX_URL)
@@ -344,6 +485,11 @@ function fromPopup(port: chrome.runtime.Port) {
   return `${url.origin}${url.pathname}` === api.runtime.getURL('popup.html');
 }
 
+api.runtime.onMessage.addListener((message, sender) => {
+  void areaChosen(message, sender);
+  return false;
+});
+
 api.runtime.onConnect.addListener((port) => {
   if (!fromPopup(port)) return port.disconnect();
   const closed = new AbortController();
@@ -364,6 +510,14 @@ api.runtime.onConnect.addListener((port) => {
   });
   void (async () => {
     current ??= (await session()).clip ?? null;
+    // An overlay that went with its page, or gave up, leaves nothing to wait for.
+    if (current?.phase === 'choosing') {
+      const was = await choosing();
+      if (!was || Date.now() > was.until || !(await overlayShown(was.tabId))) {
+        await api.storage.session.remove('choosing');
+        clearClip();
+      }
+    }
     // A failure's `!` has been seen once the popup opens.
     if (current?.phase === 'failed') badge('');
     port.postMessage({ push: 'clip', clip: current });
@@ -387,7 +541,7 @@ async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'selection
     return;
   }
   if (tabId === undefined) return;
-  let chosen: ClipMode = mode === 'selection' ? 'selection' : 'link';
+  let chosen: TextMode = mode === 'selection' ? 'selection' : 'link';
   if (mode === 'either') chosen = (await probe(tabId)).selection?.trim() ? 'selection' : 'link';
   await send(tabId, { mode: chosen, title: '', note: '', tags: [], folder: lastFolder });
 }

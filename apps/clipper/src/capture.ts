@@ -7,7 +7,7 @@
 // image the source the page shows (`currentSrc`), and makes every address
 // absolute. The app turns the HTML into Markdown.
 import { Readability } from '@mozilla/readability';
-import type { ClipMode } from './protocol.ts';
+import type { TextMode } from './protocol.ts';
 
 export type Captured = {
   url: string;
@@ -186,7 +186,7 @@ function article(): Pick<Captured, 'html' | 'text' | 'byline' | 'siteName'> {
 }
 
 /** What `mode` clips from this page. Link takes the selection as text, if any. */
-function capture(mode: ClipMode): Captured {
+function capture(mode: TextMode): Captured {
   const page = { url: location.href, title: document.title, byline: null, siteName: null };
   switch (mode) {
     case 'link':
