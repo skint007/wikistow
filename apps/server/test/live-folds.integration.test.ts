@@ -42,7 +42,7 @@ async function sharedPage() {
     rootId: lib.shared,
     people: [await invite(owner, editor, 'editor')],
   });
-  return { owner, editor, page: lib.page, shareId };
+  return { owner, editor, lib, page: lib.page, shareId };
 }
 
 async function draftOf(person: Person, page: Page) {
@@ -217,5 +217,35 @@ describe('a draft saved from outside a live session', () => {
     await expect.poll(() => body(theirs)).toBe(body(mine));
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(theirs.status().notes).toEqual([]);
+  });
+});
+
+describe('a live session’s saves', () => {
+  it('rename a link to its page’s new title, in a save’s own join', async () => {
+    const { owner, editor, lib, page } = await sharedPage();
+    const target = {
+      spaceId: lib.spaceId,
+      pageId: await pages.createPage(owner.ctx, {
+        spaceId: lib.spaceId,
+        parentId: lib.shared,
+        title: 'Recipes',
+      }),
+    };
+    await pages.publishPage(owner.ctx, target);
+    await saveOutside(owner, page, () => 'See [[Recipes]].\n');
+    // The editor's app saves, and reads the tree once the page is renamed.
+    const theirs = await join(editor, page);
+    const mine = await join(owner, page);
+    await pages.editDraft(owner.ctx, target, { title: 'Dinners' });
+    await pages.publishPage(owner.ctx, target);
+
+    setBody(mine, 'See [[Recipes]].\n\nMore.\n');
+    await expect.poll(() => body(mine), { timeout: 30_000 }).toBe('See [[Dinners]].\n\nMore.\n');
+    await expect.poll(() => body(theirs)).toBe(body(mine));
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    const head = await draftOf(editor, page);
+    expect(head.payload.markdown).toBe('See [[Dinners]].\n\nMore.\n');
+    expect(sessionState(head.payload, head.revisionId, mine.sessionId)).not.toBeNull();
+    expect(mine.status().state).toEqual({ kind: 'live' });
   });
 });

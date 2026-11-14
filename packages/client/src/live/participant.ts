@@ -46,6 +46,7 @@ import {
   type TextRoot,
 } from './decode.ts';
 import { LiveDocument, samePayload } from './document.ts';
+import { splitFrontmatter } from '../markdown/index.ts';
 import {
   carryChoices,
   foldPayloads,
@@ -120,6 +121,11 @@ export type ParticipantPorts = {
     payload: PagePayload;
     linkChoices: ReadonlyMap<string, PageId>;
   }): Promise<{ revisionId: RevisionId; payload: PagePayload }>;
+  /**
+   * The Markdown a save on `basedOn` would write once its links name their
+   * pages' current titles, or null if none would change (`renamedLinks`).
+   */
+  renamed?(payload: PagePayload, basedOn: RevisionId): Promise<string | null>;
   /** What this app knows of access to the page now (`liveAccess`), read again with `refresh`. */
   access(refresh: boolean): Promise<LiveAccess>;
   /** Whether the page is visible, which decides who saves. */
@@ -2447,6 +2453,7 @@ export class LiveParticipant {
       this.#queueSaved(result.revisionId, stateBytes, covers);
       this.#presenceDirty = true;
       void this.#maybeSnapshot(result.revisionId, savedState, covers);
+      void this.#renameLinks(result.revisionId);
       this.#scheduleSave();
       this.#update();
       return true;
@@ -2479,6 +2486,39 @@ export class LiveParticipant {
       this.#update();
       return false;
     }
+  }
+
+  #renamedAt = 0;
+
+  /**
+   * Rename the links of the draft just saved to their pages' current
+   * titles, as any draft save does, at most every 30 s (section 5.10, **The
+   * document**): only the saver renames, in a save's own join, so its saves
+   * never differ from what everyone's document holds; and only while the
+   * document has exactly that draft's state, so the change is of the text
+   * everyone has, and typing meanwhile stays where it goes.
+   */
+  async #renameLinks(saved: RevisionId): Promise<void> {
+    const renamed = this.#ports.renamed;
+    if (!renamed || Date.now() - this.#renamedAt < 30_000) return;
+    this.#renamedAt = Date.now();
+    const draft = this.#drafts.get(saved);
+    if (!draft) return;
+    let markdown: string | null;
+    try {
+      markdown = await renamed(draft.payload, saved);
+    } catch {
+      return;
+    }
+    if (markdown === null || this.#head !== saved || !this.#keyed()) return;
+    if (this.#pending.length > 0 || this.#queue.length > 0 || this.#placing) return;
+    if (!sameState(this.document.state(), draft.state)) return;
+    const { frontmatter, body } = splitFrontmatter(markdown);
+    const now = this.document.content();
+    const was = splitFrontmatter(draft.payload.markdown);
+    // The document's parts as the draft splits them: only a change within each.
+    if ((was.frontmatter ?? '') !== now.frontmatter || was.body !== now.body) return;
+    await this.commitOwn({ texts: { frontmatter: frontmatter ?? '', body } });
   }
 
   // The payload a save writes from the document, with the head's link table.

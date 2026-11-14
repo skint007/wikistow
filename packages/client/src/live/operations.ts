@@ -15,7 +15,7 @@ import {
 import { ApiError, outcomeUnknown, type Fetch } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { parseJsonText } from '../json.ts';
-import { openRevisionOf, saveDraft } from '../operations/pages.ts';
+import { openRevisionOf, renamedLinks, saveDraft } from '../operations/pages.ts';
 import { keyTargetFor, treeTarget, withFreshKeys } from '../operations/records.ts';
 import { spaceKeys } from '../operations/keys.ts';
 import type { ClientContext } from '../operations/session.ts';
@@ -418,6 +418,8 @@ export function participantPorts(
         }
       }
     },
+    renamed: (payload, basedOn) =>
+      renamedLinks(ctx, { page, basedOn, payload, ...(read && { read }) }),
     access: (refresh) => liveAccess(ctx, page.spaceId, region(), { refresh }),
     visible,
     editor,

@@ -959,6 +959,46 @@ export async function saveDraft(
 }
 
 /**
+ * The Markdown a draft save of `payload` on `basedOn` would write once its
+ * links name their pages' current titles (`writeLinks`), or null when no
+ * link would be renamed. A live session's saver saves with no renames, and
+ * makes these in a save's own join (protocol section 5.10, **The
+ * document**), so its drafts never differ from what everyone's document holds.
+ */
+export async function renamedLinks(
+  ctx: ClientContext,
+  {
+    page,
+    basedOn,
+    payload,
+    tree,
+    read,
+  }: {
+    page: PageRef;
+    basedOn: RevisionId;
+    payload: PagePayload;
+    tree?: LinkTree;
+    read?: ReadWikilinks;
+  },
+): Promise<string | null> {
+  const { value: repaired } = repairText(withoutChange(payload));
+  const linkTree = linkTreeFor(ctx, page.spaceId, tree);
+  const opened = await openRevisionOf(ctx, page, 'draft', basedOn);
+  const region = writeRegion({ kind: 'based-on', basedOn: opened.region });
+  const { payload: linked, renamed } = await writeLinks(repaired, {
+    page: { id: page.pageId },
+    audience: 'draft',
+    region,
+    tableRegion: region,
+    tree: linkTree,
+    published: publicationsFor(ctx, page.spaceId),
+    ...(read ? { read } : {}),
+    renames: true,
+  });
+  return renamed.length > 0 && linked.markdown !== repaired.markdown ? linked.markdown : null;
+}
+
+/**
  * The region of the draft `basedOn`. One no longer there was saved over long
  * ago, and draft retention removed it: that is `stale-head` with the page's
  * heads, as for any save on an old base, so the editor offers to keep both.
