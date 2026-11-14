@@ -6,7 +6,8 @@ export type EmbedKind = 'query' | 'passage';
 /** What the page asks the worker (`embed.worker.ts`), and with `id`, how. */
 export type EmbedAsk =
   | { op: 'load'; keep: boolean }
-  | { op: 'embed'; kind: EmbedKind; texts: string[] };
+  | { op: 'embed'; kind: EmbedKind; texts: string[] }
+  | { op: 'count'; words: string[] };
 export type EmbedRequest = EmbedAsk & { id: number };
 
 /**
@@ -22,7 +23,19 @@ export type Embedded = { vectors: Float32Array[]; tokens: number[] };
 export type EmbedAnswer =
   | ({ id: number; op: 'load' } & Loaded)
   | ({ id: number; op: 'embed' } & Embedded)
+  | { id: number; op: 'count'; counts: number[] }
   | { id: number; op: 'error'; message: string };
+
+/**
+ * The model couldn't be loaded, as distinct from the loaded worker failing
+ * on what it was given: nothing asked of it is at fault.
+ */
+export class ModelUnavailable extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : 'The model couldn’t be loaded.', { cause });
+    this.name = 'ModelUnavailable';
+  }
+}
 
 type Waiting = { resolve: (answer: EmbedAnswer) => void; reject: (error: Error) => void };
 
@@ -115,16 +128,37 @@ export class Embedder {
     return loading;
   }
 
-  /** Each text's vector, in order, loading the model first if need be. */
-  async embed(kind: EmbedKind, texts: string[]): Promise<Embedded> {
+  /** What the loaded worker answers `request`, loading the model first if need be. */
+  async #askLoaded(request: EmbedAsk): Promise<EmbedAnswer> {
     const loading = this.load();
-    await loading;
+    await loading.catch((error: unknown) => {
+      throw new ModelUnavailable(error);
+    });
     // Stopped between the load and this, which would start a worker with no model.
     if (this.#loaded !== loading) throw new Error('The embedding worker was stopped.');
-    const answer = await this.#ask({ op: 'embed', kind, texts });
+    const answer = await this.#ask(request);
     if (answer.op === 'error') throw new Error(answer.message);
+    if (answer.op !== request.op) throw new Error('The embedding worker answered out of turn.');
+    return answer;
+  }
+
+  /** Each text's vector, in order, loading the model first if need be. */
+  async embed(kind: EmbedKind, texts: string[]): Promise<Embedded> {
+    const answer = await this.#askLoaded({ op: 'embed', kind, texts });
     if (answer.op !== 'embed') throw new Error('The embedding worker answered out of turn.');
     return { vectors: answer.vectors, tokens: answer.tokens };
+  }
+
+  /**
+   * How many tokens the model's tokenizer makes of each word, a run without
+   * spaces, its first and last tokens left out: what cutting passages counts
+   * (`meaningPassages`), so they hold no more than the model is meant to read.
+   */
+  async count(words: string[]): Promise<number[]> {
+    if (words.length === 0) return [];
+    const answer = await this.#askLoaded({ op: 'count', words });
+    if (answer.op !== 'count') throw new Error('The embedding worker answered out of turn.');
+    return answer.counts;
   }
 
   /** Stop the worker now, failing anything still waiting on it. */

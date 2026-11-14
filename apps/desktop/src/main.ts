@@ -175,6 +175,8 @@ const library = libraryPlugins(app.getPath('userData'), (path) =>
 const workshop = desktopWorkshop(app.getPath('userData'));
 const updates = desktopUpdates(app.getPath('userData'), app.getVersion(), app.getAppPath());
 const searchIndex = keptFile(join(app.getPath('userData'), 'search-index'));
+// Search by meaning's vectors (ADR 0016, decision 4), kept as the index is.
+const meaningIndex = keptFile(join(app.getPath('userData'), 'meaning-index'));
 const trustMarks = keptFile(join(app.getPath('userData'), 'trust-marks'));
 // What the pages keep for offline use (ADR 0009): pages, trees and images
 // in `kept`, changes made offline in `queue`, what unlocking offline reads
@@ -213,19 +215,23 @@ const clipping = desktopClipping({
 });
 
 /**
- * Delete the search index and the trust marks the pages kept sealed, as
- * at every new sign-in. Pages kept for offline stay: the pages delete them
- * once the server names another account (ADR 0009, decision 10).
+ * Delete the search index, search by meaning's vectors and the trust marks
+ * the pages kept sealed, as at every new sign-in. Pages kept for offline
+ * stay: the pages delete them once the server names another account (ADR
+ * 0009, decision 10).
  */
 async function removeSignInKept() {
-  await Promise.all([searchIndex.remove(), trustMarks.remove()]).catch(() => {});
+  await Promise.all([searchIndex.remove(), meaningIndex.remove(), trustMarks.remove()]).catch(
+    () => {},
+  );
 }
 
 /**
  * Delete what the pages kept that needs a trusted keyring: the search
- * index, the trust marks, the pages kept for offline and what unlocking
- * offline reads. Changes made offline, and whose they are, stay: they are
- * kept with or without a keyring, and are never lost to one that didn't open.
+ * index, search by meaning's vectors, the trust marks, the pages kept for
+ * offline and what unlocking offline reads. Changes made offline, and
+ * whose they are, stay: they are kept with or without a keyring, and are
+ * never lost to one that didn't open.
  */
 async function removeKept() {
   await Promise.all([
@@ -914,6 +920,14 @@ void app.whenReady().then(async () => {
   });
   handle('dropSearchIndex', async () => {
     await searchIndex.remove();
+  });
+  // One that can't be read fails, so the pages don't write over it (ADR 0016).
+  handle('meaningIndex', async () => (store?.secure ? meaningIndex.readIfThere() : null));
+  handle('keepMeaningIndex', async (sealed) => {
+    if (store?.secure) await meaningIndex.write(z.instanceof(Uint8Array).parse(sealed));
+  });
+  handle('dropMeaningIndex', async () => {
+    await meaningIndex.remove();
   });
   handle('trustMarks', async () => (store?.secure ? trustMarks.read() : null));
   handle('keepTrustMarks', async (sealed) => {

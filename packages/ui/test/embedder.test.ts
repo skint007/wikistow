@@ -8,12 +8,14 @@ class FakeWorker {
   static reply: (request: EmbedRequest) => EmbedAnswer | null = (request) =>
     request.op === 'load'
       ? { id: request.id, op: 'load', from: 'network' }
-      : {
-          id: request.id,
-          op: 'embed',
-          vectors: request.texts.map(() => new Float32Array(384)),
-          tokens: request.texts.map((text) => text.length),
-        };
+      : request.op === 'count'
+        ? { id: request.id, op: 'count', counts: request.words.map((word) => word.length) }
+        : {
+            id: request.id,
+            op: 'embed',
+            vectors: request.texts.map(() => new Float32Array(384)),
+            tokens: request.texts.map((text) => text.length),
+          };
   onmessage: ((event: { data: EmbedAnswer }) => void) | null = null;
   onerror: ((event: { preventDefault: () => void }) => void) | null = null;
   readonly asked: EmbedRequest[] = [];
@@ -72,6 +74,18 @@ describe('Embedder', () => {
     expect(worker?.asked.map(({ op }) => op)).toEqual(['load', 'embed', 'embed']);
     expect(worker?.asked[0]).toEqual({ id: 0, op: 'load', keep: true });
     expect(worker?.asked[2]).toEqual({ id: 2, op: 'embed', kind: 'passage', texts: ['a', 'bb'] });
+  });
+
+  it('counts words’ tokens with the model’s tokenizer, loading it first', async () => {
+    const embedder = new Embedder({ keep: true });
+    await expect(embedder.count(['soup', 'lasagne'])).resolves.toEqual([4, 7]);
+    const [worker] = FakeWorker.started;
+    expect(worker?.asked).toEqual([
+      { id: 0, op: 'load', keep: true },
+      { id: 1, op: 'count', words: ['soup', 'lasagne'] },
+    ]);
+    await expect(embedder.count([])).resolves.toEqual([]);
+    expect(worker?.asked).toHaveLength(2);
   });
 
   it('stops the worker once idle, and starts and loads it again when next asked', async () => {
