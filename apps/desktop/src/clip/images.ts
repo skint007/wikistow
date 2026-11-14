@@ -65,27 +65,57 @@ export function dataImage(url: string, maxBytes: number): ClipImage {
   const data = url.slice(comma + 1);
   const base64 = /;base64$/.test(meta);
   if (!meta.split(';')[0]!.trim().startsWith('image/')) return { ok: false, reason: 'not-image' };
-  // Never decoded past the limit: a base64 address's bytes are three quarters of it.
-  if ((base64 ? Math.floor((data.length * 3) / 4) : data.length / 3) > maxBytes) {
+  // Never decoded past the limit: a base64 address's bytes are three
+  // quarters of it, and a percent-encoded one's at least a third.
+  if ((base64 ? Math.floor((data.length * 3) / 4) : Math.ceil(data.length / 3)) > maxBytes) {
     return { ok: false, reason: 'too-large' };
   }
   const bytes = base64 ? Buffer.from(data, 'base64') : percentDecoded(data);
+  if (!bytes) return { ok: false, reason: 'not-image' };
   if (bytes.length > maxBytes) return { ok: false, reason: 'too-large' };
   const mediaType = sniffImage(bytes);
   return mediaType ? { ok: true, bytes, mediaType } : { ok: false, reason: 'not-image' };
 }
 
-function percentDecoded(text: string): Buffer {
-  const out: number[] = [];
+const hexValue = (code: number) =>
+  code >= 0x30 && code <= 0x39
+    ? code - 0x30
+    : code >= 0x41 && code <= 0x46
+      ? code - 0x37
+      : code >= 0x61 && code <= 0x66
+        ? code - 0x57
+        : -1;
+
+/**
+ * A percent-encoded `data:` address's bytes, in one pass into one buffer,
+ * or null if it holds anything but printable ASCII, as an image's bytes
+ * written into an address are.
+ */
+function percentDecoded(text: string): Buffer | null {
+  const out = Buffer.allocUnsafe(text.length);
+  let size = 0;
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
-    if (code === 0x25 && /^[0-9a-f]{2}$/i.test(text.slice(i + 1, i + 3))) {
-      out.push(Number.parseInt(text.slice(i + 1, i + 3), 16));
+    if (code < 0x20 || code > 0x7e) return null;
+    const high = code === 0x25 ? hexValue(text.charCodeAt(i + 1)) : -1;
+    const low = high >= 0 ? hexValue(text.charCodeAt(i + 2)) : -1;
+    if (low >= 0) {
+      out[size++] = high * 16 + low;
       i += 2;
-    } else out.push(...Buffer.from(text[i]!, 'utf8'));
+    } else out[size++] = code;
   }
-  return Buffer.from(out);
+  return out.subarray(0, size);
 }
+
+/**
+ * Names no one outside the person's network can answer for: one label,
+ * or under a suffix that's never on the internet. A page on one of these
+ * that resolves only to local addresses is on the local network, as an
+ * intranet page is. Another name's records are the site's to choose, so a
+ * site could claim a local address beside its own, or switch to one
+ * between the browser's lookup and the app's.
+ */
+const LOCAL_NAME = /^[^.]+\.?$|\.(local|localhost|internal|lan|home\.arpa)\.?$/i;
 
 export type FetchImageOptions = {
   /** The kinds of address it may come from (`allowedFor`). */
@@ -112,7 +142,10 @@ export function imageFetcher({
 }: ImageFetcherOptions) {
   /**
    * The kinds of address images may come from for a page on `page`: the
-   * internet, and whatever the page is on itself, as an intranet page is.
+   * internet, and the kind of local address the page is on itself, as an
+   * intranet page is. A page is on one when its address is that local
+   * address, or its name is a local one (`LOCAL_NAME`) whose addresses are
+   * all local.
    */
   async function allowedFor(page: string): Promise<Set<AddressKind>> {
     const allowed = new Set<AddressKind>(['public']);
@@ -124,13 +157,13 @@ export function imageFetcher({
     }
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return allowed;
     const host = bare(url.hostname);
-    const addresses = isAddress(url.hostname)
-      ? [host]
-      : (await resolve(host).catch(() => [])).map((found) => found.address);
-    for (const address of addresses) {
-      const kind = kindOf(address);
-      if (kind !== 'other') allowed.add(kind);
-    }
+    let kinds: AddressKind[];
+    if (isAddress(url.hostname)) kinds = [kindOf(host)];
+    else if (LOCAL_NAME.test(host)) {
+      kinds = (await resolve(host).catch(() => [])).map((found) => kindOf(found.address));
+    } else return allowed;
+    if (kinds.includes('public') || kinds.includes('other')) return allowed;
+    for (const kind of kinds) allowed.add(kind);
     return allowed;
   }
 

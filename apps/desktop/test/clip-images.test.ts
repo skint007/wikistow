@@ -90,6 +90,15 @@ describe('what reads as an image', () => {
       ok: false,
       reason: 'not-image',
     });
+    // Only printable ASCII is percent-encoded image bytes.
+    expect(dataImage('data:image/gif,GIF89a\u00e9', 1000)).toEqual({
+      ok: false,
+      reason: 'not-image',
+    });
+    expect(dataImage(`data:image/gif,${'a'.repeat(3001)}`, 1000)).toEqual({
+      ok: false,
+      reason: 'too-large',
+    });
     // Refused from its length, before it's decoded.
     expect(dataImage(`data:image/png;base64,${'A'.repeat(4000)}`, 1000)).toEqual({
       ok: false,
@@ -132,7 +141,12 @@ const NAMES: Record<string, string[]> = {
   'cdn.test': ['127.0.0.1'],
   'home.test': ['127.0.0.2'],
   'router.test': ['127.0.0.3'],
+  'wiki.lan': ['127.0.0.3'],
+  nas: ['127.0.0.3'],
   'both.test': ['127.0.0.2', '127.0.0.1'],
+  // A site naming a local address beside its own, or only a local one.
+  'sneaky.test': ['127.0.0.1', '127.0.0.3'],
+  'sneaky.lan': ['127.0.0.1', '127.0.0.3'],
 };
 const kindOf = (address: string): AddressKind =>
   address === '127.0.0.1' ? 'public' : address === '127.0.0.3' ? 'private' : addressKind(address);
@@ -208,8 +222,11 @@ describe('the image fetcher', () => {
   it('takes the local network’s images for a page on it, as an intranet page', async () => {
     const network = await serve(png, '127.0.0.3');
     const local = await serve(png, '127.0.0.2');
-    const intranet = `http://router.test/wiki`;
+    const intranet = `http://wiki.lan/wiki`;
     expect(await get(`http://router.test:${network.port}/a.png`, intranet)).toMatchObject({
+      ok: true,
+    });
+    expect(await get(`http://127.0.0.3:${network.port}/a.png`, 'http://nas/')).toMatchObject({
       ok: true,
     });
     expect(await get(`http://127.0.0.3:${network.port}/a.png`, 'http://127.0.0.3/')).toMatchObject({
@@ -220,6 +237,17 @@ describe('the image fetcher', () => {
       ok: false,
       reason: 'refused',
     });
+  });
+
+  it('takes no local image for a page whose name the site answers for, whatever it answers', async () => {
+    const network = await serve(png, '127.0.0.3');
+    const image = `http://127.0.0.3:${network.port}/admin?reboot=1`;
+    // Its own address beside a local one, a local one alone (as rebinding
+    // answers), or both under a local name.
+    for (const page of ['http://sneaky.test/', 'http://router.test/', 'http://sneaky.lan/']) {
+      expect(await get(image, page), page).toEqual({ ok: false, reason: 'refused' });
+    }
+    expect(network.requests).toHaveLength(0);
   });
 
   it('follows five redirects at most, each checked again', async () => {

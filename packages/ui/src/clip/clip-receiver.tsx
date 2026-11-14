@@ -54,6 +54,13 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 
+/** Let go of clips main no longer holds, as after a sign-out. */
+function keepOnly(held: readonly DesktopClip[]) {
+  const ids = new Set(held.map((clip) => clip.id));
+  waiting = waiting.filter((clip) => ids.has(clip.id));
+  emit();
+}
+
 function take(clip: DesktopClip) {
   if (taken.has(clip.id)) return;
   taken.add(clip.id);
@@ -182,11 +189,21 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
         }
       })();
     });
+    // Main holds what waits: this page takes its list afresh, and lets go
+    // of its own once it's gone, as after a sign-out.
+    waiting = [];
+    taken.clear();
+    emit();
     void bridge
       .waitingClips()
       .then((held) => held.forEach(take))
       .catch(() => {});
-    return stop;
+    return () => {
+      stop();
+      waiting = [];
+      taken.clear();
+      emit();
+    };
   }, [bridge, openPage, queryClient]);
 
   // A lock closes the question; the clip waits for the next unlock.
@@ -206,6 +223,12 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
     const started = vaultStore.epoch();
     setSaving(true);
     void (async () => {
+      // Only a clip main still holds: one a sign-out let go isn't saved.
+      const held = await bridge.waitingClips().catch(() => null);
+      if (!held?.some((clip) => clip.id === next.id)) {
+        keepOnly(held ?? []);
+        return setSaving(false);
+      }
       const saved = await saveClip(next, {
         writer: pageWriter(ctx),
         places: () => loadPlaces(queryClient, ctx),

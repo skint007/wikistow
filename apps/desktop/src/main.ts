@@ -445,7 +445,9 @@ async function linkArrived(link: string) {
   cookie = cookieChange(kept, [redeemed]) ?? kept;
   // A new sign-in starts with no unlock, search index or marks kept, whoever
   // it is for. Pages kept for offline wait for the pages to learn whose it is.
+  // Clips held from before go, as they may have been someone else's.
   forget();
+  clipping.desk.signedOut();
   server = waiting.origin;
   waiting.done({ ok: true, value: undefined });
   // Signed in either way; a failed write only means signing in again next time.
@@ -613,13 +615,14 @@ async function askAfterCrash() {
   else window?.close();
 }
 
-/** The person chose to close with clips unsaved, so the close's retries don't ask again. */
-let clipsLetGo = false;
+/** The clips the person chose to close without, so the close's retries don't ask again. */
+const clipsLetGo = new Set<string>();
 
 /** Whether to close with clips still to save, which only memory holds: true unless the person stays. */
 function keepClips(window: BrowserWindow) {
-  const count = clipping.desk.holding();
-  if (count === 0 || clipsLetGo) return true;
+  const held = clipping.desk.holding();
+  if (held.every((id) => clipsLetGo.has(id))) return true;
+  const count = held.length;
   const answer = dialog.showMessageBoxSync(window, {
     type: 'question',
     buttons: ['Close', 'Stay'],
@@ -628,8 +631,9 @@ function keepClips(window: BrowserWindow) {
     message: count === 1 ? 'A clip isn’t saved yet' : `${count} clips aren’t saved yet`,
     detail: 'It came from your browser and is kept only until it’s saved. Closing now loses it.',
   });
-  clipsLetGo = answer === 0;
-  return clipsLetGo;
+  if (answer !== 0) return false;
+  for (const id of held) clipsLetGo.add(id);
+  return true;
 }
 
 /** How long "Close when saved" waits for the save before asking again. */

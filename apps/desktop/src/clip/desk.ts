@@ -34,6 +34,8 @@ export const IMAGES_PER_MINUTE = 200;
 /** Images one clip may ask for, and their bytes in all. */
 export const IMAGES_PER_CLIP = 50;
 export const IMAGE_BYTES_PER_CLIP = 100 * 1024 * 1024;
+/** How long a clip's images may take in all, from its first, so a slow site can't hold the one clip. */
+export const IMAGES_MS = 2 * 60_000;
 /** Answers to the extension name at most this many folders, paths cut this short. */
 const RECENT_FOLDERS = 5;
 const MATCHED_FOLDERS = 50;
@@ -68,6 +70,10 @@ type Held = {
   images: number;
   bytes: number;
   allowed: Promise<Set<AddressKind>> | null;
+  /** When its images must be fetched by, once one was asked for. */
+  imagesBy: number | null;
+  /** Its image fetches, one after another, so its bytes are counted before the next. */
+  fetching: Promise<unknown>;
   /** Ends its image fetches once it's done. */
   done: AbortController;
 };
@@ -183,6 +189,8 @@ export function clipDesk(options: DeskOptions) {
       images: 0,
       bytes: 0,
       allowed: null,
+      imagesBy: null,
+      fetching: Promise.resolve(),
       done: new AbortController(),
     });
     connection.reply({ id: message.id, type: 'accepted', waits });
@@ -239,6 +247,31 @@ export function clipDesk(options: DeskOptions) {
     connection.reply({ id, type: 'shown' });
   }
 
+  async function fetchFor(one: Held, url: string): Promise<ClipImage> {
+    if (one.done.signal.aborted) return { ok: false, reason: 'refused' };
+    one.imagesBy ??= now() + IMAGES_MS;
+    const left = IMAGE_BYTES_PER_CLIP - one.bytes;
+    const time = one.imagesBy - now();
+    if (one.images >= IMAGES_PER_CLIP || left <= 0 || time <= 0 || !imageLimit.take()) {
+      return { ok: false, reason: 'limit' };
+    }
+    one.images += 1;
+    one.allowed ??= options.fetcher.allowedFor(one.clip.url);
+    const maxBytes = Math.min(MAX_IMAGE_BYTES, left);
+    const answer = await options.fetcher.fetchImage(url, {
+      allowed: await one.allowed,
+      page: one.clip.url,
+      maxBytes,
+      signal: AbortSignal.any([one.done.signal, AbortSignal.timeout(time)]),
+    });
+    if (answer.ok) one.bytes += answer.bytes.length;
+    // Past what's left of the clip's, not the image's own.
+    if (!answer.ok && answer.reason === 'too-large' && maxBytes < MAX_IMAGE_BYTES) {
+      return { ok: false, reason: 'limit' };
+    }
+    return answer;
+  }
+
   /** End a held clip, telling the extension if it's still there. */
   function finish(one: Held, answer: Record<string, unknown>) {
     held.delete(one.clip.id);
@@ -290,8 +323,8 @@ export function clipDesk(options: DeskOptions) {
 
     waiting: (): DesktopClip[] => [...held.values()].map((one) => one.clip),
 
-    /** How many clips wait or are being saved, which closing asks about. */
-    holding: () => held.size,
+    /** The clips waiting or being saved, which closing asks about. */
+    holding: () => [...held.keys()],
 
     done(clipId: unknown, input: unknown) {
       const one = typeof clipId === 'string' ? held.get(clipId) : undefined;
@@ -327,31 +360,18 @@ export function clipDesk(options: DeskOptions) {
       if (answered) answered(input === null ? null : Folders.parse(input));
     },
 
-    /** Fetch an image the held clip `clipId` names, within its limits. */
-    async image(clipId: unknown, url: unknown): Promise<ClipImage> {
+    /**
+     * Fetch an image the held clip `clipId` names, within its limits: one
+     * at a time for a clip, however many the page asks for at once.
+     */
+    image(clipId: unknown, url: unknown): Promise<ClipImage> {
       const one = typeof clipId === 'string' ? held.get(clipId) : undefined;
       if (!one || typeof url !== 'string' || url.length > 16 * 1024 * 1024) {
-        return { ok: false, reason: 'refused' };
+        return Promise.resolve({ ok: false, reason: 'refused' });
       }
-      const left = IMAGE_BYTES_PER_CLIP - one.bytes;
-      if (one.images >= IMAGES_PER_CLIP || left <= 0 || !imageLimit.take()) {
-        return { ok: false, reason: 'limit' };
-      }
-      one.images += 1;
-      one.allowed ??= options.fetcher.allowedFor(one.clip.url);
-      const maxBytes = Math.min(MAX_IMAGE_BYTES, left);
-      const answer = await options.fetcher.fetchImage(url, {
-        allowed: await one.allowed,
-        page: one.clip.url,
-        maxBytes,
-        signal: one.done.signal,
-      });
-      if (answer.ok) one.bytes += answer.bytes.length;
-      // Past what's left of the clip's, not the image's own.
-      if (!answer.ok && answer.reason === 'too-large' && maxBytes < MAX_IMAGE_BYTES) {
-        return { ok: false, reason: 'limit' };
-      }
-      return answer;
+      const run = one.fetching.then(() => fetchFor(one, url));
+      one.fetching = run.catch(() => {});
+      return run;
     },
 
     /** This session's last clips, newest first. */

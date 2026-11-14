@@ -177,7 +177,7 @@ describe('a clip', () => {
     expect(replies).toEqual([expect.objectContaining({ type: 'accepted', waits: 'unlock' })]);
     expect(shown).toHaveLength(1);
     expect(requests[0]).toMatchObject({ kind: 'clip', clip: { waited: true } });
-    expect(desk.holding()).toBe(1);
+    expect(desk.holding()).toHaveLength(1);
   });
 
   it('waits for the app to start, and brings it forward once the page says it’s locked', () => {
@@ -196,7 +196,7 @@ describe('a clip', () => {
     desk.answer(clipMessage(), open);
     expect(replies).toEqual([expect.objectContaining({ type: 'error', code: 'signed-out' })]);
     expect(requests).toEqual([]);
-    expect(desk.holding()).toBe(0);
+    expect(desk.holding()).toEqual([]);
   });
 
   it('is one at a time: another meanwhile is busy', () => {
@@ -266,7 +266,7 @@ describe('a clip', () => {
     desk.answer(clipMessage(), open);
     desk.signedOut();
     expect(replies[1]).toMatchObject({ type: 'error', code: 'signed-out' });
-    expect(desk.holding()).toBe(0);
+    expect(desk.holding()).toEqual([]);
   });
 
   it('lists the last ten saved, newest first', () => {
@@ -465,6 +465,37 @@ describe('a clip’s images', () => {
       reason: 'limit',
     });
     expect(fetches).toHaveLength(5);
+  });
+
+  it('are fetched one at a time, so asking for many at once stays in the clip’s bytes', async () => {
+    const { desk, clipId, fetches, fetchWith } = heldClip();
+    const mib = 1024 * 1024;
+    let running = 0;
+    let most = 0;
+    fetchWith(async () => {
+      most = Math.max(most, ++running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running--;
+      return { ok: true, bytes: new Uint8Array(20 * mib), mediaType: 'image/png' };
+    });
+    const answers = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => desk.image(clipId, `https://cdn.example/${i}.png`)),
+    );
+    expect(most).toBe(1);
+    expect(answers.filter((answer) => answer.ok)).toHaveLength(5);
+    expect(fetches).toHaveLength(5);
+  });
+
+  it('are fetched within two minutes of the first, in all', async () => {
+    const { desk, clipId, tick } = heldClip();
+    expect(await desk.image(clipId, 'https://cdn.example/1.png')).toMatchObject({ ok: true });
+    tick(119_000);
+    expect(await desk.image(clipId, 'https://cdn.example/2.png')).toMatchObject({ ok: true });
+    tick(1_001);
+    expect(await desk.image(clipId, 'https://cdn.example/3.png')).toEqual({
+      ok: false,
+      reason: 'limit',
+    });
   });
 
   it('are what’s left of the clip’s bytes, at most', async () => {
