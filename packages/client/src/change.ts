@@ -35,6 +35,20 @@ export function withoutChange<P extends Pick<PagePayload, 'extensions'>>(payload
   return { ...payload, extensions };
 }
 
+/** Where a live session's draft says what it holds (section 5.5, `wikistow.live`). */
+const LIVE = 'wikistow.live';
+
+/**
+ * `payload` without `wikistow.live`, which goes into drafts only: what a
+ * publication, a detached draft, a copy and a publication into another
+ * space are written from (ADR 0015 decision 5).
+ */
+export function withoutLiveState<P extends Pick<PagePayload, 'extensions'>>(payload: P): P {
+  if (!Object.hasOwn(payload.extensions, LIVE)) return payload;
+  const { [LIVE]: _live, ...extensions } = payload.extensions;
+  return { ...payload, extensions };
+}
+
 /**
  * What changed from `before` to `after`, the same page with changes made
  * while reading, which never add or remove a task: each task whose box

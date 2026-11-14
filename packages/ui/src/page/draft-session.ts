@@ -4,6 +4,8 @@ import {
   linkTableOf,
   PageTooLarge,
   revisePayload,
+  splitFrontmatter,
+  withoutLiveState,
   type AttachmentRef,
   type LinkTree,
   type PageId,
@@ -17,10 +19,42 @@ import {
   withoutLinkTable,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
+import type {
+  LiveParticipant,
+  NotJoined,
+  ParticipantState,
+  ParticipantStatus,
+} from '@wikistow/client/live';
 import { ATTACHMENT_SCHEME } from './attachments';
 import { Autosave, type SaveStatus } from './autosave';
-import { lineBreakOf, type EditorSurfaceHandle } from './editor/surface';
+import { lineBreakOf, type EditorSurfaceHandle, type MarkdownParts } from './editor/surface';
+import { joinPage } from './properties';
 import { uploadMessage } from './messages';
+
+// Extensions a save works out or drops, which a live session's document never holds.
+const UNHELD = new Set(['wikistow.live', 'wikistow.links', 'wikistow.change', 'wikistow.overlaps']);
+
+/** `extensions` without those the document never holds, as edits made outside a session keep them. */
+const held = (extensions: PagePayload['extensions']): PagePayload['extensions'] =>
+  Object.fromEntries(Object.entries(extensions).filter(([namespace]) => !UNHELD.has(namespace)));
+
+/**
+ * `extensions`, the document's, as changes to `base`'s: each namespace
+ * `base` has that they don't, but those the document never holds, is
+ * deleted (`undefined`), as a change made outside a session deletes one.
+ */
+function over(
+  base: PagePayload['extensions'],
+  extensions: PagePayload['extensions'],
+): PagePayload['extensions'] {
+  const changes: Record<string, unknown> = { ...extensions };
+  for (const namespace of Object.keys(base)) {
+    if (!UNHELD.has(namespace) && !Object.hasOwn(extensions, namespace)) {
+      changes[namespace] = undefined;
+    }
+  }
+  return changes as PagePayload['extensions'];
+}
 
 /** Saving stopped at a conflict: someone else saved this draft meanwhile. */
 export class DraftConflict extends Error {
@@ -75,7 +109,36 @@ export type DraftPorts = {
   overtaken(): void;
   /** How the draft's wikilinks are read as it opens, off the page's thread (`linksInUse`). */
   readLinks: ReadWikilinks;
+  /** Editing live with the others who have the draft open (ADR 0015), where this app may. */
+  live?: LivePorts;
 };
+
+/** How a draft session joins the page's live session. */
+export type LivePorts = {
+  /**
+   * Whether this app may join now: online, not an agent, and in the browser
+   * only over HTTP/2 or later (ADR 0015 decision 10).
+   */
+  allowed(): boolean;
+  /** Join the session from the draft opened (`joinLive`); its stream isn't open yet. */
+  join(opening: {
+    revisionId: RevisionId;
+    payload: PagePayload;
+    region: Region;
+  }): Promise<LiveParticipant | NotJoined>;
+  /** Hear of changes that may change access to the page: marks, keys, owners, the tree. */
+  watch?(participant: LiveParticipant): () => void;
+  /** Run `run` now if the page is visible, else once it is shown; the result stops waiting. */
+  whenVisible?(run: () => void): () => void;
+};
+
+/** The live session as the draft view shows it. */
+export type LiveShown =
+  | { kind: 'live'; status: ParticipantStatus }
+  /** Not in one, and why: shown only when it is worth saying. */
+  | { kind: 'not-joined'; why: NotJoined }
+  /** It left one, and why. */
+  | { kind: 'left'; why: string };
 
 /**
  * What a merge was saved on top of: a draft, opened in `region`, or another
@@ -102,6 +165,8 @@ export type DraftSnapshot = {
   tooLarge: string | null;
   /** What refused the save that stopped saving, while `status` is `'error'`. */
   saveError: unknown;
+  /** The page's live session, while this session is in one or once it left one. */
+  live: LiveShown | null;
 };
 
 type Content = Pick<PagePayload, 'title' | 'markdown' | 'attachments'>;
@@ -176,11 +241,18 @@ export class DraftSession {
     this.#content = { title, markdown, attachments };
     this.#autosave = new Autosave(
       async (build) => {
+        if (this.#settling) await this.#settling;
         const trimming = this.#trim();
         if (trimming) await trimming;
         return this.#save(build());
       },
-      (status, saveError) => this.#set({ status: this.#shown(status), saveError }),
+      (status, saveError) => {
+        // In a live session, the session's saver saves (ADR 0015 decision 5).
+        if (this.#participant) return;
+        this.#set({ status: this.#shown(status), saveError });
+        // Saved outside a session: join one, so saves from here aren't someone else's to it.
+        if (status === 'saved') this.#joinSoon();
+      },
       timing,
     );
     this.#snapshot = {
@@ -191,6 +263,7 @@ export class DraftSession {
       uploadError: null,
       tooLarge: null,
       saveError: undefined,
+      live: null,
     };
     if (opened.theirs) {
       this.#theirs = opened.theirs;
@@ -231,11 +304,21 @@ export class DraftSession {
     for (const listener of this.#listeners) listener();
   }
 
-  /** The payload the next save writes. */
+  /** The payload the next save writes: in a live session, the shared document's. */
   #current(): PagePayload {
-    return revisePayload(
-      { kind: 'current', payload: this.#payload },
-      { ...this.#content, extensions: this.#extensions },
+    if (this.#participant) {
+      try {
+        return this.#participant.currentPayload();
+      } catch {
+        // A value the document refused as it was placed: the session leaves.
+      }
+    }
+    // Outside a session, a save never carries what a session draft said it held.
+    return withoutLiveState(
+      revisePayload(
+        { kind: 'current', payload: this.#payload },
+        { ...this.#content, extensions: this.#extensions },
+      ),
     );
   }
 
@@ -254,11 +337,29 @@ export class DraftSession {
 
   /** The surface's text, if it holds an edit it hasn't reported yet. */
   #pull() {
-    const markdown = this.#surface.current?.read();
+    const surface = this.#surface.current;
+    // In a live session, the parts as the editor holds them, never split again.
+    const parts = this.#participant ? surface?.parts?.() : undefined;
+    if (parts) return this.editParts(parts);
+    const markdown = surface?.read();
     if (markdown !== undefined) this.edit(markdown);
   }
 
+  /**
+   * The page editor's frontmatter and body after the person edited them:
+   * in a live session, each into its own part of the shared document as
+   * the smallest change, as the editor holds them, so body text that reads
+   * like frontmatter stays in the body.
+   */
+  editParts({ frontmatter, body }: MarkdownParts) {
+    const participant = this.#participant;
+    if (!participant) return this.edit(joinPage(frontmatter, body));
+    this.#unreported = false;
+    participant.change({ texts: { frontmatter: frontmatter ?? '', body } });
+  }
+
   setTitle(title: string) {
+    if (this.#participant) return this.#participant.change({ texts: { title } });
     this.#change({ title });
   }
 
@@ -268,12 +369,25 @@ export class DraftSession {
    */
   savedRevision(): RevisionId | null {
     this.#pull();
+    if (this.#participant) {
+      const status = this.#participant.status();
+      return status.saved ? status.head : null;
+    }
     return this.#snapshot.status === 'saved' && !this.#saving ? this.#base : null;
   }
 
   /** The surface's text after the person edited it. */
   edit(markdown: string) {
     this.#unreported = false;
+    if (this.#participant) {
+      // Into the shared document, as the smallest change to each part: the
+      // parts as the page editor holds them, never split again, so body text
+      // that reads like frontmatter stays in the body.
+      const held = this.#surface.current?.parts?.();
+      const parts = held && joinPage(held.frontmatter, held.body) === markdown ? held : null;
+      const { frontmatter, body } = parts ?? splitFrontmatter(markdown);
+      return this.#participant.change({ texts: { frontmatter: frontmatter ?? '', body } });
+    }
     if (markdown !== this.#content.markdown) this.#change({ markdown });
     // Text the draft already has, as an edit undone or already read, changes nothing.
     else if (this.#snapshot.status !== this.#autosave.status)
@@ -293,6 +407,7 @@ export class DraftSession {
    */
   revise(changes: (current: PagePayload) => PayloadChanges) {
     this.#pull();
+    if (this.#participant) return this.#reviseLive(changes(this.#current()));
     const { extensions, ...content } = changes(this.#current());
     if (extensions) this.#extensions = { ...this.#extensions, ...extensions };
     if (content.markdown !== undefined && content.markdown !== this.#content.markdown)
@@ -301,6 +416,9 @@ export class DraftSession {
   }
 
   removeAttachment(id: string) {
+    if (this.#participant) {
+      return this.#participant.change({ entries: [{ root: 'attachments', key: id, value: null }] });
+    }
     this.#change({ attachments: this.#content.attachments.filter((a) => a.id !== id) });
   }
 
@@ -317,8 +435,12 @@ export class DraftSession {
   chooseLink(key: string, pageId: PageId): boolean {
     if (!this.linkTargets()?.has(pageId)) return false;
     this.#picks.set(key, pageId);
+    this.#participant?.change({
+      entries: [{ root: 'links', key, value: JSON.stringify(pageId) }],
+    });
     this.#set({ links: this.#table() });
-    this.#schedule();
+    // In a live session, the session's saver saves it.
+    if (!this.#participant) this.#schedule();
     return true;
   }
 
@@ -328,7 +450,8 @@ export class DraftSession {
   #table(): ReadonlyMap<string, string> {
     const allowed = this.linkTargets();
     const holding = [...this.#picks].filter(([, pageId]) => allowed?.has(pageId));
-    const table = new Map<string, string>([...linkTableOf(this.#payload), ...holding]);
+    const saved = this.#participant?.headPayload ?? this.#payload;
+    const table = new Map<string, string>([...linkTableOf(saved), ...holding]);
     const shown = this.#snapshot.links;
     const same = shown.size === table.size && [...table].every(([k, v]) => shown.get(k) === v);
     return same ? shown : table;
@@ -397,6 +520,10 @@ export class DraftSession {
   /** Save what's typed now, without waiting for files still uploading. */
   async flushSaves() {
     this.#pull();
+    if (this.#participant) {
+      await this.#participant.saveNow();
+      return;
+    }
     await this.#autosave.flush();
   }
 
@@ -414,6 +541,13 @@ export class DraftSession {
    */
   async saveOrThrow() {
     await this.flush();
+    if (this.#participant) {
+      if (this.#participant.status().saved) return;
+      const { tooLarge } = this.#participant.status();
+      throw new Error(
+        tooLarge ? `${tooLarge} Make it shorter first.` : 'The draft could not be saved',
+      );
+    }
     if (this.#autosave.status === 'conflict') throw new DraftConflict();
     const { status, tooLarge } = this.#snapshot;
     if (this.#autosave.unsaved() !== null)
@@ -426,6 +560,8 @@ export class DraftSession {
 
   /** The page's draft head as last loaded: one this session didn't make means someone else saved. */
   noticeHead(head: RevisionId | null) {
+    // In a live session, the session's stream says what the head is.
+    if (this.#participant) return;
     // A save in flight may already be the head before its answer arrives.
     if (!head || this.#known.has(head) || this.#saving) return;
     this.#theirs = head;
@@ -433,6 +569,8 @@ export class DraftSession {
   }
 
   hasUnsaved() {
+    if (this.#settling) return true;
+    if (this.#participant) return this.#unreported || !this.#participant.status().saved;
     return this.#unreported || this.#autosave.unsaved() !== null;
   }
 
@@ -452,10 +590,15 @@ export class DraftSession {
     this.#known.add(revisionId);
     this.#base = revisionId;
     this.#region = null;
+    // The change waiting on this device is sent: the session can be joined now.
+    this.#joinTries = 0;
+    this.#joinSoon();
   }
 
   /** A save is waiting for its answer, or a file is still uploading. */
   isBusy() {
+    if (this.#settling) return true;
+    if (this.#participant) return !this.#participant.status().saved || this.#uploads.size > 0;
     return this.#autosave.isSaving() || this.#uploads.size > 0;
   }
 
@@ -619,6 +762,22 @@ export class DraftSession {
         );
       }
       if (!live()) return;
+      if (this.#participant) {
+        // Its uploader's own save commits the file; only then does it go to the others.
+        const committed = await this.#participant.commitOwn({
+          entries: added.map((ref) => ({
+            root: 'attachments' as const,
+            key: ref.id,
+            value: JSON.stringify(ref),
+          })),
+        });
+        if (!committed) {
+          this.#set({ uploadError: 'The file couldn’t be added just now. Try again.' });
+          return;
+        }
+        place(added.map(attachmentLink));
+        return;
+      }
       this.#change({ attachments: [...this.#content.attachments, ...added] });
       place(added.map(attachmentLink));
     } catch (caught) {
@@ -631,7 +790,19 @@ export class DraftSession {
     this.#pull();
     const text = this.#content.markdown;
     const markdown = [text.trimEnd(), ...links].filter(Boolean).join(lineBreakOf(text).repeat(2));
+    const participant = this.#participant;
+    const parts = participant ? this.#surface.current?.parts?.() : undefined;
+    if (participant && parts) {
+      // The body alone, as the editor holds it: never split again.
+      const body = [parts.body.trimEnd(), ...links]
+        .filter(Boolean)
+        .join(lineBreakOf(parts.frontmatter ?? parts.body).repeat(2));
+      participant.change({ texts: { body } });
+      // A change of the session's own: the editor shows it as the document took it.
+      return this.#fromDocument(true);
+    }
     this.#surface.current?.replace(markdown);
+    if (participant) return this.edit(markdown);
     this.#change({ markdown });
   }
 
@@ -639,12 +810,469 @@ export class DraftSession {
   open() {
     this.#live = true;
     void this.#trim();
+    void this.joinLive();
   }
 
-  /** The draft leaves the screen: save what's outstanding. */
+  /** The draft leaves the screen: save what's outstanding, leaving its live session. */
   close() {
     this.#live = false;
+    if (this.#rejoin) clearTimeout(this.#rejoin);
+    if (this.#joinTimer) clearTimeout(this.#joinTimer);
+    this.#unwait?.();
+    const participant = this.#participant;
+    if (participant) {
+      this.#detach();
+      void participant.leave();
+      return;
+    }
     void this.#autosave.flush();
+  }
+
+  /** The vault locked: leave the live session at once, its key wiped, saving nothing more. */
+  lock() {
+    const participant = this.#participant;
+    if (!participant) return;
+    this.#detach();
+    participant.close();
+  }
+
+  // ---- Live editing (ADR 0015) ----
+
+  #participant: LiveParticipant | null = null;
+  #unlive: (() => void)[] = [];
+  // Joining again, once saved outside a session: when, and whether never.
+  #joinTimer: ReturnType<typeof setTimeout> | null = null;
+  #joinTries = 0;
+  #liveOff = false;
+
+  #unwait: (() => void) | null = null;
+
+  // Run `run` while the page is visible: a hidden tab joins again when shown.
+  #whenVisible(run: () => void) {
+    this.#unwait?.();
+    this.#unwait = this.#ports.live?.whenVisible?.(run) ?? (run(), null);
+  }
+
+  // Join the page's session soon, once what this draft holds is saved, at
+  // a pace that slows with each try in a row that didn't join.
+  #joinSoon() {
+    if (this.#liveOff || this.#joinTimer || this.#participant || !this.#live) return;
+    if (!this.#ports.live || this.#joinTries >= 30) return;
+    const wait = Math.min(1_000 * 2 ** this.#joinTries, 60_000);
+    this.#joinTimer = setTimeout(() => {
+      this.#joinTimer = null;
+      if (this.#participant || !this.#live) return;
+      if (this.#autosave.status !== 'saved' || this.#autosave.unsaved() !== null) return;
+      this.#joinTries++;
+      this.#whenVisible(() => void this.joinLive());
+    }, wait);
+  }
+  // What this draft held as it joined: what it goes back to if it leaves having changed nothing.
+  #beforeLive: {
+    base: RevisionId;
+    payload: PagePayload;
+    content: Content;
+    extensions: PagePayload['extensions'];
+  } | null = null;
+
+  /** The page's live session this draft is in, if any, for the editor's binding. */
+  get participant(): LiveParticipant | null {
+    return this.#participant;
+  }
+  #joining = false;
+  #rejoin: ReturnType<typeof setTimeout> | null = null;
+  #rejoins = 0;
+
+  /**
+   * Join the page's live session, where this app may (ADR 0015 decision
+   * 1): from the draft this session is on, as the editor opened it. Not
+   * while a conflict waits for the person, nor once an edit typed before
+   * the session was joined can't go into it.
+   */
+  async joinLive(): Promise<void> {
+    const live = this.#ports.live;
+    if (!live || !this.#live || this.#participant || this.#joining) return;
+    if (!live.allowed() || this.#theirs || this.#autosave.isStopped()) return;
+    if (this.#autosave.isSaving() || this.#uploads.size > 0) return;
+    this.#joining = true;
+    // Not while a change for the page waits on this device: it would come
+    // to the session as someone else's save (ADR 0015 step 7 takes it in).
+    const waiting = await this.#ports.waitingChange?.().catch(() => null);
+    if (waiting) {
+      this.#joining = false;
+      return;
+    }
+    const opening = { revisionId: this.#base, payload: this.#payload, region: this.#tableRegion };
+    const epoch = this.#ports.epoch();
+    let joined: LiveParticipant | NotJoined;
+    try {
+      joined = await live.join(opening);
+    } catch {
+      this.#joining = false;
+      this.#joinSoon();
+      return;
+    } finally {
+      this.#joining = false;
+    }
+    if (!('start' in joined)) {
+      this.#set({ live: { kind: 'not-joined', why: joined } });
+      // No sessions on this server, or this app is too old for this one: it edits as before.
+      if (joined.kind === 'older-server' || joined.kind === 'update-app') this.#liveOff = true;
+      else this.#joinSoon();
+      return;
+    }
+    if (!this.#live || this.#ports.epoch() !== epoch || !this.#attach(joined, opening.payload)) {
+      // Never started, it saved nothing for anyone, and saves nothing now.
+      joined.close();
+      if (this.#live) {
+        this.#set({ live: { kind: 'not-joined', why: { kind: 'typed-meanwhile' } } });
+        this.#joinSoon();
+      }
+      return;
+    }
+    joined.start();
+    // Unless it stopped as it was taken in, and has gone already.
+    if (this.#participant !== joined) return;
+    const unwatch = live.watch?.(joined);
+    if (unwatch) this.#unlive.push(unwatch);
+  }
+
+  // Take part through `participant`: the person's edit made before it
+  // joined goes in, if the session holds the text it was made on.
+  #attach(participant: LiveParticipant, opening: PagePayload): boolean {
+    if (this.#theirs || this.#autosave.isStopped()) return false;
+    // A save of this draft's own landed meanwhile: the session holds the draft before it.
+    if (this.#payload !== opening || this.#autosave.isSaving()) return false;
+    this.#pull();
+    let shared: PagePayload;
+    try {
+      shared = participant.currentPayload();
+    } catch {
+      return false;
+    }
+    const mine = this.#current();
+    const sameAttachments = (a: readonly AttachmentRef[], b: readonly AttachmentRef[]) =>
+      a.length === b.length && a.every((ref) => b.some((other) => other.id === ref.id));
+    // Extensions the person changed, but those the document never holds.
+    const namespaces = new Set([
+      ...Object.keys(mine.extensions),
+      ...Object.keys(opening.extensions),
+    ]);
+    const changed = [...namespaces].filter(
+      (namespace) =>
+        !UNHELD.has(namespace) &&
+        JSON.stringify(mine.extensions[namespace]) !==
+          JSON.stringify(opening.extensions[namespace]),
+    );
+    const typed =
+      mine.title !== opening.title ||
+      mine.markdown !== opening.markdown ||
+      !sameAttachments(mine.attachments, opening.attachments) ||
+      changed.length > 0;
+    if (typed) {
+      // Files uploaded meanwhile aren't committed yet, and text needs the text it was typed on.
+      if (!sameAttachments(mine.attachments, opening.attachments)) return false;
+      if (shared.title !== opening.title || shared.markdown !== opening.markdown) return false;
+    }
+    const parts = this.#surface.current?.parts?.() ?? splitFrontmatter(mine.markdown);
+    this.#participant = participant;
+    this.#beforeLive = {
+      base: this.#base,
+      payload: this.#payload,
+      content: this.#content,
+      extensions: this.#extensions,
+    };
+    this.#autosave.discard();
+    this.#unlive.push(
+      participant.subscribe(() => this.#liveStatus()),
+      participant.onChange((local) => this.#fromDocument(!local)),
+    );
+    if (typed) {
+      participant.change({
+        texts: { title: mine.title, frontmatter: parts.frontmatter ?? '', body: parts.body },
+        entries: changed.map((namespace) => {
+          const value = mine.extensions[namespace];
+          return {
+            root: 'extensions' as const,
+            key: namespace,
+            value: value === undefined ? null : JSON.stringify(value),
+          };
+        }),
+      });
+    }
+    this.#rejoins = 0;
+    this.#joinTries = 0;
+    this.#unlive.push(
+      participant.onBeforeRemote(() => {
+        if (this.#unreported) this.#pull();
+      }),
+    );
+    this.#fromDocument(true);
+    this.#liveStatus();
+    return true;
+  }
+
+  #detach() {
+    for (const stop of this.#unlive.splice(0)) stop();
+    this.#participant = null;
+  }
+
+  // Show the shared document as it is now; `show` puts its text in the editor too.
+  #fromDocument(show: boolean) {
+    const participant = this.#participant;
+    if (!participant) return;
+    let payload: PagePayload;
+    try {
+      payload = participant.currentPayload();
+    } catch {
+      return;
+    }
+    const { title, markdown, attachments } = payload;
+    const moved = markdown !== this.#content.markdown;
+    this.#content = { title, markdown, attachments };
+    this.#extensions = held(payload.extensions);
+    if (show && this.#live) {
+      // The editor shows the document's parts as they are, never split again.
+      const surface = this.#surface.current;
+      const { frontmatter, body } = participant.document.content();
+      const parts = { frontmatter: frontmatter === '' ? null : frontmatter, body };
+      const shown = surface?.parts?.();
+      if (shown && surface?.replaceParts) {
+        if (shown.frontmatter !== parts.frontmatter || shown.body !== parts.body) {
+          surface.replaceParts(parts);
+        }
+      } else if (moved) surface?.replace(markdown);
+    }
+    this.#set({ title, markdown, attachments, links: this.#table() });
+  }
+
+  #liveStatus() {
+    const participant = this.#participant;
+    if (!participant) return;
+    const status = participant.status();
+    // Drafts of the session it compared are this draft's own, not someone else's save.
+    this.#known.add(status.checked);
+    if (status.state.kind !== 'live') return void this.#leftLive(participant, status);
+    this.#set({
+      status: status.saved ? 'saved' : status.tooLarge ? 'too-large' : 'saving',
+      tooLarge: status.tooLarge,
+      live: { kind: 'live', status },
+    });
+  }
+
+  /**
+   * The session ended or this app left it: go on as a writer outside it
+   * (ADR 0015 decision 12). The document is saved on the head unless the
+   * head holds it, or, when it doesn't hold the head, on the latest draft
+   * it compared, which meets the conflict. Then, if it can, it joins the
+   * next session once that save has landed.
+   */
+  async #leftLive(participant: LiveParticipant, status: ParticipantStatus) {
+    if (this.#participant !== participant) return;
+    this.#detach();
+    const { state } = status;
+    const untouched = await this.#goOn(participant, state);
+    const why =
+      state.kind === 'ended'
+        ? state.reason === 'access'
+          ? 'Who can edit this page changed, so live editing starts again.'
+          : 'The live session ended.'
+        : state.kind === 'stopped'
+          ? `Live editing stopped: ${state.why}.`
+          : 'You left live editing.';
+    this.#set({ live: { kind: 'left', why } });
+    // An app that changed nothing ended a session it couldn't take part
+    // in: the next start makes a fresh one, from the head.
+    const again =
+      state.kind === 'ended' || (state.kind === 'stopped' && (state.rejoin || untouched));
+    if (again) this.#rejoinWhenSaved();
+  }
+
+  /**
+   * Save what's typed and leave the page's live session, going on outside
+   * it, as before a restore, which is written from outside the session.
+   */
+  async leaveLive(): Promise<void> {
+    // The view opens again on what comes next, and joins from there.
+    this.#liveOff = true;
+    if (this.#rejoin) clearTimeout(this.#rejoin);
+    const participant = this.#participant;
+    if (!participant) return;
+    this.#detach();
+    await participant.leave();
+    await this.#goOn(participant, { kind: 'left' });
+    this.#set({ live: null });
+  }
+
+  // While a session left is settled: saves wait for it, and nothing shows as saved.
+  #settling: Promise<void> | null = null;
+
+  // Go on from what the session held, as a writer outside it. Whether the
+  // draft went back to what it opened, holding nothing of the person's.
+  async #goOn(participant: LiveParticipant, state: ParticipantState): Promise<boolean> {
+    // At once: the document's text, so typing meanwhile builds on it.
+    try {
+      const now = participant.currentPayload();
+      this.#content = { title: now.title, markdown: now.markdown, attachments: now.attachments };
+      this.#extensions = held(now.extensions);
+    } catch {
+      // A value the document refused: the editor's text stays as it is.
+    }
+    const captured = this.#content;
+    // An edit the editor hasn't reported yet, as the visual editor's, is the person's too.
+    this.#pull();
+    let release = () => {};
+    this.#settling = new Promise((resolve) => (release = resolve));
+    try {
+      // At an end, its own document is saved on the head unless that holds it.
+      const settled = await participant.settle({ save: state.kind !== 'stopped' });
+      const typedMeanwhile = this.#content !== captured;
+      const before = this.#beforeLive;
+      this.#beforeLive = null;
+      const saveOver = state.kind === 'stopped' ? state.saveOver : null;
+      const head = settled.atHead ? settled.base : null;
+      if (!settled.mine && !typedMeanwhile && !saveOver && (head || before)) {
+        // Nothing of the person's is in it: the latest session draft its
+        // document holds, or else the draft as it opened. Others' typing
+        // not saved yet is theirs to save.
+        const back = head
+          ? {
+              base: head.revisionId,
+              payload: head.payload,
+              content: {
+                title: head.payload.title,
+                markdown: head.payload.markdown,
+                attachments: head.payload.attachments,
+              },
+              extensions: {},
+            }
+          : before;
+        if (back) {
+          this.#base = back.base;
+          this.#known.add(back.base);
+          this.#payload = back.payload;
+          this.#content = back.content;
+          this.#extensions = back.extensions;
+          this.#region = null;
+          if (this.#live) this.#surface.current?.replace(this.#content.markdown);
+          this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
+          return true;
+        }
+      }
+      // Drafts of the session are this draft's own: none is someone else's save.
+      for (const draft of participant.sessionDrafts()) this.#known.add(draft);
+      if (settled.provisional && before) {
+        // Its document may hold text nobody typed: never saved over a draft
+        // unasked. The person chooses, with Merge… from the draft it opened.
+        this.#base = before.base;
+        this.#payload = before.payload;
+        this.#extensions = over(before.payload.extensions, this.#extensions);
+        this.#region = null;
+        this.#theirs = settled.base?.revisionId ?? null;
+        this.#set({ ...this.#content, links: this.#table() });
+        if (this.#theirs) this.#autosave.hold(() => this.#current());
+        return false;
+      }
+      const base = saveOver
+        ? { revisionId: saveOver, payload: settled.base?.payload ?? this.#payload }
+        : settled.base;
+      if (base) {
+        this.#base = base.revisionId;
+        this.#known.add(base.revisionId);
+        this.#payload = base.payload;
+        this.#region = null;
+      }
+      if (settled.payload && !typedMeanwhile) {
+        const { title, markdown, attachments } = settled.payload;
+        this.#content = { title, markdown, attachments };
+        this.#extensions = held(settled.payload.extensions);
+      }
+      // What the document deleted, the next save deletes too.
+      this.#extensions = over(this.#payload.extensions, this.#extensions);
+      this.#set({ ...this.#content, links: this.#table() });
+      if (!settled.saved || saveOver || typedMeanwhile) this.#schedule();
+      else this.#set({ status: 'saved' });
+      return false;
+    } finally {
+      this.#settling = null;
+      release();
+    }
+  }
+
+  // Join the next session once what this session holds is saved, trying
+  // again for a while, as a change of access may still be settling.
+  #rejoinWhenSaved() {
+    if (this.#rejoin) clearTimeout(this.#rejoin);
+    if (!this.#live || this.#rejoins >= 20) return;
+    this.#rejoin = setTimeout(
+      () => {
+        this.#rejoin = null;
+        if (!this.#live || this.#participant) return;
+        if (this.#autosave.status !== 'saved' || this.#autosave.unsaved() !== null) {
+          if (this.#autosave.isStopped()) return;
+          return this.#rejoinWhenSaved();
+        }
+        this.#rejoins++;
+        this.#whenVisible(
+          () =>
+            void this.joinLive().then(() => {
+              if (!this.#participant) this.#rejoinWhenSaved();
+            }),
+        );
+      },
+      Math.min(1_000 * 2 ** this.#rejoins, 30_000),
+    );
+  }
+
+  // A change from outside the editor, in a live session: attachments
+  // added go in through this app's own save of them, the rest at once.
+  #reviseLive(changes: PayloadChanges) {
+    const participant = this.#participant;
+    if (!participant) return;
+    const { extensions = {}, attachments, markdown, title } = changes;
+    const now = this.#content.attachments;
+    const added = (attachments ?? now).filter((ref) => !now.some((held) => held.id === ref.id));
+    const removed = attachments
+      ? now.filter((ref) => !attachments.some((a) => a.id === ref.id))
+      : [];
+    const entries = [
+      ...Object.entries(held(extensions)).map(([namespace, value]) => ({
+        root: 'extensions' as const,
+        key: namespace,
+        value: value === undefined ? null : JSON.stringify(value),
+      })),
+      ...removed.map((ref) => ({ root: 'attachments' as const, key: ref.id, value: null })),
+    ];
+    const split = markdown === undefined ? null : splitFrontmatter(markdown);
+    const texts = {
+      ...(title !== undefined && { title }),
+      ...(split && { frontmatter: split.frontmatter ?? '', body: split.body }),
+    };
+    // The editor shows it as the document takes it in, never before.
+    if (added.length === 0) {
+      participant.change({ texts, entries });
+      return this.#fromDocument(true);
+    }
+    // With a file: one change, its text too, saved by this app first (section 5.10, **Files**).
+    this.track(
+      participant
+        .commitOwn({
+          texts,
+          entries: [
+            ...added.map((ref) => ({
+              root: 'attachments' as const,
+              key: ref.id,
+              value: JSON.stringify(ref),
+            })),
+            ...entries,
+          ],
+        })
+        .then((committed) => {
+          if (!committed) {
+            this.#set({ uploadError: 'The image couldn’t be added just now. Try again.' });
+          }
+        }),
+    );
   }
 }
 

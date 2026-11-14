@@ -23,3 +23,6 @@ export {
   overlapPart,
   type OverlapPart,
 } from '@wikistow/contracts';
+export * from './operations.ts';
+export * from './participant.ts';
+export * from './text-change.ts';

@@ -67,6 +67,10 @@ export function preferredMode(): EditorMode {
 const UNFAITHFUL =
   'The visual editor couldn’t write your last change exactly, so this page is in source mode. Check the text below.';
 
+// While others edit live, only source mode takes their changes (ADR 0015
+// step 6; the visual editor joins live editing in step 7).
+const OTHERS_EDITING = 'Others are editing this page too, so it shows in source mode for now.';
+
 const NOT_LOADED: Fidelity = {
   visual: false,
   reason: 'The visual editor could not be loaded. Try again.',
@@ -120,6 +124,7 @@ export function PageEditor({
   onChange,
   status,
   propertyKeys,
+  othersEditing = false,
   ref,
   ...assist
 }: EditorSurfaceProps & {
@@ -128,6 +133,11 @@ export function PageEditor({
   status: ReactNode;
   /** The keys pages in this page's folder use, which Add property suggests. */
   propertyKeys?: PropertyKeys | undefined;
+  /**
+   * Others edit the page live: it shows in source mode, the only one that
+   * takes their changes yet, saying so, and the visual editor waits.
+   */
+  othersEditing?: boolean;
 }) {
   const [first] = useState(() => splitFrontmatter(initial));
   const frontmatter = useRef(first.frontmatter);
@@ -530,6 +540,16 @@ export function PageEditor({
     else addAtEnd(`\`${code}\``);
   };
 
+  // Others came to edit live: the visual editor's last edit goes in, then source mode.
+  useEffect(() => {
+    if (!othersEditing) return;
+    if (modeNow.current !== 'source') {
+      const text = bodyNow();
+      if (text !== body.current) changed(text);
+      void show('source', false).then(() => setNote(OTHERS_EDITING));
+    }
+  }, [othersEditing]);
+
   // The source editor too, which an edit the visual editor can't write turns to.
   useEffect(() => {
     if (mode === 'visual') preloadSourceEditor();
@@ -557,6 +577,11 @@ export function PageEditor({
     ref,
     () => ({
       read: () => joinPage(frontmatter.current, bodyNow()),
+      parts: () => ({ frontmatter: frontmatter.current, body: bodyNow() }),
+      replaceParts(parts) {
+        if (parts.frontmatter !== frontmatter.current) setFrontmatter(parts.frontmatter);
+        give(parts.body, false);
+      },
       replace(markdown) {
         const split = splitFrontmatter(markdown);
         if (split.frontmatter !== frontmatter.current) setFrontmatter(split.frontmatter);
@@ -678,8 +703,10 @@ export function PageEditor({
                 type="button"
                 aria-pressed={choice === chosen}
                 // Not `disabled`, which would drop the focus while it checks.
-                aria-disabled={checking}
+                aria-disabled={checking || (othersEditing && choice !== 'source')}
+                title={othersEditing && choice !== 'source' ? OTHERS_EDITING : undefined}
                 onClick={() => {
+                  if (othersEditing && choice !== 'source') return setNote(OTHERS_EDITING);
                   if (choice !== chosen && !checking) void show(choice, true);
                 }}
                 className={cn(

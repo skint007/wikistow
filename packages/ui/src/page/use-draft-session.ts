@@ -21,6 +21,7 @@ import { useAppPlugins } from '../plugins/app-plugins';
 import { DraftSession, type DraftPorts } from './draft-session';
 import type { EditorSurfaceHandle } from './editor/surface';
 import { readOpeningLinks, readWikilinks } from './page-reader';
+import { livePorts } from './live/live-ports';
 
 /**
  * A `DraftSession` for the draft on screen, and what it shows. Locking the
@@ -101,6 +102,15 @@ export function useDraftSession({
           !session.hasUnsaved() ||
           ask('Your latest changes to this page are not saved. Lock anyway and lose them?')
         );
+      }),
+    [session],
+  );
+
+  // A lock wipes the live session's key: the session is left at once.
+  useEffect(
+    () =>
+      vaultStore.subscribe(() => {
+        if (vaultStore.get().status !== 'unlocked') session.lock();
       }),
     [session],
   );
@@ -187,6 +197,12 @@ function appPorts(
   const info = pageQuery(ctx, page.pageId);
   return {
     saveDraft: (input) => drafts.save({ read: readWikilinks, ...input }),
+    live: livePorts(ctx, page, queryClient, ({ revisionId, basedOn, payload: written, region }) => {
+      editorSaved(page, revisionId);
+      void contentChanged(queryClient, ctx, {
+        saved: { ...page, basedOn, revisionId, payload: written, region },
+      });
+    }),
     onTopOf: (revisionId) => drafts.onTopOf(revisionId),
     waitingChange: () => drafts.waitingChange(),
     mergedWith: (version) => drafts.mergedWith(version),

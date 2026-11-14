@@ -13,6 +13,7 @@
 // new preview. Versions are opened many to a request, and both steps wait
 // out the server's rate limits (`patient`), since a copy of many pages
 // reads, uploads and sends more in a minute than they allow.
+import { withoutLiveState } from '../change.ts';
 import {
   copyRoutes,
   MetadataRevisionId,
@@ -941,7 +942,7 @@ async function sealingFor(ctx: ClientContext, preview: CopyPreview, live: () => 
     node: CopiedNode,
     audience: 'draft' | 'published',
   ): Promise<PagePayload> => {
-    const { value: payload } = repairText(revisePayload(opened.opened, {}));
+    const { value: payload } = repairText(withoutLiveState(revisePayload(opened.opened, {})));
     const { [PUBLICATION_NAMESPACE]: _source, ...extensions } = payload.extensions;
     const markdown = rewriteAddressLinks(payload.markdown, (link) => {
       const copy = link.spaceId === source.spaceId ? copies.get(link.nodeId) : undefined;

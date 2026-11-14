@@ -36,6 +36,9 @@ import type { Passages } from '../../comments/passages';
 
 export type LineBreak = '\r\n' | '\n';
 
+/** A page's frontmatter (null for none) and body, as the page editor holds them. */
+export type MarkdownParts = { frontmatter: string | null; body: string };
+
 /** The line break most of `markdown`'s lines end with, CRLF or LF: the one text added to it takes. */
 export function lineBreakOf(markdown: string): LineBreak {
   const crlf = markdown.split('\r\n').length - 1;
@@ -143,6 +146,15 @@ export type EditorSurfaceProps = {
 export type EditorSurfaceHandle = {
   /** The text as the surface holds it now, read afresh. */
   read(): string;
+  /**
+   * The page editor's: its frontmatter, as Properties holds it, and its
+   * body, as the editor holds it, apart. A live session's document keeps
+   * them apart too, so text typed in the body that reads like frontmatter
+   * stays in the body (ADR 0015 decision 2).
+   */
+  parts?(): MarkdownParts;
+  /** The page editor's: show these parts, as `replace` shows the whole text. */
+  replaceParts?(parts: MarkdownParts): void;
   /** Show `markdown` instead, keeping the cursor where it can. `onChange` isn't called. */
   replace(markdown: string): void;
   /**
