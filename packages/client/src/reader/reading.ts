@@ -2,6 +2,9 @@
 // React here: the reader's worker (`packages/ui/src/page/markdown.worker.ts`)
 // loads this.
 import {
+  highlightFromMarkdown,
+  highlightSyntax,
+  highlightToMarkdown,
   markdownNodes,
   markdownText,
   mathFromMarkdownExtension,
@@ -41,6 +44,18 @@ export function remarkMath(this: Processor) {
 }
 
 /**
+ * A remark plugin: reads highlights (`==text==`) and the theme's colours in
+ * HTML (`<span data-color="red">`, `<mark data-color="red">`), and writes
+ * them back as written (`highlightSyntax`).
+ */
+export function remarkHighlights(this: Processor) {
+  const data = this.data();
+  (data.micromarkExtensions ??= []).push(highlightSyntax);
+  (data.fromMarkdownExtensions ??= []).push(highlightFromMarkdown);
+  (data.toMarkdownExtensions ??= []).push(highlightToMarkdown);
+}
+
+/**
  * How a syntax beyond GitHub's is read: the remark plugins that read it
  * into `type` nodes. Its entry in `markdownSyntaxes`
  * (`packages/ui/src/registries.tsx`) adds
@@ -62,11 +77,29 @@ export const inlineMathReading = {
   remarkPlugins: [],
 } satisfies SyntaxReading;
 
+/** Highlights (`==text==`), read with the theme's colours by one plugin. */
+export const highlightReading = {
+  type: 'highlight',
+  remarkPlugins: [remarkHighlights],
+} satisfies SyntaxReading;
+
+/** A highlight in a theme colour (`<mark data-color>`), which `highlightReading`'s plugin reads. */
+export const colorHighlightReading = {
+  type: 'colorHighlight',
+  remarkPlugins: [],
+} satisfies SyntaxReading;
+
+/** Text in a theme colour (`<span data-color>`), which `highlightReading`'s plugin reads. */
+export const textColorReading = { type: 'textColor', remarkPlugins: [] } satisfies SyntaxReading;
+
 /** Every syntax a page body is read with beyond GitHub's, each registered in `markdownSyntaxes`. */
 export const syntaxReadings: readonly SyntaxReading[] = [
   wikilinkReading,
   mathReading,
   inlineMathReading,
+  highlightReading,
+  colorHighlightReading,
+  textColorReading,
 ];
 
 /**

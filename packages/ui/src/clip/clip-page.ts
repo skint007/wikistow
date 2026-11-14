@@ -40,22 +40,33 @@ export function textHtml(text: string): string {
 /** One piece of a clip to turn into Markdown, as a paste of that HTML and text would. */
 export type ClipPart = { html: string; text: string };
 
+/** The clip's address as HTML: a link to it, or, not `http:` or `https:`, its text. */
+function linkHtml(clip: DesktopClip): string {
+  const shown = escapeHtml(clipTitle(clip));
+  return linkable(clip.url)
+    ? `<p><a href="${escapeHtml(clip.url)}">${shown}</a></p>`
+    : `<p>${escapeHtml(clip.url)}</p>`;
+}
+
 /**
  * A clip's pieces, in the page's order. A link is the note, the selection
  * as a quote, and the link, written here as HTML so the paste path escapes
- * them as it would anything pasted. Every other mode is the note, then the
- * clip's own HTML, apart: a site's styles can't hide the note.
+ * them as it would anything pasted. A screenshot is the note and the link
+ * apart, as its image goes between them (`save-clip.ts`). Every other mode
+ * is the note, then the clip's own HTML, apart: a site's styles can't hide
+ * the note.
  */
 export function clipParts(clip: DesktopClip): ClipPart[] {
   const note = clip.note.trim() ? [{ html: textHtml(clip.note), text: '' }] : [];
+  if (clip.mode === 'screenshot') return [...note, { html: linkHtml(clip), text: '' }];
   if (clip.mode !== 'link') return [...note, { html: clip.html, text: clip.text }];
   const quote = clip.text.trim() ? `<blockquote>${textHtml(clip.text)}</blockquote>` : '';
-  const shown = escapeHtml(clipTitle(clip));
-  const link = linkable(clip.url)
-    ? `<p><a href="${escapeHtml(clip.url)}">${shown}</a></p>`
-    : `<p>${escapeHtml(clip.url)}</p>`;
-  return [{ html: `${textHtml(clip.note)}${quote}${link}`, text: '' }];
+  return [{ html: `${textHtml(clip.note)}${quote}${linkHtml(clip)}`, text: '' }];
 }
+
+/** A screenshot as the page shows it, from its attachment. */
+export const screenshotMarkdown = (attachmentId: string) =>
+  `![Screenshot](attachment:${attachmentId})\n\n`;
 
 /**
  * The clip's properties, as its page's frontmatter (ADR 0017, decision 5):

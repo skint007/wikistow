@@ -108,7 +108,9 @@ function sourceOf(node: RootContent): { source: string; block: boolean } {
  */
 const syntaxHandlers = (held: ReactElement[]): Handlers =>
   Object.fromEntries(
-    markdownSyntaxes.map(({ type, render }) => {
+    markdownSyntaxes.flatMap(({ type, render }) => {
+      // Its nodes are HTML of their own.
+      if (!render) return [];
       const handler: NonNullable<Handlers[keyof Handlers]> = (_state, node: RootContent) => {
         const syntax = render(node);
         if (!syntax) return undefined;
@@ -116,7 +118,7 @@ const syntaxHandlers = (held: ReactElement[]): Handlers =>
         const properties = { [SYNTAX]: held.length - 1 };
         return { type: 'element', tagName: 'span', properties, children: [] };
       };
-      return [type, handler];
+      return [[type, handler]];
     }),
   );
 

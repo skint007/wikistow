@@ -25,3 +25,13 @@ it('shows emphasis, but not in a paragraph too long to match it quickly (#87)', 
   // A short paragraph after it still shows its own.
   expect(nodes(`${long}\n\n*short*`)).toContain('Emphasis');
 });
+
+it('shows a highlight as the reader reads one (#403), and text that only looks like one as text', () => {
+  expect(nodes('A ==marked== word, ==**bold** in one== and x==in==side.')).toEqual(
+    expect.arrayContaining(['Highlight', 'HighlightMark', 'StrongEmphasis']),
+  );
+  expect(nodes('==starts== a line')).toContain('Highlight');
+  expect(nodes('a \\\\==b==')).toContain('Highlight');
+  for (const text of ['a == b == c', '===a===', '== a ==', '`==code==`', '\\==a==', 'a \\\\===b=='])
+    expect(nodes(text), text).not.toContain('Highlight');
+});

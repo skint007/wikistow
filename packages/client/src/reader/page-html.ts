@@ -4,7 +4,10 @@ import type {} from 'mdast-util-to-hast';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema, type Options as Schema } from 'rehype-sanitize';
 import { unified } from 'unified';
-import { markdownText } from '../markdown/index.ts';
+import { COLORS, markdownText } from '../markdown/index.ts';
+
+/** The property naming a theme colour on a span or mark (`data-color`), which `pageHtml` keeps from `COLORS` only. */
+export const COLOR = 'dataColor';
 
 /** The property marking a registered syntax's placeholder span (`data-syntax`), which `pageHtml` keeps. */
 export const SYNTAX = 'dataSyntax';
@@ -27,7 +30,9 @@ const attachment = 'attachment';
  * script, style, event handlers, forms or frames. Beyond it, links and
  * images may point at attachments, highlighted code and alerts keep their
  * classes (`highlightCode`, `remarkAlerts`), a registered syntax's placeholder span keeps its
- * `SYNTAX`, and a task's checkbox its `TASK` and label (`taskMarks`). Ids aren't prefixed, so links to headings and
+ * `SYNTAX`, and a task's checkbox its `TASK` and label (`taskMarks`). A
+ * highlight is a `<mark>`, and a span or mark keeps a `COLOR` that names one
+ * of the theme's colours, never any other (#403). Ids aren't prefixed, so links to headings and
  * footnotes still find them; names, which can stand in for the document's
  * own properties, are. A `<picture>` and its sources go, so an image loads
  * only from its `src`, which the reader shows only if it's an attachment.
@@ -42,11 +47,12 @@ const schema: Schema = {
   },
   attributes: {
     ...attributes,
-    span: [...(attributes.span ?? []), SYNTAX, ['className', /^hljs-/]],
+    span: [...(attributes.span ?? []), SYNTAX, ['className', /^hljs-/], [COLOR, ...COLORS]],
+    mark: [[COLOR, ...COLORS]],
     input: [...(attributes.input ?? []), TASK, 'ariaLabel'],
     div: [...(attributes.div ?? []), ['className', /^markdown-alert(?:-[a-z]+)?$/]],
   },
-  tagNames: tagNames.filter((name) => name !== 'picture' && name !== 'source'),
+  tagNames: [...tagNames.filter((name) => name !== 'picture' && name !== 'source'), 'mark'],
 };
 
 /**

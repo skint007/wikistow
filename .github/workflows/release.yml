@@ -3,7 +3,8 @@
 # commit, which publishes the server image under the version, and publishes
 # the desktop app and the CLI from the same build as a GitHub Release, with
 # the notes from its CHANGELOG.md entry, then to the AUR, the Homebrew tap
-# and the apt and dnf repositories.
+# and the apt and dnf repositories. The browser extension's builds go in the
+# GitHub Release too, but to no store yet.
 name: Release
 
 on:
@@ -137,6 +138,10 @@ jobs:
           cd release
           tar --sort=name --owner=0 --group=0 --numeric-owner --mode=u+w,go-w \
             --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$name.tar.gz"
+      # The browser extension's Chrome and Firefox builds, with its own
+      # version (apps/clipper). Nothing sends them to the stores yet (ADR
+      # 0017, step 7).
+      - run: cp apps/clipper/dist/wikistow-clipper-*-chrome.zip apps/clipper/dist/wikistow-clipper-*-firefox.zip release/
       # The CLI as one binary per system, built by the Bun pinned here from
       # the bundle CI tested, beside its install scripts. The Linux x64 one
       # must run outside the workspace and say it is this release.
@@ -166,7 +171,7 @@ jobs:
           sha256sum wikistow-desktop-*.tar.gz wikistow-desktop-*.deb wikistow-desktop-*.rpm \
             wikistow-desktop-*-setup.exe wikistow-desktop-*-macos-arm64.zip wikistow-desktop-*-macos-x64.zip \
             wikistow-linux-* wikistow-darwin-* wikistow-windows-* install.sh install.ps1 \
-            wikistow-cli-*.tar.gz LICENSE > SHA256SUMS
+            wikistow-cli-*.tar.gz wikistow-clipper-*.zip LICENSE > SHA256SUMS
           cat SHA256SUMS
       # The notes are the release's entry in CHANGELOG.md, reviewed in its
       # version change. Without one, nothing is published.
