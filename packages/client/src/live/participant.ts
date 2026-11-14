@@ -156,7 +156,13 @@ export type NotJoined =
    * as `revisionId`, the draft head now: the editor goes on from there and
    * joins again.
    */
-  | { kind: 'caught-up'; revisionId: RevisionId; basedOn: RevisionId; payload: PagePayload };
+  | { kind: 'caught-up'; revisionId: RevisionId; basedOn: RevisionId; payload: PagePayload }
+  /**
+   * An ended session kept unsaved is being caught up elsewhere, or may be
+   * caught up once a passing failure passes: no new session starts, since
+   * its first save would leave that one never caught up. It tries again.
+   */
+  | { kind: 'waiting' };
 
 /** Where a participant is. */
 export type ParticipantState =
@@ -336,6 +342,8 @@ type Pressed = {
   stateBytes: Uint8Array;
   covers: number;
   payload: PagePayload;
+  /** The choices between pages of one title the document held then. */
+  links: Map<string, PageId>;
 };
 
 /**
@@ -389,6 +397,8 @@ export async function joinLive(
         const { revisionId, basedOn, payload } = caught;
         return { kind: 'caught-up', revisionId, basedOn, payload };
       }
+      const passes = caught.kind === 'elsewhere' || (caught.kind === 'cant' && !caught.lasting);
+      if (passes && !served.open) return { kind: 'waiting' };
     }
     if (served.open) return newcomer(ports, served.open, served.draftHead);
     if (served.draftHead !== opening.revisionId) return { kind: 'stale-head' };
@@ -1147,6 +1157,7 @@ export class LiveParticipant {
       stateBytes: this.document.stateBytes(),
       covers: this.#covers,
       payload: this.#payload(),
+      links: this.#linkChoices(),
     };
     return pressed as unknown as LivePress;
   }
@@ -1248,7 +1259,7 @@ export class LiveParticipant {
             state: pressed.stateBytes,
             with: [...people],
           }),
-          linkChoices: this.#linkChoices(),
+          linkChoices: pressed.links,
         });
       } catch (error) {
         if (!(error instanceof ApiError) || error.code !== 'stale-head') throw error;

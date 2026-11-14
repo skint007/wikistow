@@ -187,7 +187,7 @@ describe('an ended live session with unsaved typing', () => {
     await expect.poll(async () => (await liveOf(owner, page.pageId)).ended).toBeNull();
   });
 
-  it('is caught up by one editor only: the other finds the grant held', async () => {
+  it('is caught up by one editor only: the other finds the grant held, and waits', async () => {
     const { owner, editor, page } = await sharedPage();
     const theirs = await join(editor, page, { held: true });
     type(theirs, '\n\nOnce only.\n');
@@ -202,8 +202,8 @@ describe('an ended live session with unsaved typing', () => {
     expect(asked.grant?.lapsed).toBe(false);
     const caught: CaughtUp[] = [];
     const result = await joined(owner, page, { caught });
-    expect('start' in result).toBe(true);
-    if ('start' in result) result.close();
+    // No new session starts meanwhile: its first save would leave the ended one never caught up.
+    expect(result).toEqual({ kind: 'waiting' });
     expect(caught).toMatchObject([{ kind: 'elsewhere' }]);
     expect((await draftOf(owner, page)).payload.markdown).not.toContain('Once only.');
   });
@@ -234,7 +234,7 @@ describe('an ended session a later one saved over', () => {
     const again = await joined(editor, page, { caught });
     expect('start' in again && again.sessionId).toBe(mine.sessionId);
     if ('start' in again) again.close();
-    expect(caught).toMatchObject([{ kind: 'cant', lasting: false }]);
+    expect(caught).toMatchObject([{ kind: 'cant', lasting: true }]);
     // No grant was taken: another app may still ask for it.
     const asked = await owner.ctx.api.call(liveRoutes.sendMessages, {
       params: { sessionId: ended },

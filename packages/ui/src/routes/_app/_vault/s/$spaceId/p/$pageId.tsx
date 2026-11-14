@@ -88,6 +88,7 @@ import { EmojiPicker } from '../../../../../../page/cover/emoji-picker';
 import { useCoverEditor } from '../../../../../../page/cover/use-cover-editor';
 import { DraftEditor, type DraftEditorHandle } from '../../../../../../page/draft-editor';
 import type { Queued } from '../../../../../../page/use-draft-session';
+import type { LivePublish } from '../../../../../../page/draft-session';
 import { DetachDialog } from '../../../../../../page/detach-dialog';
 import { Markdown } from '../../../../../../page/markdown';
 import { DeletePageDialog } from '../../../../../../page/delete-dialog';
@@ -531,6 +532,8 @@ function PageBody({
     }
   }
 
+  // The press of Publish in a live session, while the public link dialog asks first.
+  const pressedAt = useRef<LivePublish | null>(null);
   // Others in the page's live session: Publish says so.
   const editingToo = useEditingToo(ctx, page.pageId);
   // In a live session, Publish publishes the page as it was at the press,
@@ -591,6 +594,8 @@ function PageBody({
     const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
     if (links.some((link) => link.pageId === page.pageId)) {
       setPublishingMarkdown(editor.current?.markdown() ?? null);
+      // The dialog publishes what this press took, however long it asks.
+      pressedAt.current = pressed;
       setPublishingFrom(from);
       return;
     }
@@ -1431,7 +1436,7 @@ function PageBody({
         markdown={publishingMarkdown}
         open={publishingFrom !== null}
         onOpenChange={(open) => !open && setPublishingFrom(null)}
-        publish={publishDraft}
+        publish={() => publishDraft(pressedAt.current ?? undefined)}
         onDone={() => publishingFrom !== null && void showPublished(publishingFrom)}
       />
       {/* Kept while open, so losing publish rights meanwhile doesn't take what it says away. */}

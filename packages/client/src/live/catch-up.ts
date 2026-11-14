@@ -82,6 +82,8 @@ export function ofAnotherSession(draft: OpenedDraft, sessionId: string): boolean
   return live.kind === 'live' && live.extension.session !== sessionId;
 }
 
+// How many of the latest Saved notices are tried for one naming a draft of the session.
+const NOTICES_TRIED = 8;
 // How far back the head's signed chain is walked for a draft of the session.
 const CHAIN_STEPS = 256;
 
@@ -253,11 +255,14 @@ async function build(
   const senders = new Set<string>([...signers, ...[...opens.values()].map((m) => m.senderId)]);
   // The latest Saved notice that names a draft of the session, by position:
   // one naming a draft from outside folded in without a save, or none the
-  // server serves, is passed over for an earlier one, as checked.
-  let notice: { covers: number; draft: OpenedDraft; state: LiveState } | null = null;
+  // server serves, is passed over for an earlier one, as checked; only the
+  // latest few, so a session crafted with many costs no more.
+  let notice: { covers: number; position: number; draft: OpenedDraft; state: LiveState } | null =
+    null;
   const notices = stored
     .filter((one) => one.message.kind === 'saved')
-    .sort((a, b) => b.position - a.position);
+    .sort((a, b) => b.position - a.position)
+    .slice(0, NOTICES_TRIED);
   for (const one of notices) {
     const read = readSaved((opens.get(one) as OpenedLiveMessage).content);
     if (read.kind === 'newer-format') return lasting('it is of a newer format: update the app');
@@ -267,7 +272,7 @@ async function build(
     });
     const state = draft && sessionState(draft.payload, draft.revisionId, sessionId);
     if (!draft || !state || !sessionDraft(draft, opened, senders)) continue;
-    notice = { covers: one.covers ?? 0, draft, state };
+    notice = { covers: one.covers ?? 0, position: one.position, draft, state };
     break;
   }
   // With none, only a document built from the first snapshot alone is checked.
@@ -277,15 +282,21 @@ async function build(
   const covers = notice ? notice.covers : covered;
   let latest: Built['latest'] | null = notice ? null : built;
 
-  const check = () => {
-    if (!notice) return;
+  // Checked once the document has exactly the notice's draft's state: from
+  // the position it covers, which its sender may name before its own last
+  // messages came back to it, up to the notice itself, before which its
+  // sender sent everything the draft holds. Its text must then be the draft's.
+  const check = (): boolean => {
+    if (!notice) return true;
     const { draft, state } = notice;
-    const ok =
-      sameState(document.state(), state) &&
-      samePayload(document.payload(draft.payload), draft.payload);
-    if (!ok) throw new CryptoError('binding-mismatch', 'it doesn’t check against its last save');
+    if (!sameState(document.state(), state)) return false;
+    if (!samePayload(document.payload(draft.payload), draft.payload)) {
+      throw new CryptoError('binding-mismatch', 'it doesn’t check against its last save');
+    }
     latest = { revisionId: draft.revisionId, payload: draft.payload, state };
+    return true;
   };
+  const unchecked = () => lasting('it doesn’t check against its last save');
 
   // A fold's change placed for a revision whose fold was placed already is never placed.
   const placedAt = new Map<string, number>();
@@ -300,8 +311,7 @@ async function build(
     );
 
   const messages = [...served.messages].sort((a, b) => a.position - b.position);
-  let checked = covers <= covered;
-  if (checked) check();
+  let checked = covers <= covered && check();
   type One = { stored: liveRoutes.StoredMessage; message: OpenedLiveMessage; decoded?: Decoded };
   let held: One[] = [];
   const take = (one: One) => {
@@ -336,11 +346,8 @@ async function build(
     return true;
   };
   for (const stored of messages) {
-    if (!checked && stored.position > covers) {
-      if (held.length > 0) return lasting('messages it holds are missing');
-      check();
-      checked = true;
-    }
+    // Past the notice, the document never had its draft's state.
+    if (!checked && notice && stored.position >= notice.position) return unchecked();
     const message = opens.get(stored) as OpenedLiveMessage;
     if (!take({ stored, message })) {
       held.push({ stored, message });
@@ -356,8 +363,9 @@ async function build(
         else held.push(next);
       }
     }
+    if (!checked && stored.position >= covers && held.length === 0) checked = check();
   }
-  if (!checked) check();
+  if (!checked && !check()) return unchecked();
   if (held.length > 0 || document.pending) {
     return lasting('messages it holds are missing');
   }
@@ -536,7 +544,7 @@ async function targetOn(
   }
   // A draft from outside under other keys is never merged, as for a fold.
   if (!sameKeys(headDraft, opened)) {
-    return { kind: 'cant', why: 'the page’s draft is under other keys now', lasting: false };
+    return { kind: 'cant', why: 'the page’s draft is under other keys now', lasting: true };
   }
   // The latest draft of the ended session in the head's signed chain.
   let base: { payload: PagePayload; state: LiveState } | null = null;
@@ -551,7 +559,7 @@ async function targetOn(
       return {
         kind: 'cant',
         why: 'the page was saved in a later live session since',
-        lasting: false,
+        lasting: true,
       };
     }
     if (at.revisionId === built.start.revisionId) {
@@ -567,10 +575,10 @@ async function targetOn(
     at = at.basedOn ? await ports.openDraft(at.basedOn) : null;
   }
   if (!base)
-    return { kind: 'cant', why: 'the page’s drafts since don’t come from it', lasting: false };
+    return { kind: 'cant', why: 'the page’s drafts since don’t come from it', lasting: true };
   // Served cut back: its document lacks what a draft of it holds.
   if (!holdsState(document.state(), base.state)) {
-    return { kind: 'cant', why: 'it holds less than a draft of it', lasting: false };
+    return { kind: 'cant', why: 'it holds less than a draft of it', lasting: true };
   }
   const merge = mergePayloads(
     heldPayload(base.payload),
@@ -591,7 +599,7 @@ async function targetOn(
       { review: false },
     );
   }
-  if (!resolved.ok) return { kind: 'cant', why: 'its changes didn’t merge', lasting: false };
+  if (!resolved.ok) return { kind: 'cant', why: 'its changes didn’t merge', lasting: true };
   // The head's own extensions the document never holds stay: its link table and notes.
   const kept = Object.fromEntries(
     Object.entries(headDraft.payload.extensions).filter(
