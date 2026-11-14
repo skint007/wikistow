@@ -64,6 +64,11 @@ export type DraftEditorHandle = {
   /** Whether the draft is in the page's live session now: its saves and publishes go to the server. */
   live(): boolean;
   /**
+   * In a live session, save what the editor shows now and `publish` that
+   * draft, which must still be the head (ADR 0015 decision 5); null outside one.
+   */
+  publishLive<T>(publish: (draft: RevisionId) => Promise<T>): Promise<T | null>;
+  /**
    * Save anything not yet saved, after a file still uploading is added.
    * Throws if it can't be, so callers don't move on.
    */
@@ -238,6 +243,7 @@ export function DraftEditor({
     ref,
     () => ({
       live: () => session.participant !== null,
+      publishLive: (publish) => session.publishLive(publish),
       flush: () => session.saveOrThrow(),
       beforeRestore: async () => {
         await session.leaveLive();

@@ -656,6 +656,8 @@ export function PageEditor({
         give(split.body, false);
       },
       focus: () => surface.current?.focus(),
+      // Either editor shown, split mode's two included.
+      behind: () => (surface.current?.behind?.() ?? false) || (mirror.current?.behind?.() ?? false),
       selection: () => atCursor()?.selection?.() ?? '',
       // The visual editor's, in either mode it shows in; none in the source
       // editor, nor while the visual editor holds text older than the page's.

@@ -172,6 +172,8 @@ export type EditorSurfaceHandle = {
    * as the promise says, unless other text went in meanwhile.
    */
   take?(markdown: string): boolean | Promise<boolean>;
+  /** In a live session, whether others' changes wait to be shown: only the visual editor's ever do. */
+  behind?(): boolean;
   /** Focus it. The source surface puts its cursor `at` that offset in `read()`'s text. */
   focus(at?: number): void;
   /** Where the cursor is, as an offset in `read()`'s text; null if it can't tell. */

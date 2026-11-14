@@ -203,8 +203,11 @@ export type LiveTransport = {
     joinId: JoinId;
     messages: { message: LiveMessage; covers?: number }[];
     parent?: JoinId;
-    /** A fold grant to ask for, from a main join, or to place, from a further join (section 5.10). */
-    fold?: RevisionId;
+    /**
+     * A fold grant to ask for, from a main join, or to place, from a further
+     * join; or an ended session's own ID, to catch up from it (section 5.10).
+     */
+    fold?: RevisionId | LiveSessionId;
   }): Promise<{ positions: (number | null)[]; grant?: liveRoutes.Grant | null }>;
   snapshot(body: {
     joinId: JoinId;
@@ -360,6 +363,7 @@ export function participantPorts(
     visible = () => true,
     editor = () => 'source',
     onSaved,
+    caughtUp,
   }: {
     live?: LiveFetch;
     /** A save of the session landed, as the app hears of every draft save. */
@@ -371,6 +375,8 @@ export function participantPorts(
     read?: Parameters<typeof saveDraft>[1]['read'];
     visible?: () => boolean;
     editor?: () => 'source' | 'visual';
+    /** What catching up from an ended session came to (`catchUpEnded`). */
+    caughtUp?: ParticipantPorts['caughtUp'];
   } = {},
 ): ParticipantPorts {
   return {
@@ -424,6 +430,7 @@ export function participantPorts(
     access: (refresh) => liveAccess(ctx, page.spaceId, region(), { refresh }),
     visible,
     editor,
+    ...(caughtUp && { caughtUp }),
   };
 }
 

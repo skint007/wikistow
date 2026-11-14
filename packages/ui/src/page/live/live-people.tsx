@@ -55,6 +55,25 @@ export function initialsOf(name: string): string {
 }
 
 /**
+ * What **Publish** says while others have the draft open (ADR 0015
+ * decision 5): "Sam is editing too", since what goes out is the shared
+ * draft as everyone sees it, half-typed sentences included; null alone.
+ */
+export function useEditingToo(ctx: ClientContext, pageId: string): string | null {
+  const people = useLivePeople(pageId);
+  const { data: named } = useQuery({
+    ...peopleQuery(
+      ctx,
+      people.map((person) => person.id),
+    ),
+    enabled: people.length > 0,
+  });
+  if (people.length === 0) return null;
+  const names = people.map((person) => named?.get(person.id)?.name ?? 'Someone');
+  return `${namesSentence(names)} ${names.length === 1 ? 'is' : 'are'} editing too`;
+}
+
+/**
  * The others who have the draft open, in the page's toolbar (ADR 0015
  * decision 7): their initials in their colour, their names on hover
  * ("Sam and Rita are editing"), and on phones a count. Only joins a

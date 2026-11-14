@@ -22,6 +22,7 @@ import {
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import type {
+  CaughtUp,
   LiveParticipant,
   NotJoined,
   OpenedNote,
@@ -156,12 +157,19 @@ export type LivePorts = {
    * only over HTTP/2 or later (ADR 0015 decision 10).
    */
   allowed(): boolean;
-  /** Join the session from the draft opened (`joinLive`); its stream isn't open yet. */
-  join(opening: {
-    revisionId: RevisionId;
-    payload: PagePayload;
-    region: Region;
-  }): Promise<LiveParticipant | NotJoined>;
+  /**
+   * Join the session from the draft opened (`joinLive`); its stream isn't
+   * open yet. `caughtUp` hears what catching up from an ended session kept
+   * with unsaved changes came to, when joining found one.
+   */
+  join(
+    opening: {
+      revisionId: RevisionId;
+      payload: PagePayload;
+      region: Region;
+    },
+    caughtUp?: (caught: CaughtUp) => void,
+  ): Promise<LiveParticipant | NotJoined>;
   /** Hear of changes that may change access to the page: marks, keys, owners, the tree. */
   watch?(participant: LiveParticipant): () => void;
   /** Run `run` now if the page is visible, else once it is shown; the result stops waiting. */
@@ -618,6 +626,20 @@ export class DraftSession {
       this.#saving = false;
     }
     if (this.#ports.epoch() === epoch) await this.#ports.saved(saved);
+  }
+
+  /**
+   * Publish from the page's live session (ADR 0015 decision 5): what the
+   * editor shows now is saved and `publish`ed, as the participant says;
+   * null when this draft isn't in a session.
+   */
+  async publishLive<T>(publish: (draft: RevisionId) => Promise<T>): Promise<T | null> {
+    const participant = this.#participant;
+    if (!participant) return null;
+    // An edit the editor hasn't reported yet is the person's, at the press too.
+    this.#pull();
+    await Promise.all(this.#uploads);
+    return participant.publish(publish, () => this.#surface.current?.behind?.() ?? false);
   }
 
   /** Save what's typed now, without waiting for files still uploading. */
@@ -1236,7 +1258,7 @@ export class DraftSession {
       } else {
         opening = { revisionId: this.#base, payload: this.#payload, region: this.#tableRegion };
       }
-      joined = await live.join(opening);
+      joined = await live.join(opening, (caught) => this.#caughtUpNote(caught));
     } catch {
       release();
       this.#joining = false;
@@ -1247,6 +1269,7 @@ export class DraftSession {
     }
     if (!('start' in joined)) {
       release();
+      if (joined.kind === 'caught-up') return this.#caughtUp(joined, opening, epoch, entry);
       this.#set({ live: { kind: 'not-joined', why: joined } });
       // No sessions on this server, or this app is too old for this one: it edits as before.
       if (joined.kind === 'older-server' || joined.kind === 'update-app') this.#liveOff = true;
@@ -1298,6 +1321,60 @@ export class DraftSession {
     if (this.#participant !== joined) return;
     const unwatch = live.watch?.(joined);
     if (unwatch) this.#unlive.push(unwatch);
+  }
+
+  // What catching up from an ended session came to, said once (section 5.10, **Ending**).
+  #caughtUpNote(caught: CaughtUp) {
+    const notice =
+      caught.kind === 'saved'
+        ? caught.overlapped > 0
+          ? `Saved what a live session that ended had left unsaved. ${
+              caught.overlapped === 1 ? 'One part' : `${caught.overlapped} parts`
+            } of it overlapped later changes, which were kept.`
+          : 'Saved what a live session that ended had left unsaved.'
+        : caught.kind === 'cant'
+          ? `A live session that ended left changes unsaved, and they couldn’t be put in: ${caught.why}.`
+          : caught.kind === 'lost'
+            ? 'A live session that ended left changes unsaved, and they can’t be recovered.'
+            : null;
+    if (notice && notice !== this.#shownCatchUp) {
+      this.#shownCatchUp = notice;
+      this.#set({ liveNotice: notice });
+    }
+  }
+  #shownCatchUp: string | null = null;
+
+  // The draft caught up from an ended session is the head now: a view that
+  // still holds the draft it joined from goes on from it, and joins again.
+  // One the person typed in meanwhile meets it as someone else's save.
+  #caughtUp(
+    caught: Extract<NotJoined, { kind: 'caught-up' }>,
+    opening: { revisionId: RevisionId; payload: PagePayload },
+    epoch: number,
+    entry: QueuedPage | null,
+  ) {
+    if (!this.#live || this.#ports.epoch() !== epoch) return;
+    if (
+      !entry &&
+      !this.#saving &&
+      !this.#theirs &&
+      this.#base === opening.revisionId &&
+      this.#payload === opening.payload &&
+      caught.basedOn === opening.revisionId &&
+      this.#untouched()
+    ) {
+      this.#base = caught.revisionId;
+      this.#known.add(caught.revisionId);
+      this.#payload = caught.payload;
+      const { title, markdown, attachments } = caught.payload;
+      this.#content = { title, markdown, attachments };
+      this.#extensions = {};
+      this.#region = null;
+      this.#surface.current?.replace(markdown);
+      this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
+    }
+    this.#joinTries = 0;
+    this.#joinSoon();
   }
 
   // Take part through `participant`: the person's edit made before it

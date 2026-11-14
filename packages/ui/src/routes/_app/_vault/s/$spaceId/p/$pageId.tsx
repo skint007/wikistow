@@ -117,7 +117,7 @@ import { TableOfContents, useHeadings } from '../../../../../../page/table-of-co
 import { UnpublishDialog } from '../../../../../../page/unpublish-dialog';
 import { isUnpublishedCopy, pageViewModel, type Pill } from '../../../../../../page/view-model';
 import { PageCard, PageColumns, PageToolbar } from '../../../../../../page/page-layout';
-import { LivePeople } from '../../../../../../page/live/live-people';
+import { LivePeople, useEditingToo } from '../../../../../../page/live/live-people';
 import { useAppPlugins } from '../../../../../../plugins/app-plugins';
 import { PagePlugins } from '../../../../../../plugins/page-plugins';
 import { OWN_PANELS, Place, Replaceable, type OpenPanel } from '../../../../../../plugins/places';
@@ -531,7 +531,27 @@ function PageBody({
     }
   }
 
+  // Others in the page's live session: Publish says so.
+  const editingToo = useEditingToo(ctx, page.pageId);
   const publishDraft = async () => {
+    // In a live session: what the editor shows at the press, saved, and only
+    // that draft published (ADR 0015 decision 5).
+    const live = await editor.current?.publishLive(async (draftHead) => {
+      const { heads } = await pageOperations.loadPage(ctx, page.pageId);
+      if (heads.draftHead !== draftHead) {
+        throw new ApiError(409, 'stale-head', 'The draft moved on', {
+          draftHead: heads.draftHead,
+        });
+      }
+      return pageOperations.publishPage(ctx, page, {
+        read: readWikilinks,
+        expected: { draftHead, publishedHead: heads.publishedHead },
+      });
+    });
+    if (live) {
+      await contentChanged(queryClient, ctx, page);
+      return live;
+    }
     await editor.current?.flush();
     const written = await pageOperations.publishPage(ctx, page, { read: readWikilinks });
     await contentChanged(queryClient, ctx, page);
@@ -980,6 +1000,7 @@ function PageBody({
                 <Button
                   size="sm"
                   disabled={busy}
+                  {...(editingToo && { title: editingToo, 'aria-description': editingToo })}
                   {...here.click(publishKind, () => void publish())}
                 >
                   <Check strokeWidth={1.75} /> Publish

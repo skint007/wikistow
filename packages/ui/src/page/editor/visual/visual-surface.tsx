@@ -923,6 +923,7 @@ function Surface({
       // In a live session, `body`, its own edit in it: the page holds that,
       // and the binding takes text from it, never from what it's given.
       read: () => bound.current?.binding.write() ?? surface.read(),
+      behind: () => bound.current?.binding.behind ?? false,
       // Text given in a session that has been left is the page's from now
       // on, whatever `body` holds: the binding goes first.
       // In a session not yet bound, as while the editor is made, nothing goes

@@ -106,7 +106,7 @@ export function livePorts(
       if (opened.opened.kind !== 'current') return null;
       return { revisionId: head, payload: opened.opened.payload, region: opened.region };
     },
-    async join(opening) {
+    async join(opening, caughtUp) {
       region = opening.region;
       const live = await import('@wikistow/client/live');
       const ports = live.participantPorts(ctx, page, () => region ?? opening.region, {
@@ -114,6 +114,7 @@ export function livePorts(
         visible,
         editor: () => liveEditorOf(page.pageId),
         onSaved: (landed) => saved({ ...landed, region: region ?? opening.region }),
+        ...(caughtUp && { caughtUp }),
       });
       return live.joinLive(ports, opening);
     },
