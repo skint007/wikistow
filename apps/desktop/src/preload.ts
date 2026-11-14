@@ -2,6 +2,7 @@
 // is bundled on its own as CommonJS and may only use `electron`.
 import {
   DESKTOP_CHANNELS,
+  type ClipRequest,
   type DesktopBridge,
   type DesktopResult,
   type WindowState,
@@ -27,6 +28,9 @@ const bridge: DesktopBridge = {
   searchIndex: () => call(DESKTOP_CHANNELS.searchIndex),
   keepSearchIndex: (sealed) => call(DESKTOP_CHANNELS.keepSearchIndex, sealed),
   dropSearchIndex: () => call(DESKTOP_CHANNELS.dropSearchIndex),
+  meaningIndex: () => call(DESKTOP_CHANNELS.meaningIndex),
+  keepMeaningIndex: (sealed) => call(DESKTOP_CHANNELS.keepMeaningIndex, sealed),
+  dropMeaningIndex: () => call(DESKTOP_CHANNELS.dropMeaningIndex),
   trustMarks: () => call(DESKTOP_CHANNELS.trustMarks),
   keepTrustMarks: (sealed) => call(DESKTOP_CHANNELS.keepTrustMarks, sealed),
   keptItems: (folder) => call(DESKTOP_CHANNELS.keptItems, folder),
@@ -72,6 +76,17 @@ const bridge: DesktopBridge = {
   },
   clipping: () => call(DESKTOP_CHANNELS.clipping),
   setClipping: (on) => call(DESKTOP_CHANNELS.setClipping, on),
+  setClipState: (state) => call(DESKTOP_CHANNELS.setClipState, state),
+  onClipRequest: (listener) => {
+    const heard = (_event: unknown, request: ClipRequest) => listener(request);
+    ipcRenderer.on(DESKTOP_CHANNELS.onClipRequest, heard);
+    return () => void ipcRenderer.off(DESKTOP_CHANNELS.onClipRequest, heard);
+  },
+  waitingClips: () => call(DESKTOP_CHANNELS.waitingClips),
+  clipMade: (clipId, page) => call(DESKTOP_CHANNELS.clipMade, clipId, page),
+  clipDone: (clipId, outcome) => call(DESKTOP_CHANNELS.clipDone, clipId, outcome),
+  clipFolders: (requestId, folders) => call(DESKTOP_CHANNELS.clipFolders, requestId, folders),
+  clipImage: (clipId, url) => call(DESKTOP_CHANNELS.clipImage, clipId, url),
 };
 
 contextBridge.exposeInMainWorld('wikistowDesktop', bridge);

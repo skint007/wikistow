@@ -283,14 +283,6 @@ export default {
   build: {
     outDir: 'dist',
     sourcemap: true,
-    rollupOptions: {
-      // The embedder is an entry of its own until the app uses it (ADR 0016,
-      // step 4), so the build has its worker, which the browser tests run.
-      input: {
-        index: fileURLToPath(new URL('index.html', import.meta.url)),
-        embedder: ui('src/meaning/embedder.ts'),
-      },
-    },
   },
   // The vault worker imports libsodium; ES modules let it share chunks.
   worker: { format: 'es', plugins: () => [library, meaningModule] },
