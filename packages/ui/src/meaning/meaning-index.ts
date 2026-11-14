@@ -569,6 +569,7 @@ export class MeaningIndexer {
       made.push({ hash: passage.hash, start: passage.start, vector });
     }
     this.#reusable.delete(key);
+    if (this.#failing?.key === key) this.#failing = null;
     const had = this.#standing(key, page) !== undefined;
     this.#store(revisionId, made);
     this.#madeFrom.set(revisionId, { title: page.title, text: page.text });

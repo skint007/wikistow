@@ -43,6 +43,14 @@ export function meaningOffer({
   return 'offered';
 }
 
+/**
+ * Whether the vectors kept go: where it is off or not offered, but for a
+ * phone's layout, which a computer's narrow window takes too, and widens
+ * from again.
+ */
+export const dropsKeptVectors = (offer: MeaningOffer | null, on: boolean): boolean =>
+  offer !== null && offer !== 'phone' && !(on && offer === 'offered');
+
 /** Whether it is offered here (`meaningOffer`), or null until the device's store is known. */
 export function useMeaningOffer(): MeaningOffer | null {
   const phone = usePhoneLayout();

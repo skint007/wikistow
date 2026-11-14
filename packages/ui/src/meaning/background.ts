@@ -10,7 +10,7 @@ import { dropMeaningIndex, meaningIndexFile } from './meaning-file';
 import { MeaningIndexer, type MeaningStatus } from './meaning-index';
 import { MEANING_MODEL } from './model';
 import { oneTabAtATime } from './one-tab';
-import { searchByMeaning, useMeaningOffer } from './setting';
+import { dropsKeptVectors, searchByMeaning, useMeaningOffer } from './setting';
 
 // Search by meaning in the app (ADR 0016, step 4): the background queue
 // (`MeaningIndexer`) for the open session, following the word index and
@@ -137,7 +137,7 @@ export function useMeaningIndex(ctx: ClientContext | null) {
     });
   }, [ctx, on, queryClient]);
   // A phone's layout may be a narrow window, which widens again: kept.
-  const unkept = offer !== null && offer !== 'phone' && !on;
+  const unkept = dropsKeptVectors(offer, on);
   useEffect(() => {
     if (unkept) void dropMeaningIndex();
   }, [unkept]);

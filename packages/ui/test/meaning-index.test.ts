@@ -524,6 +524,23 @@ describe('MeaningIndexer', () => {
     expect(fake.embedded).toHaveLength(0);
   });
 
+  it('a page that failed once, then embedded, isn’t passed over at its next failure', async () => {
+    const fake = fakeWork();
+    fake.state.failNext = true;
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    await settle(2);
+    expect(fake.embedded).toHaveLength(1);
+    // Saved into the queue, on its base: embedded again, failing once.
+    const ref = { spaceId: home, pageId: PageId.parse('beach') };
+    indexer.saved({ ...ref, revisionId: rev('beach-1'), basedOn: rev('beach-1') });
+    indexer.indexChanged(wordIndex([{ ...beach, text: 'Soup on the beach.' }]));
+    fake.state.failNext = true;
+    await settle(3);
+    expect(fake.embedded.at(-1)).toBe('Summer holiday\nSoup on the beach.');
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+  });
+
   it('a model that can’t load is tried again each minute, no page passed over', async () => {
     const fake = fakeWork();
     fake.state.unavailable = 3;

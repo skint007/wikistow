@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { meaningOffer, meaningSettingState } from '../src/meaning/setting';
+import { dropsKeptVectors, meaningOffer, meaningSettingState } from '../src/meaning/setting';
 
 describe('where search by meaning is offered (ADR 0016, decision 5)', () => {
   it('offers it in the desktop app with a keyring, and a computer’s browser, keeping every page', () => {
@@ -15,6 +15,17 @@ describe('where search by meaning is offered (ADR 0016, decision 5)', () => {
 
   it('isn’t offered on a phone yet', () => {
     expect(meaningOffer({ device: 'phone', onDisk: true, everyPage: true })).toBe('phone');
+  });
+
+  it('deletes the vectors kept where it is off or needs something, but not for a phone’s layout', () => {
+    expect(dropsKeptVectors('offered', true)).toBe(false);
+    expect(dropsKeptVectors('offered', false)).toBe(true);
+    expect(dropsKeptVectors('every-page', true)).toBe(true);
+    expect(dropsKeptVectors('keyring', true)).toBe(true);
+    expect(dropsKeptVectors('phone', true)).toBe(false);
+    expect(dropsKeptVectors('phone', false)).toBe(false);
+    // Not before the device's store is known.
+    expect(dropsKeptVectors(null, false)).toBe(false);
   });
 
   it('says what it does, and what it needs where it isn’t offered', () => {
