@@ -81,13 +81,11 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   // is saved again.
   if (clip.made?.partial) {
     const { spaceId, pageId } = clip.made;
-    const dropped = await deps.writer
+    // One the person, or a failure before the reload, put in the trash
+    // already is gone: the clip is saved again all the same.
+    await deps.writer
       .deleteNode({ spaceId, nodeId: pageId, node: 'page', name: title, dropChanges: true })
-      .then(
-        () => true,
-        () => false,
-      );
-    if (!dropped) return failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
+      .catch(() => {});
     return saveClip({ ...clip, made: null }, deps);
   }
   // Made before a reload cut it short: its text is saved, so it's done.

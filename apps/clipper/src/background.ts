@@ -253,10 +253,7 @@ async function overlayShown(tabId: number): Promise<boolean> {
   try {
     const [ran] = await api.scripting.executeScript({
       target: { tabId },
-      func: () => {
-        const shown = globalThis.wikistowAreaShown;
-        return shown ? shown.stop !== null || shown.telling : false;
-      },
+      func: () => globalThis.wikistowAreaShown?.() ?? false,
     });
     return ran?.result === true;
   } catch {

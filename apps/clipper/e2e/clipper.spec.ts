@@ -596,6 +596,80 @@ test('a screenshot of an area is the part dragged over, scrolled, in its device 
   });
 });
 
+test('an area matches what was drawn on a page with a CSS zoom of its own', async () => {
+  const { worker, got } = await launch({ stable: ready }, { scale: 1 });
+  const origin = await serve();
+  const { page, popup } = await popupFor(worker, origin, undefined, '/shot');
+  // The box is 240 by 120 at 0.8; brought to 80, 160 in the tab.
+  const box = await page.evaluate(() => {
+    document.documentElement.style.zoom = '0.8';
+    const found = document.getElementById('box')!;
+    scrollTo(0, 0);
+    scrollTo(0, found.getBoundingClientRect().top - 160);
+    const { left, top, width, height } = found.getBoundingClientRect();
+    return { left, top, width, height };
+  });
+  expect(box).toEqual({ left: 80, top: 160, width: 240, height: 120 });
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const closed = popup.waitForEvent('close');
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  await page.mouse.move(80, 160);
+  await page.mouse.down();
+  await page.mouse.move(200, 220, { steps: 5 });
+  // The rectangle drawn is where the pointer is.
+  const drawn = await page.evaluate(() => {
+    const frame = document.documentElement.lastElementChild!;
+    const { left, top, width, height } = frame.getBoundingClientRect();
+    return { frame: { left, top, width, height }, tab: { width: innerWidth, height: innerHeight } };
+  });
+  expect(drawn.frame).toEqual({ left: 0, top: 0, ...drawn.tab });
+  await page.mouse.move(320, 280, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await got('stable', 'clip')).length).toBe(1);
+  const [clip] = await got('stable', 'clip');
+  const shot = await pixels(page, String(clip!['screenshot']), [
+    [0, 0],
+    [119, 60],
+    [120, 60],
+    [239, 119],
+  ]);
+  expect(shot).toEqual({
+    width: 240,
+    height: 120,
+    colours: ['#0000ff', '#0000ff', '#00ff00', '#00ff00'],
+  });
+});
+
+test('a clip from another tab takes off the overlay left on the first', async () => {
+  const { worker, got } = await launch({ stable: ready }, { scale: 1 });
+  const origin = await serve();
+  const first = await popupFor(worker, origin, undefined, '/shot');
+  await expect(first.popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await first.popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await first.page.bringToFront();
+  const closed = first.popup.waitForEvent('close');
+  await first.popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  await expect
+    .poll(() => first.page.evaluate(() => document.documentElement.children.length))
+    .toBe(3);
+
+  // The person clips from another tab instead. (Headless Chromium keeps
+  // every tab visible, so this can't show that a hidden one, which draws
+  // no frames, doesn't hold the clip up.)
+  const second = await popupFor(worker, origin, undefined, '/bread');
+  await second.page.bringToFront();
+  await second.popup.getByRole('radio', { name: 'Link' }).check();
+  await second.popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(second.popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await got('stable', 'clip')).toMatchObject([{ mode: 'link', url: `${origin}/bread` }]);
+  expect(await first.page.evaluate(() => document.documentElement.children.length)).toBe(2);
+});
+
 test('Escape stops choosing an area, sending nothing', async () => {
   const { worker, got } = await launch({ stable: ready });
   const origin = await serve();

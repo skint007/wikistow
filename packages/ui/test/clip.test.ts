@@ -218,7 +218,9 @@ describe('the folder search', () => {
 });
 
 /** A page writer that records what it's asked, as the server or queue would answer. */
-function fakeWriter({ refuse }: { refuse?: 'page' | 'attach' | 'attach-failed' | 'save' } = {}) {
+function fakeWriter({
+  refuse,
+}: { refuse?: 'page' | 'attach' | 'attach-failed' | 'save' | 'delete' } = {}) {
   const calls: { call: string; input: unknown }[] = [];
   const revisionId = newId(RevisionId);
   let n = 0;
@@ -237,6 +239,7 @@ function fakeWriter({ refuse }: { refuse?: 'page' | 'attach' | 'attach-failed' |
     },
     async deleteNode(input: unknown) {
       calls.push({ call: 'deleteNode', input });
+      if (refuse === 'delete') throw new ApiError(404, 'not-found', 'Gone');
       return 'trashed';
     },
     draft() {
@@ -550,6 +553,16 @@ describe('saving a screenshot', () => {
     expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
     expect(calls.map((c) => c.call)).toEqual(['deleteNode', 'newPageDraft', 'attach', 'save']);
     expect(calls[0]?.input).toMatchObject({ spaceId, nodeId: pageId, dropChanges: true });
+  });
+
+  it('saves the screenshot again even if the partial page is gone already', async () => {
+    const { writer, calls } = fakeWriter({ refuse: 'delete' });
+    const saved = await saveClip(
+      shot({ made: { spaceId, pageId: newId(PageId), path: 'Home / News', partial: true } }),
+      deps({ writer }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    expect(calls.map((c) => c.call)).toEqual(['deleteNode', 'newPageDraft', 'attach', 'save']);
   });
 
   it('finishes a screenshot whose page was made whole before a reload, making no other', async () => {

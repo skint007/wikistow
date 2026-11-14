@@ -42,7 +42,11 @@ const SCROLL_KEYS = new Set([
  * the page, whose area is on its way to the background.
  */
 type Shown = { stop: (() => void) | null; telling: boolean };
-const shown: Shown = (globalThis.wikistowAreaShown ??= { stop: null, telling: false });
+// Under a symbol, which no element's name or ID can stand in for, as a
+// name can on the window.
+const SHOWN = Symbol.for('wikistow.area');
+const held = globalThis as unknown as { [SHOWN]?: Shown };
+const shown: Shown = (held[SHOWN] ??= { stop: null, telling: false });
 
 /** Styles that win over the page's, even its `!important` ones. */
 function style(element: HTMLElement, rules: Record<string, string>) {
@@ -51,11 +55,16 @@ function style(element: HTMLElement, rules: Record<string, string>) {
   }
 }
 
-/** Two frames: the page is drawn without the overlay by then. */
+/** How long to wait for the page to be drawn again, at most: a hidden tab draws no frames. */
+const DRAWN_MS = 500;
+
+/** Two frames: the page is drawn without the overlay by then. Not in a hidden tab, which isn't shown. */
 const drawn = () =>
-  new Promise<void>((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-  );
+  new Promise<void>((resolve) => {
+    if (document.hidden) return resolve();
+    setTimeout(resolve, DRAWN_MS);
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
 
 /**
  * Show the overlay, and wait for an area. `zoomed` when the page is pinch
@@ -67,8 +76,12 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   if (visualViewport && Math.abs(visualViewport.scale - 1) > 0.001) return 'zoomed';
 
   const frame = document.createElement('dialog');
+  // The page's own CSS zoom on its root, which the overlay would inherit,
+  // undone: the pointer's place is in the tab's pixels, and so is the box.
+  const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
   style(frame, {
     all: 'initial',
+    zoom: String(1 / zoom),
     display: 'block',
     position: 'fixed',
     inset: '0',
@@ -154,8 +167,10 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     });
   }
   function down(event: PointerEvent) {
-    if (!event.isTrusted || event.button !== 0) return;
+    if (!event.isTrusted) return;
+    // Any button: the middle one would start the browser's autoscroll.
     event.preventDefault();
+    if (event.button !== 0) return;
     start = { x: clampX(event.clientX), y: clampY(event.clientY) };
     host.setPointerCapture(event.pointerId);
     drag(event);
@@ -190,6 +205,8 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   host.addEventListener('pointerup', up);
   host.addEventListener('wheel', still, { passive: false });
   host.addEventListener('contextmenu', still);
+  host.addEventListener('mousedown', still);
+  host.addEventListener('auxclick', still);
   addEventListener('keydown', key, true);
   // A modal dialog's own Escape, should the key reach it first.
   frame.addEventListener('cancel', (event) => {
@@ -240,10 +257,11 @@ async function stopChoosing() {
 declare global {
   var wikistowArea: typeof choose | undefined;
   var wikistowAreaStop: typeof stopChoosing | undefined;
-  var wikistowAreaShown: Shown | undefined;
+  var wikistowAreaShown: (() => boolean) | undefined;
 }
 
 // Reached through a second injection (background.ts), in this extension's
 // own world: the page's scripts can't see them.
 globalThis.wikistowArea = choose;
 globalThis.wikistowAreaStop = stopChoosing;
+globalThis.wikistowAreaShown = () => shown.stop !== null || shown.telling;
