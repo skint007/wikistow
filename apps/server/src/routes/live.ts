@@ -770,6 +770,8 @@ export function mountLiveRoutes(
       // leaves it short: it closes, and its app opens it again from `sent`.
       // Open, or closed with its end still to send after what came before it.
       const sending = () => !stream.closed || stream.final !== null;
+      // Where a read last found nothing more stored, so the loop doesn't ask again.
+      let emptyAfter = -1;
       async function* catchUp(upTo: number) {
         while (stream.sent < upTo && sending()) {
           const { messages, snapshotCovers } = await inTurn(account, () =>
@@ -780,7 +782,10 @@ export function mountLiveRoutes(
             close(stream, null, { drop: true });
             return;
           }
-          if (messages.length === 0) return;
+          if (messages.length === 0) {
+            emptyAfter = stream.sent;
+            return;
+          }
           for (const stored of messages) {
             if (!sending()) return;
             stream.sent = stored.position;
@@ -835,6 +840,8 @@ export function mountLiveRoutes(
               if (stream.final && stream.sent >= stream.known) yield stream.final;
               return;
             }
+            // More was stored while the backlog was read, its wake missed: read on.
+            if (stream.sent < stream.known && emptyAfter !== stream.sent) continue;
             await new Promise<void>((resolve) => (stream.wake = resolve));
             stream.wake = null;
           }

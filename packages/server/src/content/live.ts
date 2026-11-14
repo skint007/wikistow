@@ -367,7 +367,11 @@ function lapsed(
   if (grant.catchUp) {
     return grant.grantedAt.getTime() + CATCH_UP_GRANT_MS <= now.getTime();
   }
-  // Dated by when the head moved on, not by what it is now, so every read agrees.
+  // Dated by when the head moved on, not by what it is now, so reads agree.
+  // A save that began before the deadline and lands after it is dated by its
+  // start, so reads in between see it lapsed and reads after see it held;
+  // by then its revision is no longer the head, and a grant for one that
+  // isn't is never given or placed, so either answer leads to the same.
   const deadline = grant.grantedAt.getTime() + GRACE_MS;
   const movedAt = moved.get(grant.subject);
   if (movedAt !== undefined && movedAt < deadline) return false;
@@ -1669,6 +1673,9 @@ export async function sendLive(db: Database, input: SendLive) {
       // What it covers moved: the sweep reads it again at its next pass.
       await tx.update(liveSessions).set({ keptAt: null }).where(eq(liveSessions.id, session.id));
     }
+    // Read unlocked: a save landing after it orders after this grant, as a
+    // save after the head was read reads no grant. Locking it would wait on a
+    // save that holds the head while it waits on the quota this holds.
     const heads = await headsOf(tx, page.id);
     relay.draftHead = heads.draftHead;
     relay.draftCount = heads.draftCount;
