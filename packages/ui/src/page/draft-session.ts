@@ -5,6 +5,7 @@ import {
   PageTooLarge,
   revisePayload,
   splitFrontmatter,
+  withoutLiveState,
   type AttachmentRef,
   type LinkTree,
   type PageId,
@@ -310,9 +311,12 @@ export class DraftSession {
         // A value the document refused as it was placed: the session leaves.
       }
     }
-    return revisePayload(
-      { kind: 'current', payload: this.#payload },
-      { ...this.#content, extensions: this.#extensions },
+    // Outside a session, a save never carries what a session draft said it held.
+    return withoutLiveState(
+      revisePayload(
+        { kind: 'current', payload: this.#payload },
+        { ...this.#content, extensions: this.#extensions },
+      ),
     );
   }
 

@@ -130,6 +130,19 @@ describe('editing a page live', () => {
     expect(new Set(signers)).toEqual(new Set([owner.vault.identity.public.id]));
     expect(mine.status().state).toEqual({ kind: 'live' });
     expect(theirs.status().state).toEqual({ kind: 'live' });
+
+    // Readers see nothing of the session: a publication leaves `wikistow.live` out.
+    await pages.publishPage(owner.ctx, page);
+    const { heads } = await pages.loadPage(owner.ctx, page.pageId);
+    const published = await pages.openRevisionOf(
+      owner.ctx,
+      page,
+      'published',
+      heads.publishedHead as RevisionId,
+    );
+    if (published.opened.kind !== 'current') throw new Error('newer format');
+    expect(published.opened.payload.markdown).toBe(body(mine));
+    expect(Object.keys(published.opened.payload.extensions)).not.toContain('wikistow.live');
   });
 
   it('hands saving over when the saver leaves', async () => {

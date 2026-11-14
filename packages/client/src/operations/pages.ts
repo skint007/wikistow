@@ -9,7 +9,13 @@ import {
 } from '@wikistow/contracts';
 import type { z } from 'zod';
 import { ApiError } from '../api/client.ts';
-import { CHANGE_NAMESPACE, changeOf, withoutChange, type ChangeSummary } from '../change.ts';
+import {
+  CHANGE_NAMESPACE,
+  changeOf,
+  withoutChange,
+  withoutLiveState,
+  type ChangeSummary,
+} from '../change.ts';
 import { COVER_NAMESPACE, coverLeftBehind, coverOf, reviseCover } from '../cover.ts';
 import { CryptoError } from '../errors.ts';
 import { setPageProperty, type PropertyValue } from '../markdown/properties.ts';
@@ -1279,7 +1285,8 @@ export async function publishPage(
     record.audience === 'draft'
       ? given
       : await openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true });
-  const { value: draft, repaired } = repairText(withoutChange(current(opened)));
+  // A publication never carries what a live session's draft says it holds.
+  const { value: draft, repaired } = repairText(withoutLiveState(withoutChange(current(opened))));
   // Before its links are read and its attachments sealed again.
   checkPayloadSize({ markdown: draft.markdown });
   const previous =
@@ -1409,7 +1416,9 @@ export async function restorePublished(
   // The draft it was published from may still hold draft copies to list.
   const source = published.record.basedOn;
   const earlier = source === null ? null : await openIfReadable(ctx, page, 'draft', source);
-  const { value: repairedPayload, repaired } = repairText(withoutChange(current(published)));
+  const { value: repairedPayload, repaired } = repairText(
+    withoutLiveState(withoutChange(current(published))),
+  );
   checkPayloadSize({ markdown: repairedPayload.markdown });
   const region = draft.region;
   const {

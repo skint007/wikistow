@@ -1770,14 +1770,18 @@ export class LiveParticipant {
       this.#update();
       return true;
     } catch (error) {
-      if (error instanceof PageTooLarge) {
-        this.#tooLarge = error.message;
-      } else if (error instanceof ApiError && error.code === 'payload-too-large') {
-        // Its text fits, so the session's own state takes it past the
+      const grown =
+        (error instanceof PageTooLarge && error.part === 'payload' && this.#tooLarge === null) ||
+        (error instanceof ApiError && error.code === 'payload-too-large');
+      if (grown) {
+        // The page fits without `wikistow.live`, which takes it past the
         // limit: the session starts again, small, and the page saves as it
         // is (section 5.10, **Saving**).
         this.#stop('the live session grew too large, so it starts again', null, true, true);
         return false;
+      }
+      if (error instanceof PageTooLarge) {
+        this.#tooLarge = error.message;
       } else if (error instanceof ApiError && error.code === 'stale-head') {
         // Someone saved first: the stream names the new head.
         const detail = error.detail as { draftHead?: unknown } | undefined;

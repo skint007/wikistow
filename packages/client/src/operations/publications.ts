@@ -5,6 +5,7 @@
 // a published version, wrapped only with the destination's published key
 // or sealed to its owners. Which page it came from is written only inside
 // that encrypted payload.
+import { withoutLiveState } from '../change.ts';
 import {
   publicationRoutes,
   type Audience,
@@ -371,7 +372,9 @@ export async function publishToSpace(
   const generation = ctx.revisions.generation;
   const { source, destination } = preview;
   const page = { spaceId: destination.spaceId, pageId: destination.pageId };
-  const { value: original, repaired } = repairText(revisePayload(preview.opened.opened, {}));
+  const { value: original, repaired } = repairText(
+    withoutLiveState(revisePayload(preview.opened.opened, {})),
+  );
   // Before the publication is opened and its attachments copied.
   checkPayloadSize({ markdown: original.markdown });
   if (destination.state === 'new') {
@@ -471,7 +474,9 @@ export async function detachPublication(
   const latest = info.heads.publishedHead ?? (await loadHistory(ctx, page))[0]?.revisionId;
   if (!latest) throw new ApiError(404, 'not-found', 'This page has no published version');
   const published = await openRevisionOf(ctx, page, 'published', latest, { fresh: true });
-  const { value: payload, repaired } = repairText(revisePayload(published.opened, {}));
+  const { value: payload, repaired } = repairText(
+    withoutLiveState(revisePayload(published.opened, {})),
+  );
   // Before its attachments are sealed again for drafts.
   checkPayloadSize({ markdown: payload.markdown });
   // A copy made before copies left out the source's link table may hold one.
