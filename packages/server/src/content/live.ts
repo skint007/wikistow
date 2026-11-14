@@ -925,10 +925,11 @@ export async function startLive(db: Database, input: StartLive) {
     if (open) throw new ContentError('duplicate', 'The page has an open session');
     // What `live_usage` will count for it: the record, the ID, the snapshot as stored, the join.
     const stored = payload.ciphertext.length + LIVE_ID_BYTES + storedSize(size) + LIVE_JOIN_BYTES;
+    // The record counts toward the minute as the snapshot does.
     await spendStoredBytes(
       tx,
       caller.accountId,
-      size + LIVE_MESSAGE_BYTES,
+      size + LIVE_MESSAGE_BYTES + payload.ciphertext.length,
       input.storedBytesPerMinute,
     );
     await charge(tx, caller.accountId, stored, input.storageBytes);
@@ -1368,6 +1369,11 @@ export type Relay = {
   draftCount: number;
   /** The sender's account, whose presence the hub may keep with no stream open. */
   accountId: string;
+  /**
+   * The session's joins, when this request made one, so its streams list it
+   * before they carry anything it sent.
+   */
+  joins: liveRoutes.Join[] | null;
 };
 
 type StoreInput = {
@@ -1504,6 +1510,23 @@ export async function sendLive(db: Database, input: SendLive) {
     const now = await dbNow(tx);
     const ended = session.endedReason !== null;
     const catchingUp = ended && input.fold === session.id;
+    // What each message is refused for on its own comes before any join is made
+    // or anything charged, so it is answered with its own code.
+    for (const { message, covers } of input.messages) {
+      checkMessage(message, caller, input.joinId);
+      if (message.kind === 'snapshot') {
+        throw new ContentError('invalid-request', 'Snapshots go to the snapshots route');
+      }
+      if ((message.kind === 'saved') !== (covers !== undefined)) {
+        throw new ContentError(
+          'invalid-request',
+          'A saved, and only a saved, names what it covers',
+        );
+      }
+    }
+    if (input.messages.filter(({ message }) => message.kind === 'presence').length > 1) {
+      throw new ContentError('invalid-request', 'A request carries one presence at most');
+    }
     // Every lock a charge takes, before any row is written (a join's included).
     await lockCharges(tx, caller.accountId, input.storedBytesPerMinute);
     const { join, joins, made } = catchingUp
@@ -1535,6 +1558,7 @@ export async function sendLive(db: Database, input: SendLive) {
       draftHead: null,
       draftCount: 0,
       accountId: caller.accountId,
+      joins: made ? servedJoins(await joinsOf(tx, session.id), now) : null,
     };
     // What is new in it is charged once, after its first new message's own
     // checks and before anything is written, so a request refused for its
@@ -1610,7 +1634,13 @@ export async function sendLive(db: Database, input: SendLive) {
       if (covers !== undefined && covers > session.lastPosition) {
         throw new ContentError('invalid-request', 'A saved covers only what was stored before it');
       }
-      if (message.seq > join.lastSeq) await chargeOnce();
+      if (message.seq > join.lastSeq) {
+        // Its own refusal first: a skipped seq is that, whatever the storage.
+        if (message.seq !== join.lastSeq + 1) {
+          throw new ContentError('invalid-request', 'Stored messages are numbered without gaps');
+        }
+        await chargeOnce();
+      }
       const stored = await storeMessage(tx, session, join, caller, {
         message,
         covers: covers ?? null,
@@ -1831,6 +1861,24 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
     const ctx = await sessionFor(tx, input.actor, input.sessionId, { lock: true });
     const { caller, page, session } = ctx;
     const now = await dbNow(tx);
+    // What it is refused for on its own comes before any join is made or anything charged.
+    checkMessage(input.message, caller, input.joinId);
+    if (input.message.kind !== 'snapshot') {
+      throw new ContentError('invalid-request', 'Post a snapshot here');
+    }
+    const [named] = await tx
+      .select({ id: revisions.id })
+      .from(revisions)
+      .where(
+        and(
+          eq(revisions.id, input.revisionId),
+          eq(revisions.pageId, page.id),
+          eq(revisions.audience, 'draft'),
+        ),
+      );
+    if (!named) {
+      throw new ContentError('binding-mismatch', 'The snapshot names no draft of this page');
+    }
     // Every lock a charge takes, before any row is written (a join's included).
     await lockCharges(tx, caller.accountId, input.storedBytesPerMinute);
     const { join, made } = await joinFor(tx, ctx, input, now);
@@ -1853,18 +1901,6 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       });
       return { position: stored.position, relay: null };
     }
-    const [draft] = await tx
-      .select({ id: revisions.id })
-      .from(revisions)
-      .where(
-        and(
-          eq(revisions.id, input.revisionId),
-          eq(revisions.pageId, page.id),
-          eq(revisions.audience, 'draft'),
-        ),
-      );
-    if (!draft)
-      throw new ContentError('binding-mismatch', 'The snapshot names no draft of this page');
     const heads = await headsOf(tx, page.id);
     if (input.covers < (session.snapshotCovers ?? 0)) {
       throw new ContentError('stale-head', 'A later snapshot covers more', {
@@ -1925,6 +1961,7 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       draftHead: heads.draftHead,
       draftCount: heads.draftCount,
       accountId: caller.accountId,
+      joins: made ? servedJoins(await joinsOf(tx, session.id), now) : null,
     };
     return { position, relay };
   });
@@ -2075,7 +2112,16 @@ export async function canStillEdit(db: Database, actor: Actor, sessionId: string
  * made or ended over them): their sessions' keys count for nobody from now
  * on, even if the pages come back, in the transaction that moves them.
  */
-export async function loseLiveKeys(tx: Database, spaceId: string, nodeIds: readonly string[]) {
+export async function loseLiveKeys(
+  tx: Database,
+  spaceId: string,
+  nodeIds: readonly string[] | 'space',
+) {
+  // A share over the whole space: every page of it, those in the trash at the top included.
+  if (nodeIds === 'space') {
+    await tx.update(liveSessions).set({ keysLost: true }).where(eq(liveSessions.spaceId, spaceId));
+    return;
+  }
   if (nodeIds.length === 0) return;
   // Pages in the trash under them too, which move with their folder.
   await tx.execute(sql`

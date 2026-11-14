@@ -701,7 +701,7 @@ export async function makeShare(
     if (records.comment.length > 0) {
       await tx.delete(commentEnvelopes).where(anyId(commentEnvelopes.versionId, records.comment));
     }
-    await loseLiveKeys(tx, input.spaceId, records.nodeIds);
+    await loseLiveKeys(tx, input.spaceId, input.rootId === null ? 'space' : records.nodeIds);
     await bumpPermissions(tx, input.spaceId, records.nodeIds);
     await audit(tx, {
       actor: input.accountId,

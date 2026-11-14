@@ -411,6 +411,11 @@ export function mountLiveRoutes(
       return;
     }
     setHead(session, change.draftHead, change.draftCount);
+    // A join this request made is listed before anything it sent.
+    if (change.joins) {
+      session.joins = JSON.stringify(change.joins);
+      pushAll(session, { joins: change.joins });
+    }
     // In the order the request sent them, presence among the rest.
     for (const item of change.sent) {
       if ('stored' in item) {
@@ -522,8 +527,9 @@ export function mountLiveRoutes(
       bodyLimit: liveRoutes.SNAPSHOT_BODY_BYTES,
       bodyPool: 'live',
       beforeBody: async (params, caller) => {
-        await checkLiveEditor(db, asActor(caller), { pageId: String(params['pageId']) }).catch(
-          toApiError,
+        const actor = asActor(caller);
+        await writing(actor, () =>
+          checkLiveEditor(db, actor, { pageId: String(params['pageId']) }).catch(toApiError),
         );
       },
     },
@@ -571,9 +577,10 @@ export function mountLiveRoutes(
       bodyLimit: liveRoutes.SNAPSHOT_BODY_BYTES,
       bodyPool: 'live',
       beforeBody: async (params, caller) => {
-        await checkLiveEditor(db, asActor(caller), {
-          sessionId: String(params['sessionId']),
-        }).catch(toApiError);
+        const actor = asActor(caller);
+        await writing(actor, () =>
+          checkLiveEditor(db, actor, { sessionId: String(params['sessionId']) }).catch(toApiError),
+        );
       },
     },
   );
@@ -626,7 +633,9 @@ export function mountLiveRoutes(
         (s) => s.accountId === account && s.joinId === joinId,
       );
       // A stream replacing one of the same join still counts until that one finishes.
-      if ((streaming.get(account) ?? 0) - (replacing ? 1 : 0) >= MAX_STREAMS_PER_ACCOUNT) {
+      const keptAlone = [...followed.values()].filter((s) => s.keptFor === account).length;
+      const holding = (streaming.get(account) ?? 0) + keptAlone - (replacing ? 1 : 0);
+      if (holding >= MAX_STREAMS_PER_ACCOUNT) {
         throw new ApiError('rate-limited', 'Too many sessions open at once');
       }
       // Counted from now until the stream has finished, its join included.
@@ -719,8 +728,10 @@ export function mountLiveRoutes(
       const ended = AbortSignal.any([signal, closing.signal]);
       const abort = () => close(stream);
       ended.addEventListener('abort', abort, { once: true });
+      // Others hear of the join at once, before anything it sends, as it is listed now.
+      here.joins = JSON.stringify(joined.joins);
+      pushAll(here, { joins: joined.joins });
       here.streams.add(stream);
-      // Others hear of the join; the tick reads the session soon in any case.
       refresh(sessionId).catch(failed);
 
       const head = () => here.draftHead as Line['draftHead'];
@@ -779,8 +790,9 @@ export function mountLiveRoutes(
             yield { grant, draftHead: head() } satisfies Line;
           }
           for (;;) {
-            // The backlog from the database, once what is queued has gone out first.
-            if (!stream.queue.some((queued) => 'stored' in queued)) yield* catchUp(stream.known);
+            // The backlog from the database, once what is queued has gone out
+            // first, so a joins line queued is never passed by what it lists.
+            if (stream.queue.length === 0) yield* catchUp(stream.known);
             const item = stream.queue.shift();
             if (item) {
               stream.queuedBytes -= sizeOf(item);

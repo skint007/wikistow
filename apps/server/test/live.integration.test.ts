@@ -509,6 +509,25 @@ describe('messages', () => {
     expect(open?.position).toBe(3);
   });
 
+  it('lists a new join on every stream before anything it sends', async () => {
+    const { owner, editor, lib } = await sharedLibrary();
+    const session = await startSession(editor, lib.page);
+    const me = typist(editor, session, session.joinId);
+    me.started();
+    await stream(editor, session, me.joinId, 1);
+    const theirs = await stream(owner, session, newId(JoinId), 1);
+    await theirs.next((l) => 'joins' in l);
+    const copy = typist(editor, session);
+    await copy.send([copy.message('update')], { parent: me.joinId });
+    const sent = await theirs.next(
+      (l) => 'message' in l && l.message.message.joinId === copy.joinId,
+    );
+    const before = theirs.lines.slice(0, theirs.lines.indexOf(sent));
+    expect(before.some((l) => 'joins' in l && l.joins.some((j) => j.joinId === copy.joinId))).toBe(
+      true,
+    );
+  });
+
   it('keeps a presence sent before any stream opened, for the first that does', async () => {
     const { owner, editor, lib } = await sharedLibrary();
     const session = await startSession(editor, lib.page);
