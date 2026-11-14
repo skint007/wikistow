@@ -8,6 +8,7 @@
 // what the head doesn't hold, and sends a Saved notice, so the server
 // deletes it.
 import { JoinId, RevisionId, liveRoutes, type PageId } from '@wikistow/contracts';
+import * as Y from 'yjs';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { isAgentId } from '../identity.ts';
@@ -85,6 +86,8 @@ export function ofAnotherSession(draft: OpenedDraft, sessionId: string): boolean
 
 // How long merging the ended document onto a later head may take.
 const MERGE_MS = 2_000;
+// How many times the whole document is compared with a notice's draft's state.
+const FULL_CHECKS = 32;
 // How many of the latest Saved notices are tried for one naming a draft of the session.
 const NOTICES_TRIED = 8;
 // How far back the head's signed chain is walked for a draft of the session.
@@ -298,9 +301,20 @@ async function build(
   // the position it covers, which its sender may name before its own last
   // messages came back to it, up to the notice itself, before which its
   // sender sent everything the draft holds. Its text must then be the draft's.
+  let fullChecks = 0;
   const check = (): boolean => {
     if (!notice) return true;
     const { draft, state } = notice;
+    // The state vector first, which costs as many clients as the document has.
+    const clients = document.doc.store.clients;
+    if (clients.size !== state.vector.size) return false;
+    for (const [client, clock] of state.vector) {
+      if (Y.getState(document.doc.store, client) !== clock) return false;
+    }
+    // Then the whole state, a few times at most: deletions alone don't move the vector.
+    if (++fullChecks > FULL_CHECKS) {
+      throw new CryptoError('binding-mismatch', 'it doesn’t check against its last save');
+    }
     if (!sameState(document.state(), state)) return false;
     if (!samePayload(document.payload(draft.payload), draft.payload)) {
       throw new CryptoError('binding-mismatch', 'it doesn’t check against its last save');
@@ -317,10 +331,14 @@ async function build(
     const first = placedAt.get(grant.subject);
     if (first === undefined || grant.position < first) placedAt.set(grant.subject, grant.position);
   }
-  const secondFold = (position: number) =>
-    served.grants.some(
-      (grant) => grant.position === position && placedAt.get(grant.subject) !== position,
-    );
+  const seconds = new Set(
+    served.grants.flatMap((grant) =>
+      grant.position !== null && placedAt.get(grant.subject) !== grant.position
+        ? [grant.position]
+        : [],
+    ),
+  );
+  const secondFold = (position: number) => seconds.has(position);
 
   const messages = [...served.messages].sort((a, b) => a.position - b.position);
   let checked = covers <= covered && check();
@@ -454,23 +472,24 @@ async function putIn(
   );
   if (first.kind === 'cant') return first;
   // One join at a time, keyed by the ended session, so two editors don't both put it in.
-  try {
-    const asked = await transport.send({ joinId, messages: [], fold: sessionId });
-    const grant = asked.grant;
-    if (!grant || grant.lapsed || grant.holder.joinId !== joinId) return { kind: 'elsewhere' };
-  } catch (error) {
-    // Caught up and deleted meanwhile, or not served for catching up any more.
-    if (error instanceof ApiError && ['not-found', 'forbidden'].includes(error.code)) {
-      return { kind: 'elsewhere' };
-    }
-    return passing(error);
-  }
-  // Holding the grant: anything but done lets it go at once, so nobody waits out its 10 minutes.
+  // Anything but done leaves the join it made, and with it any grant it got,
+  // so nobody waits out its 10 minutes; a grant whose answer was lost too.
   let done = false;
   try {
+    try {
+      const asked = await transport.send({ joinId, messages: [], fold: sessionId });
+      const grant = asked.grant;
+      if (!grant || grant.lapsed || grant.holder.joinId !== joinId) return { kind: 'elsewhere' };
+    } catch (error) {
+      // Caught up and deleted meanwhile, or not served for catching up any more.
+      if (error instanceof ApiError && ['not-found', 'forbidden'].includes(error.code)) {
+        return { kind: 'elsewhere' };
+      }
+      return passing(error);
+    }
     const result = await saveAndNotice(ports, served, opened, built, startHead, first, joinId);
-    done = result.kind === 'saved' || result.kind === 'held';
-    return result;
+    done = result.noticed && (result.caught.kind === 'saved' || result.caught.kind === 'held');
+    return result.caught;
   } finally {
     if (!done) void transport.leave(joinId).catch(() => {});
   }
@@ -485,7 +504,7 @@ async function saveAndNotice(
   startHead: RevisionId,
   firstTarget: Awaited<ReturnType<typeof targetOn>>,
   joinId: JoinId,
-): Promise<CaughtUp> {
+): Promise<{ caught: CaughtUp; noticed: boolean }> {
   const { ctx } = ports;
   const sessionId = served.sessionId;
   const transport = liveTransport(ctx, sessionId, ports.live);
@@ -494,10 +513,14 @@ async function saveAndNotice(
   let head: RevisionId | null = startHead;
   let result: CaughtUp | null = null;
   for (let tries = 0; tries < 4 && !result; tries++) {
-    if (!head) return { kind: 'cant', why: 'the page has no draft', lasting: false };
+    if (!head)
+      return {
+        caught: { kind: 'cant', why: 'the page has no draft', lasting: false },
+        noticed: false,
+      };
     const target = first ?? (await targetOn(ports, opened, built, head));
     first = null;
-    if (target.kind === 'cant') return target;
+    if (target.kind === 'cant') return { caught: target, noticed: false };
     if (target.kind === 'held') {
       result = { kind: 'held' };
       break;
@@ -525,7 +548,12 @@ async function saveAndNotice(
       head = parsed.success ? parsed.data : null;
     }
   }
-  if (!result) return { kind: 'cant', why: 'the page kept changing', lasting: false };
+  if (!result) {
+    return {
+      caught: { kind: 'cant', why: 'the page kept changing', lasting: false },
+      noticed: false,
+    };
+  }
   // What the session placed, never more, naming the draft that holds it: then the server deletes it.
   const named = result.kind === 'saved' ? result.revisionId : (head ?? latest.revisionId);
   const message = sealLiveMessage({
@@ -544,13 +572,14 @@ async function saveAndNotice(
         messages: [{ message, covers: served.position }],
         fold: sessionId,
       });
-      break;
+      return { caught: result, noticed: true };
     } catch (error) {
-      // Saved already: the next to catch up finds the head holds it.
-      if (tries >= 2 || (error instanceof ApiError && error.status > 0)) break;
+      // Saved already: the grant goes, and the next to catch up finds the head holds it.
+      if (tries >= 2 || (error instanceof ApiError && error.status > 0)) {
+        return { caught: result, noticed: false };
+      }
     }
   }
-  return result;
 }
 
 // What to save on `head` so it holds the ended document: the document on

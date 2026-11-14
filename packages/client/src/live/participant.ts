@@ -4369,7 +4369,9 @@ type GoneRange = { from: number; to: number };
 // Ended sessions this app couldn't catch up from, and until when that stands.
 const triedFrom = new Map<string, { caught: CaughtUp; until: number; waitingSince: number }>();
 const TRY_AGAIN_MS = 60_000;
-// How long joining waits for an ended session to be caught up, elsewhere or once a failure passes.
-const WAIT_MS = 3 * 60_000;
+// How long joining waits for an ended session to be caught up, elsewhere or
+// once a failure passes: past a catch-up grant's 10 minutes, so a grant
+// whose holder went lapses first, and nobody starts a session over it.
+const WAIT_MS = 11 * 60_000;
 // Sessions this app left once because it couldn't catch up with the others.
 const cantCatchUp = new Set<string>();
