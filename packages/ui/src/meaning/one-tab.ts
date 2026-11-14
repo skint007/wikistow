@@ -8,7 +8,7 @@ export type Turn = { flush(): Promise<void>; stop(): void };
 
 /** The browser's parts this needs, for tests to stand in for. */
 export type Tabs = {
-  locks: Pick<LockManager, 'request'> | null;
+  locks: Pick<LockManager, 'request' | 'query'> | null;
   /** Whether this tab is in view, and a call each time that changes, until the returned function is called. */
   shown(): boolean;
   onShownChange(listener: () => void): () => void;
@@ -32,8 +32,8 @@ const browserTabs = (): Tabs => ({
  * the browser holds at a time, so one model and one queue run however many
  * tabs are open, and none writes the vectors over another's. A tab asks for
  * it while in view. One holding it that goes out of view keeps it, so
- * indexing goes on behind other windows, until a tab that wants it comes
- * into view: then it keeps what it made (`flush`) and lets go, since a tab
+ * indexing goes on behind other windows, unless or until a tab in view
+ * wants it: then it keeps what it made (`flush`) and lets go, since a tab
  * out of view doesn't follow what changes (`useTreeChanges`). It lets go
  * too as it closes or locks. Returns how to stop. Without Web Locks, as on
  * a page not served over HTTPS, the tab runs it alone, as every tab then does.
@@ -46,6 +46,8 @@ export function oneTabAtATime(start: () => Turn, tabs: Tabs = browserTabs()): ()
   }
   let left = false;
   let turn: Turn | null = null;
+  /** The turn being handed over, still keeping what it made. */
+  let giving: Turn | null = null;
   let release: (() => void) | null = null;
   let waiting: AbortController | null = null;
   const channel = tabs.channel(QUEUE_LOCK);
@@ -66,13 +68,22 @@ export function oneTabAtATime(start: () => Turn, tabs: Tabs = browserTabs()): ()
       });
   };
   const letGo = async () => {
-    const giving = turn;
-    if (!giving) return;
+    const handing = turn;
+    if (!handing) return;
     turn = null;
-    await giving.flush();
-    giving.stop();
+    giving = handing;
+    await handing.flush();
+    // Stopped meanwhile, as this tab left: stopped then already.
+    if (giving !== handing) return;
+    giving = null;
+    handing.stop();
     release?.();
     release = null;
+  };
+  /** Let go if a tab in view waits for the queue: tabs out of view don't ask. */
+  const letGoIfWanted = async () => {
+    const { pending = [] } = await locks.query();
+    if (turn && !tabs.shown() && pending.some((lock) => lock.name === QUEUE_LOCK)) await letGo();
   };
   const unwatch = tabs.onShownChange(() => {
     if (tabs.shown()) {
@@ -81,6 +92,7 @@ export function oneTabAtATime(start: () => Turn, tabs: Tabs = browserTabs()): ()
     } else {
       waiting?.abort();
       waiting = null;
+      void letGoIfWanted();
     }
   });
   if (channel) {
@@ -96,7 +108,9 @@ export function oneTabAtATime(start: () => Turn, tabs: Tabs = browserTabs()): ()
     channel?.close();
     waiting?.abort();
     turn?.stop();
+    giving?.stop();
     turn = null;
+    giving = null;
     release?.();
   };
 }

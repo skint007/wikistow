@@ -17,7 +17,7 @@ import {
   type MeaningWork,
 } from '../src/meaning/meaning-index';
 import { KEEP_AT_MOST_MS, KEEP_MS } from '../src/data/index-tracker';
-import { EmbedRefused } from '../src/meaning/embedder';
+import { ModelUnavailable } from '../src/meaning/embedder';
 
 const home = SpaceId.parse('home');
 const rev = (id: string) => RevisionId.parse(id);
@@ -90,12 +90,18 @@ function fakeWork() {
   const state = {
     busy: false,
     failNext: false,
+    /** The model won't load, this many times more. */
+    unavailable: 0,
     /** Fail every passage holding this. */
     failOn: null as string | null,
     file: file as MeaningFile | null,
   };
   const embedder = {
     count: vi.fn(async (words: string[]) => {
+      if (state.unavailable > 0) {
+        state.unavailable--;
+        throw new ModelUnavailable(new Error('No model'));
+      }
       counted.push(words);
       return words.map(estimateTokens);
     }),
@@ -109,7 +115,7 @@ function fakeWork() {
         throw new Error('The embedding worker stopped.');
       }
       if (state.failOn && texts.some((text) => text.includes(state.failOn!))) {
-        throw new EmbedRefused('The model failed.');
+        throw new Error('The model failed.');
       }
       embedded.push(...texts);
       return { vectors: texts.map(fakeVector), tokens: texts.map(() => 1) };
@@ -518,18 +524,56 @@ describe('MeaningIndexer', () => {
     expect(fake.embedded).toHaveLength(0);
   });
 
-  it('a worker that fails twice on a page is tried again, the page not passed over', async () => {
+  it('a model that can’t load is tried again each minute, no page passed over', async () => {
     const fake = fakeWork();
+    fake.state.unavailable = 3;
     const indexer = new MeaningIndexer(fake.work);
     indexer.indexChanged(wordIndex([beach]));
-    fake.state.failNext = true;
-    await vi.advanceTimersByTimeAsync(1_000);
-    fake.state.failNext = true;
-    await vi.advanceTimersByTimeAsync(61_000);
+    await vi.advanceTimersByTimeAsync(3 * 60_000 - 1_000);
     expect(fake.embedded).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(61_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     expect(fake.embedded).toHaveLength(1);
     expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+  });
+
+  it('a page whose tokens can’t be counted twice is passed over too', async () => {
+    const fake = fakeWork();
+    fake.embedder.count.mockImplementation(async (words: string[]) => {
+      if (words.includes('Cornwall.')) throw new Error('The embedding worker stopped.');
+      return words.map(estimateTokens);
+    });
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    expect(fake.embedded).toEqual(['The boiler\nThe boiler loses pressure every winter.']);
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+  });
+
+  it('a flush waits for a write already under way', async () => {
+    const fake = fakeWork();
+    // Once embedded, a moment free comes only when let through.
+    let gated = false;
+    const waiting: (() => void)[] = [];
+    const indexer = new MeaningIndexer({
+      ...fake.work,
+      idle: () =>
+        gated ? new Promise<void>((resolve) => waiting.push(resolve)) : Promise.resolve(),
+    });
+    indexer.indexChanged(wordIndex([beach]));
+    await vi.advanceTimersByTimeAsync(EMBED_MS + 10);
+    expect(fake.embedded).toHaveLength(1);
+    gated = true;
+    // The write after it starts, and waits for a moment free.
+    await vi.advanceTimersByTimeAsync(KEEP_MS);
+    expect(waiting).toHaveLength(1);
+    let flushed = false;
+    const flushing = indexer.flush().then(() => (flushed = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(flushed).toBe(false);
+    expect(fake.writes).toHaveLength(0);
+    waiting.shift()!();
+    await flushing;
+    expect(fake.writes).toHaveLength(1);
   });
 
   it('flushes what it made before handing the queue to another tab', async () => {

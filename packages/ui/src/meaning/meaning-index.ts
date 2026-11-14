@@ -13,7 +13,7 @@ import {
   type Vector8,
 } from '@wikistow/client';
 import { KEEP_AT_MOST_MS, KEEP_MS, systemClock, type Clock } from '../data/index-tracker';
-import { EmbedRefused } from './embedder';
+import { ModelUnavailable } from './embedder';
 
 // Search by meaning's background queue (ADR 0016, decision 4): the vectors
 // of each page the word index holds, made one passage at a time after the
@@ -319,10 +319,13 @@ export class MeaningIndexer {
 
   /** Keep at once what waits to be kept, as before another tab takes the queue over. */
   async flush(): Promise<void> {
-    if (this.#stopped || !this.#keeping) return;
-    this.#keeping.cancel();
-    this.#keeping = null;
-    await this.#write().catch(() => {});
+    if (this.#stopped) return;
+    if (this.#keeping) {
+      this.#keeping.cancel();
+      this.#keeping = null;
+      void this.#writeNow();
+    }
+    await this.#writing;
   }
 
   /** Stop, as at a lock: the vectors and the worker go, and nothing is kept after. */
@@ -496,9 +499,10 @@ export class MeaningIndexer {
           await this.#embedPage(page);
         } catch (error) {
           if (this.#stopped) break;
-          // A passage that fails twice, the page passed over until its
-          // version changes; else the worker failed: try again later.
-          if (error instanceof PassageFailed) {
+          // A page that fails twice in a row once the model has loaded,
+          // refused or stopping the worker, is passed over until its
+          // version changes; a model that can't load is tried again later.
+          if (!(error instanceof ModelUnavailable)) {
             const key = keyOf(page.doc.spaceId, page.doc.pageId);
             const again =
               this.#failing?.key === key && this.#failing.revisionId === page.doc.revisionId;
@@ -552,16 +556,10 @@ export class MeaningIndexer {
         await this.#pace();
         if (this.#given(key, page)) return;
         const started = this.#clock.now();
-        let vectors: Float32Array[];
-        try {
-          ({ vectors } = await this.#work.embedder.embed('passage', [passage.text]));
-        } catch (error) {
-          // Refused by the model, not the worker stopping: maybe the passage's doing.
-          throw error instanceof EmbedRefused ? new PassageFailed(error) : error;
-        }
+        const { vectors } = await this.#work.embedder.embed('passage', [passage.text]);
         const ended = this.#clock.now();
         this.#restUntil = ended + Math.max(REST_AT_LEAST_MS, (ended - started) * REST_SHARE);
-        if (!vectors[0]) throw new PassageFailed('The embedding worker gave no vector.');
+        if (!vectors[0]) throw new Error('The embedding worker gave no vector.');
         vector = quantizeVector(vectors[0]);
         if (this.#given(key, page)) {
           if (!this.#stopped) this.#reuse(key, [...made, { hash: passage.hash, vector }]);
@@ -610,9 +608,23 @@ export class MeaningIndexer {
       now,
       cancel: this.#clock.after(wait, () => {
         this.#keeping = null;
-        void this.#write().catch(() => {});
+        void this.#writeNow();
       }),
     };
+  }
+
+  /** The write under way, if any. */
+  #writing: Promise<void> | null = null;
+
+  /** Write now, after any write under way, so one never overtakes another. */
+  #writeNow(): Promise<void> {
+    const after = this.#writing ?? Promise.resolve();
+    const writing = after.then(() => this.#write()).catch(() => {});
+    this.#writing = writing;
+    void writing.then(() => {
+      if (this.#writing === writing) this.#writing = null;
+    });
+    return writing;
   }
 
   async #write() {
@@ -628,12 +640,5 @@ export class MeaningIndexer {
       return;
     }
     await file.write(this.#work.seal(this.#kept));
-  }
-}
-
-/** Embedding a passage failed, which may be the passage's doing, not the worker's. */
-class PassageFailed extends Error {
-  constructor(cause: unknown) {
-    super('A passage couldn’t be embedded', { cause });
   }
 }

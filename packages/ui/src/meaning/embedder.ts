@@ -27,14 +27,13 @@ export type EmbedAnswer =
   | { id: number; op: 'error'; message: string };
 
 /**
- * The loaded worker failed to embed or count what it was given, as distinct
- * from the worker stopping or its model failing to load: what was asked may
- * be at fault.
+ * The model couldn't be loaded, as distinct from the loaded worker failing
+ * on what it was given: nothing asked of it is at fault.
  */
-export class EmbedRefused extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'EmbedRefused';
+export class ModelUnavailable extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : 'The model couldn’t be loaded.', { cause });
+    this.name = 'ModelUnavailable';
   }
 }
 
@@ -132,11 +131,13 @@ export class Embedder {
   /** What the loaded worker answers `request`, loading the model first if need be. */
   async #askLoaded(request: EmbedAsk): Promise<EmbedAnswer> {
     const loading = this.load();
-    await loading;
+    await loading.catch((error: unknown) => {
+      throw new ModelUnavailable(error);
+    });
     // Stopped between the load and this, which would start a worker with no model.
     if (this.#loaded !== loading) throw new Error('The embedding worker was stopped.');
     const answer = await this.#ask(request);
-    if (answer.op === 'error') throw new EmbedRefused(answer.message);
+    if (answer.op === 'error') throw new Error(answer.message);
     if (answer.op !== request.op) throw new Error('The embedding worker answered out of turn.');
     return answer;
   }

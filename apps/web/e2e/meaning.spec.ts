@@ -223,7 +223,8 @@ test('indexes by meaning in the background, typing and searching staying respons
     expect(workers.filter((url) => /\/embed\.worker-[\w-]+\.js$/.test(url))).toHaveLength(1);
     await expect(row).not.toHaveAccessibleDescription(/so far/, { timeout: 120_000 });
     // The note typed in is embedded once its saves have paused for 30 s,
-    // and the vectors kept 5 s after.
+    // and the vectors kept 5 s after: the reload below would embed it
+    // otherwise, which it checks doesn't happen.
     await page.waitForTimeout(Math.max(0, saved + 40_000 - Date.now()));
     await expect.poll(() => keptVectors(page), { timeout: 30_000 }).toBeGreaterThan(60 * 400);
   });

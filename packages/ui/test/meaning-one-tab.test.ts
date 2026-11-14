@@ -33,6 +33,12 @@ function browser() {
         queue.push(request);
         next();
       })) as LockManager['request'],
+    query: async () => ({
+      held: holder ? [{ name: 'wikistow-meaning-queue' }] : [],
+      pending: queue
+        .filter((r) => !r.signal.aborted)
+        .map(() => ({ name: 'wikistow-meaning-queue' })),
+    }),
   };
   const channels = new Set<{ onmessage: ((event: MessageEvent) => void) | null }>();
   const tab = (shownAtFirst: boolean) => {
@@ -60,18 +66,26 @@ function browser() {
       },
     };
     const turns: string[] = [];
+    /** Each flush waits for this, when set. */
+    let flushing: Promise<void> | null = null;
     const turn = (): Turn => {
       turns.push('start');
       return {
-        flush: async () => void turns.push('flush'),
+        flush: async () => {
+          turns.push('flush');
+          await flushing;
+        },
         stop: () => void turns.push('stop'),
       };
+    };
+    const slowFlush = (until: Promise<void>) => {
+      flushing = until;
     };
     const show = (now: boolean) => {
       shown = now;
       for (const listener of listeners) listener();
     };
-    return { tabs, turns, turn, show };
+    return { tabs, turns, turn, show, slowFlush };
   };
   return { tab };
 }
@@ -108,6 +122,43 @@ describe('one tab at a time', () => {
     // A in view again doesn't take it from B, also in view.
     a.show(true);
     await settled();
+    expect(b.turns).toEqual(['start']);
+  });
+
+  it('hands it over on going out of view, when a tab in view waits for it', async () => {
+    const { tab } = browser();
+    const a = tab(true);
+    const b = tab(true);
+    oneTabAtATime(a.turn, a.tabs);
+    oneTabAtATime(b.turn, b.tabs);
+    await settled();
+    expect(b.turns).toEqual([]);
+    a.show(false);
+    await settled();
+    await settled();
+    expect(a.turns).toEqual(['start', 'flush', 'stop']);
+    expect(b.turns).toEqual(['start']);
+  });
+
+  it('stopped while handing it over, the turn handed stops at once', async () => {
+    const { tab } = browser();
+    const a = tab(true);
+    const b = tab(false);
+    let flushed = () => {};
+    a.slowFlush(new Promise<void>((resolve) => (flushed = resolve)));
+    const stopA = oneTabAtATime(a.turn, a.tabs);
+    oneTabAtATime(b.turn, b.tabs);
+    await settled();
+    a.show(false);
+    b.show(true);
+    await settled();
+    expect(a.turns).toEqual(['start', 'flush']);
+    // Turned off meanwhile: stopped now, not once its flush ends.
+    stopA();
+    expect(a.turns).toEqual(['start', 'flush', 'stop']);
+    flushed();
+    await settled();
+    expect(a.turns).toEqual(['start', 'flush', 'stop']);
     expect(b.turns).toEqual(['start']);
   });
 
