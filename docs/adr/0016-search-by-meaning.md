@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: built
 ---
 
 # Searching pages by meaning, on the device
@@ -250,6 +250,18 @@ Step 4 put the background queue in the app (`packages/ui/src/meaning/`). Where t
 - **The cost on the page's own thread** is cutting and hashing passages, and sealing and opening the file. Sealing 4,000 passages (2,000 pages) took about 10 ms and opening them about 15 ms on the laptop, so about 50 and 75 ms for 10,000 pages; both wait for a moment free, but for a write that lets a version go, which seals at once so a lock can't leave the version in the file. Opening happens once, at unlock. A test runs the queue for real on 2,000 pages, with a model that answers at once, while a timer ticks at a frame's pace and searches run: in five runs, once the kept vectors had opened, no tick was late by more than 9 ms, and no search, by words or by meaning, took more than 8 ms. It allows 100 ms for a tick, the time within which an answer feels immediate, and 50 ms for a search, to leave room for a busier machine. In the browser test, with the real model indexing 60 passages, no keypress took more than 32 ms to paint, typing in a page or in search.
 - **The status** counts the pages with vectors standing for them, a draft's waiting included, of the pages the word index holds. Settings shows it while pages are left; the dialog's status line is step 5's.
 
+## How step 5 turned out (2026-11-14)
+
+Step 5 put **By meaning** in the search dialog (`packages/ui/src/meaning/search.ts`, `shell/search-dialog.tsx`). Where this ADR didn't say:
+
+- **Close enough.** A page is listed when its best passage scores at least 0.5 and no more than 0.1 below the best page listed, five at most. On the spike's 33 notes and 36 queries, with the real model in Node and vectors kept at 8 bits, that lists the page meant for 33 of the 36, with about three pages a query; five queries about nothing in the notes ("kubernetes cluster upgrade") list 2.4 pages on average. With the same gap, a floor of 0.54 lists the page meant for 32, with about two pages a query and one for a query about nothing; a floor of 0.45 lists it for 34, with about 3.4 pages a query and 4.4 for a query about nothing. "Trip to the coast" scored the holiday 0.548, second to a page about flights to Lisbon (0.562). The best is the best of the pages the section may list, after filters and the word matches are left out.
+- **What is embedded** is the query's words as `parseSearch` gives them, without filters and with its quotes taken out, once they hold three letters, and typing has paused for 150 ms. Until the next vector comes, the last one stands, so the section doesn't empty at each key, but filters and the word matches it leaves out apply at once. A query with fewer letters, filters alone or a command clears it.
+- **Other tabs.** One tab of a browser runs the queue (step 4), and a tab without it has no vectors in memory. Its search reads the kept file each time the dialog opens, opened in a moment free, and embeds its queries in a worker of its own, which loads as the dialog opens and stops a minute after the last query. A page there counts by the vectors kept for the version its word index shows; until the queue keeps a new version's, which it does within a minute, that page is found by its words alone, and a draft waiting out its 30 s isn't found by meaning there. Its status line counts the pages with kept vectors, so a page the queue passed over as it failed counts as left there. Asking the tab holding the queue instead, over a `BroadcastChannel`, would spare a second model's memory, but that tab may be out of view and would need the query's filters and the word matches sent to it; a model loaded only while search is open, as this ADR has the worker started when the dialog opens, is the simpler of the two.
+- **The tab running the queue** embeds the query with the queue's own worker, so one model runs there, and a query waits behind one passage at most, as step 4 planned. The dialog starts its model, if stopped, as it opens.
+- **The status line.** Only the counts are announced (`role="status"`); the progress after them changes with each page, so it is shown but not announced. It shows while the query is one search by meaning runs for.
+- **The keyboard and screen reader.** The section is a `group` named **By meaning** inside the results' `listbox`; its visible label is hidden from screen readers, which hear the group's name instead. Below a plugin's list, the section is a `listbox` of its own after the plugin's view, and the box's `aria-controls` names both.
+- **The browser test** (`apps/web/e2e/meaning.spec.ts`) turns it on, waits for both pages to be indexed by the real model, and finds the holiday by "trip to the coast", in the tab running the queue and in a second tab, which it checks waits for the queue's lock.
+
 ## Considered options
 
 - **Embeddings from the administrator's AI provider.** No model on the device, and better models. But it sends every page's text, and every query, to the provider through the server, which #324 rules out. It could come later as an opt-in with a disclosure like the chat assistant's.
@@ -282,11 +294,11 @@ Step 4 put the background queue in the app (`packages/ui/src/meaning/`). Where t
 ## Implementation, in pull requests
 
 1. **This ADR.**
-2. **The model in the build, and a measurement** (#430; see **Measured in step 2**, which measured no phone). Fetch and check the model at its pinned hash, emit it and the runtime as hashed files with Brotli copies, serve `/assets/*` precompressed, leave the large files and the copies out of the service worker's shell and the copies out of the desktop package, add the licence. The worker and its model cache, with a browser test that embeds a text under the app's policy, offline too. Measure load, a query and a passage in Chromium and the desktop app, and in a real phone's browser, so the phone row of decision 5 rests on numbers.
-3. **Passages and vectors** in `packages/client`: cutting a page's reduced text at its headings and paragraphs, 8-bit vectors, the scan, and sealing and opening the kept file, with tests.
-4. **Indexing in the background.** The queue, kept vectors on unlock, updates when pages change, the 30 s pause for drafts, lock and logout, the desktop bridge's file, and the setting with its rules per device.
-5. **By meaning in the search dialog**, with filters, the status line, the keyboard and screen reader, and an e2e: a page about a beach holiday is found by "trip to the coast".
-6. **The spec,** marked built.
+2. **The model in the build, and a measurement** (built, PR #430; see **Measured in step 2**, which measured no phone). Fetch and check the model at its pinned hash, emit it and the runtime as hashed files with Brotli copies, serve `/assets/*` precompressed, leave the large files and the copies out of the service worker's shell and the copies out of the desktop package, add the licence. The worker and its model cache, with a browser test that embeds a text under the app's policy, offline too. Measure load, a query and a passage in Chromium and the desktop app, and in a real phone's browser, so the phone row of decision 5 rests on numbers.
+3. **Passages and vectors** (built, PR #429) in `packages/client`: cutting a page's reduced text at its headings and paragraphs, 8-bit vectors, the scan, and sealing and opening the kept file, with tests.
+4. **Indexing in the background** (built, PR #450; see **How step 4 turned out**). The queue, kept vectors on unlock, updates when pages change, the 30 s pause for drafts, lock and logout, the desktop bridge's file, and the setting with its rules per device.
+5. **By meaning in the search dialog** (built, PR #STEP5; see **How step 5 turned out**), with filters, the status line, the keyboard and screen reader, and an e2e: a page about a beach holiday is found by "trip to the coast".
+6. **The spec,** marked built (built, PR #STEP5).
 
 Steps 2 and 3 can run in parallel. Step 4 needs both, and step 5 needs step 4.
 

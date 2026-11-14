@@ -37,11 +37,14 @@ export function searchStatus({
   progress,
   query,
   results,
+  meaning = 0,
 }: {
   index: { size: number } | undefined;
   progress: searchOperations.IndexProgress | undefined;
   query: string;
   results: number;
+  /** The pages listed by meaning, below the word matches (ADR 0016). */
+  meaning?: number;
 }): string {
   if (!index) {
     return progress && progress.total > 0
@@ -50,8 +53,11 @@ export function searchStatus({
   }
   if (index.size === 0) return 'There are no pages to search yet.';
   if (!looksFor(query)) return SEARCH_HELP;
-  if (results === 0) return 'No pages match.';
-  return `${results} page${results === 1 ? '' : 's'}`;
+  if (results === 0 && meaning === 0) return 'No pages match.';
+  const words = `${results} page${results === 1 ? '' : 's'}`;
+  if (meaning === 0) return words;
+  if (results === 0) return `No pages with these words · ${meaning} by meaning`;
+  return `${words} with these words · ${meaning} more by meaning`;
 }
 
 /**

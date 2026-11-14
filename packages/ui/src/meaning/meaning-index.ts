@@ -60,7 +60,9 @@ export type MeaningWork = {
   /** The model, in its worker (`Embedder`). */
   embedder: {
     count(words: string[]): Promise<number[]>;
-    embed(kind: 'passage', texts: string[]): Promise<{ vectors: Float32Array[] }>;
+    embed(kind: 'passage' | 'query', texts: string[]): Promise<{ vectors: Float32Array[] }>;
+    /** Load the model ahead of a query, as search opens. */
+    load?(): Promise<unknown>;
     stop(): void;
   };
   /** Where the vectors are kept now, or null to keep them only in memory. */
@@ -80,11 +82,13 @@ export type MeaningWork = {
 export type MeaningHit = {
   spaceId: SpaceId;
   pageId: PageId;
+  /** The page as the word index holds it: its text is what `passage.start` is in. */
+  page: IndexedPage;
   passage: MeaningPassage;
   score: number;
 };
 
-type IndexedPage = Readonly<IndexedOf<searchOperations.SearchPage>>;
+export type IndexedPage = Readonly<IndexedOf<searchOperations.SearchPage>>;
 type SavedVersion = Pick<
   searchOperations.SavedVersion,
   'spaceId' | 'pageId' | 'revisionId' | 'basedOn'
@@ -360,10 +364,27 @@ export class MeaningIndexer {
       return {
         spaceId: page.doc.spaceId,
         pageId: page.doc.pageId,
+        page,
         passage: passages[passage]!,
         score,
       };
     });
+  }
+
+  /**
+   * A search's words as a vector, made by the queue's own worker, where it
+   * waits behind one passage at most (ADR 0016, decision 6).
+   */
+  async query(text: string): Promise<Float32Array> {
+    if (this.#stopped) throw new Error('Search by meaning stopped');
+    const { vectors } = await this.#work.embedder.embed('query', [text]);
+    if (!vectors[0]) throw new Error('The embedding worker gave no vector.');
+    return vectors[0];
+  }
+
+  /** Start the worker and its model ahead of a query, as search opens. */
+  prepare() {
+    if (!this.#stopped) void this.#work.embedder.load?.().catch(() => {});
   }
 
   /** Keep at once what waits to be kept, as before another tab takes the queue over. */
