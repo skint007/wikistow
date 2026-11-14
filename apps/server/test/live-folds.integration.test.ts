@@ -248,4 +248,33 @@ describe('a live session’s saves', () => {
     expect(sessionState(head.payload, head.revisionId, mine.sessionId)).not.toBeNull();
     expect(mine.status().state).toEqual({ kind: 'live' });
   });
+
+  it('restore a version through the session, as the restorer’s own change', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const mine = await join(owner, page);
+    const theirs = await join(editor, page);
+    setBody(mine, 'Version one.\n');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    await pages.publishPage(owner.ctx, page);
+    const published = (await pages.loadPage(owner.ctx, page.pageId)).heads.publishedHead;
+    if (!published) throw new Error('not published');
+    setBody(mine, 'Version two.\n');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+
+    const restored = await theirs.restoreThrough((input) =>
+      pages.restorePublished(editor.ctx, page, published, input),
+    );
+    expect(restored).toBe(true);
+    await expect.poll(() => body(mine)).toBe('Version one.\n');
+    expect(body(theirs)).toBe('Version one.\n');
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    const head = await draftOf(owner, page);
+    expect(head.payload.markdown).toBe('Version one.\n');
+    expect(sessionState(head.payload, head.revisionId, mine.sessionId)).not.toBeNull();
+    expect(mine.status().state).toEqual({ kind: 'live' });
+    // Typing goes on after it, saved as the session's.
+    setBody(mine, 'Version one, and more.\n');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    expect(theirs.status().state).toEqual({ kind: 'live' });
+  });
 });

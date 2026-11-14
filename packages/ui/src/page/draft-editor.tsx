@@ -48,7 +48,7 @@ import { useMovedLinks } from './moved-links';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession, type Queued } from './use-draft-session';
-import type { DraftSnapshot } from './draft-session';
+import type { DraftSession, DraftSnapshot } from './draft-session';
 import { useLiveSource } from './live/use-live-source';
 import { LiveNotes, useReviewing } from './live/live-notes';
 import { peopleQuery } from '../sharing/people';
@@ -71,6 +71,12 @@ export type DraftEditorHandle = {
    * again on it, joining a new one (ADR 0015 step 6).
    */
   beforeRestore(): Promise<void>;
+  /**
+   * Restore a version through the page's live session, as this person's
+   * change (ADR 0015 decision 8); false when this draft isn't in one, or it
+   * didn't go in, and the restore goes as before.
+   */
+  restoreLive(write: Parameters<DraftSession['restoreLive']>[0]): Promise<boolean>;
   /** Change the draft from outside the editor, as the cover pickers do, given the draft as it is now. */
   revise(changes: (current: PagePayload) => PayloadChanges): void;
   /** Work saves and leaving wait for, as for a file uploading: a banner image, say. */
@@ -227,6 +233,7 @@ export function DraftEditor({
         await session.leaveLive();
         await session.saveOrThrow();
       },
+      restoreLive: (write) => session.restoreLive(write),
       revise: (changes) => session.revise(changes),
       track: (work) => session.track(work),
       checkSize: (changes) => session.checkSize(changes),

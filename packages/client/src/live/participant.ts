@@ -50,6 +50,7 @@ import { splitFrontmatter } from '../markdown/index.ts';
 import {
   carryChoices,
   foldPayloads,
+  targetOf,
   namespacesOf,
   reviewMerge,
   reviewTarget,
@@ -979,6 +980,123 @@ export class LiveParticipant {
       if (this.#status.saved) return true;
     }
     return this.#status.saved;
+  }
+
+  /**
+   * Restore a version through the session (section 5.10, **Restoring**):
+   * its text put in as this person's change, replacing the page's, in a
+   * copy under a further join, since its files are sealed again for the
+   * draft and only the restorer can commit them; saved by `write` on the
+   * head with `restoredFrom` and `wikistow.live`, as a draft of the
+   * session; and sent once that lands. `write` hands the restored payload,
+   * its files sealed again, to `shape`, and saves what that returns.
+   * Whether it went in; nothing went to anyone when it didn't.
+   */
+  async restoreThrough(
+    write: (input: {
+      basedOn: RevisionId;
+      revisionId: RevisionId;
+      shape: (restored: PagePayload) => PagePayload;
+    }) => Promise<{ revisionId: RevisionId; payload: PagePayload }>,
+  ): Promise<boolean> {
+    if (!this.#keyed()) return false;
+    await this.flush();
+    await this.#ensureHead();
+    const headId = this.#head;
+    const head = headId ? this.#drafts.get(headId) : undefined;
+    if (!this.#keyed() || this.#pending.length > 0 || this.#queue.length > 0) return false;
+    if (!headId || !head || !holdsState(this.document.state(), head.state)) return false;
+    const ctx = this.#ports.ctx;
+    const further = newId(JoinId);
+    const clientId = liveClientId({
+      installationId: ctx.installationId,
+      sessionId: this.sessionId,
+      senderId: ctx.identity.public.id,
+      senderKeyVersion: ctx.identity.public.keyVersion,
+      joinId: further,
+    });
+    const covers = this.#covers;
+    const people = [...new Set<IdentityId>([...head.with, ...this.#typed, ctx.identity.public.id])];
+    const revisionId = newId(RevisionId);
+    const base = Y.encodeStateAsUpdate(this.document.doc);
+    // Made afresh each time the write asks, as it may again with fresh keys.
+    let made: { copy: LiveDocument; update: Uint8Array; written: PagePayload } | null = null;
+    const shape = (restored: PagePayload): PagePayload => {
+      const copy = new LiveDocument(clientId);
+      if (copy.apply(base, 'copy').length > 0) throw new Error('The page couldn’t be copied');
+      const updates: Uint8Array[] = [];
+      copy.doc.on('update', (update: Uint8Array, origin: unknown) => {
+        if (origin === LOCAL_ORIGIN) updates.push(update);
+      });
+      const misplaced = copy.edit(() => writeTarget(copy, targetOf(restored)), LOCAL_ORIGIN);
+      if (misplaced.length > 0) throw new Error('The version doesn’t fit the live page');
+      const written = this.#payload(restored, copy);
+      made = {
+        copy,
+        update: updates.length > 0 ? Y.mergeUpdates(updates) : new Uint8Array([0, 0]),
+        written,
+      };
+      return withLive(written, {
+        revision: revisionId,
+        session: this.sessionId,
+        state: copy.stateBytes(),
+        with: people,
+      });
+    };
+    const seal = (seq: number, kind: 'update' | 'saved', clock: number, content: Uint8Array) =>
+      this.#seal({ kind, joinId: further, seq, clock, content });
+    const send = (message: LiveMessage, covered?: number) =>
+      this.#sendAgain({
+        joinId: further,
+        parent: this.#me.joinId,
+        messages: [{ message, ...(covered !== undefined && { covers: covered }) }],
+      });
+    let result: { revisionId: RevisionId; payload: PagePayload };
+    try {
+      await send(seal(1, 'update', 0, new Uint8Array([0, 0])));
+      if (!this.#keyed()) return false;
+      result = await write({ basedOn: headId, revisionId, shape });
+    } catch {
+      void this.#transport.leave(further).catch(() => {});
+      return false;
+    }
+    const done = made as { copy: LiveDocument; update: Uint8Array; written: PagePayload } | null;
+    if (!this.#keyed() || !done) {
+      void this.#transport.leave(further).catch(() => {});
+      return false;
+    }
+    this.#placing = true;
+    try {
+      this.document.apply(done.update, COPY_ORIGIN);
+      const clock = Y.getState(done.copy.doc.store, clientId);
+      await send(seal(2, 'update', clock, done.update));
+      this.#drafts.set(result.revisionId, {
+        ours: true,
+        revisionId: result.revisionId,
+        payload: result.payload,
+        state: done.copy.state(),
+        compared: samePayload(done.written, result.payload),
+        with: people,
+        openedAt: Date.now(),
+      });
+      this.#basedOn.set(result.revisionId, headId);
+      if (this.#head === headId) this.#head = result.revisionId;
+      if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
+      if (!this.#keyed()) return true;
+      await send(
+        seal(3, 'saved', clock, stateContent(result.revisionId, done.copy.stateBytes())),
+        covers,
+      );
+      void this.#transport.leave(further).catch(() => {});
+    } catch {
+      this.#stop('a restored version couldn’t be sent', null, true);
+      return false;
+    } finally {
+      this.#placing = false;
+      this.#schedule();
+      this.#update();
+    }
+    return true;
   }
 
   /**

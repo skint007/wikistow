@@ -50,7 +50,8 @@ export type ReviewTarget = Partial<Omit<FoldTarget, 'extensions' | 'attachments'
 /** A fold worked out: what the document becomes, and the parts of theirs that overlapped. */
 export type Folded = { target: FoldTarget; parts: string[] };
 
-const targetOf = (payload: PagePayload): FoldTarget => {
+/** What a payload's parts are as a fold or a restore writes them into the document. */
+export const targetOf = (payload: PagePayload): FoldTarget => {
   const { frontmatter, body } = splitFrontmatter(payload.markdown);
   return {
     title: payload.title,

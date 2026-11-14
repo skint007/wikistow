@@ -1355,6 +1355,13 @@ function PageBody({
               ? {
                   flush: async () => editor.current?.flush(),
                   beforeRestore: async () => editor.current?.beforeRestore(),
+                  restoreLive: async (publishedId) =>
+                    (await editor.current?.restoreLive((input) =>
+                      pageOperations.restorePublished(ctx, page, publishedId, {
+                        read: readWikilinks,
+                        ...input,
+                      }),
+                    )) ?? false,
                   reopen: onReopen,
                 }
               : null,

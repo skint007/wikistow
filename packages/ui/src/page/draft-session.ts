@@ -830,6 +830,21 @@ export class DraftSession {
     void this.#autosave.flush();
   }
 
+  /**
+   * Restore a version through the page's live session, when this draft is
+   * in one (protocol section 5.10, **Restoring**): `write` restores it with
+   * the shape and base the session gives. Whether it did; when it didn't,
+   * nothing changed, and the restore goes as from outside the session.
+   */
+  async restoreLive(write: Parameters<LiveParticipant['restoreThrough']>[0]): Promise<boolean> {
+    const participant = this.#participant;
+    if (!participant) return false;
+    this.#pull();
+    const restored = await participant.restoreThrough(write);
+    if (restored) this.#fromDocument(true);
+    return restored;
+  }
+
   // ---- Notes waiting for review (ADR 0015 decision 8) ----
 
   /** Open a note of the live session for Review; null when it can't be, or this draft isn't in one. */
