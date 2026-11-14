@@ -165,6 +165,26 @@ describe('one tab at a time', () => {
     expect(a.turns).toEqual(['start', 'flush', 'stop']);
   });
 
+  it('takes it back when, going out of view, the tab it let go for stopped asking', async () => {
+    const { tab } = browser();
+    const a = tab(true);
+    const b = tab(true);
+    let flushed = () => {};
+    a.slowFlush(new Promise<void>((resolve) => (flushed = resolve)));
+    oneTabAtATime(a.turn, a.tabs);
+    oneTabAtATime(b.turn, b.tabs);
+    await settled();
+    // A out of view, B waiting: A lets go, but B goes out of view first.
+    a.show(false);
+    await settled();
+    b.show(false);
+    flushed();
+    await settled();
+    await settled();
+    expect(b.turns).toEqual([]);
+    expect(a.turns).toEqual(['start', 'flush', 'stop', 'start']);
+  });
+
   it('hands it over on going out of view, when a tab in view waits for it', async () => {
     const { tab } = browser();
     const a = tab(true);

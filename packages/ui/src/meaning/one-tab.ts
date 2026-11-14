@@ -107,7 +107,10 @@ export function oneTabAtATime(start: () => Turn, tabs: Tabs = browserTabs()): ()
   /** Let go if a tab in view waits for the queue: tabs out of view don't ask. */
   const letGoIfWanted = async () => {
     const { pending = [] } = await locks.query();
-    if (turn && !tabs.shown() && pending.some((lock) => lock.name === QUEUE_LOCK)) await letGo();
+    if (turn && !tabs.shown() && pending.some((lock) => lock.name === QUEUE_LOCK)) {
+      await letGo();
+      await takeBackIfLeft();
+    }
   };
   const unwatch = tabs.onShownChange(() => {
     if (tabs.shown()) ask();
