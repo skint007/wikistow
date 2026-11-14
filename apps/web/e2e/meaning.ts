@@ -1,7 +1,6 @@
 // Running the embedding worker (ADR 0016, step 2) from one of the app's
-// pages, as the built app serves it, and timing it. The app embeds nothing
-// yet, so the tests talk to the built worker in its own terms
-// (`EmbedRequest`).
+// pages, as the built app serves it, and timing it, by talking to the built
+// worker in its own terms (`EmbedRequest`).
 import type { Page } from '@playwright/test';
 import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';

@@ -322,6 +322,16 @@ export type DesktopBridge = {
   /** Delete the search index kept, as with **Pages I open** nothing keeps it (ADR 0009, decision 9). */
   dropSearchIndex(): Promise<void>;
   /**
+   * The vectors search by meaning keeps, as the pages sealed them
+   * (`sealMeaningIndex`), or null (ADR 0016, decision 4). Kept and deleted
+   * as the search index is, but bound to the model, not the app's build.
+   */
+  meaningIndex(): Promise<Uint8Array | null>;
+  /** Keep these sealed vectors, in place of the ones kept. */
+  keepMeaningIndex(sealed: Uint8Array): Promise<void>;
+  /** Delete the vectors kept, as when search by meaning is turned off. */
+  dropMeaningIndex(): Promise<void>;
+  /**
    * The contacts and No going back marks kept from an earlier launch, as the
    * pages sealed them (`KeptMarks`), or null. Kept and deleted as the search
    * index is.
@@ -469,6 +479,9 @@ export const DESKTOP_CHANNELS = {
   searchIndex: 'wikistow:search-index',
   keepSearchIndex: 'wikistow:keep-search-index',
   dropSearchIndex: 'wikistow:drop-search-index',
+  meaningIndex: 'wikistow:meaning-index',
+  keepMeaningIndex: 'wikistow:keep-meaning-index',
+  dropMeaningIndex: 'wikistow:drop-meaning-index',
   trustMarks: 'wikistow:trust-marks',
   keepTrustMarks: 'wikistow:keep-trust-marks',
   keptItems: 'wikistow:kept-items',

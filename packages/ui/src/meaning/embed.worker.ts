@@ -170,6 +170,12 @@ async function answer(request: EmbedRequest): Promise<EmbedAnswer> {
   }
   if (!model) throw new Error('The model isn’t loaded');
   const ready = await model;
+  if (request.op === 'count') {
+    const counts = request.words.map(
+      (word) => ready.tokenizer.encode(word, { add_special_tokens: false }).ids.length,
+    );
+    return { id: request.id, op: 'count', counts };
+  }
   const prefix = request.kind === 'query' ? MEANING_MODEL.queryPrefix : '';
   const vectors: Float32Array[] = [];
   const tokens: number[] = [];
