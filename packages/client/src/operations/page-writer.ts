@@ -47,6 +47,7 @@ export type ServerWrites = {
     spaceId: SpaceId;
     parentId: FolderId | null;
     title: string;
+    markdown?: string;
     pageId: PageId;
     revisionId: RevisionId;
   }): Promise<unknown>;
@@ -120,6 +121,17 @@ export type PageWriter = {
    * got no answer, under the IDs it was sent with.
    */
   newPage(input: { spaceId: SpaceId; parentId: FolderId | null; title: string }): Promise<PageId>;
+  /**
+   * As `newPage`, its first draft holding `markdown`: the page, and that
+   * draft's revision, for a save on top of it (`draft`), as a clip from the
+   * browser is saved once its images are attached (ADR 0017).
+   */
+  newPageDraft(input: {
+    spaceId: SpaceId;
+    parentId: FolderId | null;
+    title: string;
+    markdown: string;
+  }): Promise<{ pageId: PageId; revisionId: RevisionId }>;
   /** A new folder, made where `newPage` would make a page. */
   newFolder(input: {
     spaceId: SpaceId;
@@ -207,19 +219,31 @@ export function createPageWriter({
     queue && (!isOnline() || (id !== null && (await queue.waiting(id)).length > 0)) ? queue : null;
 
   const writer: PageWriter = {
-    async newPage({ spaceId, parentId, title }) {
-      const payload = newPayload({ title, markdown: '' });
+    newPage: async (input) => (await writer.newPageDraft({ ...input, markdown: '' })).pageId,
+
+    async newPageDraft({ spaceId, parentId, title, markdown }) {
+      const payload = newPayload({ title, markdown });
       const device = await onDevice(parentId);
-      if (device) return (await device.newPage({ spaceId, parentId, payload })).id;
+      if (device) {
+        const entry = await device.newPage({ spaceId, parentId, payload });
+        return { pageId: entry.id, revisionId: entry.newPage!.revisionId };
+      }
       const pageId = newId(PageId);
       const revisionId = newId(RevisionId);
       try {
-        await server.createPage({ spaceId, parentId, title, pageId, revisionId });
+        await server.createPage({
+          spaceId,
+          parentId,
+          title,
+          ...(markdown && { markdown }),
+          pageId,
+          revisionId,
+        });
       } catch (error) {
         if (!queue || !noAnswer(error)) throw error;
         await queue.newPage({ spaceId, parentId, payload, pageId, revisionId });
       }
-      return pageId;
+      return { pageId, revisionId };
     },
 
     async newFolder({ spaceId, parentId, name, look, picture }) {
