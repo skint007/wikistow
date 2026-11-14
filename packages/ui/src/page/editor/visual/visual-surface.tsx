@@ -698,6 +698,9 @@ function Surface({
     }
     const view = viewNow();
     if (!next || !view || !writer.current) return;
+    // Text given before it was bound, still being checked to go in, is
+    // the binding's to take now: it goes in no more.
+    changes.current++;
     // Typed since the session took the page's text and before it's bound:
     // that goes in as the page's text did, so it's in `body` already.
     if (edited.current) {

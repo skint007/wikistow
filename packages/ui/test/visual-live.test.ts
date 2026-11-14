@@ -420,7 +420,10 @@ describe('the binding', () => {
       await settle();
       expect(editor.shown).toContain(`Two${i}`);
     }
-    expect(editor.wholes).toEqual([]);
+    // The text checked went in, the person's typing carried onto it.
+    expect(editor.wholes).toHaveLength(1);
+    expect(editor.wholes[0]).toContain('```\n');
+    expect(editor.wholes[0]).toContain('Two2');
     // Once others pause, it catches up.
     await vi.advanceTimersByTimeAsync(WHOLE_MS * 3);
     await settle();

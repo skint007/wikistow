@@ -177,6 +177,8 @@ export function PageEditor({
   const tookTake = useRef(0);
   const texts = useRef(0);
   const lastShown = useRef(0);
+  // The text the visual editor next made opens on: the one its check passed.
+  const visualFrom = useRef<string | null>(null);
   // In a live session's split, whether the visual side takes no edit, as
   // it can't show the shared text (`cantShow`).
   const liveHeld = useRef(false);
@@ -294,7 +296,10 @@ export function PageEditor({
       checked = body.current;
       fidelity = await check(checked);
       if (ask !== asked.current) return;
-    } while (checked !== body.current);
+      // In a session others may type on through every check: the visual
+      // editor opens on the text checked, and takes the rest in as it comes.
+    } while (checked !== body.current && !liveNow.current);
+    visualFrom.current = checked;
     setMode(fidelity.visual ? next : 'source');
     setNote(fidelity.visual ? null : fidelity.reason);
   };
@@ -477,8 +482,10 @@ export function PageEditor({
       live.active?.() !== false &&
       surface.current &&
       (modeNow.current === 'visual' || modeNow.current === 'split')
-    )
+    ) {
+      given.current = null;
       return surface.current.replace(text);
+    }
     // At once, as text typed in the source isn't, which is paced.
     if (modeNow.current === 'split') return syncVisual(text, 0, true);
     if (modeNow.current !== 'visual') {
@@ -601,12 +608,13 @@ export function PageEditor({
   // of one, the split takes the source's text as it did.
   useEffect(() => {
     liveHeld.current = false;
-    if (!assist.live || modeNow.current !== 'split') return;
+    const shown = modeNow.current;
+    if (!assist.live || (shown !== 'split' && shown !== 'visual')) return;
     if (syncing.current) clearTimeout(syncing.current.timer);
     syncing.current = null;
     if (given.current !== null) {
       given.current = null;
-      setNote(null);
+      if (shown === 'split') setNote(null);
     }
   }, [assist.live]);
 
@@ -862,6 +870,7 @@ export function PageEditor({
               ) : (
                 <VisualEditor
                   {...surfaceProps}
+                  initial={(assist.live && visualFrom.current) || body.current}
                   onUnfaithful={unfaithful}
                   holding={() => given.current !== null || liveHeld.current}
                   onCantShow={cantShow}

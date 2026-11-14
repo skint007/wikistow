@@ -41,6 +41,8 @@ type Mounted = {
   changes: string[];
   /** How often the person was said to have edited, before it was reported. */
   editing: { count: number };
+  /** Draw it again, in `live` (or none). */
+  rejoin: (live: LiveSource | null) => void;
   unmount: () => void;
 };
 
@@ -65,7 +67,7 @@ function mount(
   const ref = createRef<EditorSurfaceHandle>();
   const changes: string[] = [];
   const editing = { count: 0 };
-  act(() =>
+  const draw = (live: LiveSource | null) =>
     root.render(
       <PageEditor
         ref={ref}
@@ -79,14 +81,15 @@ function mount(
         page={PAGE_REF}
         live={live}
       />,
-    ),
-  );
+    );
+  act(() => draw(live));
   if (!ref.current) throw new Error('The editor did not mount');
   const m: Mounted = {
     handle: ref.current,
     container,
     changes,
     editing,
+    rejoin: (live) => act(() => draw(live)),
     unmount: () => {
       act(() => root.unmount());
       container.remove();
@@ -313,6 +316,50 @@ describe('in a live session', () => {
     theirs('sam', (body) => body.insert(0, 'Sam. '));
     await expect.poll(() => code.state.doc.toString()).toBe('Sam. One. Source\n\nTwo.!\n');
     await expect.poll(() => editor.textContent).toContain('Sam. One. Source');
+  });
+
+  it('joined with the visual editor open, takes others’ text in once, and typing after', async () => {
+    const long = `${'A long paragraph of words. '.repeat(55)}`.trim();
+    const page = `One.\n\n${long}\n\nTwo.\n`;
+    const shared = page.replace(long, `${long} Sam added this.`);
+    const { text, live, theirs } = liveBody(shared);
+    const m = mount(page, 'visual');
+    await expect.poll(() => shown(m)).toBe('visual');
+    // The session gives the page its text, then the page is drawn in it.
+    act(() => m.handle.replace(shared));
+    m.rejoin(live);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    theirs('sam', (body) => body.insert(0, 'Zero. '));
+    act(() => m.handle.replace(text.toJSON()));
+    const editor = visual(m);
+    if (!editor) throw new Error('No visual editor');
+    await expect.poll(() => editor.textContent).toContain('Zero. One.');
+    await expect.poll(() => editor.textContent).toContain('Sam added this.');
+    expect(text.toJSON().split('Sam added this.')).toHaveLength(2);
+    const view = viewOf(editor);
+    act(() => view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1)));
+    await expect.poll(() => text.toJSON().endsWith('Two.!\n')).toBe(true);
+    expect(text.toJSON().split('Sam added this.')).toHaveLength(2);
+  });
+
+  it('turns to the visual editor while others type, opening on the text it checked', async () => {
+    const { text, live, theirs } = liveBody('One.\n\nTwo.\n');
+    const m = mount('One.\n\nTwo.\n', 'source', live);
+    await expect.poll(() => shown(m)).toBe('source');
+    const typing = setInterval(() => {
+      theirs('sam', (body) => body.insert(body.length - 1, 'x'));
+      act(() => m.handle.replace(text.toJSON()));
+    }, 30);
+    try {
+      const button = [...m.container.querySelectorAll('button')].find(
+        (b) => b.textContent === 'Visual',
+      );
+      act(() => button?.click());
+      await expect.poll(() => shown(m)).toBe('visual');
+    } finally {
+      clearInterval(typing);
+    }
+    await expect.poll(() => visual(m)?.textContent).toBe(`One.${text.toJSON().slice(6, -1)}`);
   });
 
   it('checks text it’s given once the session has been left, as ever', async () => {

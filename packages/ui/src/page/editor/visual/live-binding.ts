@@ -95,9 +95,8 @@ export class VisualBinding {
   #map: Mapping | null = null;
   /** While a take-in or a whole read is checked, how the text it read became `body` since. */
   #pending: Pending | null = null;
-  /** Others' changes to `body`, and the editor's own writes, counted. */
+  /** Others' changes to `body`, counted. */
   #theirs = 0;
-  #mine = 0;
   #destroyed = false;
 
   constructor(body: BoundText, editor: BoundEditor) {
@@ -203,7 +202,6 @@ export class VisualBinding {
     // Refused, as by a session left: the page holds it all the same.
     if (text.toJSON() !== expected) return expected;
     this.#held = next;
-    this.#mine++;
     this.#map = expected === next ? Mapping.identity(next.length) : mapping.afterOwn(changes);
     return expected;
   }
@@ -283,12 +281,22 @@ export class VisualBinding {
     }
   }
 
+  // `text`, checked, with the editor's own typing since it stood for
+  // `heldThen` carried onto it, as it was onto `body`: what it shows of a
+  // whole read others typed through, so it never hides the person's typing.
+  #withOwn(text: string, pending: Pending, heldThen: string, mapThen: Mapping): Pending {
+    const written = this.#editor.written();
+    if (written === heldThen) return pending;
+    const own = ownChanges(heldThen, written, (from, to) => mapThen.untouched(from, to));
+    return { text: applyTo(text, mapThen.carry(own)), map: null };
+  }
+
   // `text` read whole, checked first, at its pace: before then, by block
   // again. Only checked text, and the editor's own writing, is ever read
   // whole. If others changed `body` while it was checked, the newer text is
-  // checked at once, a few times; past that, the text checked goes in, and
-  // what came since follows as any change does, unless the person typed
-  // meanwhile too, which it never hides: then it tries again at its pace.
+  // checked at once, a few times; past that, the text checked goes in with
+  // the person's typing meanwhile carried onto it, and what others changed
+  // since follows as any change does.
   #whole(rechecks = 0) {
     const due = this.#wholeAt - performance.now();
     if (rechecks === 0 && due > 0) return this.#schedule(due);
@@ -296,11 +304,14 @@ export class VisualBinding {
     // what came in before counts as checked, and what comes after as since.
     this.write();
     const text = this.#body.text.toJSON();
+    // What the editor stood for then, and how that was `text`, for its typing meanwhile.
+    const heldThen = this.#held;
+    const mapThen = this.#mapNow(text);
     const started = performance.now();
     this.#wholeAt = started + WHOLE_MS;
     this.#reading = true;
     const by = [...this.#by];
-    const [theirs, mine] = [this.#theirs, this.#mine];
+    const theirs = this.#theirs;
     const pending: Pending = { text, map: Mapping.identity(text.length) };
     this.#pending = pending;
     void this.#editor
@@ -323,13 +334,10 @@ export class VisualBinding {
         this.write();
         this.#pending = null;
         const now = this.#body.text.toJSON();
-        const othersSince = this.#theirs !== theirs;
-        const ownSince = this.#mine !== mine;
         let shown: Pending;
-        if (!othersSince) shown = { text: now, map: Mapping.identity(now.length) };
+        if (this.#theirs === theirs) shown = { text: now, map: Mapping.identity(now.length) };
         else if (rechecks < RECHECKS) return this.#whole(rechecks + 1);
-        else if (!ownSince) shown = pending;
-        else return this.#schedule(Math.max(TAKE_MS, this.#wholeAt - performance.now()));
+        else shown = this.#withOwn(text, pending, heldThen, mapThen);
         if (this.#editor.show(shown.text) === 'composing') return this.#schedule(COMPOSING_MS);
         this.#held = this.#editor.written();
         this.#synced(shown);
