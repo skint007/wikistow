@@ -43,26 +43,38 @@ export function meaningOffer({
   return 'offered';
 }
 
-/**
- * Whether the vectors kept go: where it is off or not offered, but for a
- * phone's layout, which a computer's narrow window takes too, and widens
- * from again.
- */
-export const dropsKeptVectors = (offer: MeaningOffer | null, on: boolean): boolean =>
-  offer !== null && offer !== 'phone' && !(on && offer === 'offered');
+/** What decides where it's offered, here, and whether it is on. */
+export type MeaningPlace = {
+  offer: MeaningOffer;
+  on: boolean;
+  onDisk: boolean;
+  everyPage: boolean;
+};
 
-/** Whether it is offered here (`meaningOffer`), or null until the device's store is known. */
-export function useMeaningOffer(): MeaningOffer | null {
+/**
+ * Whether the vectors kept go: where it is off, or where they wouldn't be
+ * kept (**Pages I open**, or no keyring), but not for a phone's layout
+ * alone, which a computer's narrow window takes too, and widens from again.
+ */
+export const dropsKeptVectors = (place: MeaningPlace | null): boolean =>
+  place !== null && (!place.on || !place.onDisk || !place.everyPage);
+
+/** Where it's offered and whether it is on, or null until the device's store is known. */
+export function useMeaningPlace(): MeaningPlace | null {
   const phone = usePhoneLayout();
   const everyPage = useDeviceSwitch(keepEveryPage());
+  const on = useDeviceSwitch(searchByMeaning());
   const { data: onDisk } = useQuery({
     queryKey: ['kept-on-disk'],
     queryFn: async () => (await keptStore()).onDisk,
   });
   if (onDisk === undefined) return null;
   const device: Device = desktop ? 'desktop' : phone ? 'phone' : 'browser';
-  return meaningOffer({ device, onDisk, everyPage });
+  return { offer: meaningOffer({ device, onDisk, everyPage }), on, onDisk, everyPage };
 }
+
+/** Whether it is offered here (`meaningOffer`), or null until the device's store is known. */
+export const useMeaningOffer = (): MeaningOffer | null => useMeaningPlace()?.offer ?? null;
 
 /**
  * What Settings says of it: how far it has got, or that every page is

@@ -281,6 +281,9 @@ export class MeaningIndexer {
     if (this.#stopped || !this.#index) return;
     this.#index = null;
     this.#unsure = true;
+    // No text of a page the grant may have taken stays; a version's
+    // vectors are then taken as made from the text it shows next.
+    this.#madeFrom.clear();
     // Only versions, not text, kept to tell the next index what changed.
     this.#lastVersions ??= new Map(
       [...this.#shown].map(([key, page]) => [key, page.doc.revisionId] as const),
@@ -478,7 +481,6 @@ export class MeaningIndexer {
 
   /** The next page to embed, or null; a draft still being typed waits, and wakes the queue later. */
   #next(): IndexedPage | null {
-    let soonest = Infinity;
     while (this.#cursor < this.#todo.length) {
       const key = this.#todo[this.#cursor]!;
       const page = this.#shown.get(key);
@@ -488,14 +490,13 @@ export class MeaningIndexer {
       }
       const left = this.#pauseLeft(key);
       if (left > 0) {
-        soonest = Math.min(soonest, left);
+        // Passed over now, and planned again once its pause ends.
+        this.#wakeIn(left);
         this.#cursor++;
         continue;
       }
       return page;
     }
-    // Drafts passed over are planned again once their pause ends.
-    if (soonest < Infinity) this.#wakeIn(soonest);
     return null;
   }
 

@@ -335,6 +335,32 @@ describe('MeaningIndexer', () => {
     expect([...fake.writes.at(-1)!.keys()].sort()).toEqual([rev('beach-d2'), rev('boiler-1')]);
   });
 
+  it('a draft waiting while other pages are embedded is embedded once its pause ends', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    await settle();
+    const others = Array.from({ length: 300 }, (_, i) => ({
+      pageId: `p${i}`,
+      revisionId: `p${i}-1`,
+      title: `Page ${i}`,
+      text: `Text of page ${i}.`,
+      updated: '2026-11-01T10:00:00.000Z',
+    }));
+    const draft = (n: number) => ({ ...beach, revisionId: `beach-d${n}`, text: `Soup ${n}.` });
+    const ref = { spaceId: home, pageId: PageId.parse('beach') };
+    indexer.saved({ ...ref, revisionId: rev('beach-d1'), basedOn: rev('beach-1') });
+    indexer.indexChanged(wordIndex([draft(1), ...others]));
+    await vi.advanceTimersByTimeAsync(10_000);
+    indexer.saved({ ...ref, revisionId: rev('beach-d2'), basedOn: rev('beach-d1') });
+    indexer.indexChanged(wordIndex([draft(2), ...others]));
+    // Past the first save's pause, the second's still on: the others go on.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.embedded).not.toContain('Summer holiday\nSoup 2.');
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(fake.embedded).toContain('Summer holiday\nSoup 2.');
+  });
+
   it('a draft saved elsewhere, as in another tab, waits for its versions to pause too', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);

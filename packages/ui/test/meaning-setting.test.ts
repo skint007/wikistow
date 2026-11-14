@@ -18,14 +18,17 @@ describe('where search by meaning is offered (ADR 0016, decision 5)', () => {
   });
 
   it('deletes the vectors kept where it is off or needs something, but not for a phone’s layout', () => {
-    expect(dropsKeptVectors('offered', true)).toBe(false);
-    expect(dropsKeptVectors('offered', false)).toBe(true);
-    expect(dropsKeptVectors('every-page', true)).toBe(true);
-    expect(dropsKeptVectors('keyring', true)).toBe(true);
-    expect(dropsKeptVectors('phone', true)).toBe(false);
-    expect(dropsKeptVectors('phone', false)).toBe(false);
+    const place = { offer: 'offered' as const, on: true, onDisk: true, everyPage: true };
+    expect(dropsKeptVectors(place)).toBe(false);
+    expect(dropsKeptVectors({ ...place, on: false })).toBe(true);
+    expect(dropsKeptVectors({ ...place, offer: 'every-page', everyPage: false })).toBe(true);
+    expect(dropsKeptVectors({ ...place, offer: 'keyring', onDisk: false })).toBe(true);
+    // A phone's layout alone keeps them; Pages I open there doesn't.
+    expect(dropsKeptVectors({ ...place, offer: 'phone' })).toBe(false);
+    expect(dropsKeptVectors({ ...place, offer: 'phone', everyPage: false })).toBe(true);
+    expect(dropsKeptVectors({ ...place, offer: 'phone', on: false })).toBe(true);
     // Not before the device's store is known.
-    expect(dropsKeptVectors(null, false)).toBe(false);
+    expect(dropsKeptVectors(null)).toBe(false);
   });
 
   it('says what it does, and what it needs where it isn’t offered', () => {

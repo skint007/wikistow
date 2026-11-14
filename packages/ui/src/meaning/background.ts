@@ -10,7 +10,7 @@ import { dropMeaningIndex, meaningIndexFile } from './meaning-file';
 import { MeaningIndexer, type MeaningStatus } from './meaning-index';
 import { MEANING_MODEL } from './model';
 import { oneTabAtATime } from './one-tab';
-import { dropsKeptVectors, searchByMeaning, useMeaningOffer } from './setting';
+import { dropsKeptVectors, searchByMeaning, useMeaningPlace } from './setting';
 
 // Search by meaning in the app (ADR 0016, step 4): the background queue
 // (`MeaningIndexer`) for the open session, following the word index and
@@ -116,9 +116,9 @@ export function useMeaningStatus(): MeaningStatus | null {
  */
 export function useMeaningIndex(ctx: ClientContext | null) {
   const queryClient = useQueryClient();
+  const place = useMeaningPlace();
   const switchOn = useDeviceSwitch(searchByMeaning());
-  const offer = useMeaningOffer();
-  const on = switchOn && offer === 'offered';
+  const on = switchOn && place?.offer === 'offered';
   useEffect(() => {
     if (!ctx || !on) return;
     // Its turn may come after the vault locked and before this effect is
@@ -140,7 +140,7 @@ export function useMeaningIndex(ctx: ClientContext | null) {
   // A phone's layout may be a narrow window, which widens again: kept.
   // In every tab, after its own queue stopped above, so none puts back
   // what goes: the vectors, and when it is off, the model's files.
-  const unkept = dropsKeptVectors(offer, on);
+  const unkept = dropsKeptVectors(place);
   useEffect(() => {
     if (unkept) void dropMeaningIndex();
   }, [unkept]);
