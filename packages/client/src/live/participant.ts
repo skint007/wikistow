@@ -999,13 +999,27 @@ export class LiveParticipant {
       shape: (restored: PagePayload) => PagePayload;
     }) => Promise<{ revisionId: RevisionId; payload: PagePayload }>,
   ): Promise<boolean> {
-    if (!this.#keyed()) return false;
-    await this.flush();
-    await this.#ensureHead();
-    const headId = this.#head;
-    const head = headId ? this.#drafts.get(headId) : undefined;
-    if (!this.#keyed() || this.#pending.length > 0 || this.#queue.length > 0) return false;
-    if (!headId || !head || !holdsState(this.document.state(), head.state)) return false;
+    // On the head, a session draft this app holds, with nothing of its own unsent:
+    // given a few seconds, as the head the stream names may still be on its way.
+    let headId: RevisionId | null = null;
+    let head: SessionDraft | undefined;
+    for (let tries = 0; tries < 10; tries++) {
+      if (!this.#keyed()) return false;
+      await this.flush();
+      await this.#ensureHead();
+      headId = this.#head;
+      head = headId ? this.#drafts.get(headId) : undefined;
+      const ready =
+        this.#pending.length === 0 &&
+        this.#queue.length === 0 &&
+        !this.#placing &&
+        head !== undefined &&
+        holdsState(this.document.state(), head.state);
+      if (ready) break;
+      head = undefined;
+      await sleep(300, this.#abort.signal);
+    }
+    if (!this.#keyed() || !headId || !head) return false;
     const ctx = this.#ports.ctx;
     const further = newId(JoinId);
     const clientId = liveClientId({
