@@ -1,12 +1,14 @@
 #!/bin/sh
 # Build WikiStow.app for one kind of Mac, `arm64` (Apple silicon) or `x64`
 # (Intel), zipped: out/app.asar in Electron's own darwin build, named
-# WikiStow, claiming `wikistow://` links, with the Mac icon
+# WikiStow, claiming `wikistow://` links, with the web clipper's helper
+# (built anywhere by scripts/clip-host.sh) beside its executable, and the Mac icon
 # (packaging/wikistow-desktop.icns: wikistow-desktop.svg on Apple's icon
 # grid). Adding the asar breaks Electron's signature, and Apple silicon runs
 # nothing unsigned, so the app is signed again ad hoc. Not with a Developer
 # ID: Gatekeeper still asks the person to allow it (docs/desktop.md). Run on
-# a Mac, from apps/desktop after scripts/asar.ts, with the workspace installed:
+# a Mac, from apps/desktop after scripts/asar.ts and scripts/clip-host.sh,
+# with the workspace installed:
 #
 #   scripts/macos-app.sh <version> <arm64|x64> <output folder>
 #
@@ -40,6 +42,10 @@ cp out/app.asar "$app/Contents/Resources/app.asar"
 cp packaging/wikistow-desktop.icns "$app/Contents/Resources/wikistow.icns"
 # How it was installed, for the update notice (src/updates.ts).
 echo mac > "$app/Contents/Resources/install-source"
+# Where the browser starts it, and where the app looks for it (src/clip).
+helper="$app/Contents/MacOS/wikistow-clip-host"
+cp "out/clip-host/darwin-$(echo "$arch" | sed s/x64/amd64/)/wikistow-clip-host" "$helper"
+chmod 755 "$helper"
 
 plist="$app/Contents/Info.plist"
 set_key() { plutil -replace "$1" "$2" "$3" "$plist"; }
@@ -55,6 +61,8 @@ set_key CFBundleVersion -string "${version%%-*}"
 set_key CFBundleURLTypes -json '[{"CFBundleURLName":"WikiStow sign-in","CFBundleURLSchemes":["wikistow"]}]'
 plutil -lint "$plist" >/dev/null
 
+# The helper first, under a name of its own, then the app around it.
+codesign --force --sign - --identifier io.github.skint007.wikistow.clip-host "$helper"
 codesign --force --deep --sign - "$app"
 codesign --verify --deep --strict "$app"
 

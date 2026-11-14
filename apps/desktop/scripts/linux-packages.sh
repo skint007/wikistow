@@ -1,7 +1,8 @@
 #!/bin/sh
 # Build the .deb and .rpm: out/app.asar, run by the Electron the desktop
-# tests run on, packaged by nfpm (packaging/nfpm.yaml). Run from apps/desktop
-# after scripts/asar.ts, with nfpm on PATH:
+# tests run on, with the web clipper's helper beside it, packaged by nfpm
+# (packaging/nfpm.yaml). Run from apps/desktop after scripts/asar.ts and
+# scripts/clip-host.sh, with nfpm on PATH:
 #
 #   scripts/linux-packages.sh <version> <output folder>
 #
@@ -30,6 +31,9 @@ mv "$stage/lib/electron" "$stage/lib/wikistow-desktop"
 # Electron starts resources/app.asar in place of its own default app.
 rm "$stage/lib/resources/default_app.asar"
 cp out/app.asar "$stage/lib/resources/app.asar"
+# Where the browser starts it, and where the app looks for it (src/clip).
+# Its mode is set here: a CI artifact keeps none.
+install -m 755 out/clip-host/linux-amd64/wikistow-clip-host "$stage/lib/wikistow-clip-host"
 # nfpm gives the sandbox helper its setuid mode separately.
 mv "$stage/lib/chrome-sandbox" "$stage/chrome-sandbox"
 cp packaging/wikistow-desktop packaging/wikistow-desktop.desktop packaging/wikistow-desktop.svg \
