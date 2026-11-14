@@ -669,6 +669,8 @@ describe('MeaningIndexer', () => {
     indexer.indexChanged(wordIndex([beach]));
     await vi.advanceTimersByTimeAsync(1_000);
     indexer.stop();
+    // No timer left holding the page it was on.
+    expect(vi.getTimerCount()).toBe(0);
     await settle(2);
     expect(indexer.status()).toBeNull();
     expect(fake.embedded).toHaveLength(0);

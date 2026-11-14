@@ -375,6 +375,7 @@ export class MeaningIndexer {
     this.#keeping?.cancel();
     this.#wakeAt = null;
     this.#keeping = null;
+    for (const wake of [...this.#sleeps]) wake();
     this.#kept.clear();
     this.#byHash.clear();
     this.#madeFrom.clear();
@@ -634,8 +635,20 @@ export class MeaningIndexer {
     if (!this.#stopped) await this.#work.idle();
   }
 
+  /** Sleeps under way, each ended at once by `stop`, so none holds a page past a lock. */
+  readonly #sleeps = new Set<() => void>();
+
   #sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => this.#clock.after(ms, resolve));
+    if (this.#stopped) return Promise.resolve();
+    return new Promise((resolve) => {
+      const wake = () => {
+        cancel();
+        this.#sleeps.delete(wake);
+        resolve();
+      };
+      const cancel = this.#clock.after(ms, wake);
+      this.#sleeps.add(wake);
+    });
   }
 
   /**
