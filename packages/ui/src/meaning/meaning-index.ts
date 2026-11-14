@@ -252,7 +252,8 @@ export class MeaningIndexer {
         this.#savedAt.set(key, Math.max(this.#savedAt.get(key) ?? now, now));
         this.#wakeIn(DRAFT_PAUSE_MS);
       }
-      if (draft) {
+      // Nothing stands in for a version that has its own vectors already.
+      if (draft && !this.#done(page)) {
         const standing = this.#held.get(key) ?? old;
         if (this.#kept.has(standing)) this.#held.set(key, standing);
       } else this.#held.delete(key);
@@ -286,9 +287,11 @@ export class MeaningIndexer {
     // vectors are then taken as made from the text it shows next.
     this.#madeFrom.clear();
     // Only versions, not text, kept to tell the next index what changed.
-    this.#lastVersions ??= new Map(
-      [...this.#shown].map(([key, page]) => [key, page.doc.revisionId] as const),
-    );
+    // The newest known of each: one followed since the last time it went
+    // (a partial index) stands for its pages.
+    const versions = new Map(this.#lastVersions ?? []);
+    for (const [key, page] of this.#shown) versions.set(key, page.doc.revisionId);
+    this.#lastVersions = versions;
     this.#shown = new Map();
     this.#todo = [];
     this.#cursor = 0;
@@ -301,8 +304,13 @@ export class MeaningIndexer {
     const key = keyOf(save.spaceId, save.pageId);
     this.#savedAt.set(key, this.#clock.now());
     this.#ownVersions.add(save.revisionId);
-    // Into this device's queue, on its base: the same version, another text.
-    if (save.revisionId === save.basedOn) this.#rewritten.add(save.revisionId);
+    // Into this device's queue, on its base: the same version, another
+    // text, so one passed over as it failed is tried again.
+    if (save.revisionId === save.basedOn) {
+      this.#rewritten.add(save.revisionId);
+      this.#failed.delete(key);
+      if (this.#failing?.key === key) this.#failing = null;
+    }
     this.#wakeIn(DRAFT_PAUSE_MS);
   }
 

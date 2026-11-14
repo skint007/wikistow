@@ -581,6 +581,22 @@ describe('MeaningIndexer', () => {
     expect(fake.embedded).toHaveLength(3);
   });
 
+  it('a draft embedded under a partial index between two rebuilds lets the version before go', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    await settle();
+    indexer.indexGone();
+    const draft = { ...beach, revisionId: 'beach-d1', text: 'Soup at the beach.', draft: true };
+    indexer.indexChanged(wordIndex([draft]), { partial: true });
+    await settle(1);
+    expect(fake.embedded).toHaveLength(2);
+    indexer.indexGone();
+    indexer.indexChanged(wordIndex([draft]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect([...fake.writes.at(-1)!.keys()]).toEqual([rev('beach-d1')]);
+  });
+
   it('the same index, no longer partial once updated online, lets go as a whole one', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);
@@ -727,6 +743,22 @@ describe('MeaningIndexer', () => {
     fake.state.failNext = true;
     await settle(3);
     expect(fake.embedded.at(-1)).toBe('Summer holiday\nSoup on the beach.');
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+  });
+
+  it('a page passed over as it failed is tried again after a save into the queue', async () => {
+    const fake = fakeWork();
+    fake.state.failOn = 'Cornwall';
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    await settle();
+    expect(indexer.status()).toEqual({ pages: 0, total: 0 });
+    fake.state.failOn = null;
+    const ref = { spaceId: home, pageId: PageId.parse('beach') };
+    indexer.saved({ ...ref, revisionId: rev('beach-1'), basedOn: rev('beach-1') });
+    indexer.indexChanged(wordIndex([{ ...beach, text: 'Soup on the beach.' }]));
+    await settle(2);
+    expect(fake.embedded).toEqual(['Summer holiday\nSoup on the beach.']);
     expect(indexer.status()).toEqual({ pages: 1, total: 1 });
   });
 
