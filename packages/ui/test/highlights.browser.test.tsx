@@ -225,6 +225,21 @@ describe('highlights and colours in the visual editor', () => {
       expect(t.serialize(t.parse(page))).toBe(page);
   });
 
+  it('escape `==` in an image’s alt, which the reader reads highlights in', async () => {
+    const t = await transformer();
+    const { schema } = t.parse('x').type;
+    const image = schema.nodes['image']?.create({
+      src: 'attachment:a1',
+      alt: 'notes==draft==.png',
+    });
+    if (!image) throw new Error('No image');
+    const doc = schema.topNodeType.create(null, schema.node('paragraph', null, [image]));
+    const written = t.serialize(doc);
+    expect(written).toBe('![notes\\==draft\\==.png](attachment:a1)\n');
+    expect(writesAsShown(doc, written, t.parse)).toBe(true);
+    expect(fidelityOf('![a\\=\\=b\\=\\=c](u)\n', t).visual).toBe(true);
+  });
+
   it('leave a held space out of a mark before a soft line break', async () => {
     const t = await transformer();
     const { schema } = t.parse('x').type;

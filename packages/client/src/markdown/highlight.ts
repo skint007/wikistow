@@ -10,7 +10,7 @@ import type {
 } from 'mdast';
 import type {} from 'mdast-util-to-hast';
 import type { Extension as FromMarkdownExtension } from 'mdast-util-from-markdown';
-import type { Handle, Options as ToMarkdownExtension } from 'mdast-util-to-markdown';
+import type { Handle, Options as ToMarkdownExtension, Unsafe } from 'mdast-util-to-markdown';
 import { splice } from 'micromark-util-chunked';
 import { classifyCharacter } from 'micromark-util-classify-character';
 import { resolveAll } from 'micromark-util-resolve-all';
@@ -385,7 +385,22 @@ function colorHtml(tag: 'span' | 'mark') {
   return handle;
 }
 
+/**
+ * Each `=` before another in an image's alt, which Markdown reads
+ * highlights in before it takes their text as the alt, as it reads `*`
+ * (`![a\\==b\\==](u)`); not in its address or title.
+ */
+const UNSAFE: Unsafe[] = [
+  {
+    character: '=',
+    after: '=',
+    inConstruct: ['image', 'imageReference'],
+    notInConstruct: ['destinationLiteral', 'destinationRaw', 'titleQuote', 'titleApostrophe'],
+  },
+];
+
 /** Writes highlights and colours back as they're read, and escapes `=` in text that would make one. */
 export const highlightToMarkdown: ToMarkdownExtension = {
+  unsafe: UNSAFE,
   handlers: { text, highlight, colorHighlight: colorHtml('mark'), textColor: colorHtml('span') },
 };
