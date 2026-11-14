@@ -81,6 +81,7 @@ export * as keptOperations from './operations/kept.ts';
 export * as queueOperations from './operations/queue.ts';
 export * as pageMerge from './merge/index.ts';
 export * from './operations/page-writer.ts';
+export type { KeptLive, QueuedPage } from './operations/queue.ts';
 export * as exportOperations from './operations/export.ts';
 export * as importOperations from './operations/import.ts';
 export { lookupPeople, spaceKeys, type SpaceKeys } from './operations/keys.ts';

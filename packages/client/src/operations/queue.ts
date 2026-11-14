@@ -3,6 +3,8 @@
 import {
   FolderId,
   type InstallationId,
+  JoinId,
+  LiveSessionId,
   MetadataRevisionId,
   PageId,
   Position,
@@ -79,6 +81,34 @@ const Sending = z.strictObject({
 });
 type Sending = z.output<typeof Sending>;
 
+/**
+ * Beside a draft change made from a page's live session's document (ADR
+ * 0015 decisions 1 and 10): the text of its base, which holds everything
+ * others typed that the app took in and, of its own, only what the latest
+ * session draft it compared holds, so a merge from it counts only what the
+ * person typed as theirs; the document as kept; the join it was typed in,
+ * with the `seq` of that join's latest message the base holds, and of its
+ * latest sealed, null if typing waited unsealed beyond it. Once the change
+ * was put into a session, the join and `seq` of the message it went in as,
+ * so it never goes in twice (section 5.10, **Putting typing back**).
+ */
+const KeptLiveJson = z.strictObject({
+  base: Payload,
+  typed: Payload,
+  sessionId: LiveSessionId,
+  joinId: JoinId,
+  baseSeq: z.number().int().nonnegative(),
+  seq: z.number().int().nonnegative().nullable(),
+  putIn: z
+    .strictObject({
+      sessionId: LiveSessionId,
+      joinId: JoinId,
+      seq: z.number().int().positive(),
+    })
+    .nullable(),
+});
+export type KeptLive = z.output<typeof KeptLiveJson>;
+
 const QueuedPageJson = z.strictObject({
   kind: z.literal('page'),
   id: PageId,
@@ -97,6 +127,8 @@ const QueuedPageJson = z.strictObject({
   picks: z.record(z.string(), PageId),
   failure: Failure.nullable(),
   at: z.number(),
+  /** Made from a live session's document: its base's text and where it was typed. */
+  live: KeptLiveJson.nullable().optional(),
 });
 export type QueuedPage = z.output<typeof QueuedPageJson>;
 
@@ -361,6 +393,8 @@ export class OfflineQueue {
   readonly #landedOn = new Map<PageId, { base: RevisionId; landed: RevisionId; at: number }>();
   #closed = false;
   #last = 0;
+  // While a send runs: whether a tab is in a page's live session.
+  #held: ((pageId: PageId) => Promise<boolean>) | undefined;
 
   constructor(store: KeptStore, sealer: KeptSealer, installationId: InstallationId) {
     this.#store = store;
@@ -501,6 +535,8 @@ export class OfflineQueue {
     seen,
     onTop = false,
     linkChoices,
+    live,
+    stopped,
   }: {
     page: PageRef;
     basedOn: RevisionId;
@@ -509,6 +545,14 @@ export class OfflineQueue {
     seen: number | null;
     onTop?: boolean;
     linkChoices?: ReadonlyMap<string, PageId>;
+    /** Made from a live session's document: what is kept beside it; left as it was when absent. */
+    live?: KeptLive | null;
+    /**
+     * Kept stopped as a conflict, never sent until the person merges it (a
+     * provisional document), or, false, sendable whatever stopped it before;
+     * left as it was when absent.
+     */
+    stopped?: boolean;
   }): Promise<number> {
     const picks = Object.fromEntries(linkChoices ?? []);
     const { entry, made } = await this.#store.queueExclusive(async () => {
@@ -528,14 +572,34 @@ export class OfflineQueue {
       this.#landedOn.delete(page.pageId);
       const landed =
         went?.base === basedOn && Date.now() - went.at < LANDING_MS ? went.landed : undefined;
+      // The person put theirs on top of the base it stopped on (Merge…, Save mine on top): settled.
+      const settled = onTop && before?.failure?.kind === 'conflict' && before.basedOn === basedOn;
       const entry: QueuedPage = before
         ? {
             ...before,
+            ...(settled && { failure: null }),
             payload,
             picks,
             version: before.version + 1,
-            // What was being sent on the old base is the person's no more.
-            ...(rebased && { basedOn, failure: null, sending: null }),
+            // What was being sent on the old base is the person's no more,
+            // nor is the base its text was merged from.
+            ...(rebased && { basedOn, failure: null, sending: null, live: null }),
+            ...(live !== undefined && { live }),
+            // Saved into by a view outside the session after it was put in: the
+            // session holds the change as it was then, the base of what's new.
+            ...(!rebased &&
+              live === undefined &&
+              before.live?.putIn && {
+                live: {
+                  base: before.payload,
+                  typed: before.payload,
+                  sessionId: before.live.putIn.sessionId,
+                  joinId: before.live.putIn.joinId,
+                  baseSeq: before.live.putIn.seq,
+                  seq: before.live.putIn.seq,
+                  putIn: null,
+                },
+              }),
           }
         : {
             kind: 'page',
@@ -550,9 +614,14 @@ export class OfflineQueue {
             picks,
             failure: null,
             at: this.#at(),
+            live: live ?? null,
           };
-      await this.#write(entry);
-      return { entry, made: !before || rebased };
+      const kept: QueuedPage =
+        stopped === undefined
+          ? entry
+          : { ...entry, failure: stopped ? { kind: 'conflict' } : null };
+      await this.#write(kept);
+      return { entry: kept, made: !before || rebased || stopped !== undefined };
     });
     this.#emit({ kind: 'saved', entry });
     if (made) this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
@@ -571,6 +640,7 @@ export class OfflineQueue {
     payload,
     revisionId,
     linkChoices,
+    live,
   }: {
     page: PageRef;
     basedOn: RevisionId;
@@ -578,6 +648,7 @@ export class OfflineQueue {
     payload: PagePayload;
     revisionId: RevisionId;
     linkChoices?: ReadonlyMap<string, PageId>;
+    live?: KeptLive | null;
   }): Promise<number> {
     const first = this.#firstVersion();
     const entry = await this.#store.queueExclusive(async () => {
@@ -596,6 +667,7 @@ export class OfflineQueue {
         picks: Object.fromEntries(linkChoices ?? []),
         failure: null,
         at: this.#at(),
+        live: live ?? null,
       };
       await this.#write(entry);
       return entry;
@@ -603,6 +675,48 @@ export class OfflineQueue {
     this.#emit({ kind: 'recorded', spaceId: page.spaceId, pageId: page.pageId, revisionId });
     this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
     return entry.version;
+  }
+
+  /**
+   * The page's own draft entry as it is now, read in turn with the queue's
+   * sending, so one that is not `sending` now is not sent until a tab that
+   * holds the page's live lock lets it go (ADR 0015 decision 1).
+   */
+  async entryNow(pageId: PageId): Promise<QueuedPage | null> {
+    return this.#store.queueExclusive(() => this.#page(pageId));
+  }
+
+  /**
+   * The entry at `version` went into the page's live session: `live`, kept
+   * beside it, says as which change (`putIn`). Recorded without a new
+   * version, so a draft view saving into it still can, and a later join
+   * doesn't put it in again.
+   */
+  async markPutIn(pageId: PageId, version: number, live: KeptLive) {
+    await this.#store.queueExclusive(async () => {
+      const current = await this.#page(pageId);
+      if (!current || current.version !== version) return;
+      await this.#write({ ...current, live });
+    });
+  }
+
+  /**
+   * Withdraw the page's draft entry at `version`, which a draft of its live
+   * session that the app compared holds (ADR 0015 decision 1): unless it
+   * was saved into since, or is being sent. Whether it went.
+   */
+  async withdraw(pageId: PageId, version: number): Promise<boolean> {
+    const gone = await this.#store.queueExclusive(async () => {
+      const current = await this.#page(pageId);
+      if (!current || current.version !== version || current.sending || current.newPage) {
+        return null;
+      }
+      await this.#remove(current);
+      return current;
+    });
+    if (!gone) return false;
+    this.#emit({ kind: 'changed', spaceId: gone.spaceId, id: gone.id });
+    return true;
   }
 
   /**
@@ -1101,20 +1215,39 @@ export class OfflineQueue {
    */
   async send(
     ctx: ClientContext,
-    { read }: { read?: ReadWikilinks } = {},
+    {
+      read,
+      held,
+    }: {
+      read?: ReadWikilinks;
+      /**
+       * Whether a tab or window of this app is in the page's live session
+       * now (ADR 0015 decision 1): its draft entry is held back meanwhile,
+       * as that tab puts it into the session, and what waits behind it with it.
+       */
+      held?: (pageId: PageId) => Promise<boolean>;
+    } = {},
   ): Promise<'sent' | 'offline' | 'busy'> {
     let outcome: 'sent' | 'offline' = 'sent';
     const ran = await this.#store.sending(async () => {
-      outcome = await this.#sendAll(ctx, read);
+      outcome = await this.#sendAll(ctx, read, held);
     });
     return ran ? outcome : 'busy';
   }
 
-  async #sendAll(ctx: ClientContext, read: ReadWikilinks | undefined): Promise<'sent' | 'offline'> {
+  async #sendAll(
+    ctx: ClientContext,
+    read: ReadWikilinks | undefined,
+    held: ((pageId: PageId) => Promise<boolean>) | undefined,
+  ): Promise<'sent' | 'offline'> {
+    // Pages held back in this run: their draft entries, and what waits behind them.
+    const holding = new Set<string>();
     // Each round sends one request, and every one either removes an entry,
     // moves it a step on, or stops it; a page typed into meanwhile takes more.
     for (let round = 0; round < 10_000 && !this.#closed; round += 1) {
-      const entries = await this.entries();
+      const entries = (await this.entries()).filter(
+        (entry) => !holding.has(entry.id) || entry.kind === 'folder',
+      );
       const folders = new Map(
         entries.flatMap((entry) => (entry.kind === 'folder' ? [[entry.id, entry]] : [])),
       );
@@ -1158,7 +1291,26 @@ export class OfflineQueue {
         break;
       }
       if (!next) return 'sent';
-      if ((await this.#sendOne(ctx, next, entries, read)) === 'offline') return 'offline';
+      // A page's draft change, or its publish, which would send a draft of it too.
+      const holdable =
+        (next.kind === 'page' && !next.newPage && !next.sending) ||
+        (next.kind === 'publish' && next.draft !== null && !next.sending);
+      if (holdable && held) {
+        const isHeld = await held(next.id as PageId).catch(() => false);
+        if (isHeld) {
+          holding.add(next.id);
+          continue;
+        }
+      }
+      this.#held = held;
+      let sent: Awaited<ReturnType<OfflineQueue['send']>> | 'held' | void;
+      try {
+        sent = await this.#sendOne(ctx, next, entries, read, held);
+      } finally {
+        this.#held = undefined;
+      }
+      if (sent === 'offline') return 'offline';
+      if (sent === 'held') holding.add(next.id);
     }
     return 'sent';
   }
@@ -1168,12 +1320,13 @@ export class OfflineQueue {
     entry: QueueEntry,
     entries: readonly QueueEntry[],
     read: ReadWikilinks | undefined,
-  ): Promise<'offline' | void> {
+    held?: (pageId: PageId) => Promise<boolean>,
+  ): Promise<'offline' | 'held' | void> {
     switch (entry.kind) {
       case 'folder':
         return this.#sendFolder(ctx, entry, entries);
       case 'page':
-        return this.#sendPage(ctx, entry, read);
+        return this.#sendPage(ctx, entry, read, held);
       case 'rename':
         return this.#sendRename(ctx, entry);
       case 'delete':
@@ -1555,12 +1708,15 @@ export class OfflineQueue {
     this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
   }
 
-  // Record what the next publish request sends, before it is sent.
+  // Record what the next publish request sends, before it is sent; one that
+  // saves a draft first waits while a tab is in the page's live session.
   async #recordPublish(entry: QueuedPublish): Promise<QueuedPublish['sending']> {
+    const held = this.#held;
     return this.#store.queueExclusive(async () => {
       const current = await this.#publish(entry.id);
       if (!current || current.failure) return null;
       if (current.sending) return current.sending;
+      if (current.draft && held && (await held(current.id).catch(() => false))) return null;
       const sending = { revisionId: newId(RevisionId) };
       await this.#write({ ...current, sending });
       return sending;
@@ -1571,9 +1727,11 @@ export class OfflineQueue {
     ctx: ClientContext,
     entry: QueuedPage,
     read: ReadWikilinks | undefined,
-  ): Promise<'offline' | void> {
+    held?: (pageId: PageId) => Promise<boolean>,
+  ): Promise<'offline' | 'held' | void> {
     const page = { spaceId: entry.spaceId, pageId: entry.id };
-    const attempt = entry.sending ?? (await this.#record(entry));
+    const attempt = entry.sending ?? (await this.#record(entry, held));
+    if (attempt === 'held') return 'held';
     if (!attempt) return;
     this.#emit({
       kind: 'recorded',
@@ -1620,12 +1778,17 @@ export class OfflineQueue {
     await this.#landed(entry, attempt);
   }
 
-  // Record what the next request sends, before it is sent.
-  async #record(entry: QueuedPage): Promise<Sending | null> {
+  // Record what the next request sends, before it is sent: unless a tab in
+  // the page's live session holds it back, which `entryNow` reads in turn with this.
+  async #record(
+    entry: QueuedPage,
+    held?: (pageId: PageId) => Promise<boolean>,
+  ): Promise<Sending | 'held' | null> {
     return this.#store.queueExclusive(async () => {
       const current = await this.#page(entry.id);
       if (!current || current.failure) return null;
       if (current.sending) return current.sending;
+      if (!current.newPage && held && (await held(current.id).catch(() => false))) return 'held';
       const partial = current.newPage !== null && hasFiles(current.payload);
       const sending: Sending = {
         revisionId: current.newPage?.revisionId ?? newId(RevisionId),
@@ -1654,7 +1817,14 @@ export class OfflineQueue {
         if (base) this.#landedOn.set(entry.id, { base, landed: sent.revisionId, at: Date.now() });
         return this.#remove(current);
       }
-      await this.#write({ ...current, newPage: null, basedOn: sent.revisionId, sending: null });
+      // What was typed after grows from what landed, not from a session's base.
+      await this.#write({
+        ...current,
+        newPage: null,
+        basedOn: sent.revisionId,
+        sending: null,
+        live: null,
+      });
     });
     this.#emit({
       kind: 'landed',

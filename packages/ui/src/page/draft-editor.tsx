@@ -61,6 +61,8 @@ import { useAvailability } from '../shell/availability';
 import type { Passages } from '../comments/passages';
 
 export type DraftEditorHandle = {
+  /** Whether the draft is in the page's live session now: its saves and publishes go to the server. */
+  live(): boolean;
   /**
    * Save anything not yet saved, after a file still uploading is added.
    * Throws if it can't be, so callers don't move on.
@@ -235,6 +237,7 @@ export function DraftEditor({
   useImperativeHandle(
     ref,
     () => ({
+      live: () => session.participant !== null,
       flush: () => session.saveOrThrow(),
       beforeRestore: async () => {
         await session.leaveLive();
@@ -418,6 +421,11 @@ export function DraftEditor({
           }
         />
         <LiveNote ctx={ctx} live={snapshot.live} />
+        {snapshot.liveNotice && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {snapshot.liveNotice}
+          </p>
+        )}
         <LiveNotes
           ctx={ctx}
           notes={snapshot.live?.kind === 'live' ? snapshot.live.status.notes : []}

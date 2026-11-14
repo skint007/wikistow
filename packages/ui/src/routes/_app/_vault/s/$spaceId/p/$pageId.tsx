@@ -547,8 +547,11 @@ function PageBody({
   // as publishing updates the public page too (ADR 0005).
   const publishOrAsk = async () => {
     // Offline, or after a change waiting here, it waits on this device,
-    // sent after that change (#331). The page stays as it is meanwhile.
-    if (availability.offline || waiting !== 'none') {
+    // sent after that change (#331). The page stays as it is meanwhile. In
+    // a live session it goes to the server, never behind what this tab
+    // keeps on the device for the session (ADR 0015 decision 1).
+    const live = editor.current?.live() ?? false;
+    if (availability.offline || (waiting !== 'none' && !live)) {
       await editor.current?.flush();
       const { draftHead } = info.heads;
       if (!draftHead) throw new Error('There is no draft to publish');
@@ -602,9 +605,12 @@ function PageBody({
           queued: {
             version: change.version,
             sending: change.sending?.revisionId ?? null,
+            live: change.live ?? null,
             // Someone saved since it was based: it opens as the conflict it came back as.
+            // One kept from a live session merges from its kept base, the head unchanged too.
             theirs:
-              change.failure?.kind === 'conflict' && info.heads.draftHead !== change.basedOn
+              change.failure?.kind === 'conflict' &&
+              (info.heads.draftHead !== change.basedOn || change.live)
                 ? info.heads.draftHead
                 : null,
           },

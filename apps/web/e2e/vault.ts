@@ -164,8 +164,12 @@ export async function setProperty(page: Page, label: string, value: string) {
 }
 
 /** Wait for the source editor to hold `expected`, as `toHaveValue` waits for a field. */
-export async function expectSource(page: Page, expected: string | RegExp) {
-  const poll = expect.poll(() => sourceOf(page), { timeout: 15_000 });
+export async function expectSource(
+  page: Page,
+  expected: string | RegExp,
+  { timeout = 15_000 }: { timeout?: number } = {},
+) {
+  const poll = expect.poll(() => sourceOf(page), { timeout });
   await (typeof expected === 'string' ? poll.toBe(expected) : poll.toMatch(expected));
 }
 

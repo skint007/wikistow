@@ -46,11 +46,20 @@ export async function openOnlineMerge(
   if (!versions) throw new CantMerge(NOTHING);
   const open = (revisionId: RevisionId) =>
     queryClient.fetchQuery(revisionQuery(ctx, page, 'draft', revisionId));
-  const [base, theirs] = await Promise.all([open(versions.base), open(versions.theirs)]);
-  if (base.opened.kind !== 'current' || theirs.opened.kind !== 'current')
-    throw new CantMerge(NEWER);
+  // Typing put back from a live session merges from the base kept beside it.
+  const kept = versions.basePayload;
+  const [base, theirs] = await Promise.all([
+    kept ? null : open(versions.base),
+    open(versions.theirs),
+  ]);
+  const basePayload = kept ?? (base?.opened.kind === 'current' ? base.opened.payload : null);
+  if (!basePayload || theirs.opened.kind !== 'current') throw new CantMerge(NEWER);
+  // From a kept base, both sides adding at one place is the person's to settle:
+  // what they typed may be in theirs already, so both are never kept unasked.
+  const theirsPayload = theirs.opened.payload;
+  const merged = () => pageMerge.mergePayloads(basePayload, versions.yours, theirsPayload);
   return {
-    merge: pageMerge.mergePayloads(base.opened.payload, versions.yours, theirs.opened.payload),
+    merge: kept ? pageMerge.addsOverlap(merged) : merged(),
     theirs: await whoseIs(ctx, queryClient, theirs.record.authorId),
     over: { kind: 'draft', revisionId: versions.theirs, region: theirs.region },
     attachments: [...versions.yours.attachments, ...theirs.opened.payload.attachments],
