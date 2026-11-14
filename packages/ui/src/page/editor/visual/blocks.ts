@@ -81,8 +81,9 @@ export type Change = {
 /**
  * The least change that makes `doc` show as `next`, a reading of other
  * text, links it changes inside keeping their ids; null if they show the
- * same. Put in with `replace`, it gives `next`: whole top-level blocks
- * where less wouldn't.
+ * same. Where ProseMirror would fit that into something else, the
+ * top-level blocks it's in instead, their links as read. Put in with
+ * `replaceIn`, it gives `next`.
  */
 export function replacement(doc: Node, next: Node): Change | null {
   const mine = unnumbered(doc);

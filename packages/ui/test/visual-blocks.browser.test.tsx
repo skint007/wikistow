@@ -499,14 +499,19 @@ describe('text taken in by block', () => {
   it('joins a line to the table, list or quote before it as reading whole does, keeping it as written', async () => {
     // Beside a long paragraph, the page is read whole (`show`).
     const long = 'Long text. '.repeat(1_600);
-    for (const block of ['| a |\n| - |\n| x |', '- x\n- y', '> x\n> y'])
+    // Each with the blank line before `B` and with it gone, as a row, an item's line or the quote's.
+    for (const [joined, apart] of [
+      ['| a |\n| - |\n| x |\nB', '| a |\n| - |\n| x |\n\nB'],
+      ['- x\n- y\nB', '- x\n- y\n\nB'],
+      ['> x\n> y\nB', '> x\n> y\n\nB'],
+      ['> | a |\n> | - |\n> | x |\n> B', '> | a |\n> | - |\n> | x |\n>\n> B'],
+    ])
       for (const [after, byBlock] of [
         ['', true],
         [`\n\n${long}`, false],
       ] as const) {
-        const page = `A\n\n${block}\n\nB${after}\n\nC\n`;
-        // The blank line before `B` gone, as a row, an item's line or the quote's.
-        const next = page.replace(`${block}\n\nB`, `${block}\nB`);
+        const page = `A\n\n${apart}${after}\n\nC\n`;
+        const next = `A\n\n${joined}${after}\n\nC\n`;
         const m = await mount(page);
         const view = viewOf(m.dom);
         const cursor = (at: number) =>
