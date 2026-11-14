@@ -36,6 +36,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { enrolledAgent } from './support/agents.ts';
 import { postComment } from './support/comments.ts';
+import { startSession, typist } from './support/live.ts';
 import { openCopy } from './support/copies.ts';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
@@ -111,14 +112,23 @@ const allRevisions = async () =>
 
 const AnyEnvelope = z.union([KeyEnvelope, MetadataEnvelope, KeyEnvelopeV2, MetadataEnvelopeV2]);
 
-/** Page, metadata and comment envelopes alike. */
+/** Page, metadata, comment and live session envelopes alike. */
 const allEnvelopes = async () =>
   [
     ...(await t.db.select({ envelope: schema.keyEnvelopes.envelope }).from(schema.keyEnvelopes)),
     ...(await t.db
       .select({ envelope: schema.commentEnvelopes.envelope })
       .from(schema.commentEnvelopes)),
+    ...(await t.db.select({ envelope: schema.liveEnvelopes.envelope }).from(schema.liveEnvelopes)),
   ].map((row) => AnyEnvelope.parse(row.envelope));
+
+/** What was typed into live sessions, and their first snapshots' text (section 5.10). */
+const LIVE = {
+  typed: 'PLAINTEXT-LIVE-TYPED-8f2b',
+  saved: 'PLAINTEXT-LIVE-SAVED-1c7e',
+  presence: 'PLAINTEXT-LIVE-PRESENCE-4a9d',
+  snapshot: 'PLAINTEXT-LIVE-SNAPSHOT-5d1a',
+};
 
 /** Comments' text, as their writers typed it (protocol section 5.9). */
 const COMMENTS = {
@@ -821,6 +831,24 @@ describe('a snapshot of the database, blob files, logs, and mail', () => {
       text: COMMENTS.reader,
     });
     await postComment(m.owner.ctx, m.insidePage, { audience: 'draft', text: COMMENTS.editors });
+    // Live sessions outside shares and in one, with typing, presence and a save notice.
+    const sessions = [
+      await startSession(owner, world.page),
+      await startSession(m.owner, m.insidePage),
+    ];
+    for (const [session, person] of [
+      [sessions[0], owner],
+      [sessions[1], m.owner],
+    ] as const) {
+      if (!session) throw new Error('two sessions');
+      const join = typist(person, session, session.joinId);
+      join.started();
+      await join.send([
+        join.message('update', { content: utf8(LIVE.typed) }),
+        join.message('presence', { content: utf8(LIVE.presence) }),
+        { message: join.message('saved', { content: utf8(LIVE.saved) }), covers: 2 },
+      ]);
+    }
     const corpus = readableCorpus(await snapshot(t));
 
     for (const marker of Object.values(MARKERS)) {
@@ -835,6 +863,7 @@ describe('a snapshot of the database, blob files, logs, and mail', () => {
       ...Object.values(OUTSIDE),
       ...Object.values(COPY),
       ...Object.values(COMMENTS),
+      ...Object.values(LIVE),
       GROUP,
     ];
     // The copy's record of where it came from is inside its payload too.
@@ -866,12 +895,17 @@ describe('a snapshot of the database, blob files, logs, and mail', () => {
     expect(contentKeys.length).toBeGreaterThan(5);
     expect(attachmentKeys.length).toBeGreaterThanOrEqual(2);
     for (const key of [...contentKeys, ...attachmentKeys]) expect(exposes(corpus, key)).toBe(false);
+    // Nor a session's key, which only its record's payload holds, sealed.
+    for (const session of sessions) {
+      if (session) expect(exposes(corpus, session.sessionKey)).toBe(false);
+    }
 
     // A control, so a broken search can't make the checks above pass.
     expect(exposes(corpus, fromBase64(identity.public.boxPublicKey))).toBe(true);
     expect(corpus.includes(utf8(world.page.pageId))).toBe(true);
     expect(corpus.includes(utf8(m.copy.pageId))).toBe(true);
     expect(corpus.includes(utf8(question.commentId))).toBe(true);
+    expect(corpus.includes(utf8(sessions[1]?.sessionId ?? 'none'))).toBe(true);
     expect(t.logs.length).toBeGreaterThan(0);
     expect(t.mails.length).toBeGreaterThan(0);
   });

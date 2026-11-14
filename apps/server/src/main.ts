@@ -15,6 +15,7 @@ import {
   sweepPlugins,
   sweepPublicLinks,
   sweepTrash,
+  sweepLive,
 } from '@wikistow/server';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
@@ -45,7 +46,7 @@ await lock.migrate(config.migrationsDir ?? MIGRATIONS_DIR);
 stdoutLog({ level: 'info', event: 'migrated' });
 const { db, close } = connect(config.databaseUrl);
 const blobs = fileBlobStore(config.blobDir);
-const { app, treeChanges, commentChanges, renderer } = createApp({
+const { app, treeChanges, commentChanges, live, renderer } = createApp({
   db,
   config,
   log: stdoutLog,
@@ -54,6 +55,7 @@ const { app, treeChanges, commentChanges, renderer } = createApp({
 // Should the database go away, losing the lock above stops the server too.
 const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.changed, {
   onComment: commentChanges.changed,
+  onLive: (payload) => live.notified(payload),
 });
 
 // Each sweep on its own, so one failing doesn't stop the others: attachment
@@ -64,7 +66,10 @@ const treeListener = await listenForTreeChanges(config.databaseUrl, treeChanges.
 // password allowances that are full again (see sweepPasswordBudgets);
 // public copies nobody finished, or whose sharer or uploader can no
 // longer publish their page (see sweepPublicLinks), every 10 minutes; and
-// whatever has been in the trash for 30 days (see sweepTrash).
+// whatever has been in the trash for 30 days (see sweepTrash); and live
+// sessions everyone has left whose changes are saved, or that were kept
+// for the draft retention, every 15 seconds, saying so only when one went
+// (see sweepLive).
 const sweeps = [
   scheduleSweep(stdoutLog, 'blob-sweep', () => sweepBlobs(db, blobs)),
   scheduleSweep(stdoutLog, 'plugin-sweep', async () => ({
@@ -79,6 +84,13 @@ const sweeps = [
   })),
   scheduleSweep(stdoutLog, 'public-link-sweep', () => sweepPublicLinks(db), 10 * 60 * 1000),
   scheduleSweep(stdoutLog, 'trash-sweep', () => sweepTrash(db, blobs)),
+  scheduleSweep(
+    stdoutLog,
+    'live-sweep',
+    async () => ({ sessions: await sweepLive(db, { retentionMs: config.draftRetentionMs }) }),
+    15_000,
+    { quiet: true },
+  ),
 ];
 
 // Public copies a release's reader renders differently are rendered again,
@@ -113,6 +125,7 @@ const shutdown = () => {
   });
   treeChanges.close();
   commentChanges.close();
+  live.close();
 };
 process.once('SIGTERM', shutdown);
 process.once('SIGINT', shutdown);

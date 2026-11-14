@@ -14,7 +14,8 @@ import {
  * A signed, immutable version of a space's or folder's encrypted metadata
  * (name, emoji, tint). Renaming writes a new version based on the current
  * head, exactly like a page draft. A v1 record names a space or folder
- * only: a group's name and a comment are v2 records (sections 5.7 and 5.9).
+ * only: a group's name, a comment and a live session are v2 records
+ * (sections 5.7, 5.9 and 5.10), whose kinds `MetadataSubjectKindV2` lists.
  */
 export const MetadataRecord = z.strictObject({
   protocol: z.literal(1),
@@ -32,16 +33,31 @@ export const MetadataRecord = z.strictObject({
 export type MetadataRecord = z.infer<typeof MetadataRecord>;
 
 /**
+ * Every `subjectKind` a metadata record v2 signs (`metadata-record/v2`,
+ * sections 5.7, 5.9 and 5.10), kept apart from v1's: names (a space's, a
+ * folder's, a group's), comments and live sessions. Each kind but names'
+ * has a schema of its own, so no route takes another's.
+ */
+export const MetadataSubjectKindV2 = z.enum(['space', 'folder', 'group', 'comment', 'live']);
+/** The kinds of name a v2 record takes, which name routes take. */
+export const NameSubjectKind = MetadataSubjectKindV2.extract(['space', 'folder', 'group']);
+/** A comment's kind (section 5.9). */
+export const CommentSubjectKind = MetadataSubjectKindV2.extract(['comment']);
+/** A live session's kind (section 5.10), for `LiveRecord` in `records/live.ts`. */
+export const LiveSubjectKind = MetadataSubjectKindV2.extract(['live']);
+
+/**
  * A metadata record from Milestone 2 on, of a name: a space's, a folder's,
  * or a group's, which is always in the space's owner region (protocol
  * section 6.6). Selected by `protocol: 2`. A comment has the same signed
- * layout, but its own schema (`CommentRecord`), so no route that takes a
- * name takes a comment.
+ * layout, but its own schema (`CommentRecord`), as has a live session's
+ * (`LiveRecord`, in `records/live.ts`), so no route that takes a name takes
+ * either.
  */
 export const MetadataRecordV2 = z.strictObject({
   ...MetadataRecord.shape,
   protocol: z.literal(2),
-  subjectKind: z.enum(['space', 'folder', 'group']),
+  subjectKind: NameSubjectKind,
   ...recordCommitment,
 });
 export type MetadataRecordV2 = z.infer<typeof MetadataRecordV2>;
@@ -54,7 +70,7 @@ export type MetadataRecordV2 = z.infer<typeof MetadataRecordV2>;
  */
 export const CommentRecord = z.strictObject({
   ...MetadataRecordV2.shape,
-  subjectKind: z.literal('comment'),
+  subjectKind: CommentSubjectKind,
   subjectId: CommentId,
 });
 export type CommentRecord = z.infer<typeof CommentRecord>;
