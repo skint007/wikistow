@@ -720,6 +720,8 @@ export class DraftSession {
   landed(revisionId: RevisionId) {
     this.#known.add(revisionId);
     this.#base = revisionId;
+    // What comes next grows from what landed, not from a session's base.
+    this.#keptLive = null;
     this.#region = null;
     // The change waiting on this device is sent: the session can be joined now.
     this.#joinTries = 0;
@@ -1162,9 +1164,13 @@ export class DraftSession {
     const hold = live.hold?.() ?? (() => {});
     // And the claim on a change waiting here, once taken: one tab puts it in at a time.
     let claim: (() => void) | null = null;
+    // A claim this view kept for getting back in stays its own if this try fails.
+    let kept: (() => void) | null = null;
     const release = () => {
       hold();
-      claim?.();
+      if (claim && claim === kept && this.#rejoinHold && !this.#participant) {
+        this.#claimed = claim;
+      } else claim?.();
       claim = null;
     };
     const epoch = this.#ports.epoch();
@@ -1179,7 +1185,10 @@ export class DraftSession {
       // that opened the draft instead joins without it.
       // One this view holds already, kept through a join that lapsed, is its own.
       const own = this.#claimed;
-      if (waiting && own) this.#claimed = null;
+      if (waiting && own) {
+        this.#claimed = null;
+        kept = own;
+      }
       claim = waiting ? (own ?? (live.claim ? await live.claim() : () => {})) : null;
       const theirs = waiting && !claim;
       if (theirs && this.#ports.seen?.() === waiting.version) throw new Error('claimed');
@@ -1266,9 +1275,11 @@ export class DraftSession {
     if (claimed) {
       this.#claimed = claimed;
       void (this.#markedPutIn ?? Promise.resolve()).finally(() => {
-        // Still kept for this session: held on, as a keeping tab's, until withdrawn.
-        if (this.#claimed === claimed && this.#participant === joined && this.#kept) return;
-        if (this.#claimed === claimed) this.#claimed = null;
+        // Let go already, as on leaving: nothing to do.
+        if (this.#claimed !== claimed) return;
+        // Still kept, in the session or on the way back in: held on until withdrawn.
+        if (this.#kept || this.#rejoinHold) return;
+        this.#claimed = null;
         claimed();
       });
     }
@@ -1522,12 +1533,13 @@ export class DraftSession {
   // Out of the session: the page's live lock goes with the returned function,
   // once leaving has settled what was kept or put in, so the queue doesn't
   // send it meanwhile.
-  #detach(): () => void {
+  #detach({ keepClaim = false }: { keepClaim?: boolean } = {}): () => void {
     for (const stop of this.#unlive.splice(0)) stop();
     this.#participant = null;
     const hold = this.#release ?? (() => {});
-    const claimed = this.#claimed;
-    this.#claimed = null;
+    // A claim on what this tab keeps stays its own on the way back in.
+    const claimed = keepClaim ? null : this.#claimed;
+    if (!keepClaim) this.#claimed = null;
     const release = () => {
       hold();
       claimed?.();
@@ -1688,9 +1700,7 @@ export class DraftSession {
     // Its join went: held from now, so the queue sends nothing of the page's before it is kept.
     if (state.kind === 'stopped' && state.rejoin) this.#holdForRejoin();
     // A claim on what this tab kept stays its own while it gets back in.
-    const claimed = state.kind === 'stopped' && state.rejoin ? this.#claimed : null;
-    if (claimed) this.#claimed = null;
-    const release = this.#detach();
+    const release = this.#detach({ keepClaim: state.kind === 'stopped' && state.rejoin });
     let untouched: boolean;
     try {
       untouched = await this.#goOn(participant, state);
@@ -1699,9 +1709,9 @@ export class DraftSession {
     }
     // Nothing kept for the next join: the queue may send the page's changes.
     if (!this.#rejoinKept) {
-      claimed?.();
       this.#releaseRejoinHold();
-    } else if (claimed) this.#claimed = claimed;
+      this.#releaseClaim();
+    }
     const why =
       state.kind === 'ended'
         ? state.reason === 'access'
@@ -1963,15 +1973,17 @@ export class DraftSession {
     this.#holdCheck = setTimeout(check, 15_000);
   }
 
+  #releaseClaim() {
+    const claimed = this.#claimed;
+    this.#claimed = null;
+    claimed?.();
+  }
+
   #releaseRejoinHold() {
     if (this.#holdCheck) clearTimeout(this.#holdCheck);
     this.#holdCheck = null;
     // Out of a session, a claim kept for getting back in goes with the hold.
-    if (!this.#participant && this.#rejoinHold) {
-      const claimed = this.#claimed;
-      this.#claimed = null;
-      claimed?.();
-    }
+    if (!this.#participant) this.#releaseClaim();
     this.#rejoinKept = false;
     const release = this.#rejoinHold;
     this.#rejoinHold = null;
@@ -1991,6 +2003,10 @@ export class DraftSession {
   ): Promise<boolean> {
     if (!this.#rejoinHold || !this.#ports.keep || !settled.payload || !this.#keptLive) {
       return false;
+    }
+    // Claimed for getting back in: no other tab puts it in meanwhile.
+    if (!this.#claimed && this.#ports.live?.claim) {
+      this.#claimed = (await this.#ports.live.claim().catch(() => null)) ?? null;
     }
     if (!(await this.#keepNow(participant))) return false;
     this.#rejoinKept = true;
