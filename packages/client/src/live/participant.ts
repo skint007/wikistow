@@ -709,6 +709,18 @@ export class LiveParticipant {
 
   status = (): ParticipantStatus => this.#status;
 
+  /**
+   * Hear just before someone else's change goes into the document, so an
+   * edit an editor hasn't reported yet goes in first, as the change of the
+   * text it was made on.
+   */
+  onBeforeRemote(listener: () => void): () => void {
+    this.#beforeRemote.add(listener);
+    return () => void this.#beforeRemote.delete(listener);
+  }
+
+  readonly #beforeRemote = new Set<() => void>();
+
   /** Hear every change to the document, `local` for this app's own. */
   onChange(listener: (local: boolean) => void): () => void {
     this.#changes.add(listener);
@@ -1350,6 +1362,16 @@ export class LiveParticipant {
     }
     const { opened, stored } = held;
     if (opened.kind === 'update') {
+      // An edit the editor hasn't reported yet goes in first, on the text it was made on.
+      if (key(opened) !== key(this.#me)) {
+        for (const listener of this.#beforeRemote) {
+          try {
+            listener();
+          } catch {
+            // A listener's own failure stays its own.
+          }
+        }
+      }
       const misplaced = this.document.apply(opened.content, REMOTE_ORIGIN);
       if (misplaced.length > 0) {
         return this.#stop(
@@ -1863,7 +1885,8 @@ export class LiveParticipant {
       this.#snapshotBytes = message.sealed.ciphertext.length;
       this.#bytesSinceSnapshot = 0;
     } catch {
-      // The next save tries again.
+      // The next save tries again, from a join of its own.
+      void this.#transport.leave(further).catch(() => {});
     }
   }
 

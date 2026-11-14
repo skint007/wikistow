@@ -148,6 +148,9 @@ class FakeParticipant {
     for (const listener of this.#changes) listener(false);
     return true;
   }
+  onBeforeRemote() {
+    return () => {};
+  }
   sessionDrafts() {
     return [R0];
   }
@@ -288,6 +291,9 @@ describe('a draft session in a live session', () => {
     // Saved as before, outside the session.
     await other.draft.saveOrThrow();
     expect(other.saves.at(-1)?.payload.markdown).toBe('Start. Typed early.');
+    // Saved, it joins the session after all, so its saves aren't someone else's there.
+    await expect.poll(() => other.joins.length, { timeout: 5_000 }).toBe(2);
+    expect(other.draft.participant).not.toBeNull();
   });
 
   it('goes on outside the session when it ends, saves what it held, and joins the next', async () => {
