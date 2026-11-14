@@ -205,6 +205,12 @@ function rememberFolder(folder: Folder, saved: Saved) {
   void api.storage.session.set({ lastFolder: folder });
 }
 
+/** What the person typed for `url` is saved now: the popup starts afresh there. */
+async function forgetDraft(url: string) {
+  const { draft } = (await api.storage.session.get('draft')) as SessionState;
+  if (draft?.url === url) await api.storage.session.remove('draft');
+}
+
 /**
  * Capture the tab as `form` says and send it to the app: with the app
  * closed, `open` first, which the helper holds the clip behind until the
@@ -281,6 +287,7 @@ async function send(tabId: number, form: Form) {
               return false;
             case 'saved':
               rememberFolder(form.folder, answer);
+              void forgetDraft(clip.url);
               setClip({ phase: 'saved', saved: answer });
               return true;
             case 'error':
@@ -355,10 +362,10 @@ api.runtime.onConnect.addListener((port) => {
       },
     );
   });
-  // A failure's `!` has been seen once the popup opens.
-  if (current?.phase === 'failed') badge('');
   void (async () => {
     current ??= (await session()).clip ?? null;
+    // A failure's `!` has been seen once the popup opens.
+    if (current?.phase === 'failed') badge('');
     port.postMessage({ push: 'clip', clip: current });
   })();
 });
@@ -396,26 +403,31 @@ function commanded(command: string, tab?: chrome.tabs.Tab) {
   if (command === 'send') return quick(tab, 'either');
 }
 
+// Firefox for Android has neither menus nor shortcuts; its popup still
+// says clipping needs the desktop app.
+const menus = api.contextMenus as
+  | (typeof chrome.contextMenus & { onShown?: chrome.events.Event<() => void> })
+  | undefined;
+const commands = api.commands as typeof chrome.commands | undefined;
+
 api.runtime.onInstalled.addListener(() => {
-  void api.contextMenus.removeAll().then(() => {
-    api.contextMenus.create({ id: MENU.link, title: 'Send link to WikiStow', contexts: ['page'] });
-    api.contextMenus.create({
+  void menus?.removeAll().then(() => {
+    menus.create({ id: MENU.link, title: 'Send link to WikiStow', contexts: ['page'] });
+    menus.create({
       id: MENU.selection,
       title: 'Send selection to WikiStow',
       contexts: ['selection'],
     });
   });
 });
-api.contextMenus.onClicked.addListener((info, tab) => void menuClicked(info, tab));
+menus?.onClicked.addListener((info, tab) => void menuClicked(info, tab));
 // Firefox wakes its background to show the context menu, before the click,
 // so the last folder is read by then, and a click with none can open the
 // popup at once, as Firefox asks. Chrome has no `onShown`, and opens the
 // popup after a wait too. A shortcut has no such warning: pressed while
 // Firefox's background sleeps, with no folder yet, it shows `!` instead.
-(api.contextMenus as { onShown?: chrome.events.Event<() => void> }).onShown?.addListener(
-  () => void readLastFolder(),
-);
-api.commands.onCommand.addListener((command, tab) => void commanded(command, tab));
+menus?.onShown?.addListener(() => void readLastFolder());
+commands?.onCommand.addListener((command, tab) => void commanded(command, tab));
 
 async function readLastFolder() {
   const kept = await session();

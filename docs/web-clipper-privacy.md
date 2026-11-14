@@ -23,7 +23,7 @@ The extension reads a page only when you clip from it: when you press its toolba
 ## What it keeps
 
 - **On disk:** only its own setting, which WikiStow app to use if you run both the stable app and the beta.
-- **For the browser's session,** in memory, gone when the browser closes (`storage.session`): the folder your last clip went to, with its name, so the next clip can go there too; what you typed in the popup, if it closed before you saved; and how your last clip went, with the saved page's title and folder.
+- **For the browser's session,** in memory, gone when the browser closes (`storage.session`): the folder your last clip went to, with its name, so the next clip can go there too; what you typed in the popup for a page, until a clip of it is saved; and how your last clip went, with the saved page's title and folder.
 
 It keeps no keys, passwords or tokens, and no folder names on disk.
 

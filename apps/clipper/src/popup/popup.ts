@@ -296,7 +296,6 @@ function heard(message: FromBackground) {
     showView(message.view);
   } else {
     clip = message.clip;
-    if (clip?.phase === 'saved') void api.storage.session.remove('draft');
     renderClip();
     renderForm();
   }

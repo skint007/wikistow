@@ -141,13 +141,18 @@ async function launch(apps: Partial<Record<HostKey, Scenario>>) {
 }
 
 /** Open the site's page, and the popup for it in a tab of its own, as the toolbar button would. */
-async function popupFor(worker: Worker, origin: string, select?: (page: Page) => Promise<void>) {
+async function popupFor(
+  worker: Worker,
+  origin: string,
+  select?: (page: Page) => Promise<void>,
+  path = '/bread',
+) {
   const page = await context!.newPage();
-  await page.goto(`${origin}/bread`);
+  await page.goto(`${origin}${path}`);
   await select?.(page);
   const tabId = await worker.evaluate(
-    async (origin) => (await chrome.tabs.query({})).find((tab) => tab.url?.startsWith(origin))?.id,
-    origin,
+    async (url) => (await chrome.tabs.query({})).find((tab) => tab.url === url)?.id,
+    `${origin}${path}`,
   );
   const popup = await context!.newPage();
   await popup.setViewportSize({ width: 360, height: 640 });
@@ -233,6 +238,15 @@ test('an article goes to the folder found, and opens in WikiStow', async () => {
   expect(await worker.evaluate(() => chrome.storage.session.get('lastFolder'))).toEqual({
     lastFolder: RECIPES,
   });
+
+  // What's typed for another page stays for the session, the saved clip notwithstanding.
+  const other = await popupFor(worker, origin, undefined, '/other');
+  await other.popup.getByLabel('Tags').fill('later');
+  for (let again = 0; again < 2; again++) {
+    await other.popup.reload();
+    await expect(other.popup.getByLabel('Tags')).toHaveValue('later');
+    await expect(other.popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  }
 });
 
 test('a selection keeps what the page shows, and the whole page drops what it hides', async () => {
