@@ -123,18 +123,45 @@ const NESTING = new Set<string>([
 ]);
 
 // A tree as `inOneOrder` sees it.
-type Tree = { type: string; color?: string; children?: Tree[] };
+type Tree = { type: string; color?: string; value?: string; children?: Tree[] };
+
+// A colour's HTML, which the editor shows as one where two of a colour meet.
+const COLORED = new Set(['textColor', 'colorHighlight']);
+
+/** `children`, each colour's HTML beside one of the same colour made one, text where they meet joined. */
+function joined(children: Tree[]): Tree[] {
+  const out: Tree[] = [];
+  for (const child of children) {
+    const last = out.at(-1);
+    const same = last && COLORED.has(child.type) && last.type === child.type;
+    if (!last || !same || last.color !== child.color) {
+      out.push(child);
+      continue;
+    }
+    const inside = [...(last.children ?? [])];
+    for (const next of child.children ?? []) {
+      const end = inside.at(-1);
+      if (end?.type === 'text' && next.type === 'text')
+        inside[inside.length - 1] = { ...end, value: `${end.value ?? ''}${next.value ?? ''}` };
+      else inside.push(next);
+    }
+    out[out.length - 1] = { ...last, children: inside };
+  }
+  return out;
+}
 const nestingKey = (node: Tree) => `${node.type}:${node.color ?? ''}`;
 const byKey = (a: Tree, b: Tree) => nestingKey(a).localeCompare(nestingKey(b));
 
 /**
  * `tree`, each run of marks one inside the other around the same text put
- * in one order, by type, so the order they're written in says nothing. In
- * place, without recursion.
+ * in one order, by type, so the order they're written in says nothing, and
+ * a colour's HTML beside one of its colour made one (`joined`). In place,
+ * without recursion.
  */
 function inOneOrder(tree: Root): Root {
   const stack: Tree[] = [tree];
   for (let node = stack.pop(); node; node = stack.pop()) {
+    if (node.children) node.children = joined(node.children);
     const children = node.children ?? [];
     for (const [i, child] of children.entries()) {
       // The marks around the same text, outermost first, and what they hold.

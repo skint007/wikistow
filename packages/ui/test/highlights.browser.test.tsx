@@ -4,7 +4,8 @@ import { createRoot } from 'react-dom/client';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import type { EditorSurfaceHandle } from '../src/page/editor/surface.ts';
-import { loadSyntaxNodes } from '../src/page/editor/visual/config.ts';
+import { loadSyntaxNodes, transformer } from '../src/page/editor/visual/config.ts';
+import { fidelityOf } from '../src/page/editor/visual/fidelity.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
@@ -81,6 +82,25 @@ function select(m: Mounted, text: string, cursor = false) {
   );
 }
 
+/** Select `text` in the first block whose text holds it, across the marks in it. */
+function selectAcross(m: Mounted, text: string) {
+  const view = viewOf(m.dom);
+  let from = -1;
+  view.state.doc.descendants((node, pos) => {
+    if (from >= 0 || !node.isTextblock) return from < 0;
+    const at = node.textContent.indexOf(text);
+    if (at >= 0) from = pos + 1 + at;
+    return false;
+  });
+  if (from < 0) throw new Error(`No text ${text}`);
+  m.dom.focus();
+  act(() =>
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, from, from + text.length)),
+    ),
+  );
+}
+
 /** The last Markdown the editor reported, once it's `expected`. */
 const reported = (m: Mounted, expected: string) =>
   expect.poll(() => m.changes.at(-1)).toBe(expected);
@@ -144,6 +164,32 @@ describe('highlights and colours in the visual editor', () => {
     await userEvent.keyboard('{Control>}{Shift>}h{/Shift}{/Control}');
     await reported(m, 'Pick **==one== word** here.\n');
     expect(m.unfaithful).toEqual([]);
+  });
+
+  it('leave spaces at a mark’s ends out of it, however the marks around them part', async () => {
+    const t = await transformer();
+    for (const [page, text, keys, expected] of [
+      ['one **two three**\n', 'one two', '{Control>}i{/Control}', '*one **two*** **three**\n'],
+      [
+        'Read the [setup guide](https://x.org) first.\n',
+        'Read the setup',
+        '{Control>}b{/Control}',
+        '**Read the** [**setup** guide](https://x.org) first.\n',
+      ],
+      [
+        'one **two three**\n',
+        'one two',
+        '{Control>}{Shift>}h{/Shift}{/Control}',
+        '==one **two**== **three**\n',
+      ],
+    ] as const) {
+      const m = await mount(page);
+      selectAcross(m, text);
+      await userEvent.keyboard(keys);
+      await reported(m, expected);
+      expect(fidelityOf(expected, t).visual, expected).toBe(true);
+      unmounts.pop()?.();
+    }
   });
 
   it('give the selection a highlight and text colour from the toolbar', async () => {

@@ -303,8 +303,13 @@ function leavesOf(nodes: readonly Tree[], marks: readonly Wrap[] = []): Leaf[] {
 
 const isLink = (wrap: Wrap) => wrap.node.type === 'link';
 
+// Marks that hold a space at their ends: a link's text, and a colour's HTML.
+const SPACED = new Set(['link', 'textColor', 'colorHighlight']);
+
 // `wrap` around `children`, with the spaces they start and end with
 // outside it, as Milkdown puts them: a delimiter beside a space isn't one.
+// A space held for Milkdown (`HELD_SPACE`) goes out too, but of a link or
+// a colour's HTML, which can hold it.
 function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[] {
   const inside = [...children];
   const take = (first: boolean, edge: RegExp) => {
@@ -317,8 +322,9 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
     inside.splice(first ? 0 : -1, 1, ...(value ? [{ ...node, value }] : []));
     return space ? [{ type: 'text', value: space }] : [];
   };
-  const before = take(true, /^\s+/);
-  const after = take(false, /\s+$/);
+  const held = SPACED.has(wrap.type) ? '' : HELD_SPACE;
+  const before = take(true, new RegExp(`^[\\s${held}]+`));
+  const after = take(false, new RegExp(`[\\s${held}]+$`));
   return [...before, ...(inside.length > 0 ? [{ ...wrap, children: inside }] : []), ...after];
 }
 

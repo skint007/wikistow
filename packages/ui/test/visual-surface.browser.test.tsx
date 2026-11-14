@@ -236,6 +236,8 @@ describe('the fidelity check', () => {
       '<span data-color="red"><mark data-color="blue">a</mark> b</span>\n',
       '[==a==](https://x.test) [<span data-color="red">a</span>](https://x.test)\n',
       '**==x ~~*a*~~==** and **==x *~~a~~*==**\n',
+      // Two of a colour side by side, which the editor shows as one.
+      '<span data-color="red">a</span><span data-color="red">b</span> <mark data-color="red">c</mark><mark data-color="red">d</mark>\n',
       // A colour's HTML holds spaces at its ends.
       'x <span data-color="red"> a</span> y <span data-color="red">a </span>b x<mark data-color="red"> a</mark>\n',
       '> [!NOTE]\n> body\n',
