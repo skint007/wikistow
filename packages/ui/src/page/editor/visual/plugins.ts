@@ -966,6 +966,15 @@ export const cellLinks = $prose(
     }),
 );
 
+/**
+ * What the visual editor does to each change to its document, a paste's
+ * included, so it holds only what a page writes as it shows, in this
+ * order: wikilinks written out whole, autolinks, wikilinks in cells, HTML
+ * blocks, footnotes no definition names and tables' header rows. A paste
+ * with no editor open (`htmlMarkdown`) goes through the same.
+ */
+export const changeRules = [typedLinks, autolinks, cellLinks, htmlBlocks, footnotes, tableHeaders];
+
 // Whether text changed in `range` is part of the brackets from `start` to
 // `end`: typed or pasted there, or a deletion inside them that joined them.
 const wrote = (range: { from: number; to: number }, start: number, end: number) =>
