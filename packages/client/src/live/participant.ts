@@ -895,7 +895,7 @@ export class LiveParticipant {
           state: stateBytes,
           with: [...people],
         }),
-        linkChoices: new Map(),
+        linkChoices: this.#linkChoices(copy),
       });
     } catch {
       // Nothing of it went to anyone: a refused save leaves nothing behind.
@@ -943,7 +943,11 @@ export class LiveParticipant {
       const span = textChange(text.toJSON(), target.toWellFormed());
       if (!span) return [];
       const from = Y.createRelativePositionFromTypeIndex(text, span.from);
-      const to = Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
+      // An insertion has one place, which typing there meanwhile goes before.
+      const to =
+        span.remove === 0
+          ? from
+          : Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
       return [{ name, target, span, from, to }];
     });
     return (document) => {
@@ -1100,7 +1104,7 @@ export class LiveParticipant {
             state: this.document.stateBytes(),
             with: [...new Set<IdentityId>([...head.with, ...this.#typed])],
           }),
-          linkChoices: new Map(),
+          linkChoices: this.#linkChoices(),
         });
         this.#drafts.set(result.revisionId, {
           revisionId: result.revisionId,
@@ -1347,7 +1351,12 @@ export class LiveParticipant {
       const changes =
         (held.decoded?.structs.length ?? 0) > 0 || (held.decoded?.deletes.size ?? 0) > 0;
       if (changes && !this.#further.has(key(ref))) this.#typed.add(opened.senderId);
-      this.#bytesSinceSnapshot += stored.message.sealed.ciphertext.length;
+      // This app's own were counted as they were sealed.
+      if (key(ref) !== key(this.#me)) {
+        this.#bytesSinceSnapshot += stored.message.sealed.ciphertext.length;
+      }
+      // Only an update makes a session unsaved, for the server: a Saved notice never does.
+      this.#lastUpdate = Math.max(this.#lastUpdate, stored.position);
     } else if (opened.kind === 'saved') {
       try {
         readSaved(opened.content);
@@ -1667,14 +1676,7 @@ export class LiveParticipant {
       state: stateBytes,
       with: [...people],
     });
-    const choices = new Map<string, PageId>();
-    for (const [linkKey, text] of this.document.map('links').entries()) {
-      try {
-        choices.set(linkKey, JSON.parse(text) as PageId);
-      } catch {
-        // A value the document checked as it was placed.
-      }
-    }
+    const choices = this.#linkChoices();
     try {
       const result = await this.#ports.saveDraft({
         basedOn: headId,
@@ -1732,6 +1734,19 @@ export class LiveParticipant {
       : { ...payload, extensions: { ...payload.extensions, [LINKS_NAMESPACE]: table } };
   }
 
+  // The choices between pages of one title the session made, which a save's link table keeps.
+  #linkChoices(document: LiveDocument = this.document): Map<string, PageId> {
+    const choices = new Map<string, PageId>();
+    for (const [linkKey, text] of document.map('links').entries()) {
+      try {
+        choices.set(linkKey, JSON.parse(text) as PageId);
+      } catch {
+        // A value the document checked as it was placed.
+      }
+    }
+    return choices;
+  }
+
   #queueSaved(revisionId: RevisionId, state: Uint8Array, covers: number): void {
     if (!this.#keyed()) return;
     const message = this.#seal({
@@ -1748,8 +1763,10 @@ export class LiveParticipant {
     this.#schedule();
   }
 
-  // The most any Saved notice of this app's has covered.
+  // The most any Saved notice of this app's has covered, and the latest
+  // update taken, by position: a Saved notice is due only for updates after it.
   #savedCovers = 0;
+  #lastUpdate = 0;
   #trailTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
@@ -1761,7 +1778,8 @@ export class LiveParticipant {
    * and be kept for the draft retention.
    */
   #trail(): void {
-    if (!this.#keyed() || this.#covers <= this.#savedCovers) return;
+    if (!this.#keyed() || this.#lastUpdate <= this.#savedCovers) return;
+    if (this.#covers < this.#lastUpdate) return;
     if (this.#pending.length > 0 || this.#queue.length > 0 || this.#sending || this.#placing)
       return;
     const head = this.#head ? this.#drafts.get(this.#head) : undefined;
@@ -1775,7 +1793,7 @@ export class LiveParticipant {
   }
 
   #trailSoon(): void {
-    if (this.#trailTimer || this.#covers <= this.#savedCovers) return;
+    if (this.#trailTimer || this.#lastUpdate <= this.#savedCovers) return;
     this.#trailTimer = setTimeout(() => {
       this.#trailTimer = null;
       this.#trail();

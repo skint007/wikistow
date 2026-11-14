@@ -213,6 +213,10 @@ describe('editing a page live', () => {
         { timeout: 15_000 },
       )
       .toBe(true);
+    // And then says nothing more while nothing changes: no Saved notice answers its own.
+    const settled = (await row())?.lastPosition;
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    expect((await row())?.lastPosition).toBe(settled);
   });
 
   it('ends the session for everyone when a member is removed', async () => {

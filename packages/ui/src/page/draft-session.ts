@@ -1061,6 +1061,8 @@ export class DraftSession {
       // A value the document refused: the editor's text stays as it is.
     }
     const captured = this.#content;
+    // An edit the editor hasn't reported yet, as the visual editor's, is the person's too.
+    this.#pull();
     let release = () => {};
     this.#settling = new Promise((resolve) => (release = resolve));
     try {
