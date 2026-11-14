@@ -28,7 +28,7 @@ import { CompletionListbox } from './completion-list';
 import { alerts } from './alerts';
 import { selectedMarkdown } from './at-cursor';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
-import { planBlocks, replacement, same, type Taken } from './blocks';
+import { planBlocks, replaceIn, replacement, same, type Taken } from './blocks';
 import { BLOCK_TIMED, checkFidelity, endsInLine, fidelityOf, withLf } from './fidelity';
 import { lineBreakFor } from '../surface';
 import { inText, spansOf, type Span } from './sources';
@@ -136,10 +136,7 @@ function putIn(view: EditorView, write: Writer, markdown: string, doc: Node, tak
     let at = 0;
     for (let i = 0; i < taken.first; i++) at += doc.child(i).nodeSize;
     view.dispatch(
-      view.state.tr
-        .replace(at + change.from, at + change.to, change.slice)
-        .setMeta(EXTERNAL, true)
-        .setMeta('addToHistory', false),
+      replaceIn(view.state.tr, change, at).setMeta(EXTERNAL, true).setMeta('addToHistory', false),
     );
   }
   const now = view.state.doc;
@@ -410,10 +407,7 @@ function Surface({
         const change = replacement(doc, next);
         if (change)
           view.dispatch(
-            view.state.tr
-              .replace(change.from, change.to, change.slice)
-              .setMeta(EXTERNAL, true)
-              .setMeta('addToHistory', false),
+            replaceIn(view.state.tr, change).setMeta(EXTERNAL, true).setMeta('addToHistory', false),
           );
         origin.current = { markdown, doc: view.state.doc };
         if (writer.current) sourceAs(writer.current, view.state.doc, markdown, next, doc);
