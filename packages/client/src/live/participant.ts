@@ -327,6 +327,9 @@ type Held = {
 
 type Outgoing = { message: LiveMessage; covers?: number };
 
+/** The press of **Publish** in a session (`LiveParticipant.press`), for `publish`. */
+export type LivePress = { readonly __press: unique symbol };
+
 /** The document as a publish's press found it. */
 type Pressed = {
   state: LiveState;
@@ -357,11 +360,25 @@ export async function joinLive(
       throw error;
     }
     if (served.ended) {
-      // Kept with changes nobody saved: caught up from first, once, by one app.
-      const known = cantFrom.get(served.ended.sessionId);
-      const caught = known ?? (await catchUpEnded(ports, served.ended, served.draftHead));
-      if (caught.kind === 'cant' || caught.kind === 'lost') {
-        cantFrom.set(served.ended.sessionId, caught);
+      // Kept with changes nobody saved: caught up from first, by one app.
+      // Whatever it comes to, joining goes on.
+      const id = served.ended.sessionId;
+      const known = triedFrom.get(id);
+      const caught: CaughtUp =
+        known && known.until > Date.now()
+          ? known.caught
+          : await catchUpEnded(ports, served.ended, served.draftHead).catch(
+              (error: unknown): CaughtUp => ({
+                kind: 'cant',
+                why: error instanceof Error ? error.message : 'it failed',
+                lasting: false,
+              }),
+            );
+      if (caught.kind === 'saved' || caught.kind === 'held') triedFrom.delete(id);
+      else if (caught !== known?.caught) {
+        // Not tried again this run once the session fails its checks; otherwise in a minute.
+        const lasts = caught.kind === 'cant' && caught.lasting;
+        triedFrom.set(id, { caught, until: lasts ? Infinity : Date.now() + TRY_AGAIN_MS });
       }
       try {
         ports.caughtUp?.(caught);
@@ -1112,23 +1129,51 @@ export class LiveParticipant {
    * (`LivePublishStopped`), so nothing typed after the press goes out
    * under the publisher's name.
    */
-  async publish<T>(
-    publish: (draft: RevisionId) => Promise<T>,
-    /** Whether the editor hasn't shown everything the document holds from others yet: it asks again. */
-    behind: () => boolean = () => false,
-  ): Promise<T> {
+  /**
+   * Take the press of **Publish** (section 5.10, **Saving**): the document
+   * as it is now, and the payload a save would write from it. Refused at
+   * once when the editor hadn't shown everything others typed yet
+   * (`behind`), when this app isn't in the session, or when it is built
+   * from a snapshot nobody has checked yet, which is never saved whole.
+   */
+  press(behind: () => boolean = () => false): LivePress {
     if (this.#status.state.kind !== 'live' || !this.#keyed()) {
       throw new LivePublishStopped('left');
     }
     if (behind()) throw new LivePublishStopped('behind');
-    // Built from a snapshot nobody has checked yet: never saved whole.
     if (this.#provisional) throw new LivePublishStopped('unchecked');
-    // At the press: the document, and what a save would write from it.
-    const pressed = {
+    const pressed: Pressed = {
       state: this.document.state(),
       stateBytes: this.document.stateBytes(),
       covers: this.#covers,
       payload: this.#payload(),
+    };
+    return pressed as unknown as LivePress;
+  }
+
+  /**
+   * Publish the page as it was at `press` (section 5.10, **Saving**). Its
+   * presence says it is publishing, so the saver holds its saves. The
+   * document as it was then is saved, never caught up and saved on top,
+   * unless the head is a draft of the session with exactly its state whose
+   * payload is the one pressed; `publish` then publishes that draft, which
+   * must still be the head, once `check` has found the draft it opens to
+   * publish is the one pressed. If either meets `stale-head`, the newer
+   * head is published only if it is a session draft with exactly the state
+   * pressed and the payload pressed; otherwise it stops
+   * (`LivePublishStopped`), so nothing typed after the press goes out
+   * under the publisher's name.
+   */
+  async publish<T>(
+    publish: (draft: RevisionId, check: (payload: PagePayload) => void) => Promise<T>,
+    press: LivePress = this.press(),
+  ): Promise<T> {
+    const pressed = press as unknown as Pressed;
+    if (this.#status.state.kind !== 'live' || !this.#keyed()) {
+      throw new LivePublishStopped('left');
+    }
+    const check = (payload: PagePayload) => {
+      if (!samePayload(pressed.payload, payload)) throw new LivePublishStopped('changed');
     };
     this.#publishing = true;
     this.#publishingSeen(key(this.#me), this.#me.senderId, true);
@@ -1138,7 +1183,7 @@ export class LiveParticipant {
       let draft = await this.#saveAtPress(pressed);
       for (let tries = 0; ; tries++) {
         try {
-          return await publish(draft);
+          return await publish(draft, check);
         } catch (error) {
           if (!(error instanceof ApiError) || error.code !== 'stale-head' || tries >= 2)
             throw error;
@@ -1174,7 +1219,13 @@ export class LiveParticipant {
     }
     if (this.#head !== headId) return this.#saveAtPress(pressed);
     let release = (_saved: boolean) => {};
-    this.#saving = new Promise<boolean>((resolve) => (release = resolve));
+    const mine = new Promise<boolean>((resolve) => (release = resolve));
+    this.#saving = mine;
+    // Let go before resolving: a save waiting on it then finds the way clear.
+    const letGo = (saved: boolean) => {
+      if (this.#saving === mine) this.#saving = null;
+      release(saved);
+    };
     try {
       // What this app typed up to the press goes out before its Saved notice names the draft.
       await this.flush();
@@ -1205,7 +1256,7 @@ export class LiveParticipant {
         const detail = error.detail as { draftHead?: unknown } | undefined;
         const parsed = RevisionId.safeParse(detail?.draftHead);
         if (parsed.success) this.#setHead(parsed.data);
-        release(false);
+        letGo(false);
         return await this.#pressedHead(pressed);
       }
       const compared = samePayload(payload, result.payload);
@@ -1228,12 +1279,11 @@ export class LiveParticipant {
       this.#queueSaved(result.revisionId, pressed.stateBytes, pressed.covers);
       this.#scheduleSave();
       this.#update();
-      release(true);
+      letGo(true);
       if (!compared) throw new LivePublishStopped('changed');
       return result.revisionId;
     } finally {
-      release(false);
-      this.#saving = null;
+      letGo(false);
     }
   }
 
@@ -4299,7 +4349,8 @@ const foldedGone = new Map<string, Map<number, GoneRange>>();
 
 /** The clocks of a gone join's client a fold put in, from what the folding app held to what the draft claimed. */
 type GoneRange = { from: number; to: number };
-// Ended sessions this app couldn't catch up from: tried once in its run.
-const cantFrom = new Map<string, CaughtUp>();
+// Ended sessions this app couldn't catch up from, and until when that stands.
+const triedFrom = new Map<string, { caught: CaughtUp; until: number }>();
+const TRY_AGAIN_MS = 60_000;
 // Sessions this app left once because it couldn't catch up with the others.
 const cantCatchUp = new Set<string>();

@@ -49,8 +49,12 @@ export type CaughtUp =
   | { kind: 'held' }
   /** Another editor's app is catching up from it now, or did: nothing to do. */
   | { kind: 'elsewhere' }
-  /** It can't catch up from it, and says why; the session is left for the draft retention. */
-  | { kind: 'cant'; why: string }
+  /**
+   * It can't catch up from it, and says why; the session is left for the
+   * draft retention. `lasting` when the session itself fails its checks,
+   * so trying again this run finds the same; otherwise it may pass.
+   */
+  | { kind: 'cant'; why: string; lasting: boolean }
   /** This app's keys no longer count for it: its unsaved changes can't be recovered. */
   | { kind: 'lost' };
 
@@ -98,7 +102,7 @@ export async function catchUpEnded(
   try {
     opened = openServedSession(ctx, served, page, await ports.access(false));
   } catch (error) {
-    if (!(error instanceof CryptoError)) throw error;
+    if (!(error instanceof CryptoError)) return passing(error);
     // Under keys that no longer count for writing, or of another region now.
     if (['key-version', 'region-mismatch', 'unaccepted-owner'].includes(error.code)) {
       return { kind: 'lost' };
@@ -109,6 +113,7 @@ export async function catchUpEnded(
         error.code === 'unsupported-format'
           ? 'it is of a newer format: update the app'
           : `its record was refused: ${error.message}`,
+      lasting: true,
     };
   }
   try {
@@ -116,14 +121,25 @@ export async function catchUpEnded(
     if (built.kind === 'cant') return built;
     return await putIn(ports, served, opened, built, head);
   } catch (error) {
-    if (error instanceof CryptoError) {
-      return { kind: 'cant', why: error.message };
-    }
-    throw error;
+    if (error instanceof CryptoError) return { kind: 'cant', why: error.message, lasting: true };
+    return passing(error);
   } finally {
     opened.key.fill(0);
   }
 }
+
+// What the server answered, or a draft it didn't serve: it may pass.
+function passing(error: unknown): CaughtUp {
+  const why =
+    error instanceof ApiError
+      ? `the server answered ${error.code}`
+      : error instanceof Error
+        ? error.message
+        : 'it failed';
+  return { kind: 'cant', why, lasting: false };
+}
+
+const lasting = (why: string) => ({ kind: 'cant' as const, why, lasting: true });
 
 /** The ended session's document, checked, and what it was checked against. */
 type Built = {
@@ -147,10 +163,10 @@ async function build(
   ports: ParticipantPorts,
   served: liveRoutes.ServedSession,
   opened: OpenedLiveSession,
-): Promise<Built | { kind: 'cant'; why: string }> {
+): Promise<Built | { kind: 'cant'; why: string; lasting: boolean }> {
   const { ctx, page } = ports;
   // What a fetch cut short leaves to the stream: past what an ended session's unsaved typing comes to.
-  if (!served.complete) return { kind: 'cant', why: 'it holds more than one fetch serves' };
+  if (!served.complete) return lasting('it holds more than one fetch serves');
   const sessionId = opened.record.subjectId;
   const binding = liveBinding(opened);
   const joins = new LiveJoins({
@@ -173,11 +189,11 @@ async function build(
   const first = open(served.firstSnapshot.message);
   const firstRead = readSnapshot(first.content);
   if (firstRead.kind === 'newer-format') {
-    return { kind: 'cant', why: 'it is of a newer format: update the app' };
+    return lasting('it is of a newer format: update the app');
   }
   const scratch = new LiveDocument(clientId);
   if (scratch.apply(firstRead.state, 'snapshot').length > 0 || scratch.pending) {
-    return { kind: 'cant', why: 'its first snapshot doesn’t fit the page' };
+    return lasting('its first snapshot doesn’t fit the page');
   }
   const firstState = scratch.state();
   let document: LiveDocument;
@@ -196,11 +212,11 @@ async function build(
     if (!started.has(`${first.senderId} ${first.joinId}`)) joins.startFrom(first);
     const read = readSnapshot(later.content);
     if (read.kind === 'newer-format') {
-      return { kind: 'cant', why: 'it is of a newer format: update the app' };
+      return lasting('it is of a newer format: update the app');
     }
     const draft = await ports.openDraft(read.revisionId);
     if (!sessionDraft(draft, opened, signers)) {
-      return { kind: 'cant', why: 'its snapshot names a draft from outside the session' };
+      return lasting('its snapshot names a draft from outside the session');
     }
     document = openSnapshot({
       message: later,
@@ -223,7 +239,7 @@ async function build(
       clientId,
     }).document;
     if (joins.check(first, decodeUpdate(firstRead.state)).kind !== 'take') {
-      return { kind: 'cant', why: 'its first snapshot isn’t its join’s first message' };
+      return lasting('its first snapshot isn’t its join’s first message');
     }
     joins.take(first);
     covered = served.firstSnapshot.position;
@@ -231,27 +247,40 @@ async function build(
     start = built;
   }
 
-  // The latest Saved notice, by position, of those kept.
+  // Every kept message, opened: its sender verified, as a join of the session's.
   const stored = [...served.latest, ...served.messages];
-  const notice = stored
-    .filter((message) => message.message.kind === 'saved')
-    .sort((a, b) => b.position - a.position)[0];
+  const opens = new Map(stored.map((one) => [one, open(one.message)] as const));
+  const senders = new Set<string>([...signers, ...[...opens.values()].map((m) => m.senderId)]);
+  // The latest Saved notice that names a draft of the session, by position:
+  // one naming a draft from outside folded in without a save, or none the
+  // server serves, is passed over for an earlier one, as checked.
+  let notice: { covers: number; draft: OpenedDraft; state: LiveState } | null = null;
+  const notices = stored
+    .filter((one) => one.message.kind === 'saved')
+    .sort((a, b) => b.position - a.position);
+  for (const one of notices) {
+    const read = readSaved((opens.get(one) as OpenedLiveMessage).content);
+    if (read.kind === 'newer-format') return lasting('it is of a newer format: update the app');
+    const draft = await ports.openDraft(read.revisionId).catch((error: unknown) => {
+      if (error instanceof ApiError && error.code === 'not-found') return null;
+      throw error;
+    });
+    const state = draft && sessionState(draft.payload, draft.revisionId, sessionId);
+    if (!draft || !state || !sessionDraft(draft, opened, senders)) continue;
+    notice = { covers: one.covers ?? 0, draft, state };
+    break;
+  }
   // With none, only a document built from the first snapshot alone is checked.
   if (!notice && served.snapshot) {
-    return { kind: 'cant', why: 'no Saved notice checks what its later snapshot holds' };
+    return lasting('no Saved notice checks what its later snapshot holds');
   }
-  const covers = notice ? (notice.covers ?? 0) : covered;
+  const covers = notice ? notice.covers : covered;
   let latest: Built['latest'] | null = notice ? null : built;
 
-  const check = async () => {
+  const check = () => {
     if (!notice) return;
-    const read = readSaved(open(notice.message).content);
-    if (read.kind === 'newer-format') throw new CryptoError('unsupported-format', 'newer');
-    const draft = await ports.openDraft(read.revisionId);
-    const state = sessionState(draft.payload, draft.revisionId, sessionId);
+    const { draft, state } = notice;
     const ok =
-      state !== null &&
-      sessionDraft(draft, opened, signers) &&
       sameState(document.state(), state) &&
       samePayload(document.payload(draft.payload), draft.payload);
     if (!ok) throw new CryptoError('binding-mismatch', 'it doesn’t check against its last save');
@@ -272,23 +301,14 @@ async function build(
 
   const messages = [...served.messages].sort((a, b) => a.position - b.position);
   let checked = covers <= covered;
-  if (checked) await check();
-  let held: { stored: liveRoutes.StoredMessage; message: OpenedLiveMessage }[] = [];
-  const take = (one: { stored: liveRoutes.StoredMessage; message: OpenedLiveMessage }) => {
+  if (checked) check();
+  type One = { stored: liveRoutes.StoredMessage; message: OpenedLiveMessage; decoded?: Decoded };
+  let held: One[] = [];
+  const take = (one: One) => {
     const { message } = one;
-    const decoded =
-      message.kind === 'update'
-        ? decodeUpdate(message.content)
-        : message.kind === 'snapshot'
-          ? (() => {
-              const read = readSnapshot(message.content);
-              return read.kind === 'current'
-                ? decodeUpdate(read.state)
-                : { structs: [], deletes: new Map() };
-            })()
-          : undefined;
-    if (message.kind === 'saved') readSaved(message.content);
-    const verdict = joins.check(message, decoded);
+    one.decoded ??= decodedOf(message);
+    const { decoded } = one;
+    const verdict = joins.check(message, decoded ?? undefined);
     if (verdict.kind === 'repeat') return true;
     if (verdict.kind === 'hold') return false;
     if (verdict.kind !== 'take') {
@@ -317,11 +337,11 @@ async function build(
   };
   for (const stored of messages) {
     if (!checked && stored.position > covers) {
-      if (held.length > 0) return { kind: 'cant', why: 'messages it holds are missing' };
-      await check();
+      if (held.length > 0) return lasting('messages it holds are missing');
+      check();
       checked = true;
     }
-    const message = open(stored.message);
+    const message = opens.get(stored) as OpenedLiveMessage;
     if (!take({ stored, message })) {
       held.push({ stored, message });
       continue;
@@ -337,12 +357,14 @@ async function build(
       }
     }
   }
-  if (!checked) await check();
+  if (!checked) check();
   if (held.length > 0 || document.pending) {
-    return { kind: 'cant', why: 'messages it holds are missing' };
+    return lasting('messages it holds are missing');
   }
   const at = latest as Built['latest'] | null;
-  if (!at) return { kind: 'cant', why: 'it doesn’t check against its last save' };
+  if (!at) return lasting('it doesn’t check against its last save');
+  // A draft of the session its notice's sender saved: that sender counts as one who signed in it.
+  for (const message of opens.values()) signers.add(message.senderId);
   if (!start) {
     const draft = await ports.openDraft(opened.payload.revisionId);
     start = { revisionId: draft.revisionId, payload: draft.payload, state: firstState };
@@ -373,6 +395,20 @@ function sessionDraft(
   );
 }
 
+type Decoded = ReturnType<typeof decodeUpdate> | null;
+
+// What a stored message changes, decoded once: an update's, a snapshot's
+// state; none for a Saved notice, whose content must still read.
+function decodedOf(message: OpenedLiveMessage): Decoded {
+  if (message.kind === 'update') return decodeUpdate(message.content);
+  if (message.kind === 'snapshot') {
+    const read = readSnapshot(message.content);
+    return read.kind === 'current' ? decodeUpdate(read.state) : { structs: [], deletes: new Map() };
+  }
+  readSaved(message.content);
+  return null;
+}
+
 // Take the grant, save what the head doesn't hold, and send the Saved
 // notice that lets the server delete the session.
 async function putIn(
@@ -386,6 +422,15 @@ async function putIn(
   const sessionId = served.sessionId;
   const transport = liveTransport(ctx, sessionId, ports.live);
   const joinId = newId(JoinId);
+  if (!startHead) return { kind: 'cant', why: 'the page has no draft', lasting: false };
+  // What it can't put in, it says before taking the grant, which would hold others off.
+  let first: Awaited<ReturnType<typeof targetOn>> | null = await targetOn(
+    ports,
+    opened,
+    built,
+    startHead,
+  );
+  if (first.kind === 'cant') return first;
   // One join at a time, keyed by the ended session, so two editors don't both put it in.
   try {
     const asked = await transport.send({ joinId, messages: [], fold: sessionId });
@@ -396,14 +441,15 @@ async function putIn(
     if (error instanceof ApiError && ['not-found', 'forbidden'].includes(error.code)) {
       return { kind: 'elsewhere' };
     }
-    throw error;
+    return passing(error);
   }
   const { document, latest } = built;
-  let head = startHead;
+  let head: RevisionId | null = startHead;
   let result: CaughtUp | null = null;
   for (let tries = 0; tries < 4 && !result; tries++) {
-    if (!head) return { kind: 'cant', why: 'the page has no draft' };
-    const target = await targetOn(ports, opened, built, head);
+    if (!head) return { kind: 'cant', why: 'the page has no draft', lasting: false };
+    const target = first ?? (await targetOn(ports, opened, built, head));
+    first = null;
     if (target.kind === 'cant') return target;
     if (target.kind === 'held') {
       result = { kind: 'held' };
@@ -432,9 +478,9 @@ async function putIn(
       head = parsed.success ? parsed.data : null;
     }
   }
-  if (!result) return { kind: 'cant', why: 'the page kept changing' };
-  // What the session placed, never more: then the server deletes it.
-  const named = result.kind === 'saved' ? result.revisionId : latest.revisionId;
+  if (!result) return { kind: 'cant', why: 'the page kept changing', lasting: false };
+  // What the session placed, never more, naming the draft that holds it: then the server deletes it.
+  const named = result.kind === 'saved' ? result.revisionId : (head ?? latest.revisionId);
   const message = sealLiveMessage({
     sender: ctx.identity,
     binding: liveBinding(opened),
@@ -472,7 +518,7 @@ async function targetOn(
 ): Promise<
   | { kind: 'save'; payload: PagePayload; overlapped: number }
   | { kind: 'held' }
-  | { kind: 'cant'; why: string }
+  | { kind: 'cant'; why: string; lasting: boolean }
 > {
   const { document, latest } = built;
   const sessionId = opened.record.subjectId;
@@ -488,6 +534,10 @@ async function targetOn(
     if (!built.unsaved) return { kind: 'held' };
     return { kind: 'save', payload: ours(headDraft.payload), overlapped: 0 };
   }
+  // A draft from outside under other keys is never merged, as for a fold.
+  if (!sameKeys(headDraft, opened)) {
+    return { kind: 'cant', why: 'the page’s draft is under other keys now', lasting: false };
+  }
   // The latest draft of the ended session in the head's signed chain.
   let base: { payload: PagePayload; state: LiveState } | null = null;
   let at: OpenedDraft | null = headDraft;
@@ -498,7 +548,11 @@ async function targetOn(
     }
     if (ofAnotherSession(at, sessionId)) {
       // A later session's starter could open this one, and would have caught it up.
-      return { kind: 'cant', why: 'the page was saved in a later live session since' };
+      return {
+        kind: 'cant',
+        why: 'the page was saved in a later live session since',
+        lasting: false,
+      };
     }
     if (at.revisionId === built.start.revisionId) {
       // Its base, with the first snapshot's state.
@@ -512,10 +566,11 @@ async function targetOn(
     }
     at = at.basedOn ? await ports.openDraft(at.basedOn) : null;
   }
-  if (!base) return { kind: 'cant', why: 'the page’s drafts since don’t come from it' };
+  if (!base)
+    return { kind: 'cant', why: 'the page’s drafts since don’t come from it', lasting: false };
   // Served cut back: its document lacks what a draft of it holds.
   if (!holdsState(document.state(), base.state)) {
-    return { kind: 'cant', why: 'it holds less than a draft of it' };
+    return { kind: 'cant', why: 'it holds less than a draft of it', lasting: false };
   }
   const merge = mergePayloads(
     heldPayload(base.payload),
@@ -536,7 +591,7 @@ async function targetOn(
       { review: false },
     );
   }
-  if (!resolved.ok) return { kind: 'cant', why: 'its changes didn’t merge' };
+  if (!resolved.ok) return { kind: 'cant', why: 'its changes didn’t merge', lasting: false };
   // The head's own extensions the document never holds stay: its link table and notes.
   const kept = Object.fromEntries(
     Object.entries(headDraft.payload.extensions).filter(

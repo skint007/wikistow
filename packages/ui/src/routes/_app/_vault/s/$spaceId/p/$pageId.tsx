@@ -533,24 +533,31 @@ function PageBody({
 
   // Others in the page's live session: Publish says so.
   const editingToo = useEditingToo(ctx, page.pageId);
-  const publishDraft = async () => {
-    // In a live session: what the editor shows at the press, saved, and only
-    // that draft published (ADR 0015 decision 5).
-    const live = await editor.current?.publishLive(async (draftHead) => {
-      const { heads } = await pageOperations.loadPage(ctx, page.pageId);
-      if (heads.draftHead !== draftHead) {
-        throw new ApiError(409, 'stale-head', 'The draft moved on', {
-          draftHead: heads.draftHead,
+  // In a live session, Publish publishes the page as it was at the press,
+  // taken before anything is awaited (ADR 0015 decision 5).
+  const publishDraft = async (pressed = editor.current?.pressLive() ?? null) => {
+    if (pressed) {
+      const written = await pressed(async (draftHead, check) => {
+        const { heads } = await pageOperations.loadPage(ctx, page.pageId);
+        if (heads.draftHead !== draftHead) {
+          throw new ApiError(409, 'stale-head', 'The draft moved on', {
+            draftHead: heads.draftHead,
+          });
+        }
+        // The draft as it is published: only the one pressed goes out.
+        const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', draftHead, {
+          fresh: true,
         });
-      }
-      return pageOperations.publishPage(ctx, page, {
-        read: readWikilinks,
-        expected: { draftHead, publishedHead: heads.publishedHead },
+        if (draft.opened.kind !== 'current') throw new Error('Update the app to publish this page');
+        check(draft.opened.payload);
+        return pageOperations.publishPage(ctx, page, {
+          read: readWikilinks,
+          expected: { draftHead, publishedHead: heads.publishedHead },
+          draft,
+        });
       });
-    });
-    if (live) {
       await contentChanged(queryClient, ctx, page);
-      return live;
+      return written;
     }
     await editor.current?.flush();
     const written = await pageOperations.publishPage(ctx, page, { read: readWikilinks });
@@ -571,6 +578,8 @@ function PageBody({
     // a live session it goes to the server, never behind what this tab
     // keeps on the device for the session (ADR 0015 decision 1).
     const live = editor.current?.live() ?? false;
+    // The press, before anything is awaited: what goes out is what the page showed now.
+    const pressed = live && !availability.offline ? (editor.current?.pressLive() ?? null) : null;
     if (availability.offline || (waiting !== 'none' && !live)) {
       await editor.current?.flush();
       const { draftHead } = info.heads;
@@ -585,7 +594,7 @@ function PageBody({
       setPublishingFrom(from);
       return;
     }
-    await publishDraft();
+    await publishDraft(pressed);
     await showPublished(from);
   };
 

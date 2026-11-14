@@ -49,7 +49,7 @@ import { useMovedLinks } from './moved-links';
 import { readHeadings } from './page-reader';
 import type { AttachmentAssist, EditorSurfaceHandle, LinkAssist } from './editor/surface';
 import { useDraftSession, type Queued } from './use-draft-session';
-import type { DraftSession, DraftSnapshot } from './draft-session';
+import type { DraftSession, DraftSnapshot, LivePublish } from './draft-session';
 import { useLiveSource } from './live/use-live-source';
 import { LiveNotes, useReviewing } from './live/live-notes';
 import { peopleQuery } from '../sharing/people';
@@ -64,10 +64,10 @@ export type DraftEditorHandle = {
   /** Whether the draft is in the page's live session now: its saves and publishes go to the server. */
   live(): boolean;
   /**
-   * In a live session, save what the editor shows now and `publish` that
-   * draft, which must still be the head (ADR 0015 decision 5); null outside one.
+   * In a live session, press **Publish**: what the editor shows now is what
+   * the function returned publishes (ADR 0015 decision 5); null outside one.
    */
-  publishLive<T>(publish: (draft: RevisionId) => Promise<T>): Promise<T | null>;
+  pressLive(): LivePublish | null;
   /**
    * Save anything not yet saved, after a file still uploading is added.
    * Throws if it can't be, so callers don't move on.
@@ -243,7 +243,7 @@ export function DraftEditor({
     ref,
     () => ({
       live: () => session.participant !== null,
-      publishLive: (publish) => session.publishLive(publish),
+      pressLive: () => session.pressLive(),
       flush: () => session.saveOrThrow(),
       beforeRestore: async () => {
         await session.leaveLive();

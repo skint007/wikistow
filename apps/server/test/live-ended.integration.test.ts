@@ -209,6 +209,41 @@ describe('an ended live session with unsaved typing', () => {
   });
 });
 
+describe('an ended session a later one saved over', () => {
+  it('is not caught up, takes no grant, and joining goes on', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const theirs = await join(editor, page, { held: true });
+    type(theirs, '\n\nLeft behind.\n');
+    await theirs.flush();
+    // Ended, but its join is still there: not served to catch up from yet.
+    await editor.ctx.api.call(liveRoutes.end, { params: { sessionId: theirs.sessionId } });
+    const ended = theirs.sessionId;
+    // A new session starts, and saves.
+    const mine = await join(owner, page);
+    expect(mine.sessionId).not.toBe(ended);
+    type(mine, '\n\nLater session.\n');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    theirs.close();
+    await t.db.execute(sql`
+      update live_joins set left_at = now() - interval '2 minutes',
+        last_message_at = now() - interval '2 minutes'
+      where session_id = ${ended}`);
+    await expect.poll(async () => (await liveOf(owner, page.pageId)).ended?.sessionId).toBe(ended);
+
+    const caught: CaughtUp[] = [];
+    const again = await joined(editor, page, { caught });
+    expect('start' in again && again.sessionId).toBe(mine.sessionId);
+    if ('start' in again) again.close();
+    expect(caught).toMatchObject([{ kind: 'cant', lasting: false }]);
+    // No grant was taken: another app may still ask for it.
+    const asked = await owner.ctx.api.call(liveRoutes.sendMessages, {
+      params: { sessionId: ended },
+      body: { joinId: newId(JoinId), messages: [], fold: ended },
+    });
+    expect(asked.grant?.lapsed).toBe(false);
+  });
+});
+
 describe('publishing in a live session', () => {
   it('publishes what the document held at the press, while the saver holds its saves', async () => {
     const { owner, editor, page } = await sharedPage();

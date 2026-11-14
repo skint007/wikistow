@@ -128,9 +128,13 @@ class FakeParticipant {
   }
   /** What the editor said at a publish's press: whether it was behind. */
   published: { behind: boolean; text: string }[] = [];
-  async publish<T>(publish: (draft: RevisionId) => Promise<T>, behind: () => boolean) {
-    this.published.push({ behind: behind(), text: this.document.text('body').toJSON() });
-    return publish(R0);
+  press(behind: () => boolean) {
+    const at = { behind: behind(), text: this.document.text('body').toJSON() };
+    this.published.push(at);
+    return at;
+  }
+  async publish<T>(publish: (draft: RevisionId, check: () => void) => Promise<T>) {
+    return publish(R0, () => {});
   }
   async settle() {
     return (
@@ -852,7 +856,7 @@ describe('catching up from an ended live session', () => {
 });
 
 describe('publishing in a live session', () => {
-  it('takes in what the editor holds first, and tells the participant whether the editor is behind', async () => {
+  it('takes the press as the editor holds it, and whether the editor is behind', async () => {
     const { draft, surface, joins } = session();
     await draft.joinLive();
     const [participant] = joins;
@@ -861,18 +865,21 @@ describe('publishing in a live session', () => {
     (surface as FakeSurface & { behind: () => boolean }).behind = () => behind;
     // Typed, not yet reported.
     surface.text = 'Start. Pressed.';
-    expect(await draft.publishLive(async (head) => head)).toBe(R0);
+    const pressed = draft.pressLive();
+    // What others type after the press isn't the press.
+    participant.theirs('Start. Pressed. Theirs after.');
+    expect(await pressed?.(async (head) => head)).toBe(R0);
     behind = false;
-    await draft.publishLive(async (head) => head);
+    await draft.pressLive()?.(async (head) => head);
     expect(participant.published).toEqual([
       { behind: true, text: 'Start. Pressed.' },
-      { behind: false, text: 'Start. Pressed.' },
+      { behind: false, text: 'Start. Pressed. Theirs after.' },
     ]);
   });
 
   it('is null outside a session', async () => {
     const { draft, noJoining } = session();
     noJoining();
-    expect(await draft.publishLive(async () => 'published')).toBeNull();
+    expect(draft.pressLive()).toBeNull();
   });
 });

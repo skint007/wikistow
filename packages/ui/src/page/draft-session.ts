@@ -150,6 +150,15 @@ export type DraftPorts = {
   live?: LivePorts;
 };
 
+/**
+ * Publishing what a press of **Publish** in a live session took: `publish`
+ * publishes the draft it is handed, once `check` passes the payload it
+ * opened to publish.
+ */
+export type LivePublish = <T>(
+  publish: (draft: RevisionId, check: (payload: PagePayload) => void) => Promise<T>,
+) => Promise<T>;
+
 /** How a draft session joins the page's live session. */
 export type LivePorts = {
   /**
@@ -629,17 +638,20 @@ export class DraftSession {
   }
 
   /**
-   * Publish from the page's live session (ADR 0015 decision 5): what the
-   * editor shows now is saved and `publish`ed, as the participant says;
-   * null when this draft isn't in a session.
+   * Press **Publish** in the page's live session (ADR 0015 decision 5):
+   * what the editor shows now, the edit it hasn't reported yet included, is
+   * what gets published, by the function this returns; null when this draft
+   * isn't in a session. Throws when it can't be published as it is.
    */
-  async publishLive<T>(publish: (draft: RevisionId) => Promise<T>): Promise<T | null> {
+  pressLive(): LivePublish | null {
     const participant = this.#participant;
     if (!participant) return null;
-    // An edit the editor hasn't reported yet is the person's, at the press too.
     this.#pull();
-    await Promise.all(this.#uploads);
-    return participant.publish(publish, () => this.#surface.current?.behind?.() ?? false);
+    // A file not in yet would go out without it.
+    if (this.#uploads.size > 0)
+      throw new Error('Files are still uploading. Publish once they’re in.');
+    const pressed = participant.press(() => this.#surface.current?.behind?.() ?? false);
+    return (publish) => participant.publish(publish, pressed);
   }
 
   /** Save what's typed now, without waiting for files still uploading. */
