@@ -1162,6 +1162,8 @@ export class DraftSession {
   async joinLive(): Promise<void> {
     const live = this.#ports.live;
     if (!live || !this.#live || this.#participant || this.#joining) return;
+    // Not while leaving the last session settles: it may still change the text.
+    if (this.#settling) return void this.#settling.then(() => this.#joinSoon());
     if (!live.allowed() || this.#theirs || this.#autosave.isStopped()) return;
     if (this.#autosave.isSaving() || this.#uploads.size > 0) return;
     this.#joining = true;
@@ -1252,7 +1254,7 @@ export class DraftSession {
       return;
     }
     const attached =
-      !this.#live || this.#ports.epoch() !== epoch
+      !this.#live || this.#ports.epoch() !== epoch || this.#settling
         ? 'failed'
         : entry
           ? this.#attachQueued(joined, entry, basedOn)
