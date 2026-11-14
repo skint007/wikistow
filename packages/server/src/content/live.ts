@@ -150,10 +150,24 @@ function servedJoins(joins: readonly JoinRow[], now: Date): liveRoutes.Join[] {
 // --- Access ----------------------------------------------------------------
 
 /**
- * The class of the two-key advisory locks that queue a session's requests,
- * apart from every one-key advisory lock (quota, items, vault and so on).
+ * The classes of the two-key advisory locks that queue live requests, apart
+ * from every one-key advisory lock (quota, items, vault and so on).
  */
-const LIVE_LOCK_CLASS = 5010;
+const LIVE_ACCOUNT_LOCK_CLASS = 5011;
+const LIVE_SESSION_LOCK_CLASS = 5010;
+
+/**
+ * Queue a person's live requests, before any of them holds a lock a change
+ * of access waits on. Otherwise one person's requests, in several sessions,
+ * each holding the space shared while it waits on their minute row or
+ * quota, could overlap without end and hold off a removal from the space or
+ * the end of a share. Only live requests take it, always first, so it never
+ * waits in a ring.
+ */
+const queueLive = (tx: Database, accountId: string) =>
+  tx.execute(
+    sql`select pg_advisory_xact_lock(${LIVE_ACCOUNT_LOCK_CLASS}::int, hashtext(${accountId}))`,
+  );
 
 /**
  * The session `sessionId` and its page, for a person who can edit the page
@@ -183,12 +197,14 @@ async function sessionFor(
     throw new ContentError('not-found');
   }
   if (lock) {
-    // One request of the session's at a time holds the page: the rest queue
-    // here, holding nothing a change of access waits on. Otherwise requests
-    // queued on the session's row, each holding the page FOR SHARE, could
-    // overlap without end and hold off a removal while its member floods.
+    // One request of a person's at a time, and one of the session's, holds
+    // the space and the page: the rest queue here, holding nothing a change
+    // of access waits on. Otherwise requests queued on the session's row or
+    // their sender's charges, each holding the page FOR SHARE, could overlap
+    // without end and hold off a removal while its member floods.
+    await queueLive(tx, caller.accountId);
     await tx.execute(
-      sql`select pg_advisory_xact_lock(${LIVE_LOCK_CLASS}::int, hashtext(${sessionId}))`,
+      sql`select pg_advisory_xact_lock(${LIVE_SESSION_LOCK_CLASS}::int, hashtext(${sessionId}))`,
     );
     await lockSpace(tx, found.spaceId);
   }
@@ -858,6 +874,7 @@ export async function startLive(db: Database, input: StartLive) {
   return db.transaction(async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     if (caller.personId !== null) throw new ContentError('not-found');
+    await queueLive(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
     if (!canEdit(access)) throw new ContentError('not-found');

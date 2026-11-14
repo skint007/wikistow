@@ -7,6 +7,7 @@ import {
   moveOperations as moves,
   trashOperations as trash,
   fromBase64,
+  groupOperations,
   metadataAd,
   newId,
   openSealedKey,
@@ -832,6 +833,69 @@ describe('ending', () => {
     expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
     expect(took).toBeLessThan(2000);
   });
+
+  it.each(['remove from space', 'end share'] as const)(
+    'lets a change that holds the space through while one person floods sessions on four pages (%s)',
+    async (change) => {
+      const { owner, editor, lib, shareId } = await sharedLibrary();
+      const list = [lib.page];
+      for (let i = 1; i < 4; i++) {
+        list.push({
+          ...lib.page,
+          pageId: await pages.createPage(owner.ctx, {
+            spaceId: lib.spaceId,
+            parentId: lib.shared,
+            title: `Page ${i}`,
+            markdown: 'x',
+          }),
+        });
+      }
+      const floods: { session: TestSession; batch: liveRoutes.LiveMessage[] }[] = [];
+      for (const page of list) {
+        const session = await startSession(editor, page);
+        const me = typist(editor, session, session.joinId);
+        me.started();
+        const batch = Array.from({ length: liveRoutes.MAX_MESSAGES }, () => me.message('update'));
+        await me.send(batch);
+        floods.push({ session, batch });
+      }
+      const plan =
+        change === 'end share'
+          ? await ending.previewEnding(owner.ctx, { spaceId: lib.spaceId, shareId })
+          : await groupOperations.planRemovalEverywhere(owner.ctx, {
+              spaceId: lib.spaceId,
+              identityId: editor.vault.identity.public.id,
+            });
+      let flooding = true;
+      const loops = floods.map(async ({ session, batch }) => {
+        while (flooding) await send(editor, session, session.joinId, batch).catch(() => {});
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const began = Date.now();
+      const applied =
+        change === 'end share'
+          ? ending.endShare(owner.ctx, {
+              preview: plan as Awaited<ReturnType<typeof ending.previewEnding>>,
+            })
+          : groupOperations.applyGroupChange(
+              owner.ctx,
+              plan as Awaited<ReturnType<typeof groupOperations.planRemovalEverywhere>>,
+            );
+      const done = await Promise.race([
+        applied.then(() => Date.now() - began),
+        new Promise<null>((resolve) => setTimeout(resolve, 5000, null)),
+      ]);
+      flooding = false;
+      await Promise.all(loops);
+      await applied;
+      expect(done).not.toBeNull();
+      expect(done).toBeLessThan(2000);
+      for (const { session } of floods) {
+        expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
+      }
+    },
+    30_000,
+  );
 
   it('ends the session in the transaction that removes a member, and takes nothing after but saved', async () => {
     const { owner, reader, editor, lib, shareId } = await sharedLibrary();
