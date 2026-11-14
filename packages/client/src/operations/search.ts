@@ -178,6 +178,16 @@ export class PageIndex extends SearchIndex<SearchPage> {
   }
 
   /**
+   * Whether the index holds the page `pageId` in `spaceId` as a change
+   * waiting on this device over the version it names (`WaitingText`), not
+   * as that version's own text.
+   */
+  waiting(spaceId: SpaceId, pageId: PageId): boolean {
+    const held = this.#lookup().byPage.get(pageKey(spaceId, pageId));
+    return held !== undefined && typedOver.has(held.page);
+  }
+
+  /**
    * An index like this one, but holding `pages`, each in place of the page
    * with its space and page ID, and in each of `spaces` (every one for
    * `'all'`) no page `pages` leaves out. A page's content can be left out
@@ -185,7 +195,9 @@ export class PageIndex extends SearchIndex<SearchPage> {
    * (`VersionTime`): what the index holds of it stays, with that time. A
    * page given in the version and place this index holds it is kept as
    * indexed, its content and time too, unless given a time alone that
-   * differs: only the
+   * differs, or a change waiting on this device over it (`WaitingText`)
+   * that differs from what is held. A change held so gives way to the
+   * version's own content when that is given. Only the
    * text of pages that changed is read again (`SearchIndex`), and its
    * lookups are copied, in time linear in the pages it holds, then sorted
    * only where pages changed. If nothing did, this index is returned
@@ -199,12 +211,15 @@ export class PageIndex extends SearchIndex<SearchPage> {
    * compacts: for a change this person made, whose version before was theirs.
    */
   with(
-    pages: Iterable<readonly [SearchPage, (IndexedText | VersionTime)?]>,
+    pages: Iterable<readonly [SearchPage, (IndexedText | WaitingText | VersionTime)?]>,
     { spaces = [] }: { spaces?: Iterable<SpaceId> | 'all' } = {},
   ): PageIndex {
     const read = this.#lookup();
     const { byPage, bySpace } = read;
-    const given = new Map<string, readonly [SearchPage, (IndexedText | VersionTime)?]>();
+    const given = new Map<
+      string,
+      readonly [SearchPage, (IndexedText | WaitingText | VersionTime)?]
+    >();
     for (const page of pages) given.set(pageKey(page[0].spaceId, page[0].pageId), page);
     const removed = new Map<string, Held>();
     const added: Held[] = [];
@@ -217,7 +232,15 @@ export class PageIndex extends SearchIndex<SearchPage> {
       const time = give && !('title' in give) ? give.updated : null;
       const kept = held?.entry.revisionId === doc.revisionId ? held.page : undefined;
       const at = time ?? kept?.updated ?? null;
-      if (held && sameDoc(held.entry, doc) && held.entry.updated === at) continue;
+      const typed = content !== undefined && 'waiting' in content && content.waiting === true;
+      // The version held, given as typed over it, or given as its own over
+      // what was typed: the same version, but not the same text (#423).
+      const retyped =
+        kept !== undefined &&
+        content !== undefined &&
+        (typed || typedOver.has(kept)) &&
+        !(typed === typedOver.has(kept) && sameText(kept, content));
+      if (held && sameDoc(held.entry, doc) && held.entry.updated === at && !retyped) continue;
       if (held) removed.set(key, held);
       const text = content ?? (kept && { ...kept, updated: at });
       if (!text) throw new Error('A page’s content is needed for a version the index doesn’t hold');
@@ -230,6 +253,7 @@ export class PageIndex extends SearchIndex<SearchPage> {
         links: text.links ?? [],
         updated: text.updated ?? null,
       };
+      if (content ? typed : kept !== undefined && typedOver.has(kept)) typedOver.add(page);
       const { title, properties, links, updated } = page;
       added.push({ page, entry: { ...doc, title, properties, links, updated } });
     }
@@ -273,6 +297,26 @@ export class PageIndex extends SearchIndex<SearchPage> {
     }
     return this.#read;
   }
+}
+
+/**
+ * The pages indexes hold as a change waiting on this device over the
+ * version they name (`WaitingText`), not as that version's own text: never
+ * kept as that version's (`keptPages`), and replaced by it when it is
+ * opened again (`updateIndex`).
+ */
+const typedOver = new WeakSet<Readonly<IndexedPage<SearchPage>>>();
+
+/** Whether `held` holds `content`: its title, text, headings, properties, links and time. */
+function sameText(held: Readonly<IndexedPage<SearchPage>>, content: IndexedText): boolean {
+  return (
+    held.title === content.title &&
+    held.text === content.text &&
+    JSON.stringify(held.headings) === JSON.stringify(content.headings ?? []) &&
+    JSON.stringify(held.properties) === JSON.stringify(content.properties ?? []) &&
+    JSON.stringify(held.links) === JSON.stringify(content.links ?? []) &&
+    held.updated === (content.updated ?? null)
+  );
 }
 
 /** A page an index holds: as it lists it, and as it indexed it. */
@@ -474,6 +518,13 @@ export async function indexSpaces(
  */
 export type VersionTime = { readonly updated: string | null };
 
+/**
+ * A change waiting on this device, given to `PageIndex.with` for the version
+ * it was typed over (ADR 0009, decision 7): its text, which isn't that
+ * version's, so it goes in over what the index holds of the version.
+ */
+export type WaitingText = IndexedText & { readonly waiting: true };
+
 /** What changed since an index was built, for `updateIndex` to follow. */
 export type IndexChanges = {
   /** The spaces whose trees may have changed, or every one. */
@@ -494,7 +545,9 @@ export type SavedVersion = {
    * When it was saved, by this device's clock once the server confirmed it
    * (`IndexedEntry.updated`); null or left out if unknown. A save still
    * waiting on this device names its base as the version (`revisionId` is
-   * `basedOn`), and keeps the time the index holds for that.
+   * `basedOn`), and keeps the time the index holds for that. Its text goes
+   * in over what the index holds of its base (`WaitingText`), until the
+   * space is listed again.
    */
   updated?: string | null;
 };
@@ -551,13 +604,18 @@ export async function updateIndex(
   }
   const ids = all ? await readableSpaces(ctx) : [...listing];
   live();
-  const pages: [SearchPage, (IndexedText | VersionTime)?][] = [];
+  const pages: [SearchPage, (IndexedText | WaitingText | VersionTime)?][] = [];
   if (ids.length > 0) {
     await readPages(ctx, await loadSpaces(ctx, ids, true), {
       reuse: (spaceId, page, head) => {
         const held = index.page(spaceId, page);
-        // One held without its time is opened again, to be asked for it (`timed`).
-        return held?.revisionId === head && held.updated !== null ? 'held' : undefined;
+        // One held without its time is opened again, to be asked for it
+        // (`timed`), and one held as a change waiting on this device over
+        // it, as the server has it now: the change was sent, discarded, or
+        // waits on the person's choice.
+        return held?.revisionId === head && held.updated !== null && !index.waiting(spaceId, page)
+          ? 'held'
+          : undefined;
       },
       timed: true,
       live,
@@ -565,7 +623,10 @@ export async function updateIndex(
       readLinks,
       each: (doc, content) => {
         // The version held, opened again only for its time (`reuse`).
-        const again = content && index.page(doc.spaceId, doc.pageId)?.revisionId === doc.revisionId;
+        const again =
+          content &&
+          index.page(doc.spaceId, doc.pageId)?.revisionId === doc.revisionId &&
+          !index.waiting(doc.spaceId, doc.pageId);
         pages.push(
           again ? [doc, { updated: content.updated ?? null }] : content ? [doc, content] : [doc],
         );
@@ -592,6 +653,8 @@ export async function updateIndex(
       {
         ...(await contentOfPayload(saved.payload, readLinks)),
         updated: times.has(key) ? (times.get(key) ?? null) : held.updated,
+        // Still on this device (`OfflineQueue.drafts`): typed over its base.
+        ...(saved.revisionId === saved.basedOn ? { waiting: true as const } : {}),
       },
     ]);
   }
@@ -778,19 +841,23 @@ export type KeptPages = ReadonlyMap<
 
 export const keptPages = (index: SearchIndex<SearchPage>): KeptPages =>
   new Map(
-    index.pages().map(({ doc, title, text, headings, properties, links, updated }) => [
-      doc.revisionId,
-      {
-        spaceId: doc.spaceId,
-        pageId: doc.pageId,
-        title,
-        text,
-        headings,
-        properties,
-        links,
-        updated,
-      },
-    ]),
+    // What was typed over a version isn't that version's (`WaitingText`).
+    index
+      .pages()
+      .filter((page) => !typedOver.has(page))
+      .map(({ doc, title, text, headings, properties, links, updated }) => [
+        doc.revisionId,
+        {
+          spaceId: doc.spaceId,
+          pageId: doc.pageId,
+          title,
+          text,
+          headings,
+          properties,
+          links,
+          updated,
+        },
+      ]),
   );
 
 const KeptScalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);

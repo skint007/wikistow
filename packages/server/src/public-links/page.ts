@@ -3,7 +3,7 @@
 // and no script at all. It looks as the app shows a page: its palette (light,
 // or slate where the reader's system is dark), its font, the page in a card
 // under its cover, and the reader's styles for the body.
-import { BANNER_PRESETS, type BannerPreset } from '@wikistow/client';
+import { BANNER_PRESETS, COLORS, type BannerPreset } from '@wikistow/client';
 import { createHash } from 'node:crypto';
 import { NO_COVER, symbolNode, type PublicCover } from './cover.ts';
 import { MATH_FONT, PAGE_FONTS } from './fonts.ts';
@@ -33,6 +33,19 @@ export const LIGHT = {
   'table-head': '#f1ece4',
   'folder-blue': '#e4eeff',
   'folder-purple': '#efe8ff',
+  highlight: '#fff3a3',
+  'highlight-red': '#ffe0e0',
+  'highlight-orange': '#ffe5cc',
+  'highlight-yellow': '#fff3a3',
+  'highlight-green': '#dcf5e1',
+  'highlight-blue': '#dde9ff',
+  'highlight-purple': '#ece3ff',
+  'text-red': '#b42323',
+  'text-orange': '#a8390b',
+  'text-yellow': '#8f5b00',
+  'text-green': '#1f7a45',
+  'text-blue': '#2b5fb4',
+  'text-purple': '#6d3fc0',
   'card-shadow': '0 1px 2px rgba(60, 40, 20, 0.06), 0 4px 16px rgba(60, 40, 20, 0.05)',
   cover:
     'radial-gradient(circle at 20% 30%, #ffd8a8 0, transparent 55%), radial-gradient(circle at 80% 20%, #ffc9c9 0, transparent 50%), linear-gradient(120deg, #ffe8cc, #fff4e6)',
@@ -59,6 +72,19 @@ export const SLATE: Record<keyof typeof LIGHT, string> = {
   'table-head': '#1a2436',
   'folder-blue': 'rgba(96, 165, 250, 0.17)',
   'folder-purple': 'rgba(167, 139, 250, 0.18)',
+  highlight: 'rgba(250, 204, 21, 0.26)',
+  'highlight-red': 'rgba(248, 113, 113, 0.26)',
+  'highlight-orange': 'rgba(251, 146, 60, 0.26)',
+  'highlight-yellow': 'rgba(250, 204, 21, 0.26)',
+  'highlight-green': 'rgba(74, 222, 128, 0.22)',
+  'highlight-blue': 'rgba(96, 165, 250, 0.28)',
+  'highlight-purple': 'rgba(167, 139, 250, 0.3)',
+  'text-red': '#fca5a5',
+  'text-orange': '#fdba74',
+  'text-yellow': '#fde047',
+  'text-green': '#86efac',
+  'text-blue': '#93c5fd',
+  'text-purple': '#c4b5fd',
   'card-shadow': 'inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 8px 24px rgba(0, 0, 0, 0.4)',
   cover:
     'radial-gradient(circle at 20% 35%, rgba(45, 212, 191, 0.35) 0, transparent 55%), radial-gradient(circle at 80% 15%, rgba(99, 102, 241, 0.35) 0, transparent 50%), linear-gradient(120deg, #10213a, #0f1a2c)',
@@ -190,6 +216,9 @@ ${STEPS.slice(1)
 .page-body table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; border-radius: 12px; background: var(--table); font-size: 0.875rem; }
 .page-body th { background: var(--table-head); padding: 0.5rem 0.75rem; text-align: left; font-weight: 700; }
 .page-body td { border-top: 1px solid var(--border); padding: 0.5rem 0.75rem; }
+.page-body span[data-color] a { color: inherit; }
+.page-body mark { background: var(--highlight); color: inherit; border-radius: 3px; padding: 0 0.125rem; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+${COLORS.map((color) => `.page-body mark[data-color="${color}"] { background: var(--highlight-${color}); }\n.page-body span[data-color="${color}"] { color: var(--text-${color}); }`).join('\n')}
 .page-body kbd { font: 0.85em ${MONO}; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; background: var(--card); padding: 0.125rem 0.375rem; }
 .page-body summary { cursor: pointer; font-weight: 700; }
 .page-body details > * + * { margin-top: 0.5rem; }

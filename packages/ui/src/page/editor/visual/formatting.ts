@@ -416,6 +416,8 @@ export const FORMATS = {
   bold: mark('strong'),
   italic: mark('emphasis'),
   code: mark('inlineCode'),
+  // A plain one, `==text==`; off takes any colour's too (`setColor` gives one).
+  highlight: mark('highlight'),
   strike: mark('strike_through'),
   quote,
   codeBlock,
@@ -434,6 +436,7 @@ export const SHORTCUTS: Record<FormatName, string> = {
   bold: 'Mod-b',
   italic: 'Mod-i',
   code: 'Mod-e',
+  highlight: 'Mod-Shift-h',
   strike: 'Mod-Alt-x',
   quote: 'Mod-Shift-b',
   codeBlock: 'Mod-Alt-c',

@@ -2,10 +2,12 @@ import type { Nodes, Root } from 'mdast';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import { gfm } from 'micromark-extension-gfm';
+import { highlightFromMarkdown, highlightSyntax } from './highlight.ts';
 import { mathFromMarkdownExtension, mathSyntax } from './math.ts';
 import { wikilinkFromMarkdown, wikilinkSyntax } from './wikilink.ts';
 
 export * from './frontmatter.ts';
+export * from './highlight.ts';
 export * from './link-spans.ts';
 export * from './math.ts';
 export * from './properties.ts';
@@ -16,12 +18,18 @@ export * from './wikilink.ts';
 
 /**
  * A page body (frontmatter already split off) as mdast, read the way the
- * reader reads it: GitHub-flavoured Markdown plus wikilinks and math.
+ * reader reads it: GitHub-flavoured Markdown plus wikilinks, math,
+ * highlights and the theme's colours.
  */
 export const parseMarkdown = (body: string): Root =>
   fromMarkdown(body, {
-    extensions: [gfm(), wikilinkSyntax, mathSyntax],
-    mdastExtensions: [gfmFromMarkdown(), wikilinkFromMarkdown, mathFromMarkdownExtension],
+    extensions: [gfm(), wikilinkSyntax, mathSyntax, highlightSyntax],
+    mdastExtensions: [
+      gfmFromMarkdown(),
+      wikilinkFromMarkdown,
+      mathFromMarkdownExtension,
+      highlightFromMarkdown,
+    ],
   });
 
 /** Every node of `tree`, in document order. */

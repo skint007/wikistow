@@ -15,6 +15,7 @@ import {
 } from '@wikistow/client';
 import type { DesktopBridge, KeptFolder } from '@wikistow/contracts';
 import { desktop } from '../desktop';
+import { forgetModel } from '../meaning/embedder';
 
 // Where this device keeps pages for offline use (ADR 0009, decision 2).
 
@@ -209,24 +210,32 @@ function desktopKeptStore(bridge: DesktopBridge, secure: boolean): KeptStore {
   };
 }
 
-const SEARCH_INDEX = 'search-index';
+/** Sealed bytes kept under `name` in the database's `meta` store. */
+const metaFile = (name: string) => ({
+  read: async () => {
+    const kept = await transact('meta', 'readonly', (s) => s.get(name));
+    return kept instanceof Uint8Array ? kept : null;
+  },
+  write: async (sealed: Uint8Array) => {
+    await transact('meta', 'readwrite', (s) => void s.put(sealed, name));
+  },
+  drop: async () => {
+    await transact('meta', 'readwrite', (s) => void s.delete(name));
+  },
+});
 
 /**
  * The browser's search index, kept in the same database (ADR 0009,
  * decision 9), sealed by the pages (`sealKept`). Deleted with it at sign-out.
  */
-export const browserSearchIndex = {
-  read: async () => {
-    const kept = await transact('meta', 'readonly', (s) => s.get(SEARCH_INDEX));
-    return kept instanceof Uint8Array ? kept : null;
-  },
-  write: async (sealed: Uint8Array) => {
-    await transact('meta', 'readwrite', (s) => void s.put(sealed, SEARCH_INDEX));
-  },
-  drop: async () => {
-    await transact('meta', 'readwrite', (s) => void s.delete(SEARCH_INDEX));
-  },
-};
+export const browserSearchIndex = metaFile('search-index');
+
+/**
+ * Search by meaning's vectors, kept beside the search index (ADR 0016,
+ * decision 4), sealed by the pages (`sealMeaningIndex`). Deleted with the
+ * database at sign-out, and at a sign-in to another account.
+ */
+export const browserMeaningIndex = metaFile('meaning-index');
 
 const TRUST_MARKS = 'trust-marks';
 
@@ -410,7 +419,8 @@ export async function forgetKept(): Promise<void> {
     channel.close();
   }
   const { store } = await keptStore();
-  await store.clear().catch(() => {});
+  // The model search by meaning keeps, too (ADR 0016, decision 3).
+  await Promise.all([store.clear().catch(() => {}), forgetModel().catch(() => {})]);
 }
 
 /** Run `signedOut` when another tab signs out, until the returned function is called. */

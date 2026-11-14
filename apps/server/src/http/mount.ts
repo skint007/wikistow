@@ -3,11 +3,13 @@ import type {
   RouteInput,
   RouteOutput,
   StreamBody,
+  StreamInput,
   StreamRouteDef,
 } from '@wikistow/contracts';
 import { hash, utf8 } from '@wikistow/client';
 import { consumeRateLimit, type Actor, type Database, type Once } from '@wikistow/server';
 import type { Context, Hono } from 'hono';
+import type { ServerResponse } from 'node:http';
 import type { z } from 'zod';
 import type { Auth } from '../auth/auth.ts';
 import type { Config } from '../config.ts';
@@ -55,10 +57,11 @@ type Options = {
    */
   bodyLimit?: number;
   /**
-   * The large-body slots it takes: `bulk` (the default), `rotation` or
-   * `staging`. Rotations and owner removals have their own, so large shares
-   * being made can't hold off removing someone, and so does staging a
-   * public copy, which holds its slot while the copy renders.
+   * The large-body slots it takes: `bulk` (the default), `rotation`,
+   * `staging` or `live`. Rotations and owner removals have their own, so
+   * large shares being made can't hold off removing someone, and so does
+   * staging a public copy, which holds its slot while the copy renders,
+   * and a live session's snapshot.
    */
   bodyPool?: BodyPool;
   /**
@@ -76,22 +79,34 @@ type Options = {
    * hands to the change as `once`. Every other route refuses the header.
    */
   idempotent?: boolean;
+  /**
+   * The rate limit's key in place of the route's method and path, so
+   * several routes count against one allowance (live sessions' `LIVE_LIMIT`).
+   */
+  rateLimitKey?: string;
 };
 
-/** Large bodies read and handled at once in each pool, by one account and in all. */
+/**
+ * Large bodies read and handled at once in each pool, by one account and in
+ * all. Live sessions' snapshots are smaller and more often, one each time a
+ * draft is opened alone, so their pool has more room.
+ */
 const BULK_PER_ACCOUNT = 1;
 const BULK_AT_ONCE = 4;
+const LIVE_PER_ACCOUNT = 2;
+const LIVE_AT_ONCE = 16;
 
-export type BodyPool = 'bulk' | 'rotation' | 'staging';
+/** The large-body pools: `live` takes sessions' snapshots, so typing never waits on a share being made. */
+export type BodyPool = 'bulk' | 'rotation' | 'staging' | 'live';
 
 // A pool's large bodies being read or handled now, in all and by account:
 // a slot for `accountId`, or `rate-limited` if none is free.
-function bodySlots() {
+function bodySlots(perAccount = BULK_PER_ACCOUNT, atOnce = BULK_AT_ONCE) {
   let inFlight = 0;
   const byAccount = new Map<string, number>();
   return (accountId: string): (() => void) => {
     const mine = byAccount.get(accountId) ?? 0;
-    if (mine >= BULK_PER_ACCOUNT || inFlight >= BULK_AT_ONCE) {
+    if (mine >= perAccount || inFlight >= atOnce) {
       throw new ApiError('rate-limited', 'Too many large requests at once; try again shortly');
     }
     inFlight++;
@@ -145,6 +160,7 @@ export function createRoutes({
     bulk: bodySlots(),
     rotation: bodySlots(),
     staging: bodySlots(),
+    live: bodySlots(LIVE_PER_ACCOUNT, LIVE_AT_ONCE),
   };
 
   // Signed-in routes check the session, and count toward the account's rate
@@ -240,10 +256,10 @@ export function createRoutes({
     c: Context<AppEnv>,
     route: Pick<RouteDef, 'method' | 'path'>,
     principal: Principal,
-    options: Options,
+    options: Pick<Options, 'rateLimit' | 'rateLimitKey'>,
   ) {
     if (!options.rateLimit || !config.rateLimit) return;
-    const key = `${route.method} ${route.path} account:${principal.accountId}`;
+    const key = `${options.rateLimitKey ?? `${route.method} ${route.path}`} account:${principal.accountId}`;
     return enforceRateLimit(c, key, options.rateLimit);
   }
 
@@ -328,7 +344,12 @@ export function createRoutes({
         options,
         async (c): Promise<ContentCtx & { lowerLimit?: number | undefined }> => {
           const actor = await requireActor(c);
-          await limitActor(c, `${route.method} ${route.path}`, actor, options.rateLimit);
+          await limitActor(
+            c,
+            options.rateLimitKey ?? `${route.method} ${route.path}`,
+            actor,
+            options.rateLimit,
+          );
           const lowerLimit = (await options.beforeBody?.(c.req.param(), actor)) ?? undefined;
           return { c, actor, lowerLimit };
         },
@@ -428,12 +449,29 @@ export function createRoutes({
       route: R,
       handler: (
         body: StreamBody<R>,
-        ctx: AccountCtx & { signal: AbortSignal },
+        ctx: AccountCtx & {
+          signal: AbortSignal;
+          input: StreamInput<R>;
+          /** End the response now, whether or not its reader is reading. */
+          stop: () => void;
+        },
       ) => AsyncIterable<z.input<R['event']>> | Promise<AsyncIterable<z.input<R['event']>>>,
-      options: Pick<Options, 'rateLimit'> = {},
+      options: Pick<Options, 'rateLimit'> & {
+        /**
+         * Answer an agent's credential `not-found`, once it is checked, as
+         * live sessions' routes do, rather than `unauthenticated`.
+         */
+        agentsNotFound?: boolean;
+        /** The rate limit's key in place of the route's, so routes share one (`LIVE_LIMIT`). */
+        rateLimitKey?: string;
+      } = {},
     ) {
       app.on(route.method, route.path, async (c) => {
         checkOrigin(c, route, config.publicOrigin);
+        if (options.agentsNotFound && hasBearer(c)) {
+          await requireAgent(db, c, config.publicOrigin);
+          throw new ApiError('not-found', 'Not found');
+        }
         const principal = await requirePrincipal(auth, c);
         if (c.req.header('idempotency-key') !== undefined) refuseKey();
         await limitAccount(c, route, principal, options);
@@ -442,11 +480,17 @@ export function createRoutes({
         const body = (
           route.body ? parsed(route.body, await readJson(c), 'body') : undefined
         ) as StreamBody<R>;
+        const input = {
+          params: parsePart(route.params, c.req.param(), 'params'),
+          query: parsePart(route.query, c.req.query(), 'query'),
+        } as StreamInput<R>;
         // Ends when the client leaves or cancels the stream, so the
         // handler can stop its own work (the provider's request) at once.
         const left = new AbortController();
         const signal = AbortSignal.any([c.req.raw.signal, left.signal]);
-        const events = await handler(body, { c, principal, signal });
+        let stop = () => {};
+        let stopped = false;
+        const events = await handler(body, { c, principal, signal, input, stop: () => stop() });
         const iterator = events[Symbol.asyncIterator]();
         const encoder = new TextEncoder();
         // The event being waited for, kept across a keep-alive. Handled here
@@ -455,6 +499,24 @@ export function createRoutes({
         // Pulled one event at a time, so a slow reader slows the provider's
         // stream rather than filling memory.
         const lines = new ReadableStream<Uint8Array>({
+          start(controller) {
+            stop = () => {
+              if (stopped) return;
+              stopped = true;
+              left.abort();
+              void iterator.return?.();
+              try {
+                controller.close();
+              } catch {
+                // Closed already.
+              }
+              // A reader that isn't reading keeps the socket, and what is
+              // buffered for it, until the idle timeout: cut it off now. A
+              // response sent in full is left be, its connection reused.
+              const outgoing = (c.env as { outgoing?: ServerResponse } | undefined)?.outgoing;
+              if (outgoing && !outgoing.writableFinished) outgoing.destroy();
+            };
+          },
           async pull(controller) {
             if (!pending) {
               pending = iterator.next();
@@ -468,6 +530,7 @@ export function createRoutes({
               timer = setTimeout(resolve, STREAM_KEEPALIVE_MS, null);
             });
             const next = await Promise.race([pending, quiet]).finally(() => clearTimeout(timer));
+            if (stopped) return;
             if (next === null) {
               controller.enqueue(encoder.encode('\n'));
               return;

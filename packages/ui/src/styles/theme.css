@@ -82,6 +82,19 @@
   --alert-important: #6d3fc0;
   --alert-caution: #b02525;
   --code-title: #2b5fb4;          /* highlighted code's names: functions, types, tags */
+  --highlight: #fff3a3;           /* a page's highlight (`==text==`), behind text in the palette's foreground */
+  --highlight-red: #ffe0e0;       /* a highlight in one of the theme's colours (`<mark data-color>`) */
+  --highlight-orange: #ffe5cc;
+  --highlight-yellow: #fff3a3;
+  --highlight-green: #dcf5e1;
+  --highlight-blue: #dde9ff;
+  --highlight-purple: #ece3ff;
+  --text-red: #b42323;            /* text in one of the theme's colours (`<span data-color>`): 4.5:1 on the card and on its highlight */
+  --text-orange: #a8390b;
+  --text-yellow: #8f5b00;
+  --text-green: #1f7a45;
+  --text-blue: #2b5fb4;
+  --text-purple: #6d3fc0;
 
   --folder-green: #e3f6e9;
   --folder-orange: #ffeedd;
@@ -151,6 +164,19 @@
   --alert-important: #c4b5fd;
   --alert-caution: var(--destructive);
   --code-title: #8ab4f8;
+  --highlight: rgba(250, 204, 21, 0.26);
+  --highlight-red: rgba(248, 113, 113, 0.26);
+  --highlight-orange: rgba(251, 146, 60, 0.26);
+  --highlight-yellow: rgba(250, 204, 21, 0.26);
+  --highlight-green: rgba(74, 222, 128, 0.22);
+  --highlight-blue: rgba(96, 165, 250, 0.28);
+  --highlight-purple: rgba(167, 139, 250, 0.3);
+  --text-red: #fca5a5;
+  --text-orange: #fdba74;
+  --text-yellow: #fde047;
+  --text-green: #86efac;
+  --text-blue: #93c5fd;
+  --text-purple: #c4b5fd;
 
   --folder-green: rgba(74, 222, 128, 0.14);
   --folder-orange: rgba(251, 146, 60, 0.16);
@@ -220,6 +246,19 @@
   --alert-important: #c4b5fd;
   --alert-caution: var(--destructive);
   --code-title: #8ab4f8;
+  --highlight: rgba(250, 204, 21, 0.26);
+  --highlight-red: rgba(248, 113, 113, 0.26);
+  --highlight-orange: rgba(251, 146, 60, 0.26);
+  --highlight-yellow: rgba(250, 204, 21, 0.26);
+  --highlight-green: rgba(74, 222, 128, 0.22);
+  --highlight-blue: rgba(96, 165, 250, 0.28);
+  --highlight-purple: rgba(167, 139, 250, 0.3);
+  --text-red: #fca5a5;
+  --text-orange: #fdba74;
+  --text-yellow: #fde047;
+  --text-green: #86efac;
+  --text-blue: #93c5fd;
+  --text-purple: #c4b5fd;
 
   --folder-green: rgba(74, 222, 128, 0.15);
   --folder-orange: rgba(251, 146, 60, 0.17);
@@ -289,6 +328,19 @@
   --alert-important: #c4b5fd;
   --alert-caution: var(--destructive);
   --code-title: #8ab4f8;
+  --highlight: rgba(250, 204, 21, 0.26);
+  --highlight-red: rgba(248, 113, 113, 0.26);
+  --highlight-orange: rgba(251, 146, 60, 0.26);
+  --highlight-yellow: rgba(250, 204, 21, 0.26);
+  --highlight-green: rgba(74, 222, 128, 0.22);
+  --highlight-blue: rgba(96, 165, 250, 0.28);
+  --highlight-purple: rgba(167, 139, 250, 0.3);
+  --text-red: #fca5a5;
+  --text-orange: #fdba74;
+  --text-yellow: #fde047;
+  --text-green: #86efac;
+  --text-blue: #93c5fd;
+  --text-purple: #c4b5fd;
 
   --folder-green: rgba(74, 222, 128, 0.14);
   --folder-orange: rgba(251, 146, 60, 0.16);

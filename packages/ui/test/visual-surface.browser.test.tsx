@@ -216,14 +216,30 @@ describe('the fidelity check', () => {
       '> [!note] Title\n> body\n',
       'Hidden %%note%% text\n',
       '#project starts a line\n',
-      '==marked== starts a line\n',
       '[a][r]\n\n[r]: https://example.test\n',
     ])
       expect(visual(body), body).toBe(false);
     // Text Markdown writes back the same stays visual, as does math, a
-    // price beside it too.
+    // price beside it too, and highlights and colours (#403), one starting
+    // a line too.
     for (const body of [
       'A #tag mid-line, $5 and $10, ==marked== and ^block\n',
+      '==marked== starts a line\n',
+      'Text\n==marked== starts its second line, and a == b, x==y==z and ===\n',
+      '- ==**item**== <span data-color="red">red</span> <mark data-color="blue">blue</mark>\n',
+      '| a |\n| - |\n| ==b== <span data-color="green">c</span> |\n',
+      '<span data-color="pink">not a colour</span> <span data-color="red">open\n',
+      // Marks around a highlight or colour at their start, and around all of it.
+      '**==a== b**\n',
+      '*==a== b*, ~~==a== b~~\n',
+      '**<span data-color="red">a</span> b** <span data-color="red">==a== b</span>\n',
+      '<span data-color="red"><mark data-color="blue">a</mark> b</span>\n',
+      '[==a==](https://x.test) [<span data-color="red">a</span>](https://x.test)\n',
+      '**==x ~~*a*~~==** and **==x *~~a~~*==**\n',
+      // Two of a colour side by side, which the editor shows as one.
+      '<span data-color="red">a</span><span data-color="red">b</span> <mark data-color="red">c</mark><mark data-color="red">d</mark>\n',
+      // A colour's HTML holds spaces at its ends.
+      'x <span data-color="red"> a</span> y <span data-color="red">a </span>b x<mark data-color="red"> a</mark>\n',
       '> [!NOTE]\n> body\n',
       'Speed is $v = d / t$ here.\n',
       'It costs \\$5, so $x^2$ more.\n',

@@ -36,14 +36,19 @@ export type CommentChange = {
  * once per space and transaction, until `close`. The `wikistow_tree_changed`
  * trigger names it (migration 0034); nothing says what changed. With
  * `onComment`, also each change to a comment, as the `wikistow_comment_changed`
- * trigger names it (migration 0048), on the same connection. postgres.js
+ * trigger names it (migration 0048), and with `onLive`, each live session
+ * that ends or goes and each page with one whose draft head moves (migration
+ * 0050), on the same connection. postgres.js
  * listens on a connection of its own, which stays open, and listens again if
  * that one drops. Changes made while it is down are missed.
  */
 export async function listenForTreeChanges(
   url: string,
   onChange: (spaceId: string) => void,
-  { onComment }: { onComment?: (change: CommentChange) => void } = {},
+  {
+    onComment,
+    onLive,
+  }: { onComment?: (change: CommentChange) => void; onLive?: (payload: string) => void } = {},
 ) {
   const sql = postgres(url, {
     max: 1,
@@ -58,6 +63,8 @@ export async function listenForTreeChanges(
       onComment({ pageId, audience, readerHistoryFrom: Number(from) });
     });
   }
+  // A live session ended or went, or the draft head of a page with one moved.
+  if (onLive) await sql.listen('wikistow_live', onLive);
   return { close: () => sql.end({ timeout: 5 }) };
 }
 

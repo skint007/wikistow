@@ -386,6 +386,9 @@ export const searchIndexQuery = (ctx: ClientContext, queryClient: QueryClient) =
             onProgress,
             readLinks: readIndexLinks,
           });
+          // Listed from the server again, every space as one built from
+          // what's kept asks (`putBack`): whole now, if unchanged.
+          fromKept.delete(index);
         } else {
           // What an index read before stands in for the versions it read: the
           // one shown, going offline, else the one this device kept.
@@ -471,6 +474,9 @@ async function withQueuedDrafts(
 /** Indexes built from what's kept alone, offline: never kept, and updated from the server once back. */
 const fromKept = new WeakSet<searchOperations.PageIndex>();
 
+/** `index` was built offline from what's kept alone, so may lack pages still there. */
+export const builtFromKept = (index: searchOperations.PageIndex): boolean => fromKept.has(index);
+
 const searchIndexHash = hashKey(searchIndexKey);
 const trackers = new WeakMap<QueryClient, IndexTracker>();
 
@@ -512,6 +518,32 @@ export function searchIndexChanged(
   change: IndexChange = { spaces: 'all' },
 ) {
   trackerOf(queryClient).note(change);
+  if ('saved' in change) for (const listener of savesHeard(queryClient)) listener(change.saved);
+}
+
+const saveListeners = new WeakMap<
+  QueryClient,
+  Set<(save: searchOperations.SavedVersion) => void>
+>();
+const savesHeard = (queryClient: QueryClient) => {
+  let listeners = saveListeners.get(queryClient);
+  if (!listeners) saveListeners.set(queryClient, (listeners = new Set()));
+  return listeners;
+};
+
+/**
+ * Call `listener` with each draft this person saves, as the index hears of
+ * it (`searchIndexChanged`), until the returned function is called: search
+ * by meaning waits for a page's saves to pause before embedding it.
+ */
+export function onDraftSaved(
+  queryClient: QueryClient,
+  listener: (save: searchOperations.SavedVersion) => void,
+): () => void {
+  savesHeard(queryClient).add(listener);
+  return () => {
+    savesHeard(queryClient).delete(listener);
+  };
 }
 
 /**

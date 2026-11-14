@@ -18,7 +18,9 @@ const REVISION_BATCH = 1000;
  * was journaled and saved over (by itself, if it landed) only after, finds
  * its base. Kept besides: the draft head; every draft a published version
  * was made from; and every draft a copy in another space was sent from, as
- * the copy's "Published from" label opens it. A page with copies sent before
+ * the copy's "Published from" label opens it; and, while a live session is
+ * kept, open or ended, the draft it started from and each draft a kept
+ * snapshot names (protocol section 5.10, **Retention**). A page with copies sent before
  * the server recorded their sources keeps every draft, since those name
  * theirs only inside ciphertext.
  */
@@ -30,6 +32,8 @@ const removable = (cutoff: Date) => sql`
   and not exists (select 1 from revisions p
     where p.audience = 'published' and p.based_on = r.id)
   and not exists (select 1 from revisions c where c.source_revision_id = r.id)
+  and not exists (select 1 from live_sessions l where l.revision_id = r.id)
+  and not exists (select 1 from live_messages m where m.revision_id = r.id)
   and not exists (select 1 from publications s
     join revisions c on c.page_id = s.destination_page_id
     where s.source_page_id = r.page_id and c.audience = 'published'
