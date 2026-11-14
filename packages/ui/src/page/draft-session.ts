@@ -1349,20 +1349,26 @@ export class DraftSession {
   // One the person typed in meanwhile meets it as someone else's save.
   #caughtUp(
     caught: Extract<NotJoined, { kind: 'caught-up' }>,
-    opening: { revisionId: RevisionId; payload: PagePayload },
+    opening: { revisionId: RevisionId },
     epoch: number,
     entry: QueuedPage | null,
   ) {
     if (!this.#live || this.#ports.epoch() !== epoch) return;
+    // The page may have heard of that save first, and taken it for someone else's.
+    const mine = this.#theirs === null || this.#theirs === caught.revisionId;
     if (
       !entry &&
       !this.#saving &&
-      !this.#theirs &&
+      mine &&
       this.#base === opening.revisionId &&
-      this.#payload === opening.payload &&
       caught.basedOn === opening.revisionId &&
       this.#untouched()
     ) {
+      if (this.#theirs) {
+        this.#theirs = null;
+        this.#releaseConflictHold();
+        this.#autosave.resume();
+      }
       this.#base = caught.revisionId;
       this.#known.add(caught.revisionId);
       this.#payload = caught.payload;
