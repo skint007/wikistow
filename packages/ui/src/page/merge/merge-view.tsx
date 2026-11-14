@@ -92,8 +92,16 @@ export function MergeView({
   useLayoutEffect(() => heading.current?.focus(), [step]);
 
   const toReview = () => {
-    // Review puts the choices in part by part, with no review of the whole.
-    const resolved = pageMerge.resolve(merge, choices, { review: !reviewMode });
+    // Review puts the choices in part by part, with no review of the whole,
+    // and within a second: one too large to settle here goes as chosen.
+    let resolved: pageMerge.Resolved;
+    try {
+      resolved = reviewMode
+        ? pageMerge.withinTime(1_000, () => pageMerge.resolve(merge, choices, { review: false }))
+        : pageMerge.resolve(merge, choices);
+    } catch {
+      return reviewMode?.onApply(merge, choices);
+    }
     if (resolved.ok && reviewMode) reviewMode.onApply(merge, choices);
     else if (resolved.ok) setState({ merge, review: resolved, unfit: false });
     else {

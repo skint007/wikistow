@@ -11,6 +11,7 @@
 import { COVER_NAMESPACE } from '../cover.ts';
 import { readProperties, splitFrontmatter } from '../markdown/index.ts';
 import { edges, withinTime, writeBody, type Choice, type SegmentPick } from '../merge/body.ts';
+import { takeKeys } from '../merge/frontmatter.ts';
 import { mergePayloads, narrowMerge, resolve, type Merge, type Overlap } from '../merge/payload.ts';
 import type { AttachmentRef, PagePayload } from '../payload.ts';
 
@@ -290,7 +291,14 @@ function reviewTargetWithin(
   const written = targetOf(resolved.payload);
   if (picked.some((overlap) => overlap.part === 'title')) target.title = written.title;
   if (picked.some((overlap) => overlap.part === 'frontmatter' || overlap.part === 'property')) {
-    target.frontmatter = written.frontmatter;
+    // The keys chosen alone, unless the block was chosen whole.
+    const whole = picked.some((overlap) => overlap.part === 'frontmatter');
+    const keys = picked.flatMap((overlap) =>
+      overlap.part === 'property' && overlap.key !== null ? [overlap.key] : [],
+    );
+    const ours = splitFrontmatter(plan.yours.markdown).frontmatter;
+    const taken = whole ? undefined : takeKeys(ours, written.frontmatter || null, keys);
+    target.frontmatter = taken === undefined ? written.frontmatter : (taken ?? '');
   }
   const bodyPicks = new Set(
     picked.flatMap((overlap) => {
@@ -321,8 +329,28 @@ function reviewTargetWithin(
     target.body = ends ? body : body.replace(/\r?\n$/, '');
   }
   const extensions: Record<string, Json | null> = {};
-  if (picked.some((overlap) => overlap.part === 'banner' || overlap.part === 'icon')) {
-    extensions[COVER_NAMESPACE] = resolved.payload.extensions[COVER_NAMESPACE] ?? null;
+  const pickedCover = (part: 'banner' | 'icon') => picked.some((overlap) => overlap.part === part);
+  if (pickedCover('banner') || pickedCover('icon')) {
+    // Ours' cover, with only the field chosen as theirs: the banner, or the icon.
+    const object = (value: unknown) =>
+      typeof value === 'object' && value !== null && !Array.isArray(value)
+        ? (value as Record<string, Json>)
+        : null;
+    const ours = object(plan.yours.extensions[COVER_NAMESPACE]);
+    const chosen = object(resolved.payload.extensions[COVER_NAMESPACE]);
+    const cover: Record<string, Json> = {
+      ...(ours ?? (chosen ? { format: chosen['format'] ?? 1 } : {})),
+    };
+    const fields = [
+      ...(pickedCover('banner') ? ['banner'] : []),
+      ...(pickedCover('icon') ? ['emoji', 'icon', 'symbol'] : []),
+    ];
+    for (const field of fields) {
+      if (chosen && Object.hasOwn(chosen, field)) cover[field] = chosen[field] as Json;
+      else delete cover[field];
+    }
+    const empty = Object.keys(cover).every((field) => field === 'format');
+    extensions[COVER_NAMESPACE] = empty && !ours ? null : cover;
   }
   for (const overlap of picked) {
     if (overlap.part !== 'data' || overlap.namespace === null) continue;

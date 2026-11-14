@@ -208,7 +208,7 @@ describe('a draft saved from outside a live session', () => {
     const late = await join(owner, page);
     expect(body(late)).toBe(body(theirs));
     await new Promise((resolve) => setTimeout(resolve, 35_000));
-    expect(late.status().state).toEqual({ kind: 'live' });
+    expect(JSON.stringify(late.status().state)).toBe(JSON.stringify({ kind: 'live' }));
     setBody(late, `${body(late)}Later.\n`);
     await expect.poll(() => late.status().saved, { timeout: 30_000 }).toBe(true);
   }, 180_000);

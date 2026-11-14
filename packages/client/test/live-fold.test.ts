@@ -167,4 +167,19 @@ describe('Review', () => {
     if (!overlap) throw new Error('no overlap');
     expect(reviewTarget(merge, { [overlap.id]: 'theirs' })?.body).toBe('One, theirs.\n\nTwo.');
   });
+
+  it('takes theirs at the chosen property alone, keeping the page’s other keys as they are now', () => {
+    const merge = reviewMerge(
+      page('---\nstatus: todo\ntags: a\n---\nText.\n'),
+      // The fold took status: done; someone in the session set it back since.
+      page('---\nstatus: todo\ntags: b\n---\nText.\n'),
+      page('---\nstatus: done\ntags: c\n---\nText.\n'),
+      ['property:1'],
+    );
+    const tags = merge.overlaps.find((overlap) => overlap.part === 'property');
+    if (!tags) throw new Error('no property overlap');
+    expect(reviewTarget(merge, { [tags.id]: 'theirs' })?.frontmatter).toBe(
+      '---\nstatus: todo\ntags: c\n---\n',
+    );
+  });
 });

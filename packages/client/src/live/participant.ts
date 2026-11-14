@@ -672,9 +672,16 @@ export class LiveParticipant {
     null;
   // Each further join's parent, and the updates further joins sent, by position.
   readonly #parents = new Map<string, string>();
-  readonly #furtherUpdates = new Map<number, { join: string; decoded: DecodedUpdate }>();
+  readonly #furtherUpdates = new Map<
+    number,
+    { join: string; decoded: DecodedUpdate; after: PagePayload | null }
+  >();
   // A fold placed without a save whose Saved notice came before its grant did.
-  readonly #foldNotices = new Map<RevisionId, { join: string; state: LiveState }>();
+  // By revision and join, so one join's notice never puts another's out.
+  readonly #foldNotices = new Map<
+    string,
+    { revision: RevisionId; join: string; state: LiveState }
+  >();
   // Notes waiting for review, as this app counts them (section 5.10, **The
   // document**), and those deleted, which never come back.
   readonly #notes = new Map<RevisionId, LiveNote>();
@@ -1764,10 +1771,20 @@ export class LiveParticipant {
         }
       }
       // Known before it is placed, as a note it places counts by it.
-      if (this.#further.has(key(opened)) && held.decoded) {
-        this.#furtherUpdates.set(stored.position, { join: key(opened), decoded: held.decoded });
-      }
+      const further =
+        this.#further.has(key(opened)) && held.decoded
+          ? { join: key(opened), decoded: held.decoded, after: null as PagePayload | null }
+          : null;
+      if (further) this.#furtherUpdates.set(stored.position, further);
       const misplaced = this.document.apply(opened.content, REMOTE_ORIGIN);
+      // The page as it is once it is in: what a fold placed without a save is checked against.
+      if (further) {
+        try {
+          further.after = this.#payload();
+        } catch {
+          further.after = null;
+        }
+      }
       if (misplaced.length > 0) {
         return this.#stop(
           `someone’s change doesn’t fit the page: ${misplaced[0]?.why}`,
@@ -1787,9 +1804,9 @@ export class LiveParticipant {
       this.#lastUpdate = Math.max(this.#lastUpdate, stored.position);
       // A further join's, which may be a fold's grant placed (section 5.10, **Saving**).
       if (this.#further.has(key(ref)) && held.decoded) {
-        for (const [revision, notice] of [...this.#foldNotices]) {
-          if (this.#grants.get(revision)?.position === stored.position) {
-            queueMicrotask(() => this.#foldNotice(revision, notice.join, notice.state));
+        for (const notice of [...this.#foldNotices.values()]) {
+          if (this.#grants.get(notice.revision)?.position === stored.position) {
+            queueMicrotask(() => this.#foldNotice(notice.revision, notice.join, notice.state));
           }
         }
       }
@@ -2012,7 +2029,13 @@ export class LiveParticipant {
       const placed = this.#placedAt.get(head.revisionId);
       if (placed && !head.foldedBy && !holdsState(state, head.state)) {
         if (Date.now() - placed.at > HOLD_MS) {
-          return this.#stop('a change folded in from outside never said it was saved', null, true);
+          return this.#stop('a change folded in from outside never said it was saved', null, false);
+        }
+        if (!this.#foldTimer) {
+          this.#foldTimer = setTimeout(() => {
+            this.#foldTimer = null;
+            this.#compare();
+          }, 2_000);
         }
         return;
       }
@@ -2060,6 +2083,8 @@ export class LiveParticipant {
     head.compared = true;
     this.#checked = head.revisionId;
     this.#provisional = false;
+    // Caught up: a later time it can't is a first time again.
+    cantCatchUp.delete(this.sessionId);
     this.#update();
   }
 
@@ -2067,7 +2092,12 @@ export class LiveParticipant {
 
   // The clients of the changes `draft` claims that `state` lacks, when each
   // is a join that has gone; null otherwise.
-  #goneFrom(draft: SessionDraft, state: LiveState): number[] | null {
+  #goneFrom(
+    draft: SessionDraft,
+    state: LiveState,
+    /** Joins whose changes a fold put in count too, as for counting that fold. */
+    { folded = false }: { folded?: boolean } = {},
+  ): number[] | null {
     const clients = new Set<number>();
     for (const [client, clock] of draft.state.vector) {
       if ((state.vector.get(client) ?? 0) < clock) clients.add(client);
@@ -2080,7 +2110,7 @@ export class LiveParticipant {
     for (const client of clients) {
       // Its changes were folded in once already: putting them in again would
       // copy the text each time. This app can't catch up instead.
-      if (this.#foldedGone.has(client)) return null;
+      if (!folded && this.#foldedGone.has(client)) return null;
       const join = this.#joins.joinOf(client);
       if (!join || this.#present.get(key(join)) !== false) return null;
     }
@@ -2170,8 +2200,11 @@ export class LiveParticipant {
       if (this.#status) queueMicrotask(() => this.#noteChanged(id));
     }
     // A Saved notice that came first.
-    const notice = this.#foldNotices.get(revision.data);
-    if (notice) this.#foldNotice(revision.data, notice.join, notice.state);
+    for (const notice of [...this.#foldNotices.values()]) {
+      if (notice.revision === revision.data) {
+        this.#foldNotice(notice.revision, notice.join, notice.state);
+      }
+    }
     if (grant.lapsed && this.#head === revision.data && this.#status) {
       void this.#fromOutside(revision.data);
     }
@@ -2525,19 +2558,19 @@ export class LiveParticipant {
    * every app; one that claims otherwise doesn't count (section 5.10).
    */
   #foldNotice(revision: RevisionId, join: string, state: LiveState): void {
+    const id = `${revision}\0${join}`;
     const grant = this.#grants.get(revision);
     if (!grant || grant.position === null) {
-      this.#foldNotices.set(revision, { join, state });
+      this.#foldNotices.set(id, { revision, join, state });
       return;
     }
-    if (this.#parents.get(join) !== key(grant.holder))
-      return void this.#foldNotices.delete(revision);
+    if (this.#parents.get(join) !== key(grant.holder)) return void this.#foldNotices.delete(id);
     const placed = this.#furtherUpdates.get(grant.position);
     // Its change may still be on its way, held: the notice waits for it.
-    if (!placed) return void this.#foldNotices.set(revision, { join, state });
-    this.#foldNotices.delete(revision);
+    if (!placed) return void this.#foldNotices.set(id, { revision, join, state });
+    this.#foldNotices.delete(id);
     if (placed.join !== join || this.#drafts.get(revision)?.foldedBy) return;
-    void this.#countFold(revision, grant, placed.decoded, state);
+    void this.#countFold(revision, grant, placed.decoded, state, placed.after);
   }
 
   async #countFold(
@@ -2546,6 +2579,8 @@ export class LiveParticipant {
     decoded: DecodedUpdate,
     /** As its holder's Saved notice says. */
     noticed: LiveState,
+    /** The page as it was once the fold's change was in. */
+    after: PagePayload | null,
   ): Promise<void> {
     let draft = this.#outsiderDrafts.get(revision);
     if (!draft) {
@@ -2565,10 +2600,17 @@ export class LiveParticipant {
       !existing ||
       (!existing.foldedBy &&
         !existing.compared &&
-        !holdsState(this.document.state(), existing.state));
+        !holdsState(this.document.state(), existing.state) &&
+        (this.#goneJoins.has(revision) ||
+          this.#goneFrom(existing, this.document.state(), { folded: true }) !== null));
     if (!base || typeof base === 'string' || !replaceable) return;
     const state = plusUpdate(base.state, decoded);
     if (!sameState(state, noticed)) return;
+    // The fold claims the page holds the outsider's draft once its change is in: check it,
+    // as no app may ever have exactly that state to compare it at.
+    if (!after || !foldHolds(base.payload, after, draft.payload)) {
+      return this.#stop('the change folded in from outside left some of it out', null, false);
+    }
     this.#drafts.set(revision, {
       revisionId: revision,
       payload: draft.payload,
@@ -3609,3 +3651,31 @@ function ofAnotherSession(draft: OpenedDraft, sessionId: string): boolean {
 const foldedGone = new Map<string, Set<number>>();
 // Sessions this app left once because it couldn't catch up with the others.
 const cantCatchUp = new Set<string>();
+
+/**
+ * Whether `after`, a page once a fold's change is in, holds everything
+ * `theirs`, a draft from outside, changed from `base`: folding theirs into
+ * it again would change nothing and find no overlap.
+ */
+function foldHolds(base: PagePayload, after: PagePayload, theirs: PagePayload): boolean {
+  let folded: Folded;
+  try {
+    folded = foldPayloads(base, after, theirs);
+  } catch {
+    return false;
+  }
+  if (folded.parts.length > 0) return false;
+  const now = targetOf(after);
+  const ids = (refs: readonly { id: string }[]) =>
+    refs
+      .map((ref) => ref.id)
+      .sort()
+      .join(' ');
+  return (
+    folded.target.title === now.title &&
+    folded.target.frontmatter === now.frontmatter &&
+    folded.target.body === now.body &&
+    ids(folded.target.attachments) === ids(now.attachments) &&
+    sameJson(folded.target.extensions, now.extensions)
+  );
+}

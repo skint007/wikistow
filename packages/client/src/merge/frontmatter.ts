@@ -274,3 +274,28 @@ export function frontmatterPieces(block: Block): { text: string; key: string }[]
     { text: block.slice(read.closeStart), key: 'close' },
   ];
 }
+
+/**
+ * `ours` with the lines of each of `keys` as `from` has them, or taken out
+ * where `from` has no such key, and every other line as it is: as Review
+ * puts in theirs at the properties chosen, and nothing else. Undefined
+ * where either block isn't keys, or `ours` has no block to put one in.
+ */
+export function takeKeys(ours: Block, from: Block, keys: readonly string[]): Block | undefined {
+  const [o, f] = [readKeys(ours), readKeys(from)];
+  if (!o || !f || ours === null) return undefined;
+  type Edit = { start: number; end: number; text: string };
+  const edits: Edit[] = [];
+  for (const key of new Set(keys)) {
+    const have = o.entries.find((entry) => entry.key === key);
+    const want = f.entries.find((entry) => entry.key === key);
+    const lines = want ? want.lines.replace(/(?<!\n)$/, '\n') : '';
+    if (have) edits.push({ start: have.start, end: have.end, text: lines });
+    else if (want) edits.push({ start: o.closeStart, end: o.closeStart, text: lines });
+  }
+  let block = ours;
+  for (const { start, end, text } of edits.sort((a, b) => b.start - a.start || b.end - a.end)) {
+    block = block.slice(0, start) + text + block.slice(end);
+  }
+  return block;
+}
