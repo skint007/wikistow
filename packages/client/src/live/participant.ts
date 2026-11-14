@@ -71,7 +71,7 @@ import {
   type OpenedLiveSession,
 } from './session.ts';
 import { openSnapshot } from './snapshot.ts';
-import { changeText } from './text-change.ts';
+import { changeText, textChange } from './text-change.ts';
 
 /** A draft of the page, opened. */
 export type OpenedDraft = {
@@ -376,7 +376,10 @@ async function newcomerFrom(
       // A draft of the session: signed by a person with a join it has
       // taken a message from, under the record's key material.
       if (!signedInSession(draft, opened, started) || !sameKeys(draft, opened)) {
-        return { kind: 'refused', why: 'the snapshot names a draft from outside the session' };
+        throw new CryptoError(
+          'binding-mismatch',
+          'The snapshot names a draft from outside the session',
+        );
       }
       const built = openSnapshot({
         message: later,
@@ -391,22 +394,24 @@ async function newcomerFrom(
       const verdict = joins.check(later, decodeUpdate(read.state));
       if (verdict.kind === 'take') joins.take(later);
       for (const stored of served.messages) backlog.push(stored);
-      return new LiveParticipant(ports, {
-        opened,
-        joinId,
-        document,
-        joins,
-        first: served.firstSnapshot.message,
-        firstPosition: served.firstSnapshot.position,
-        base: null,
-        laterDraft: draft,
-        position: served.position,
-        kept: served.complete ? undefined : (served.snapshot.covers ?? undefined),
-        head,
-        provisional,
-        backlog,
-        verified: [...started],
-      });
+      return joinedOrRefused(
+        new LiveParticipant(ports, {
+          opened,
+          joinId,
+          document,
+          joins,
+          first: served.firstSnapshot.message,
+          firstPosition: served.firstSnapshot.position,
+          base: null,
+          laterDraft: draft,
+          position: served.position,
+          kept: served.complete ? undefined : (served.snapshot.covers ?? undefined),
+          head,
+          provisional,
+          backlog,
+          verified: [...started],
+        }),
+      );
     }
     const draft = await ports.openDraft(opened.payload.revisionId);
     const built = openSnapshot({
@@ -421,34 +426,53 @@ async function newcomerFrom(
     if (read.kind === 'newer-format') return { kind: 'update-app' };
     const verdict = joins.check(first, decodeUpdate(read.state));
     if (verdict.kind !== 'take') {
-      return { kind: 'refused', why: 'the first snapshot isn’t its join’s first message' };
+      throw new CryptoError(
+        'binding-mismatch',
+        'The first snapshot isn’t its join’s first message',
+      );
     }
     joins.take(first);
     for (const stored of served.messages) backlog.push(stored);
-    return new LiveParticipant(ports, {
-      opened,
-      joinId,
-      document,
-      joins,
-      first: served.firstSnapshot.message,
-      firstPosition: served.firstSnapshot.position,
-      base: { revisionId: draft.revisionId, payload: draft.payload },
-      position: served.position,
-      kept: served.complete ? undefined : (served.firstSnapshot.position ?? undefined),
-      head,
-      provisional: false,
-      backlog,
-      verified: [key(first)],
-    });
+    return joinedOrRefused(
+      new LiveParticipant(ports, {
+        opened,
+        joinId,
+        document,
+        joins,
+        first: served.firstSnapshot.message,
+        firstPosition: served.firstSnapshot.position,
+        base: { revisionId: draft.revisionId, payload: draft.payload },
+        position: served.position,
+        kept: served.complete ? undefined : (served.firstSnapshot.position ?? undefined),
+        head,
+        provisional: false,
+        backlog,
+        verified: [key(first)],
+      }),
+    );
   } catch (error) {
     opened.key.fill(0);
     if (error instanceof CryptoError) {
-      return error.code === 'unsupported-format'
-        ? { kind: 'update-app' }
-        : { kind: 'refused', why: error.message };
+      if (error.code === 'unsupported-format') return { kind: 'update-app' };
+      // It can't take part: it refused the session's snapshot or a kept
+      // message. It ends the session, so the next start makes a fresh one
+      // and one bad message can't keep live editing off the page.
+      void liveTransport(ctx, opened.record.subjectId, ports.live)
+        .end()
+        .catch(() => {});
+      return { kind: 'refused', why: error.message };
     }
     throw error;
   }
+}
+
+// A newcomer that refused a message served with the session stopped, and
+// ended it, before it took part: it didn't join.
+function joinedOrRefused(participant: LiveParticipant): LiveParticipant | NotJoined {
+  const { state } = participant.status();
+  if (state.kind === 'live') return participant;
+  participant.close();
+  return { kind: 'refused', why: state.kind === 'stopped' ? state.why : 'the session ended' };
 }
 
 // A draft signed by a person with a join in the session this app has taken a message from.
@@ -540,6 +564,10 @@ export class LiveParticipant {
   #stopSending = false;
   // This join's clock as it joined: the starter's counts the page's text.
   readonly #startClock: number;
+  // Taking in the messages served with the session, as it joins.
+  #joining = false;
+  // Whether its stream has been opened: one never started never saved for anyone.
+  #started = false;
   // A change of this app's own copy is on its way: the main join waits for it.
   #placing = false;
   // Whether the server has made this app's join: the starter's with the
@@ -637,12 +665,16 @@ export class LiveParticipant {
       for (const listener of this.#changes) listener(local);
     });
     this.#status = this.#computeStatus({ kind: 'live' });
+    // A kept message refused as it joins means it can't take part: that ends the session.
+    this.#joining = true;
     for (const stored of opening.backlog) this.#receive(stored);
+    this.#joining = false;
   }
 
   /** Open the stream: take part from here on. */
   start(): void {
     if (this.#status.state.kind !== 'live') return;
+    this.#started = true;
     void this.#run();
     this.#presenceTimer = setInterval(() => {
       this.#presenceDirty = true;
@@ -776,6 +808,9 @@ export class LiveParticipant {
   async saveNow(): Promise<boolean> {
     await this.flush();
     if (this.#status.saved) return true;
+    // Built from a snapshot nobody has checked yet: its whole document is
+    // never saved on leaving, locking or publishing (section 5.10).
+    if (this.#provisional) return false;
     const saved = await this.#save({ force: true });
     this.#update();
     return saved && this.#status.saved;
@@ -790,10 +825,9 @@ export class LiveParticipant {
    * join sends nothing built on it until it is placed. Whether it went in.
    */
   async commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
-    const make =
-      typeof change === 'function'
-        ? change
-        : (document: LiveDocument) => applyChange(document, change);
+    // Text given whole is made a change of the text as it is now, anchored
+    // in it, so whatever others type meanwhile, around it, stays.
+    const make = typeof change === 'function' ? change : this.#anchored(change);
     if (!this.#keyed()) return false;
     await this.flush();
     await this.#ensureHead();
@@ -871,7 +905,7 @@ export class LiveParticipant {
         openedAt: Date.now(),
       });
       if (this.#head === headId) this.#head = result.revisionId;
-      this.#checked = result.revisionId;
+      if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
       if (!this.#keyed()) return true;
       await send(seal(3, 'saved', clock, stateContent(result.revisionId, stateBytes)), covers);
     } catch {
@@ -884,6 +918,34 @@ export class LiveParticipant {
       this.#update();
     }
     return true;
+  }
+
+  // A change of the document as it is now, to be made later in a copy of it:
+  // each text's smallest change, its edges held as relative positions.
+  #anchored({ texts = {}, entries = [] }: DocumentChange): (document: LiveDocument) => void {
+    const spans = (Object.entries(texts) as [TextRoot, string][]).flatMap(([name, target]) => {
+      const text = this.document.text(name);
+      const span = textChange(text.toJSON(), target.toWellFormed());
+      if (!span) return [];
+      const from = Y.createRelativePositionFromTypeIndex(text, span.from);
+      const to = Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
+      return [{ name, target, span, from, to }];
+    });
+    return (document) => {
+      for (const { name, target, span, from, to } of spans) {
+        const text = document.text(name);
+        const start = Y.createAbsolutePositionFromRelativePosition(from, document.doc);
+        const end = Y.createAbsolutePositionFromRelativePosition(to, document.doc);
+        if (!start || !end || start.type !== text || end.type !== text || end.index < start.index) {
+          // Where it was can't be found: the whole text, as given.
+          changeText(text, target);
+          continue;
+        }
+        if (end.index > start.index) text.delete(start.index, end.index - start.index);
+        if (span.insert !== '') text.insert(start.index, span.insert);
+      }
+      applyChange(document, { entries });
+    };
   }
 
   /**
@@ -1034,7 +1096,7 @@ export class LiveParticipant {
           openedAt: Date.now(),
         });
         this.#head = result.revisionId;
-        this.#checked = result.revisionId;
+        if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
         return;
       } catch (error) {
         const detail =
@@ -1066,7 +1128,7 @@ export class LiveParticipant {
   async leave(): Promise<boolean> {
     if (this.#status.state.kind === 'left') return this.#status.saved;
     let saved = this.#status.saved;
-    if (this.#status.state.kind === 'live' && !this.#stopSending) {
+    if (this.#status.state.kind === 'live' && !this.#stopSending && this.#started) {
       saved = await withTimeout(this.saveNow(), 8_000).catch(() => false);
     }
     this.#close({ kind: 'left' });
@@ -1601,7 +1663,7 @@ export class LiveParticipant {
         openedAt: Date.now(),
       });
       if (this.#head === headId) this.#head = result.revisionId;
-      this.#checked = result.revisionId;
+      if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
       this.#saveFailing = null;
       this.#retryAt = 0;
       this.#unsavedSince = holdsState(savedState, this.document.state()) ? null : this.#changedAt;
@@ -1861,6 +1923,7 @@ export class LiveParticipant {
    */
   #stop(why: string, saveOver: RevisionId | null, rejoin: boolean, end = false): void {
     if (this.#status.state.kind !== 'live') return;
+    end ||= this.#joining;
     this.#stopSending = true;
     const state: ParticipantState = { kind: 'stopped', why, saveOver, rejoin };
     this.#close(state);

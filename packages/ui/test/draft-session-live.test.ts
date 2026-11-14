@@ -276,7 +276,8 @@ describe('a draft session in a live session', () => {
     const other = session(opened, { ...opened, markdown: 'Start. Someone else’s.' });
     other.type('Start. Typed early.');
     await other.draft.joinLive();
-    expect(other.joins[0]?.left).toBe(true);
+    // Never started, it is closed, saving nothing.
+    expect(other.joins[0]?.closed).toBe(true);
     expect(other.draft.snapshot().live).toEqual({
       kind: 'not-joined',
       why: { kind: 'typed-meanwhile' },
