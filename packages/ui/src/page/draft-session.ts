@@ -1051,18 +1051,19 @@ export class DraftSession {
       const before = this.#beforeLive;
       this.#beforeLive = null;
       const saveOver = state.kind === 'stopped' ? state.saveOver : null;
-      if (!settled.mine && !typedMeanwhile && !saveOver && (settled.base || before)) {
+      const head = settled.atHead ? settled.base : null;
+      if (!settled.mine && !typedMeanwhile && !saveOver && (head || before)) {
         // Nothing of the person's is in it: the latest session draft its
         // document holds, or else the draft as it opened. Others' typing
         // not saved yet is theirs to save.
-        const back = settled.base
+        const back = head
           ? {
-              base: settled.base.revisionId,
-              payload: settled.base.payload,
+              base: head.revisionId,
+              payload: head.payload,
               content: {
-                title: settled.base.payload.title,
-                markdown: settled.base.payload.markdown,
-                attachments: settled.base.payload.attachments,
+                title: head.payload.title,
+                markdown: head.payload.markdown,
+                attachments: head.payload.attachments,
               },
               extensions: {},
             }
