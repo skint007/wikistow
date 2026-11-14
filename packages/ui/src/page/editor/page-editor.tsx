@@ -580,6 +580,11 @@ export function PageEditor({
     ref,
     () => ({
       read: () => joinPage(frontmatter.current, bodyNow()),
+      parts: () => ({ frontmatter: frontmatter.current, body: bodyNow() }),
+      replaceParts(parts) {
+        if (parts.frontmatter !== frontmatter.current) setFrontmatter(parts.frontmatter);
+        give(parts.body, false);
+      },
       replace(markdown) {
         const split = splitFrontmatter(markdown);
         if (split.frontmatter !== frontmatter.current) setFrontmatter(split.frontmatter);

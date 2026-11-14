@@ -1352,7 +1352,11 @@ function PageBody({
           published: model.view === 'published' ? revisionId : null,
           draft:
             model.view === 'draft'
-              ? { flush: async () => editor.current?.flush(), reopen: onReopen }
+              ? {
+                  flush: async () => editor.current?.flush(),
+                  beforeRestore: async () => editor.current?.beforeRestore(),
+                  reopen: onReopen,
+                }
               : null,
         }}
       />
