@@ -20,6 +20,10 @@ Until that account exists, anyone who can reach the server can claim it. Create 
 
 The server closes a connection that sends and takes nothing for 60 seconds, such as a client that stopped reading a large file. A reverse proxy in front of it needs a read timeout well over 15 seconds, about the longest an AI reply goes without sending anything. Proxy defaults, such as nginx's 60 seconds, are.
 
+## Serve over HTTP/2
+
+Browsers edit a page live with others (ADR 0015) only when the app's requests reach the server over HTTP/2 or later: each tab with a draft open holds three streams, and over HTTP/1.1 a browser allows six connections per server, so two windows would leave none for saves. Over HTTP/1.1 the app edits as before, one person at a time. Serve HTTP/2 at the TLS proxy in front of the server; with nginx, `http2 on;` in the `server` block. The desktop app isn't limited this way.
+
 ## Set up mail
 
 WikiStow sends mail for invitations, email confirmations, password resets and email changes. Set it up in **Administration → Settings → Mail**: the SMTP server and port, the security (STARTTLS, TLS or none), a username and password if the server wants them, and the From address, such as `WikiStow <wiki@example.com>`. **Send test email** sends a message to your own address with what the form holds, saved or not, and says why if it fails. A save applies at once, without a restart. The password is write-only and stored encrypted ([What to back up](#what-to-back-up)).
