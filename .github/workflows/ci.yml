@@ -132,13 +132,21 @@ jobs:
           path: node_modules/.cache/wikistow-meaning
           key: meaning-${{ hashFiles('packages/ui/src/meaning/model.ts', 'pnpm-lock.yaml') }}
           restore-keys: meaning-
-      - run: |
+      - env:
+          # Firefox's add-on ID for the extension, once Mozilla Add-ons holds
+          # it (ADR 0017, step 7). Unset, its builds name a placeholder.
+          CLIPPER_FIREFOX_ID: ${{ vars.CLIPPER_FIREFOX_ID }}
+        run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then export WIKISTOW_RELEASE="${GITHUB_REF_NAME#v}"; fi
           cp packages/ui/src/routeTree.gen.ts "$RUNNER_TEMP/routeTree.committed.ts"
           ./node_modules/.bin/vp -C apps/server pack
           ./node_modules/.bin/vp -C apps/cli pack
           ./node_modules/.bin/vp -C apps/web build
           ./node_modules/.bin/vp -C apps/desktop pack
+          # The browser extension: its Chrome and Firefox builds, zipped as
+          # the stores take them, and its tests' build (apps/clipper).
+          ./node_modules/.bin/vp -C apps/clipper pack
+          node apps/clipper/scripts/assemble.ts
           # What the desktop release ships: the bundles and pages in one app.asar,
           # and the helper beside it.
           node apps/desktop/scripts/asar.ts
@@ -153,6 +161,7 @@ jobs:
             apps/web/dist
             apps/desktop/dist
             apps/desktop/out
+            apps/clipper/dist
           if-no-files-found: error
           retention-days: 7
 
@@ -184,6 +193,35 @@ jobs:
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
       - run: go test -count=1 -timeout 3m $([ "$RUNNER_OS" = Linux ] && echo -race) ./...
+
+  # The browser extension (apps/clipper): Mozilla's linter on its Firefox
+  # build, as Mozilla Add-ons runs it, and its tests in Chromium against a
+  # fake native host. The desktop tests clip with it into the real app.
+  clipper:
+    needs: build
+    runs-on: ubuntu-24.04
+    container: *browser_image
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build
+          path: apps
+      - run: ./node_modules/.bin/web-ext lint --source-dir dist/firefox --self-hosted
+        working-directory: apps/clipper
+      - run: ./node_modules/.bin/playwright test
+        working-directory: apps/clipper
+        env:
+          CI: 'true'
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: clipper-results
+          path: apps/clipper/test-results
+          retention-days: 7
 
   # Boot the exact bundles the image ships against a fresh database. They run
   # from a copy laid out like the image, outside the workspace, so a dependency
@@ -507,6 +545,7 @@ jobs:
         test-browser,
         clip-host,
         build,
+        clipper,
         smoke,
         e2e,
         e2e-desktop,

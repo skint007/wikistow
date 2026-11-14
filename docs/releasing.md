@@ -13,7 +13,8 @@ GitHub Actions checks every change and publishes the server image and the deskto
 | `test-integration` | The integration tests against a Postgres 17 service, including the backup and restore drill |
 | `test-browser` | The protocol vectors and editor surfaces in Chromium |
 | `clip-host` | The web clipper's [helper](#the-clippers-helper), vetted and tested against a fake app on Linux, Windows and macOS |
-| `build` | The server, CLI, web and desktop bundles, the desktop `app.asar`, and the clipper's helper for every system. The committed route tree must not change |
+| `build` | The server, CLI, web and desktop bundles, the desktop `app.asar`, the clipper's helper for every system, and the [browser extension](#the-browser-extension). The committed route tree must not change |
+| `clipper` | Mozilla's `web-ext lint` on the extension's Firefox build, and its tests in Chromium against a fake native host |
 | `smoke` | The server and CLI bundles, run outside the workspace as the image runs them |
 | `e2e` | The web app's browser tests against the built pages |
 | `e2e-desktop` | The desktop app's tests under a virtual display, with GNOME Keyring |
@@ -37,7 +38,7 @@ Only that job can write packages, and only that job and the release's `github-re
 
 ## Versions
 
-WikiStow has one version, such as `0.2.0`. Every `package.json` in the workspace carries it:
+WikiStow has one version, such as `0.2.0`. Every `package.json` in the workspace carries it, save the browser extension's, which has [its own](#the-browser-extension):
 
 ```sh
 node scripts/version.ts         # prints it, and fails if any disagree
@@ -162,6 +163,8 @@ Each release has the desktop app, for Linux on x86_64, for Windows and for macOS
 | `wikistow-desktop-<version>-arm64-setup.exe` | Windows 11 on Arm |
 | `wikistow-desktop-<version>-macos-arm64.zip` | Macs with Apple silicon, and the Homebrew cask |
 | `wikistow-desktop-<version>-macos-x64.zip` | Intel Macs, and the Homebrew cask |
+| `wikistow-clipper-<clipper version>-chrome.zip` | The [browser extension](#the-browser-extension) for Chrome, Edge and Brave, as the Chrome Web Store takes it |
+| `wikistow-clipper-<clipper version>-firefox.zip` | The browser extension for Firefox, as Mozilla Add-ons takes it |
 | `SHA256SUMS` | The checksums of these, and of the [CLI downloads](#the-cli-downloads) |
 
 Check a download before you use it:
@@ -187,6 +190,10 @@ The archive is built the same way every time, from the commit's files and time.
 ### The clipper's helper
 
 Every desktop package carries `wikistow-clip-host`, the program the browser starts for the web clipper ([desktop](desktop.md#clipping-from-your-browser), [ADR 0017](adr/0017-web-clipper.md)). It is Go, in `apps/desktop/clip-host`. `apps/desktop/scripts/clip-host.sh` builds it in CI's `build` job for every system a package ships on (Linux x86_64, Windows x64 and arm64, macOS arm64 and x64), into `apps/desktop/out/clip-host/<GOOS>-<GOARCH>/`, where each package takes it from; a CI artifact keeps no file modes, so each sets the mode itself. The same Go and source give the same bytes: no paths, build IDs or symbol tables go in. `go.mod` names the Go version CI installs; raise it on purpose. The `.deb` and `.rpm` check that their copy runs and answers.
+
+### The browser extension
+
+The web clipper's extension is `apps/clipper` ([its README](../apps/clipper/README.md), [privacy](web-clipper-privacy.md)). CI's `build` job builds it for Chrome and Firefox, and its tests' build, into `apps/clipper/dist`, and each release carries both zips. It has versions of its own, in `apps/clipper/package.json`, which `scripts/version.ts` leaves alone: the stores take numbers only, and update it apart from the app, so raise it when the extension changes, never as a beta. The Firefox build's add-on ID comes from the repository variable `CLIPPER_FIREFOX_ID` (**Settings → Secrets and variables → Actions → Variables**); unset, it names a placeholder no app trusts. Nothing sends the zips to the Chrome Web Store or Mozilla Add-ons yet: that waits on the stores' accounts (ADR 0017, step 7).
 
 ## The CLI downloads
 
