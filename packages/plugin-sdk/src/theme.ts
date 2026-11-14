@@ -64,7 +64,11 @@ export const PALETTE_TOKENS = [
   '--cover',
 ] as const;
 
-/** A page's GitHub alerts (`> [!NOTE]` and the rest), each type's label and edge, and highlighted code's colours. */
+/**
+ * A page's GitHub alerts (`> [!NOTE]` and the rest), each type's label and
+ * edge, highlighted code's colours, and the page's highlights and the
+ * theme's colours for its text and highlights (`data-color`).
+ */
 export const CONTENT_TOKENS = [
   '--alert-note',
   '--alert-tip',
@@ -77,6 +81,19 @@ export const CONTENT_TOKENS = [
   '--code-number',
   '--code-title',
   '--code-deletion',
+  '--highlight',
+  '--highlight-red',
+  '--highlight-orange',
+  '--highlight-yellow',
+  '--highlight-green',
+  '--highlight-blue',
+  '--highlight-purple',
+  '--text-red',
+  '--text-orange',
+  '--text-yellow',
+  '--text-green',
+  '--text-blue',
+  '--text-purple',
 ] as const;
 
 /** The banner presets a page can choose, the same in every palette. */

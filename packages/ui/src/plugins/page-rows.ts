@@ -177,7 +177,8 @@ const sameList = <T>(a: readonly T[], b: readonly T[]) =>
 /**
  * The pages whose rows may differ between `before` and `after`, each where
  * it is in either: a page in only one of them, another version of it, one
- * moved, or whose folders were renamed, or one given the time it lacked. Linear in their pages; a page
+ * moved, or whose folders were renamed, one given the time it lacked, or
+ * one typed over on this device. Linear in their pages; a page
  * held as it was, as an index derived from another keeps it, costs nothing.
  */
 export function indexChanges(
@@ -203,6 +204,10 @@ export function indexChanges(
       old.doc.unpublished === doc.unpublished &&
       // As when the time it lacked comes in (`PageIndex.with`).
       old.updated === page.updated &&
+      // As when a change waiting on this device is typed over the version
+      // (`WaitingText`), or gives way to it.
+      old.title === page.title &&
+      JSON.stringify(old.properties) === JSON.stringify(page.properties) &&
       sameList(old.doc.folderIds, doc.folderIds) &&
       sameList(old.doc.path, doc.path)
     )

@@ -292,4 +292,28 @@ describe('what changed in the index', () => {
     expect(timed.with([[doc, { updated: SAVED }]])).toBe(timed);
     expect(timed.with([[doc, { title: 'Garlic bread', text: '' }]])).toBe(timed);
   });
+
+  it('names a page typed over on this device, the same version as before (#423)', () => {
+    const [bread] = PAGES as [Page];
+    const doc = docOf(bread);
+    const typed = INDEX.with([
+      [
+        doc,
+        {
+          title: 'Garlic bread, typed here',
+          text: '',
+          properties: [{ key: 'servings', type: 'number', value: 6 }],
+          updated: SAVED,
+          waiting: true,
+        },
+      ],
+    ]);
+    expect(indexChanges(INDEX, typed)).toEqual([{ spaceId, folderIds: doc.folderIds }]);
+    // And back to the version's own, once the change goes.
+    const own = typed.with([
+      [doc, { title: bread[1], text: '', properties: bread[2], updated: SAVED }],
+    ]);
+    expect(own.page(spaceId, doc.pageId)?.title).toBe(bread[1]);
+    expect(indexChanges(typed, own)).toEqual([{ spaceId, folderIds: doc.folderIds }]);
+  });
 });

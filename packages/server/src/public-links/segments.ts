@@ -22,7 +22,7 @@ export type Segment = z.infer<typeof Segment>;
  * rendered again after the server starts, and say they are being updated
  * until then.
  */
-export const READER_VERSION = 3;
+export const READER_VERSION = 4;
 
 /** A heading a public page lists under "On this page": its anchor, its text, and whether it's an h3. */
 export const Heading = z.strictObject({ id: z.string(), text: z.string(), sub: z.boolean() });

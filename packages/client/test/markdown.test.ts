@@ -7,6 +7,7 @@ import { gfm } from 'micromark-extension-gfm';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   findWikilinks,
+  highlightToMarkdown,
   markdownNodes,
   mathToMarkdownExtension,
   parseMarkdown,
@@ -26,7 +27,9 @@ const samples = readdirSync(corpus)
   .map((name) => ({ name, markdown: readFileSync(new URL(name, corpus), 'utf8') }));
 
 const stringify = (tree: Nodes) =>
-  toMarkdown(tree, { extensions: [gfmToMarkdown(), wikilinkToMarkdown, mathToMarkdownExtension] });
+  toMarkdown(tree, {
+    extensions: [gfmToMarkdown(), wikilinkToMarkdown, mathToMarkdownExtension, highlightToMarkdown],
+  });
 
 // What the page says, with where each node sat left out.
 const meaning = (body: string): unknown =>
