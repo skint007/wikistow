@@ -249,4 +249,24 @@ describe('Review', () => {
     expect(target?.body).toContain('Tail, typed.');
     expect(target?.body).toContain('eggs, theirs');
   });
+
+  it('keeps each of two alike overlaps’ choices when carried', () => {
+    const base = page('## A\n\nTODO\n\n## B\n\nTODO\n\nTail.\n');
+    const ours = page('## A\n\nTODO ours\n\n## B\n\nTODO ours\n\nTail.\n');
+    const theirs = page('## A\n\nTODO theirs\n\n## B\n\nTODO theirs\n\nTail.\n');
+    const parts = foldPayloads(base, ours, theirs).parts;
+    const chosen = reviewMerge(base, ours, theirs, parts);
+    const [a, b] = chosen.overlaps;
+    if (!a || !b) throw new Error('two overlaps');
+    const now = reviewMerge(
+      base,
+      page('## A\n\nTODO ours\n\n## B\n\nTODO ours\n\nTail, typed.\n'),
+      theirs,
+      parts,
+    );
+    const carried = carryInto(chosen, { [a.id]: 'yours', [b.id]: 'theirs' }, now);
+    expect(reviewTarget(carried.merge, carried.choices)?.body).toBe(
+      '## A\n\nTODO ours\n\n## B\n\nTODO theirs\n\nTail, typed.\n',
+    );
+  });
 });

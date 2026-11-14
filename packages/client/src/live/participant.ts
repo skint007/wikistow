@@ -1654,11 +1654,6 @@ export class LiveParticipant {
   #listJoins(joins: readonly liveRoutes.Join[]): void {
     this.#joins.list(listedOf(joins));
     for (const join of joins) this.#recordJoin(join);
-    // A gone join whose changes an earlier join of this app folded in stays refused.
-    for (const client of this.#foldedGone) {
-      const join = this.#joins.joinOf(client);
-      if (join) this.#joins.refuse(join, 'its changes were folded in after it went');
-    }
     // A join that went may leave the head claiming what it never sent: fold it in.
     queueMicrotask(() => this.#compare());
     for (const held of this.#held) {
@@ -1737,6 +1732,16 @@ export class LiveParticipant {
   // Take a message if it fits now, hold it if it waits, and then whatever
   // it held up.
   #take(held: Held): void {
+    // A gone join whose changes a fold put in (section 5.10, **Serving and
+    // relaying**): what the server relays of it later is dropped, unplaced,
+    // for any join of this app in the session, the backlog it joins with too.
+    const client = this.#joins.clientOf({
+      senderId: held.opened.senderId,
+      joinId: held.opened.joinId,
+    });
+    if (client !== undefined && (this.#ignoring.has(client) || this.#foldedGone.has(client))) {
+      return this.#taken(held.stored.position);
+    }
     const verdict = this.#joins.check(held.opened, held.decoded);
     switch (verdict.kind) {
       case 'repeat':
@@ -1988,7 +1993,8 @@ export class LiveParticipant {
         const present = [...state.vector].some(([client, clock]) => {
           const join = this.#joins.joinOf(client);
           const lacking = (held.get(client) ?? 0) < clock;
-          return lacking && join !== undefined && this.#present.get(key(join)) !== false;
+          // Under a client no join it knows derives, or a join still here: it can't catch up.
+          return lacking && (join === undefined || this.#present.get(key(join)) !== false);
         });
         if (present)
           return this.#stop('messages from someone in the session never came', null, true);
@@ -2137,6 +2143,8 @@ export class LiveParticipant {
 
   // Joins whose changes a draft claims but that went without sending them, by that draft.
   readonly #goneJoins = new Map<RevisionId, number[]>();
+  // Gone joins' clients whose changes this app's fold is putting in now.
+  readonly #ignoring = new Set<number>();
   // The clients of gone joins whose changes a fold put in: once is all (A2),
   // for every join of this app in the session, so joining again forgets nothing.
   get #foldedGone(): Set<number> {
@@ -2425,14 +2433,13 @@ export class LiveParticipant {
     ) {
       return this.#armFold();
     }
-    // A gone join's changes are about to go in: its messages are refused from here on.
+    // A gone join's changes are about to go in: its messages are dropped from here on.
     const goneNow: number[] = [];
     for (const [revision, clients] of this.#goneJoins) {
       if (revision !== head && !this.#chainHas(head, revision)) continue;
       for (const client of clients) {
         goneNow.push(client);
-        const join = this.#joins.joinOf(client);
-        if (join) this.#joins.refuse(join, 'its changes were folded in after it went');
+        this.#ignoring.add(client);
       }
     }
     const before = this.document.state();

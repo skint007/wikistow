@@ -167,7 +167,9 @@ export function mergePayloads(base: PagePayload, yours: PagePayload, theirs: Pag
   );
   for (const namespace of namespaces) {
     if (namespace === COVER_NAMESPACE || namespace === LINKS_NAMESPACE) continue;
-    const value = (payload: PagePayload) => payload.extensions[namespace] ?? null;
+    // Its own value only: a namespace named `__proto__` that a side lacks is none.
+    const value = (payload: PagePayload) =>
+      Object.hasOwn(payload.extensions, namespace) ? (payload.extensions[namespace] ?? null) : null;
     data.set(namespace, field(value(base), value(yours), value(theirs)));
   }
   const plan: Plan = {

@@ -298,14 +298,25 @@ export function carryChoices(
   choices: Readonly<Record<string, Choice>>,
   now: Merge,
 ): Record<string, Choice> {
-  const byIdentity = new Map<string, Choice>();
+  // Overlaps alike in every word are told apart by which of them, in page order, each is.
+  const byIdentity = new Map<string, (Choice | undefined)[]>();
   for (const overlap of chosen.overlaps) {
-    const choice = choices[overlap.id];
-    if (choice !== undefined) byIdentity.set(identity(overlap), choice);
+    const list = byIdentity.get(identity(overlap)) ?? [];
+    list.push(choices[overlap.id]);
+    byIdentity.set(identity(overlap), list);
   }
+  const seen = new Map<string, number>();
   const carried: Record<string, Choice> = {};
   for (const overlap of now.overlaps) {
-    const choice = byIdentity.get(identity(overlap));
+    const id = identity(overlap);
+    const nth = seen.get(id) ?? 0;
+    seen.set(id, nth + 1);
+    const list = byIdentity.get(id);
+    // As many alike as when chosen, or which is which can't be told: none carries.
+    const choice =
+      list && list.length === now.overlaps.filter((other) => identity(other) === id).length
+        ? list[nth]
+        : undefined;
     const offer = typeof choice === 'object' ? 'edit' : choice;
     carried[overlap.id] =
       choice !== undefined && offer && overlap.offers.includes(offer) ? choice : 'yours';
@@ -430,7 +441,9 @@ function reviewTargetWithin(
     if (overlap.part !== 'data' || overlap.namespace === null) continue;
     // As an own property, a `__proto__` namespace included.
     Object.defineProperty(extensions, overlap.namespace, {
-      value: resolved.payload.extensions[overlap.namespace] ?? null,
+      value: Object.hasOwn(resolved.payload.extensions, overlap.namespace)
+        ? (resolved.payload.extensions[overlap.namespace] ?? null)
+        : null,
       enumerable: true,
       writable: true,
       configurable: true,
