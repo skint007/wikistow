@@ -66,8 +66,10 @@ export function oneTabAtATime(start: () => Turn, tabs: Tabs = browserTabs()): ()
     void locks
       .request(QUEUE_LOCK, { signal: asking.signal }, async () => {
         if (waiting === asking) waiting = null;
-        // Granted as this tab left, or after it stopped asking.
-        if (left || asking.signal.aborted) return;
+        // Granted as this tab left. One granted just as it went out of view
+        // runs it all the same, as a tab out of view holding it does: the
+        // tab that let go may have seen it taken.
+        if (left) return;
         holding = settled;
         turn = start();
         await new Promise<void>((resolve) => (release = resolve));
