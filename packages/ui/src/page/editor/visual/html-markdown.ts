@@ -1,4 +1,5 @@
-import { editorViewCtx, parserCtx, serializerCtx } from '@milkdown/kit/core';
+import { editorStateCtx, editorViewCtx, parserCtx, serializerCtx } from '@milkdown/kit/core';
+import type { Ctx } from '@milkdown/kit/ctx';
 import type { Node } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
@@ -21,8 +22,8 @@ import { Writer, type Written } from './writer';
 // DOM. So it runs in the app's page, never its main process, which has no
 // DOM, and where the vault's keys and the page writer are anyway.
 
-/** An editor nobody sees that pastes, its empty page, and its writer. */
-type Paster = { view: EditorView; empty: EditorState; writer: Writer };
+/** An editor nobody sees that pastes, its context, its empty page, and its writer. */
+type Paster = { ctx: Ctx; view: EditorView; empty: EditorState; writer: Writer };
 
 let shared: Promise<Paster> | undefined;
 
@@ -48,7 +49,7 @@ function paster(): Promise<Paster> {
       const made = new Writer({ parse: ctx.get(parserCtx), serialize: ctx.get(serializerCtx) });
       writer = made;
       const view = ctx.get(editorViewCtx);
-      return { view, empty: view.state, writer: made };
+      return { ctx, view, empty: view.state, writer: made };
     });
   })().catch((error: unknown) => {
     shared = undefined;
@@ -80,7 +81,7 @@ async function prepared(writer: Writer, doc: Node) {
  */
 export async function htmlMarkdown(html: string, text = ''): Promise<Written> {
   if (!html && !text) return { markdown: '', faithful: true };
-  const { view, empty, writer } = await paster();
+  const { ctx, view, empty, writer } = await paster();
   const data = new DataTransfer();
   data.setData('text/html', html);
   data.setData('text/plain', text);
@@ -97,8 +98,10 @@ export async function htmlMarkdown(html: string, text = ''): Promise<Written> {
     else view.pasteText(text);
     doc = view.state.doc;
   } finally {
-    // Not holding on to the clip.
+    // Not holding on to the clip, in the view or in the state Milkdown
+    // keeps of it, which it notes only as a change is made.
     view.updateState(empty);
+    ctx.set(editorStateCtx, empty);
   }
   await prepared(writer, doc);
   return writer.write(doc, true);
