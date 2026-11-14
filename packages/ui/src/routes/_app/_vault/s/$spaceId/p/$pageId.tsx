@@ -1436,7 +1436,12 @@ function PageBody({
         markdown={publishingMarkdown}
         open={publishingFrom !== null}
         onOpenChange={(open) => !open && setPublishingFrom(null)}
-        publish={() => publishDraft(pressedAt.current ?? undefined)}
+        publish={() => {
+          // Once: after a stop, Publish again takes a press of its own.
+          const pressed = pressedAt.current;
+          pressedAt.current = null;
+          return publishDraft(pressed ?? undefined);
+        }}
         onDone={() => publishingFrom !== null && void showPublished(publishingFrom)}
       />
       {/* Kept while open, so losing publish rights meanwhile doesn't take what it says away. */}

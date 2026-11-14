@@ -8,11 +8,12 @@
 // what the head doesn't hold, and sends a Saved notice, so the server
 // deletes it.
 import { JoinId, RevisionId, liveRoutes, type PageId } from '@wikistow/contracts';
-import { ApiError } from '../api/client.ts';
+import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { isAgentId } from '../identity.ts';
 import { newId } from '../ids.ts';
 import { LINKS_NAMESPACE } from '../link-table.ts';
+import { checkTime, withinTime } from '../merge/body.ts';
 import { mergePayloads, resolve } from '../merge/payload.ts';
 import type { PagePayload } from '../payload.ts';
 import { sameRegion } from '../regions.ts';
@@ -82,6 +83,8 @@ export function ofAnotherSession(draft: OpenedDraft, sessionId: string): boolean
   return live.kind === 'live' && live.extension.session !== sessionId;
 }
 
+// How long merging the ended document onto a later head may take.
+const MERGE_MS = 2_000;
 // How many of the latest Saved notices are tried for one naming a draft of the session.
 const NOTICES_TRIED = 8;
 // How far back the head's signed chain is walked for a draft of the session.
@@ -130,7 +133,9 @@ export async function catchUpEnded(
   }
 }
 
-// What the server answered, or a draft it didn't serve: it may pass.
+// A failure other than the session's own checks: only no answer, a
+// server's failure or a limit may pass; what the server refused, a page
+// too large to save or a merge too large, fails the same for anyone.
 function passing(error: unknown): CaughtUp {
   const why =
     error instanceof ApiError
@@ -138,7 +143,10 @@ function passing(error: unknown): CaughtUp {
       : error instanceof Error
         ? error.message
         : 'it failed';
-  return { kind: 'cant', why, lasting: false };
+  const passes =
+    outcomeUnknown(error) ||
+    (error instanceof ApiError && ['rate-limited', 'busy', 'stale-head'].includes(error.code));
+  return { kind: 'cant', why, lasting: !passes };
 }
 
 const lasting = (why: string) => ({ kind: 'cant' as const, why, lasting: true });
@@ -215,6 +223,10 @@ async function build(
     const read = readSnapshot(later.content);
     if (read.kind === 'newer-format') {
       return lasting('it is of a newer format: update the app');
+    }
+    // The draft it names sealed is the one the server keeps for it, named in the clear.
+    if (read.revisionId !== served.snapshot.revisionId) {
+      return lasting('its snapshot names another draft than the server keeps');
     }
     const draft = await ports.openDraft(read.revisionId);
     if (!sessionDraft(draft, opened, signers)) {
@@ -346,6 +358,8 @@ async function build(
     return true;
   };
   for (const stored of messages) {
+    // Past what the notice covers, the document as it stands may be its draft's.
+    if (!checked && stored.position > covers && held.length === 0) checked = check();
     // Past the notice, the document never had its draft's state.
     if (!checked && notice && stored.position >= notice.position) return unchecked();
     const message = opens.get(stored) as OpenedLiveMessage;
@@ -451,6 +465,31 @@ async function putIn(
     }
     return passing(error);
   }
+  // Holding the grant: anything but done lets it go at once, so nobody waits out its 10 minutes.
+  let done = false;
+  try {
+    const result = await saveAndNotice(ports, served, opened, built, startHead, first, joinId);
+    done = result.kind === 'saved' || result.kind === 'held';
+    return result;
+  } finally {
+    if (!done) void transport.leave(joinId).catch(() => {});
+  }
+}
+
+// With the grant: save on the head, and send the Saved notice.
+async function saveAndNotice(
+  ports: ParticipantPorts,
+  served: liveRoutes.ServedSession,
+  opened: OpenedLiveSession,
+  built: Built,
+  startHead: RevisionId,
+  firstTarget: Awaited<ReturnType<typeof targetOn>>,
+  joinId: JoinId,
+): Promise<CaughtUp> {
+  const { ctx } = ports;
+  const sessionId = served.sessionId;
+  const transport = liveTransport(ctx, sessionId, ports.live);
+  let first: typeof firstTarget | null = firstTarget;
   const { document, latest } = built;
   let head: RevisionId | null = startHead;
   let result: CaughtUp | null = null;
@@ -580,25 +619,24 @@ async function targetOn(
   if (!holdsState(document.state(), base.state)) {
     return { kind: 'cant', why: 'it holds less than a draft of it', lasting: true };
   }
-  const merge = mergePayloads(
-    heldPayload(base.payload),
-    heldPayload(headDraft.payload),
-    heldPayload(ours(headDraft.payload)),
-  );
-  // Where both changed one part, the head's text stays.
-  let resolved = resolve(
-    merge,
-    Object.fromEntries(merge.overlaps.map((overlap) => [overlap.id, 'yours' as const])),
-    { review: false },
-  );
-  const overlapped = merge.overlaps.length;
-  for (let round = 0; !resolved.ok && round < 8; round++) {
-    resolved = resolve(
-      resolved.merge,
-      Object.fromEntries(resolved.merge.overlaps.map((overlap) => [overlap.id, 'yours' as const])),
-      { review: false },
+  // Within a time, as a fold's merge is: past it, it fails the same for anyone.
+  const merged = withinTime(MERGE_MS, () => {
+    const merge = mergePayloads(
+      heldPayload(base.payload),
+      heldPayload(headDraft.payload),
+      heldPayload(ours(headDraft.payload)),
     );
-  }
+    // Where both changed one part, the head's text stays.
+    const yours = (overlaps: typeof merge.overlaps) =>
+      Object.fromEntries(overlaps.map((overlap) => [overlap.id, 'yours' as const]));
+    let resolved = resolve(merge, yours(merge.overlaps), { review: false });
+    for (let round = 0; !resolved.ok && round < 8; round++) {
+      checkTime();
+      resolved = resolve(resolved.merge, yours(resolved.merge.overlaps), { review: false });
+    }
+    return { resolved, overlapped: merge.overlaps.length };
+  });
+  const { resolved, overlapped } = merged;
   if (!resolved.ok) return { kind: 'cant', why: 'its changes didn’t merge', lasting: true };
   // The head's own extensions the document never holds stay: its link table and notes.
   const kept = Object.fromEntries(

@@ -382,11 +382,16 @@ export async function joinLive(
                 lasting: false,
               }),
             );
+      const waitingSince = known?.waitingSince ?? Date.now();
       if (caught.kind === 'saved' || caught.kind === 'held') triedFrom.delete(id);
       else if (caught !== known?.caught) {
         // Not tried again this run once the session fails its checks; otherwise in a minute.
         const lasts = caught.kind === 'cant' && caught.lasting;
-        triedFrom.set(id, { caught, until: lasts ? Infinity : Date.now() + TRY_AGAIN_MS });
+        triedFrom.set(id, {
+          caught,
+          until: lasts ? Infinity : Date.now() + TRY_AGAIN_MS,
+          waitingSince,
+        });
       }
       try {
         ports.caughtUp?.(caught);
@@ -397,8 +402,9 @@ export async function joinLive(
         const { revisionId, basedOn, payload } = caught;
         return { kind: 'caught-up', revisionId, basedOn, payload };
       }
+      // For a while only: one that never passes doesn't keep live editing off the page.
       const passes = caught.kind === 'elsewhere' || (caught.kind === 'cant' && !caught.lasting);
-      if (passes && !served.open) return { kind: 'waiting' };
+      if (passes && !served.open && Date.now() - waitingSince < WAIT_MS) return { kind: 'waiting' };
     }
     if (served.open) return newcomer(ports, served.open, served.draftHead);
     if (served.draftHead !== opening.revisionId) return { kind: 'stale-head' };
@@ -4361,7 +4367,9 @@ const foldedGone = new Map<string, Map<number, GoneRange>>();
 /** The clocks of a gone join's client a fold put in, from what the folding app held to what the draft claimed. */
 type GoneRange = { from: number; to: number };
 // Ended sessions this app couldn't catch up from, and until when that stands.
-const triedFrom = new Map<string, { caught: CaughtUp; until: number }>();
+const triedFrom = new Map<string, { caught: CaughtUp; until: number; waitingSince: number }>();
 const TRY_AGAIN_MS = 60_000;
+// How long joining waits for an ended session to be caught up, elsewhere or once a failure passes.
+const WAIT_MS = 3 * 60_000;
 // Sessions this app left once because it couldn't catch up with the others.
 const cantCatchUp = new Set<string>();
