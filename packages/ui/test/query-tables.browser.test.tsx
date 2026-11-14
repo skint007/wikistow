@@ -246,7 +246,7 @@ describe('a query table in the reader', () => {
       ['Cake', ''],
     ]);
     expect(container.querySelector('.query-table figcaption')?.textContent).toBe(
-      '3 pages. Here updated is when each page was saved, not the updated property some of them have.',
+      '3 pages. Here updated is when each page was saved, not the updated property some pages here have.',
     );
   });
 

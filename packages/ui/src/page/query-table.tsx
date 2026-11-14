@@ -151,7 +151,7 @@ export function QueryTable({
               ? '1 page.'
               : `${total} pages.`}
         {shadowed &&
-          ' Here updated is when each page was saved, not the updated property some of them have.'}
+          ' Here updated is when each page was saved, not the updated property some pages here have.'}
       </figcaption>
     </figure>
   );
