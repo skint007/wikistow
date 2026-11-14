@@ -85,6 +85,7 @@ export function livePorts(
       return () => document.removeEventListener('visibilitychange', shown);
     },
     hold: () => holdLivePage(page.pageId),
+    ask: () => void connection.check(),
     async head() {
       const info = await queryClient.fetchQuery({ ...pageQuery(ctx, page.pageId), staleTime: 0 });
       const head = info.heads.draftHead;
@@ -108,6 +109,12 @@ export function livePorts(
       const stops: (() => void)[] = [];
       // Marks, keys and owners another tab changed, or this one.
       if (ctx.kept) stops.push(ctx.kept.onChange(() => void participant.recheck()));
+      // Offline: a stream may hang rather than break, so it is taken as broken at once.
+      stops.push(
+        connection.subscribe(() => {
+          if (!connection.get().online) participant.offline();
+        }),
+      );
       // Who saves: visible tabs first.
       const shown = () => participant.presenceChanged();
       if (typeof document !== 'undefined') {

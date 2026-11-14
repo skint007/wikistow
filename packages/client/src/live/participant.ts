@@ -1788,9 +1788,12 @@ export class LiveParticipant {
       try {
         const kept =
           this.#kept !== undefined && this.#position < this.#kept ? this.#kept : undefined;
+        const stream = new AbortController();
+        this.#streamAbort = stream;
+        const signal = AbortSignal.any([this.#abort.signal, stream.signal]);
         for await (const line of this.#transport.stream(
           { after: this.#position, joinId: this.#me.joinId, ...(kept !== undefined && { kept }) },
-          this.#abort.signal,
+          signal,
         )) {
           brokeAt = null;
           pause = 500;
@@ -1829,6 +1832,19 @@ export class LiveParticipant {
       // break resumes within the join's 30 s (ADR 0015 decision 10).
       pause = Math.min(pause * 2, 2_000);
     }
+  }
+
+  // The stream open now, which going offline breaks at once.
+  #streamAbort: AbortController | null = null;
+
+  /**
+   * The app went offline: the stream is taken as broken now, as it may hang
+   * rather than fail, and the app asks every 2 s whether the server is back,
+   * keeping its place for the join's 30 s (ADR 0015 decision 10).
+   */
+  offline(): void {
+    if (this.#status.state.kind !== 'live') return;
+    this.#streamAbort?.abort();
   }
 
   #line(line: liveRoutes.StreamLine): void {

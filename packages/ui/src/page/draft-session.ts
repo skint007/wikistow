@@ -72,7 +72,10 @@ export class DraftConflict extends Error {
 /** What a draft session reaches outside itself: the app's own, or fakes in tests. */
 export type DraftPorts = {
   saveDraft(
-    input: Omit<Parameters<typeof pageOperations.saveDraft>[1], 'page'>,
+    input: Omit<Parameters<typeof pageOperations.saveDraft>[1], 'page'> & {
+      /** Kept beside it if it goes into this device's queue: typing put back from a live session. */
+      live?: KeptLive | null;
+    },
   ): Promise<pageOperations.Written>;
   uploadAttachment(
     file: {
@@ -165,6 +168,8 @@ export type LivePorts = {
    * (ADR 0015 decision 1). The result lets it go.
    */
   hold?(): () => void;
+  /** Ask the server now whether it answers, offline, rather than at the app's next check. */
+  ask?(): void;
   /** The page's draft head as the server has it now, opened, which a session with a change waiting here starts from. */
   head?(): Promise<{ revisionId: RevisionId; payload: PagePayload; region: Region } | null>;
 };
@@ -642,8 +647,9 @@ export class DraftSession {
 
   /** The page's draft head as last loaded: one this session didn't make means someone else saved. */
   noticeHead(head: RevisionId | null) {
-    // In a live session, the session's stream says what the head is.
-    if (this.#participant) return;
+    // In a live session, the session's stream says what the head is; on
+    // the way back into one, what's kept here goes in by block, whatever saved meanwhile.
+    if (this.#participant || this.#rejoinHold) return;
     // A save in flight may already be the head before its answer arrives.
     if (!head || this.#known.has(head) || this.#saving) return;
     this.#theirs = head;
@@ -916,6 +922,8 @@ export class DraftSession {
   close() {
     this.#live = false;
     if (this.#rejoin) clearTimeout(this.#rejoin);
+    this.#rejoinHold?.();
+    this.#rejoinHold = null;
     if (this.#joinTimer) clearTimeout(this.#joinTimer);
     this.#unwait?.();
     const participant = this.#participant;
@@ -1314,6 +1322,9 @@ export class DraftSession {
   // In the session through `participant`: its status and changes shown here.
   #bind(participant: LiveParticipant) {
     this.#participant = participant;
+    // In: the join's own hold of the page's live lock takes over.
+    this.#rejoinHold?.();
+    this.#rejoinHold = null;
     this.#beforeLive = {
       base: this.#base,
       payload: this.#payload,
@@ -1566,6 +1577,12 @@ export class DraftSession {
               putIn: null,
             }
           : null;
+      if (state.kind === 'stopped' && state.rejoin && !saveOver && settled.mine) {
+        // Its join went, as offline: what the session didn't take waits on
+        // this device, held back, and goes in when it joins again (ADR 0015
+        // decision 10), never as a save from outside the session meanwhile.
+        if (await this.#keepForRejoin(participant, settled)) return false;
+      }
       if (!saveOver && !(settled.atHead && !settled.provisional)) {
         // Its document doesn't hold the head, or may hold text nobody typed:
         // never saved over a draft. Only the person's own typing goes back,
@@ -1669,11 +1686,55 @@ export class DraftSession {
     return true;
   }
 
+  // The page's live lock, held from a join that went until the next join
+  // puts back what was kept: the queue sends nothing of the page's meanwhile.
+  #rejoinHold: (() => void) | null = null;
+
+  /**
+   * Keep `participant`'s document on this device for the next join to put
+   * back (ADR 0015 decision 10), based on the latest session draft it
+   * compared, holding the page's live lock until then; what the person
+   * types meanwhile goes into that change too. Whether it is kept.
+   */
+  async #keepForRejoin(
+    participant: LiveParticipant,
+    settled: Awaited<ReturnType<LiveParticipant['settle']>>,
+  ): Promise<boolean> {
+    const live = this.#ports.live;
+    if (!live?.hold || !this.#ports.keep || !settled.payload || !this.#keptLive) return false;
+    // Held first: no head seen meanwhile is a conflict, and the queue sends nothing of it.
+    this.#rejoinHold?.();
+    const hold = live.hold();
+    this.#rejoinHold = hold;
+    if (!(await this.#keepNow(participant))) {
+      if (this.#rejoinHold === hold) this.#rejoinHold = null;
+      hold();
+      return false;
+    }
+    const checked = participant.checkedDraft;
+    if (checked) {
+      this.#base = checked.revisionId;
+      this.#known.add(checked.revisionId);
+      this.#payload = checked.payload;
+      this.#region = null;
+    }
+    const { title, markdown, attachments } = settled.payload;
+    this.#content = { title, markdown, attachments };
+    this.#extensions = over(this.#payload.extensions, held(settled.payload.extensions));
+    this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
+    return true;
+  }
+
   // Join the next session once what this session holds is saved, trying
   // again for a while, as a change of access may still be settling.
   #rejoinWhenSaved() {
     if (this.#rejoin) clearTimeout(this.#rejoin);
-    if (!this.#live || this.#rejoins >= 20) return;
+    if (!this.#live || this.#rejoins >= 20) {
+      // Not back in: what is kept here goes as the queue sends it.
+      this.#rejoinHold?.();
+      this.#rejoinHold = null;
+      return;
+    }
     this.#rejoin = setTimeout(
       () => {
         this.#rejoin = null;
@@ -1682,7 +1743,10 @@ export class DraftSession {
           if (this.#autosave.isStopped()) return;
           return this.#rejoinWhenSaved();
         }
-        this.#rejoins++;
+        // Tries offline don't count: they ask nothing of the server, but
+        // with typing kept here for the session, whether it is back.
+        if (this.#ports.live?.allowed()) this.#rejoins++;
+        else if (this.#rejoinHold) this.#ports.live?.ask?.();
         this.#whenVisible(
           () =>
             void this.joinLive().then(() => {
@@ -1690,7 +1754,8 @@ export class DraftSession {
             }),
         );
       },
-      Math.min(1_000 * 2 ** this.#rejoins, 30_000),
+      // On the way back with typing kept here, it asks every 2 s (ADR 0015 decision 10).
+      this.#rejoinHold ? 2_000 : Math.min(1_000 * 2 ** this.#rejoins, 30_000),
     );
   }
 
