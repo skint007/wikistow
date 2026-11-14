@@ -49,6 +49,7 @@ import { LiveDocument, samePayload } from './document.ts';
 import { splitFrontmatter } from '../markdown/index.ts';
 import {
   carryChoices,
+  carryInto,
   foldPayloads,
   targetOf,
   namespacesOf,
@@ -1654,6 +1655,11 @@ export class LiveParticipant {
   #listJoins(joins: readonly liveRoutes.Join[]): void {
     this.#joins.list(listedOf(joins));
     for (const join of joins) this.#recordJoin(join);
+    // A gone join whose changes an earlier join of this app folded in stays refused.
+    for (const client of this.#foldedGone) {
+      const join = this.#joins.joinOf(client);
+      if (join) this.#joins.refuse(join, 'its changes were folded in after it went');
+    }
     // A join that went may leave the head claiming what it never sent: fold it in.
     queueMicrotask(() => this.#compare());
     for (const held of this.#held) {
@@ -2681,7 +2687,8 @@ export class LiveParticipant {
     const parts = noteParts(text, revision);
     if (!parts) return;
     if (counted) {
-      const narrower = parts.every((part) => counted.parts.includes(part));
+      const had = new Set(counted.parts);
+      const narrower = parts.every((part) => had.has(part));
       if (narrower && parts.length < counted.parts.length) {
         this.#notes.set(revision, { ...counted, parts });
         this.#update();
@@ -2871,8 +2878,11 @@ export class LiveParticipant {
       if (!target) return false;
       return this.#putReview(opened.revision, target);
     }
-    const now = reviewMerge(opened.base, page, opened.theirs, opened.parts);
-    const carried = carryChoices(chosen, choices, now);
+    const { merge: now, choices: carried } = carryInto(
+      chosen,
+      choices,
+      reviewMerge(opened.base, page, opened.theirs, opened.parts),
+    );
     // A choice of theirs at a part someone changed meanwhile is asked again, never dropped.
     const changing = (picked: Readonly<Record<string, Choice>>) =>
       Object.values(picked).filter((choice) => choice !== 'yours').length;
@@ -3635,8 +3645,8 @@ function noteParts(text: string, revision: RevisionId): string[] | null {
 }
 
 const sameParts = (a: readonly string[], b: readonly string[]) => {
-  const known = b.filter((part) => overlapPart(part) !== null);
-  return a.length === new Set(known).size && a.every((part) => known.includes(part));
+  const known = new Set(b.filter((part) => overlapPart(part) !== null));
+  return a.length === known.size && a.every((part) => known.has(part));
 };
 
 // A state with an update's structs and deletions added, as a fold placed without a save holds.

@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
   carryChoices,
+  carryInto,
   foldPayloads,
   namespacesOf,
   reviewMerge,
@@ -223,5 +224,29 @@ describe('Review', () => {
       settled.overlaps.map((overlap) => [overlap.id, choices[overlap.id] ?? ('theirs' as const)]),
     );
     expect(reviewTarget(settled, choices)).not.toBeNull();
+  });
+
+  it('carries such a choice to the page after someone typed elsewhere', () => {
+    const base = page('- eggs\n- milk\n\nTail.\n');
+    const theirs = page('1. eggs, theirs\n2. milk\n3. jam\n\nTail.\n');
+    const parts = ['body:0-1'];
+    const merge = reviewMerge(base, page('- eggs, ours\n- milk\n- tea\n\nTail.\n'), theirs, parts);
+    const [first] = merge.overlaps;
+    if (!first) throw new Error('no overlap');
+    const resolved = resolve(merge, { [first.id]: 'theirs' });
+    const chosen = resolved.ok ? merge : resolved.merge;
+    const choices = Object.fromEntries(
+      chosen.overlaps.map((overlap) => [overlap.id, 'theirs' as const]),
+    );
+    const now = reviewMerge(
+      base,
+      page('- eggs, ours\n- milk\n- tea\n\nTail, typed.\n'),
+      theirs,
+      parts,
+    );
+    const carried = carryInto(chosen, choices, now);
+    const target = reviewTarget(carried.merge, carried.choices);
+    expect(target?.body).toContain('Tail, typed.');
+    expect(target?.body).toContain('eggs, theirs');
   });
 });

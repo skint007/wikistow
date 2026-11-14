@@ -10,7 +10,14 @@
 // theirs, for Review.
 import { COVER_NAMESPACE } from '../cover.ts';
 import { readProperties, splitFrontmatter } from '../markdown/index.ts';
-import { edges, withinTime, writeBody, type Choice, type SegmentPick } from '../merge/body.ts';
+import {
+  checkTime,
+  edges,
+  withinTime,
+  writeBody,
+  type Choice,
+  type SegmentPick,
+} from '../merge/body.ts';
 import { takeKeys } from '../merge/frontmatter.ts';
 import { mergePayloads, narrowMerge, resolve, type Merge, type Overlap } from '../merge/payload.ts';
 import type { AttachmentRef, PagePayload } from '../payload.ts';
@@ -83,6 +90,7 @@ function foldWithin(base: PagePayload, ours: PagePayload, theirs: PagePayload): 
   // A resolve that comes back unfit names more overlaps; picking yours there ends it.
   for (let round = 0; round < 8; round++) {
     for (const overlap of merge.overlaps) {
+      checkTime();
       // Numbered over every namespace theirs has, as section 5.5 counts them.
       for (const part of partsOf(merge, overlap, theirs)) parts.add(part);
     }
@@ -112,6 +120,17 @@ function byCodePoint(a: string, b: string): number {
 /** `payload`'s extension namespaces as `data:<n>` counts them: every one, in code point order. */
 export const namespacesOf = (payload: PagePayload): string[] =>
   Object.keys(payload.extensions).sort(byCodePoint);
+
+// Each payload's namespaces by their place, sorted once however many data overlaps name them.
+const namespacesRead = new WeakMap<PagePayload, Map<string, number>>();
+function namespaceIndex(payload: PagePayload): Map<string, number> {
+  let index = namespacesRead.get(payload);
+  if (!index) {
+    index = new Map(namespacesOf(payload).map((namespace, at) => [namespace, at]));
+    namespacesRead.set(payload, index);
+  }
+  return index;
+}
 
 // Each payload's keys, read once however many property overlaps name them.
 const keysRead = new WeakMap<PagePayload, string[]>();
@@ -177,35 +196,41 @@ export function partsOf(merge: Merge, overlap: Overlap, theirs: PagePayload): st
     case 'icon':
       return [overlap.part];
     case 'data': {
-      const at = overlap.namespace === null ? -1 : namespacesOf(theirs).indexOf(overlap.namespace);
+      const at =
+        overlap.namespace === null ? -1 : (namespaceIndex(theirs).get(overlap.namespace) ?? -1);
       return at === -1 ? [] : [`data:${at}`];
     }
   }
 }
 
-// Whether a part an overlap names is one a note names.
-function named(part: string, noted: readonly string[]): boolean {
+// Whether a part an overlap names is one a note names: the note's parts read once.
+function namer(noted: readonly string[]): (part: string) => boolean {
   const range = (text: string) => {
     const match = /^body:(\d+)-(\d+)$/.exec(text);
     return match ? [Number(match[1]), Number(match[2])] : null;
   };
   const frontmatter = (text: string) => text === 'frontmatter' || text.startsWith('property:');
-  const ours = range(part);
-  return noted.some((note) => {
-    const theirs = range(note);
-    if (ours && theirs) {
+  const ranges = noted.flatMap((note) => {
+    const r = range(note);
+    return r ? [r] : [];
+  });
+  const others = new Set(noted.filter((note) => range(note) === null));
+  const anyFrontmatter = [...others].some(frontmatter);
+  return (part) => {
+    const ours = range(part);
+    if (ours) {
       const [a = 0, b = 0] = ours;
-      const [s = 0, e = 0] = theirs;
       // An empty range, a deletion, is named by any range at its place.
-      return a === b || s === e ? s <= b && a <= e : a < e && s < b;
+      return ranges.some(([s = 0, e = 0]) =>
+        a === b || s === e ? s <= b && a <= e : a < e && s < b,
+      );
     }
-    if (ours || theirs) return false;
-    if (part === note) return true;
+    if (others.has(part)) return true;
     // The front matter cut whole, or by key, names the same lines.
     return (
-      (part === 'frontmatter' || note === 'frontmatter') && frontmatter(part) && frontmatter(note)
+      frontmatter(part) && (others.has('frontmatter') || (part === 'frontmatter' && anyFrontmatter))
     );
-  });
+  };
 }
 
 /**
@@ -232,11 +257,19 @@ export function reviewMerge(
       if (resolved.ok) break;
       merged = resolved.merge;
     }
-    return merged;
+    // Offering only the overlaps the note names, worked out within the time too.
+    const named = namer(parts);
+    const offered = merged.overlaps.filter((overlap) => {
+      checkTime();
+      return partsOf(merged, overlap, theirs).some(named);
+    });
+    const keep = new Set(offered);
+    return narrowMerge(
+      merged,
+      (overlap) => keep.has(overlap) || partsOf(merged, overlap, theirs).some(named),
+    );
   });
-  return narrowMerge(merge, (overlap) =>
-    partsOf(merge, overlap, theirs).some((part) => named(part, parts)),
-  );
+  return merge;
 }
 
 // An overlap as the person saw it: what it is about, and both sides there.
@@ -278,6 +311,29 @@ export function carryChoices(
       choice !== undefined && offer && overlap.offers.includes(offer) ? choice : 'yours';
   }
   return carried;
+}
+
+/**
+ * The choices made in `chosen` carried to `now` (`carryChoices`), and, where
+ * they make blocks not fit there, carried again into the overlaps the merge
+ * then offers, which a choice that made blocks not fit was answered at.
+ */
+export function carryInto(
+  chosen: Merge,
+  choices: Readonly<Record<string, Choice>>,
+  now: Merge,
+): { merge: Merge; choices: Record<string, Choice> } {
+  return withinTime(FOLD_MS, () => {
+    let merge = now;
+    let carried = carryChoices(chosen, choices, merge);
+    for (let round = 0; round < 8; round++) {
+      const resolved = resolve(merge, carried, { review: false });
+      if (resolved.ok) break;
+      merge = resolved.merge;
+      carried = carryChoices(chosen, choices, merge);
+    }
+    return { merge, choices: carried };
+  });
 }
 
 /**
