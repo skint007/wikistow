@@ -57,18 +57,13 @@ function smallest(before: string, after: string, at: number): TextChange | null 
 
 /**
  * The changes that make `before` read `after`, each the smallest in
- * characters, those a few alike characters apart joined where `untouched`
- * says nobody else changed those: by a character diff of the lines between the common start and
+ * characters: by a character diff of the lines between the common start and
  * end, so text the editor didn't change, between or within its changes,
  * stays as it is in `body`, and others' changes there with it. Past
  * `DIFF_MS`, by lines, each run of lines that differ its smallest change;
  * failing that, one span.
  */
-export function ownChanges(
-  before: string,
-  after: string,
-  untouched: (from: number, to: number) => boolean = () => true,
-): TextChange[] {
+export function ownChanges(before: string, after: string): TextChange[] {
   if (before === after) return [];
   let { start, endA, endB } = edges(before, after);
   // Whole lines, which the line diff, if it comes to that, lines up.
@@ -100,21 +95,13 @@ export function ownChanges(
     const change = smallest(was, now, start);
     return change ? [change] : [];
   }
-  for (const [i, part] of parts.entries()) {
+  // Characters alike by chance, as the "r" of "world" and "there", are
+  // left as they are: joining them into one change would undo what someone
+  // else did to them meanwhile, which it can't see yet.
+  for (const part of parts) {
     if (part.removed) removed += part.value;
     else if (part.added) added += part.value;
-    else if (
-      byChars &&
-      changed(removed, added) &&
-      closeUp(part.value, parts, i) &&
-      untouched(at + removed.length, at + removed.length + part.value.length)
-    ) {
-      // A few characters alike between two changes are lined up by chance,
-      // as the "r" of "world" and "there": part of one change, where nobody
-      // else changed them meanwhile (`untouched`), which it would undo.
-      removed += part.value;
-      added += part.value;
-    } else {
+    else {
       flush(!byChars);
       at += part.value.length;
     }
@@ -123,28 +110,17 @@ export function ownChanges(
   return changes;
 }
 
-// Characters alike this few, on one line, between two changes join them.
-const ALIKE_BY_CHANCE = 3;
-
-const changed = (removed: string, added: string) => removed !== '' || added !== '';
-
-/** Whether `value`, alike at `parts[i]`, is short, on one line, and has a change after it. */
-function closeUp(value: string, parts: readonly ChangeObject<string>[], i: number): boolean {
-  const after = parts[i + 1];
-  return (
-    value.length <= ALIKE_BY_CHANCE &&
-    !value.includes('\n') &&
-    !!after &&
-    (after.added || after.removed)
-  );
-}
-
 /**
  * A run of characters, as the text the editor took in (`held`) and `body`
  * now have them: in both, alike; in `held` only, which someone else took
  * out; or in `body` only, which someone else put in.
  */
-type Piece = { readonly kind: 'same' | 'held' | 'body'; readonly length: number };
+type Piece = {
+  readonly kind: 'same' | 'held' | 'body';
+  readonly length: number;
+  /** In `body` only, or in `held` only, by the editor's own writing rather than someone else's. */
+  readonly mine?: true;
+};
 
 /** A stretch of `held`, and what it is in `body` now. */
 type Segment = {
@@ -167,8 +143,8 @@ function joined(pieces: readonly Piece[]): Piece[] {
   for (const piece of pieces) {
     if (piece.length === 0) continue;
     const last = out.at(-1);
-    if (last?.kind === piece.kind)
-      out[out.length - 1] = { kind: last.kind, length: last.length + piece.length };
+    if (last?.kind === piece.kind && last.mine === piece.mine)
+      out[out.length - 1] = { ...last, length: last.length + piece.length };
     else out.push(piece);
   }
   return out;
@@ -190,7 +166,7 @@ class Cursor {
   }
   peek(): Piece | undefined {
     const piece = this.#pieces[this.#at];
-    return piece && { kind: piece.kind, length: this.#left };
+    return piece && { ...piece, length: this.#left };
   }
   /** Up to `length` of the piece in front, as a piece of its own. */
   take(length: number): Piece {
@@ -198,7 +174,7 @@ class Cursor {
     const used = Math.min(length, this.#left);
     this.#left -= used;
     if (this.#left === 0) this.#left = this.#pieces[++this.#at]?.length ?? 0;
-    return { kind: piece.kind, length: used };
+    return { ...piece, length: used };
   }
   left(): Piece[] {
     const piece = this.peek();
@@ -267,7 +243,8 @@ export class Mapping {
    * into `body`: null once it has grown past `MAX_PIECES`, as so many
    * scattered changes would make following each one cost more than a diff.
    */
-  remote(delta: Delta): Mapping | null {
+  remote(delta: Delta, mine = false): Mapping | null {
+    const own = mine ? ({ mine: true } as const) : {};
     const out: Piece[] = [];
     const rest = new Cursor(this.#pieces);
     // Take `length` of `body` from `rest`, as `take` says, with what of
@@ -290,12 +267,12 @@ export class Mapping {
       else if (op.delete !== undefined)
         // Alike, it's now in `held` only; theirs, it's gone.
         walk(op.delete, (piece, length) => {
-          if (piece.kind === 'same') out.push({ kind: 'held', length });
+          if (piece.kind === 'same') out.push({ kind: 'held', length, ...own });
         });
       else if (op.insert !== undefined) {
         // After what of `held` only lies here.
         while (rest.peek()?.kind === 'held') out.push(rest.take(Infinity));
-        out.push({ kind: 'body', length: lengthOf(op.insert) });
+        out.push({ kind: 'body', length: lengthOf(op.insert), ...own });
       }
       if (out.length > MAX_PIECES) return null;
     }
@@ -345,6 +322,31 @@ export class Mapping {
     return mapping.#pieces.length > MAX_PIECES ? null : mapping;
   }
 
+  /**
+   * `held`, as `text` is, with the editor's own writing since (`remote`'s
+   * `mine`) as `body`, now `body` has it, and how that became `body`: what
+   * the editor shows of text it checked while it typed on, its typing where
+   * `body` has it, others' changes since still to come.
+   */
+  withOwn(text: string, body: string): { text: string; map: Mapping } {
+    let shown = '';
+    const pieces: Piece[] = [];
+    let [t, b] = [0, 0];
+    for (const piece of this.#pieces) {
+      const { length } = piece;
+      if (piece.kind === 'same' || (piece.kind === 'body' && piece.mine)) {
+        shown += body.slice(b, b + length);
+        pieces.push({ kind: 'same', length });
+      } else if (piece.kind === 'held' && !piece.mine) {
+        shown += text.slice(t, t + length);
+        pieces.push({ kind: 'held', length });
+      } else if (piece.kind === 'body') pieces.push({ kind: 'body', length });
+      if (piece.kind !== 'body') t += length;
+      if (piece.kind !== 'held') b += length;
+    }
+    return { text: shown, map: new Mapping(pieces) };
+  }
+
   get #segments(): Segment[] {
     if (this.#cached) return this.#cached;
     const segments: Segment[] = [];
@@ -358,24 +360,6 @@ export class Mapping {
       body = bodyEnd;
     }
     return (this.#cached = segments);
-  }
-
-  /**
-   * Whether nobody else changed `held` from `from` to `to`: none of it
-   * taken out, and nothing put in within it or at either end.
-   */
-  untouched(from: number, to: number): boolean {
-    for (const segment of this.#segments) {
-      if (segment.same) continue;
-      const put = segment.held === segment.heldEnd;
-      if (
-        put
-          ? segment.held >= from && segment.held <= to
-          : segment.held < to && segment.heldEnd > from
-      )
-        return false;
-    }
-    return true;
   }
 
   /**

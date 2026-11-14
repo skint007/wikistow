@@ -672,6 +672,11 @@ function Surface({
     }),
   );
 
+  // In a session that still takes the person's changes, bound or not yet.
+  const inSession = () => {
+    const live = latest.current.live;
+    return !!live && live.active?.() !== false;
+  };
   const viewNow = () => {
     const view = editor.current?.action((ctx) => ctx.get(editorViewCtx));
     return view && !view.isDestroyed ? view : null;
@@ -920,15 +925,17 @@ function Surface({
       read: () => bound.current?.binding.write() ?? surface.read(),
       // Text given in a session that has been left is the page's from now
       // on, whatever `body` holds: the binding goes first.
+      // In a session not yet bound, as while the editor is made, nothing goes
+      // in but by the binding, which starts from the text it was checked on.
       replace: (markdown: string) => {
         if (bound.current?.live.active?.() === false) bind(null, false);
         if (bound.current) bound.current.binding.nudge();
-        else surface.replace(markdown);
+        else if (!inSession()) surface.replace(markdown);
       },
       take: (markdown: string) => {
         if (bound.current?.live.active?.() === false) bind(null, false);
-        if (!bound.current) return surface.take(markdown);
-        bound.current.binding.nudge();
+        if (bound.current) bound.current.binding.nudge();
+        else if (!inSession()) return surface.take(markdown);
         return true;
       },
       caret: surface.caret,

@@ -870,7 +870,9 @@ export function PageEditor({
               ) : (
                 <VisualEditor
                   {...surfaceProps}
-                  initial={(assist.live && visualFrom.current) || body.current}
+                  initial={
+                    assist.live && visualFrom.current !== null ? visualFrom.current : body.current
+                  }
                   onUnfaithful={unfaithful}
                   holding={() => given.current !== null || liveHeld.current}
                   onCantShow={cantShow}

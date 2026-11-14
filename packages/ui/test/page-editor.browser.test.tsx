@@ -362,6 +362,24 @@ describe('in a live session', () => {
     await expect.poll(() => visual(m)?.textContent).toBe(`One.${text.toJSON().slice(6, -1)}`);
   });
 
+  it('turning to the visual editor, never shows unchecked what someone adds meanwhile', async () => {
+    const { text, live, theirs } = liveBody('One.\n\nTwo.\n');
+    const m = mount('One.\n\nTwo.\n', 'source', live);
+    await expect.poll(() => shown(m)).toBe('source');
+    const button = [...m.container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Visual',
+    );
+    act(() => button?.click());
+    // While it's checked, Sam adds what the visual editor can't show.
+    expect(shown(m)).toBe('loading');
+    theirs('sam', (body) => body.insert(body.length, '\n[r]: https://example.test/\n'));
+    act(() => m.handle.replace(text.toJSON()));
+    // Checked as it's taken in, never shown unchecked: added before it was
+    // bound, it can't say who, so it says why, as a page opening so does.
+    await expect.poll(() => m.container.textContent).toContain(STAYS);
+    expect(shown(m)).toBe('source');
+  });
+
   it('checks text it’s given once the session has been left, as ever', async () => {
     const { live } = liveBody('One.\n\nTwo.\n');
     let active = true;

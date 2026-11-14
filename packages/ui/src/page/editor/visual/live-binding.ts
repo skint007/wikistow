@@ -106,12 +106,15 @@ export class VisualBinding {
     this.#synced();
     const observer = (event: Y.YTextEvent, transaction: Y.Transaction) => {
       const delta = event.delta as Delta;
-      if (this.#pending) this.#pending.map = this.#pending.map?.remote(delta) ?? null;
-      if (transaction.meta.get(MINE) === this) return;
-      this.#map = this.#map?.remote(delta) ?? null;
+      const mine = transaction.meta.get(MINE) === this;
+      if (this.#pending) this.#pending.map = this.#pending.map?.remote(delta, mine) ?? null;
+      if (mine) return;
+      const followed = this.#map;
+      this.#map = followed?.remote(delta) ?? null;
       this.#theirs++;
       this.#by.add(this.#sending);
-      this.#schedule();
+      // Too much to follow: catch up at once, so a diff stands in as briefly as can be.
+      this.#schedule(followed && !this.#map ? 0 : TAKE_MS);
     };
     body.text.observe(observer);
     this.#stops.push(() => body.text.unobserve(observer));
@@ -187,7 +190,7 @@ export class VisualBinding {
     const next = this.#editor.written();
     if (next === this.#held) return body;
     const mapping = this.#mapNow(body);
-    const changes = ownChanges(this.#held, next, (from, to) => mapping.untouched(from, to));
+    const changes = ownChanges(this.#held, next);
     const carried = body === this.#held ? changes : mapping.carry(changes);
     const expected = applyTo(body, carried);
     const text = this.#body.text;
@@ -229,7 +232,11 @@ export class VisualBinding {
   #schedule(wait = TAKE_MS) {
     if (this.#destroyed) return;
     if (this.#reading) return void (this.#again = true);
-    if (this.#timer !== null) return;
+    if (this.#timer !== null) {
+      // Waiting already, unless this is to go at once.
+      if (wait > 0) return;
+      clearTimeout(this.#timer);
+    }
     this.#timer = setTimeout(() => {
       this.#timer = null;
       this.#run();
@@ -245,7 +252,11 @@ export class VisualBinding {
     // The editor's own edit, before others' changes go in over it.
     this.write();
     const text = this.#body.text.toJSON();
-    if (text === this.#held) return this.#caughtUp();
+    if (text === this.#held) {
+      // As changes that changed nothing it shows leave it: the same again.
+      this.#map = Mapping.identity(text.length);
+      return this.#caughtUp();
+    }
     const pending: Pending = { text, map: Mapping.identity(text.length) };
     this.#pending = pending;
     const taking = this.#editor.take(text);
@@ -287,8 +298,9 @@ export class VisualBinding {
   #withOwn(text: string, pending: Pending, heldThen: string, mapThen: Mapping): Pending {
     const written = this.#editor.written();
     if (written === heldThen) return pending;
-    const own = ownChanges(heldThen, written, (from, to) => mapThen.untouched(from, to));
-    return { text: applyTo(text, mapThen.carry(own)), map: null };
+    // As followed, its typing exactly where `body` has it.
+    if (pending.map) return pending.map.withOwn(text, this.#body.text.toJSON());
+    return { text: applyTo(text, mapThen.carry(ownChanges(heldThen, written))), map: null };
   }
 
   // `text` read whole, checked first, at its pace: before then, by block

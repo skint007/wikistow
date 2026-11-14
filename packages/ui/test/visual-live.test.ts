@@ -115,7 +115,9 @@ describe('carried onto body', () => {
     const body = 'hello ld\n';
     const next = 'hello there\n';
     const carried = Mapping.between(held, body).carry(ownChanges(held, next));
-    expect(applyTo(body, carried)).toBe('hello there\n');
+    // By character, the "r" both have was kept, and it was taken out: as two
+    // people changing one word at once can leave it, for either to fix.
+    expect(applyTo(body, carried)).toBe('hello thee\n');
   });
 
   it('puts two blocks’ changes each where its block is now', () => {
@@ -150,13 +152,13 @@ describe('carried onto body', () => {
     expect(Mapping.identity(10).remote([{ retain: 2 }, { insert: 'x' }])?.bodyLength).toBe(11);
   });
 
-  it('doesn’t join two changes over characters someone else changed between them', () => {
+  it('changes each of two places a character apart, leaving what someone did between', () => {
     const held = 'x a-b y\n';
     const body = 'x ab y\n';
     const next = 'x A-B y\n';
-    const mapping = Mapping.between(held, body);
-    const changes = ownChanges(held, next, (from, to) => mapping.untouched(from, to));
-    expect(applyTo(body, mapping.carry(changes))).toBe('x AB y\n');
+    expect(ownChanges(held, next)).toHaveLength(2);
+    const carried = Mapping.between(held, body).carry(ownChanges(held, next));
+    expect(applyTo(body, carried)).toBe('x AB y\n');
   });
 
   it('maps places both ways', () => {
@@ -428,6 +430,52 @@ describe('the binding', () => {
     await vi.advanceTimersByTimeAsync(WHOLE_MS * 3);
     await settle();
     expect(editor.shown).toBe(text.toJSON());
+  });
+
+  it('keeps following exactly through a whole read others and the person typed through', async () => {
+    editor.byBlock = false;
+    editor.checkMs = 300;
+    theirs('sam', (body) => body.insert(0, '```\n'));
+    await vi.advanceTimersByTimeAsync(TAKE_MS);
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(150);
+      theirs('sam', (body) => body.insert(body.length, String(i)));
+      if (i === 2) {
+        editor.shown = editor.shown.replace('Two.', 'the dog.');
+        binding.write();
+        theirs('rita', (body) => body.insert(body.toJSON().indexOf('the dog'), 'the cat '));
+      }
+      await vi.advanceTimersByTimeAsync(150);
+      await settle();
+    }
+    expect(editor.wholes).toHaveLength(1);
+    // The person deletes "the " of their "the dog" before Rita's comes in.
+    editor.shown = editor.shown.replace('the dog', 'dog');
+    binding.write();
+    expect(text.toJSON()).toContain('the cat dog.');
+  });
+
+  it('catches up at once when there’s too much to follow', async () => {
+    text.delete(0, text.length);
+    text.insert(0, '- bar\n' + 'y'.repeat(3_000));
+    editor.shown = text.toJSON();
+    await vi.advanceTimersByTimeAsync(TAKE_MS);
+    theirs('rita', (body) => body.insert(0, '- foo\n'));
+    // Mallory changes nothing anyone sees, in more places than are followed.
+    theirs('mallory', (body) => {
+      for (let i = 0; i < 1_100; i++) {
+        const at = 12 + i * 2;
+        body.delete(at, 1);
+        body.insert(at, 'y');
+      }
+    });
+    // Taken in at once, not a tenth of a second on.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(editor.shown).toBe(text.toJSON());
+    expect(editor.shown.startsWith('- foo\n- bar')).toBe(true);
+    editor.shown = editor.shown.replace('- bar', 'bar');
+    binding.write();
+    expect(text.toJSON().startsWith('- foo\nbar')).toBe(true);
   });
 
   it('shows only text it checked, while others type on through every check', async () => {
