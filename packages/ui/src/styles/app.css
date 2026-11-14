@@ -208,6 +208,67 @@
   .page-body > * + * {
     @apply mt-4;
   }
+  /* In a live session, the block someone else's caret is in, in the visual
+     editor (ADR 0015 decision 7): a bar in their colour beside it, with
+     their name. Colours by class, never a `style` attribute; these are
+     CARET_COLOURS (page/editor/source/live-colours.ts), in order. */
+  .page-body > .live-block {
+    position: relative;
+  }
+  .page-body > .live-block::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -0.625rem;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--live-colour);
+    pointer-events: none;
+  }
+  .page-body > .live-block::after {
+    content: attr(data-live-block);
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: var(--live-colour);
+    color: #fff;
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    user-select: none;
+  }
+  .live-block-0 {
+    --live-colour: #d9480f;
+  }
+  .live-block-1 {
+    --live-colour: #1971c2;
+  }
+  .live-block-2 {
+    --live-colour: #2f9e44;
+  }
+  .live-block-3 {
+    --live-colour: #9c36b5;
+  }
+  .live-block-4 {
+    --live-colour: #c2255c;
+  }
+  .live-block-5 {
+    --live-colour: #0c8599;
+  }
+  .live-block-6 {
+    --live-colour: #e67700;
+  }
+  .live-block-7 {
+    --live-colour: #5f3dc4;
+  }
   /* Room above a heading scrolled to, clear of the phone's top bar. */
   .page-body :is(h1, h2, h3, h4, h5, h6) {
     @apply scroll-mt-4 max-[899px]:scroll-mt-16;

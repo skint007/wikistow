@@ -67,9 +67,10 @@ export function preferredMode(): EditorMode {
 const UNFAITHFUL =
   'The visual editor couldn’t write your last change exactly, so this page is in source mode. Check the text below.';
 
-// While others edit live, only source mode takes their changes (ADR 0015
-// step 6; the visual editor joins live editing in step 7).
-const OTHERS_EDITING = 'Others are editing this page too, so it shows in source mode for now.';
+// In a live session, someone gave a block what the visual editor can't
+// read back the same (ADR 0015 decision 3, **What it can't show**).
+const cantShowBy = (name: string) => `${name} added something the visual editor can’t show.`;
+const CANT_SHOW_OTHERS = 'Others added something the visual editor can’t show.';
 
 const NOT_LOADED: Fidelity = {
   visual: false,
@@ -124,7 +125,6 @@ export function PageEditor({
   onChange,
   status,
   propertyKeys,
-  othersEditing = false,
   ref,
   ...assist
 }: EditorSurfaceProps & {
@@ -133,11 +133,6 @@ export function PageEditor({
   status: ReactNode;
   /** The keys pages in this page's folder use, which Add property suggests. */
   propertyKeys?: PropertyKeys | undefined;
-  /**
-   * Others edit the page live: it shows in source mode, the only one that
-   * takes their changes yet, saying so, and the visual editor waits.
-   */
-  othersEditing?: boolean;
 }) {
   const [first] = useState(() => splitFrontmatter(initial));
   const frontmatter = useRef(first.frontmatter);
@@ -182,6 +177,14 @@ export function PageEditor({
   const tookTake = useRef(0);
   const texts = useRef(0);
   const lastShown = useRef(0);
+  // The text the visual editor next made opens on: the one its check passed.
+  const visualFrom = useRef<string | null>(null);
+  // In a live session's split, whether the visual side takes no edit, as
+  // it can't show the shared text (`cantShow`).
+  const liveHeld = useRef(false);
+  // The live session's body as last drawn, for the handle the session calls, made once.
+  const liveNow = useRef(assist.live);
+  liveNow.current = assist.live;
   // In split, the side the person was in last, where Insert in page puts its code.
   const lastSide = useRef<'source' | 'visual'>('visual');
   // What Find on page searches: the editor the page's text is in, or in
@@ -214,8 +217,12 @@ export function PageEditor({
     if (handle && handle.read() !== body.current) handle.replace(body.current);
   });
   const setMode = (next: Shown) => {
-    // The editor the page reads is going: text given now is for the next.
-    if (mainOf(next) !== mainOf(modeNow.current)) surface.current = null;
+    // The editor the page reads is going: text given now is for the next,
+    // and a visual editor made next holds nothing back yet.
+    if (mainOf(next) !== mainOf(modeNow.current)) {
+      surface.current = null;
+      liveHeld.current = false;
+    }
     if (next !== 'split' && syncing.current) {
       clearTimeout(syncing.current.timer);
       syncing.current = null;
@@ -269,8 +276,14 @@ export function PageEditor({
       setNote(null);
       return;
     }
-    // The visual editor holds the body already: only the source beside it comes or goes.
-    if (mainOf(modeNow.current) === 'visual' && surface.current && given.current === null) {
+    // The visual editor holds the body already: only the source beside it
+    // comes or goes. Not one holding back text it can't show, which is checked again.
+    if (
+      mainOf(modeNow.current) === 'visual' &&
+      surface.current &&
+      given.current === null &&
+      !liveHeld.current
+    ) {
       setMode(next);
       setNote(null);
       return;
@@ -283,7 +296,10 @@ export function PageEditor({
       checked = body.current;
       fidelity = await check(checked);
       if (ask !== asked.current) return;
-    } while (checked !== body.current);
+      // In a session others may type on through every check: the visual
+      // editor opens on the text checked, and takes the rest in as it comes.
+    } while (checked !== body.current && !liveNow.current);
+    visualFrom.current = checked;
     setMode(fidelity.visual ? next : 'source');
     setNote(fidelity.visual ? null : fidelity.reason);
   };
@@ -458,6 +474,18 @@ export function PageEditor({
     body.current = text;
     if (given.current !== null) given.current = text;
     mirror.current?.replace(text);
+    // In a live session, the visual editor takes `body` itself, by block
+    // (ADR 0015 decision 3); once it's left, text given is checked as ever.
+    const live = liveNow.current;
+    if (
+      live &&
+      live.active?.() !== false &&
+      surface.current &&
+      (modeNow.current === 'visual' || modeNow.current === 'split')
+    ) {
+      given.current = null;
+      return surface.current.replace(text);
+    }
     // At once, as text typed in the source isn't, which is paced.
     if (modeNow.current === 'split') return syncVisual(text, 0, true);
     if (modeNow.current !== 'visual') {
@@ -543,15 +571,52 @@ export function PageEditor({
     else addAtEnd(`\`${code}\``);
   };
 
-  // Others came to edit live: the visual editor's last edit goes in, then source mode.
-  useEffect(() => {
-    if (!othersEditing) return;
-    if (modeNow.current !== 'source') {
-      const text = bodyNow();
-      if (text !== body.current) changed(text);
-      void show('source', false).then(() => setNote(OTHERS_EDITING));
+  /**
+   * In a live session, the visual editor can't show the shared text, which
+   * `by` changed last: in the visual editor alone, the page turns to source
+   * mode, saying who, as for an edit it couldn't write; in split, its side
+   * takes no edit, saying so, until the text is one it can show.
+   */
+  const cantShow = (by: readonly (string | null)[], reason: string) => {
+    // Named only when one other person changed it since it could show it.
+    const others = by.filter((id): id is string => id !== null);
+    const own = others.length === 0;
+    const said = own
+      ? reason
+      : others.length === 1 && by.length === 1
+        ? cantShowBy(liveNow.current?.nameOf?.(others[0] ?? '') ?? 'Someone')
+        : CANT_SHOW_OTHERS;
+    if (modeNow.current === 'split') {
+      liveHeld.current = true;
+      return setNote(own ? onHold(reason) : `The visual side is on hold. ${said}`);
     }
-  }, [othersEditing]);
+    if (modeNow.current !== 'visual') return;
+    asked.current++;
+    body.current = bodyNow();
+    const typing = !!document.activeElement?.closest('#page-visual');
+    if (typing) focusAt.current = { at: surface.current?.caret?.() ?? undefined };
+    setMode('source');
+    setNote(said);
+  };
+  const canShow = () => {
+    if (!liveHeld.current) return;
+    liveHeld.current = false;
+    if (modeNow.current === 'split') setNote(null);
+  };
+  // In a session, split's visual side takes the shared text from its
+  // binding: the source's text waiting for it is the binding's to take. Out
+  // of one, the split takes the source's text as it did.
+  useEffect(() => {
+    liveHeld.current = false;
+    const shown = modeNow.current;
+    if (!assist.live || (shown !== 'split' && shown !== 'visual')) return;
+    if (syncing.current) clearTimeout(syncing.current.timer);
+    syncing.current = null;
+    if (given.current !== null) {
+      given.current = null;
+      if (shown === 'split') setNote(null);
+    }
+  }, [assist.live]);
 
   // The source editor too, which an edit the visual editor can't write turns to.
   useEffect(() => {
@@ -644,8 +709,8 @@ export function PageEditor({
   }, [properties]);
   const surfaceProps: EditorSurfaceProps = {
     ...assist,
-    // Only source mode edits a live session's text as it's typed (step 7 brings the visual editor).
-    live: mode === 'source' ? assist.live : null,
+    // Both editors edit a live session's text as it's typed (ADR 0015 decision 3).
+    live: assist.live ?? null,
     ref: attach,
     initial: body.current,
     // Not while text it was given is held: that has what it reports.
@@ -660,16 +725,19 @@ export function PageEditor({
     properties: propertyData,
     setProperty: setOneProperty,
   };
-  // The source beside the visual editor: its edits go there once typing pauses.
-  // Plugins' buttons are in the visual editor's toolbar only.
-  const { toolbar: _toolbar, live: _live, ...mirrored } = assist;
+  // The source beside the visual editor: its edits go there once typing
+  // pauses; in a live session, both are bound to the shared text, and each
+  // takes the other's changes as it takes anyone's. Plugins' buttons are in
+  // the visual editor's toolbar only.
+  const { toolbar: _toolbar, ...mirrored } = assist;
   const mirrorProps: EditorSurfaceProps = {
     ...mirrored,
+    live: assist.live ?? null,
     ref: attachMirror,
     initial: body.current,
     onChange: (text) => {
       changed(text);
-      if (modeNow.current === 'split')
+      if (modeNow.current === 'split' && !assist.live)
         syncVisual(text, Math.max(TAKE_MS, WHOLE_SHARE * tookTake.current));
     },
     lineBreak,
@@ -708,10 +776,8 @@ export function PageEditor({
                 type="button"
                 aria-pressed={choice === chosen}
                 // Not `disabled`, which would drop the focus while it checks.
-                aria-disabled={checking || (othersEditing && choice !== 'source')}
-                title={othersEditing && choice !== 'source' ? OTHERS_EDITING : undefined}
+                aria-disabled={checking}
                 onClick={() => {
-                  if (othersEditing && choice !== 'source') return setNote(OTHERS_EDITING);
                   if (choice !== chosen && !checking) void show(choice, true);
                 }}
                 className={cn(
@@ -804,8 +870,14 @@ export function PageEditor({
               ) : (
                 <VisualEditor
                   {...surfaceProps}
+                  initial={
+                    assist.live && visualFrom.current !== null ? visualFrom.current : body.current
+                  }
                   onUnfaithful={unfaithful}
-                  holding={() => given.current !== null}
+                  holding={() => given.current !== null || liveHeld.current}
+                  onCantShow={cantShow}
+                  onCanShow={canShow}
+                  onBehind={(text) => give(text, false)}
                 />
               )}
             </div>

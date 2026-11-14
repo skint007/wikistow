@@ -53,6 +53,11 @@ import {
 import { FormatToolbar, FormatWatch } from './toolbar';
 import { wrapSelection } from './wrapping';
 import { Writer } from './writer';
+import * as Y from 'yjs';
+import type { LiveSource } from '../source/live';
+import { resolveIn } from '../live-cursor';
+import { VisualBinding, type Taking } from './live-binding';
+import { barDecorations, barsOf, blockAt, liveBars, setBars, type BarsHost } from './live-bars';
 
 export { checkFidelity, type Fidelity } from './fidelity';
 export { wikilinkEditorNode } from './wikilink-node';
@@ -149,6 +154,24 @@ function putIn(view: EditorView, write: Writer, markdown: string, doc: Node, tak
   return now;
 }
 
+/**
+ * Whether a word is being composed with an input method in the top-level
+ * block that's between `from` and `to`, or touches them, in `view`'s
+ * document: that block takes others' changes only once it's done.
+ */
+function composingIn(view: EditorView, from: number, to: number): boolean {
+  if (!view.composing) return false;
+  const { doc, selection } = view.state;
+  const $at = doc.resolve(selection.from);
+  if ($at.depth === 0) return false;
+  const start = $at.before(1);
+  const end = start + $at.node(1).nodeSize;
+  return from <= end && to >= start;
+}
+
+// How often the person's caret goes out, at most (ADR 0015 decision 7).
+const CURSOR_MS = 100;
+
 // Whether `tr` is the session's change (`EXTERNAL`), or one plugins added to it.
 const external = (tr: Transaction) =>
   !!((tr.getMeta('appendedTransaction') as Transaction | undefined) ?? tr).getMeta(EXTERNAL);
@@ -179,6 +202,20 @@ export type VisualSurfaceProps = EditorSurfaceProps & {
   onUnfaithful?: (markdown: string) => void;
   /** Whether it takes no edit for now, as text it's to be given is checked. */
   holding?: () => boolean;
+  /**
+   * In a live session (`live`), it can't show the shared `body`, which
+   * those in `by` changed since it last could (null: the person, from
+   * elsewhere, as the other pane of split), and why, as a page that opens
+   * so would say.
+   */
+  onCantShow?: (by: readonly (string | null)[], reason: string) => void;
+  /** In a live session, it shows `body` again after it couldn't. */
+  onCanShow?: () => void;
+  /**
+   * It left a live session holding less than `body` did, others' changes it
+   * hadn't taken in yet: `text`, what the page then holds, to be given it.
+   */
+  onBehind?: (text: string) => void;
 };
 
 /**
@@ -216,6 +253,10 @@ function Surface({
   otherPages,
   queryTable,
   toolbar,
+  live,
+  onCantShow,
+  onCanShow,
+  onBehind,
   ref,
 }: VisualSurfaceProps) {
   const nodes = use(loadSyntaxNodes());
@@ -233,6 +274,10 @@ function Surface({
     properties,
     setProperty,
     otherPages,
+    live,
+    onCantShow,
+    onCanShow,
+    onBehind,
   });
   useLayoutEffect(() => {
     latest.current = {
@@ -248,6 +293,10 @@ function Surface({
       properties,
       setProperty,
       otherPages,
+      live,
+      onCantShow,
+      onCanShow,
+      onBehind,
     };
   });
   // The runtime of the place it is drawn in, if any, for the editor's whole life.
@@ -305,6 +354,13 @@ function Surface({
   // Each text shown, a block at a time or whole, counted, so one checked
   // meanwhile doesn't go in over a later one.
   const changes = useRef(0);
+  // In a live session, the binding to its `body`, which its text goes into
+  // and comes from (ADR 0015 decision 3), and what's to be undone with it.
+  const bound = useRef<{ live: LiveSource; binding: VisualBinding; stops: (() => void)[] } | null>(
+    null,
+  );
+  // Others' bars, and the person's caret going out, while it's bound.
+  const [bars] = useState<BarsHost>(() => ({}));
 
   const docOf = (live: Editor) => live.action((ctx) => ctx.get(editorViewCtx).state.doc);
   // `doc` as the page holds it, ending as the text it was given does, and
@@ -360,7 +416,8 @@ function Surface({
     report: () => {
       edited.current = false;
       reported.current = performance.now();
-      latest.current.onChange(surface.read());
+      // In a live session, its blocks go into `body`, and the page holds `body`.
+      latest.current.onChange(bound.current?.binding.write() ?? surface.read());
     },
     /**
      * Write and check the document in idle time, a slice at a time,
@@ -395,16 +452,23 @@ function Surface({
      * Show `markdown`, read whole, changing only what differs so the cursor
      * stays where it was.
      */
-    show: (markdown: string) => {
+    show: (markdown: string, waits = false): true | 'composing' => {
+      // A block being composed in waits, if it would change.
+      const live = editor.current;
+      const next = live?.action((ctx) => ctx.get(parserCtx)(withLf(markdown)));
+      const change = live && next && replacement(docOf(live), next);
+      if (waits && live && change) {
+        const view = live.action((ctx) => ctx.get(editorViewCtx));
+        if (change.some((edit) => composingIn(view, edit.from, edit.to))) return 'composing';
+      }
       changes.current++;
       text.current = markdown;
       // A cursor asked for before it was made was in other text.
       focusing.current = null;
-      editor.current?.action((ctx) => {
+      live?.action((ctx) => {
         const view = ctx.get(editorViewCtx);
-        const next = ctx.get(parserCtx)(withLf(markdown));
         const { doc } = view.state;
-        const change = replacement(doc, next);
+        if (!next) return;
         if (change)
           view.dispatch(
             replaceIn(view.state.tr, change).setMeta(EXTERNAL, true).setMeta('addToHistory', false),
@@ -413,6 +477,7 @@ function Surface({
         if (writer.current) sourceAs(writer.current, view.state.doc, markdown, next, doc);
       });
       surface.later();
+      return true;
     },
     /**
      * Show `markdown` by reading again only the top-level blocks it changes,
@@ -424,6 +489,14 @@ function Surface({
      * edit to undo.
      */
     take: (markdown: string, atOnce = false): boolean | Promise<boolean> => {
+      const taking = surface.takeIn(markdown, atOnce, false);
+      return taking instanceof Promise ? taking.then((took) => took === true) : taking === true;
+    },
+    /**
+     * `take`, but with `waits`, not while a word is being composed in a
+     * block it would replace: then it says so (`'composing'`), showing nothing.
+     */
+    takeIn: (markdown: string, atOnce: boolean, waits: boolean): Taking | Promise<Taking> => {
       const live = editor.current;
       const write = writer.current;
       const given = origin.current;
@@ -441,11 +514,20 @@ function Surface({
         return made && { ...made, doc, transform };
       });
       if (!plan) return false;
-      const go = (kept: boolean) => {
+      const go = (kept: boolean): Taking => {
         const now = editor.current;
         if (!kept || !now || mine !== changes.current || docOf(now) !== plan.doc) return false;
         const taken = plan.finish();
         if (!taken) return false;
+        if (waits) {
+          const view = now.action((ctx) => ctx.get(editorViewCtx));
+          let from = 0;
+          for (let i = 0; i < taken.first; i++) from += plan.doc.child(i).nodeSize;
+          let to = from;
+          for (let i = taken.first; i < taken.first + taken.count; i++)
+            to += plan.doc.child(i).nodeSize;
+          if (composingIn(view, from, to)) return 'composing';
+        }
         const doc = now.action((ctx) =>
           putIn(ctx.get(editorViewCtx), write, markdown, plan.doc, taken),
         );
@@ -461,7 +543,7 @@ function Surface({
       // if it couldn't be taken in so.
       return checkFidelity(plan.check)
         .then((fidelity) => go(fidelity.visual))
-        .catch(() => false);
+        .catch((): Taking => false);
     },
     /**
      * Show `markdown`, checked already, at once: a block at a time if that
@@ -590,6 +672,141 @@ function Surface({
     }),
   );
 
+  // In a session that still takes the person's changes, bound or not yet.
+  const inSession = () => {
+    const live = latest.current.live;
+    return !!live && live.active?.() !== false;
+  };
+  const viewNow = () => {
+    const view = editor.current?.action((ctx) => ctx.get(editorViewCtx));
+    return view && !view.isDestroyed ? view : null;
+  };
+  /**
+   * Bind to `live`'s `body`, or to none: the edit not yet in the old one
+   * goes in first. Left `leaving` a session, what it hadn't taken in
+   * yet is given it as text from outside (`onBehind`).
+   */
+  const [bind] = useState(() => (next: LiveSource | null, leaving: boolean) => {
+    const was = bound.current;
+    if (was?.live === next) return;
+    if (was) {
+      bound.current = null;
+      const final = was.binding.write();
+      was.binding.destroy();
+      for (const stop of was.stops) stop();
+      was.live.cursor(null, 'visual');
+      const view = viewNow();
+      if (view) view.dispatch(setBars(view.state.tr, barDecorations(view.state.doc, [])));
+      bars.redraw = undefined;
+      bars.moved = undefined;
+      if (leaving && final !== surface.read()) latest.current.onBehind?.(final);
+    }
+    const view = viewNow();
+    if (!next || !view || !writer.current) return;
+    // Text given before it was bound, still being checked to go in, is
+    // the binding's to take now: it goes in no more.
+    changes.current++;
+    // Typed since the session took the page's text and before it's bound:
+    // that goes in as the page's text did, so it's in `body` already.
+    if (edited.current) {
+      waiting.current?.();
+      waiting.current = null;
+      surface.report();
+    }
+    const binding = new VisualBinding(
+      {
+        text: next.text,
+        edit: (change) => next.edit(change),
+        onBeforeRemote: (listener) => next.onBeforeRemote?.(listener) ?? (() => {}),
+        active: () => next.active?.() ?? true,
+      },
+      {
+        written: () => surface.read(),
+        take: (markdown) => surface.takeIn(markdown, false, true),
+        show: (markdown) => surface.show(markdown, true),
+        check: async (markdown) => {
+          const fidelity = await checkFidelity(markdown);
+          return { visual: fidelity.visual, reason: fidelity.visual ? null : fidelity.reason };
+        },
+        cantShow: (by, reason) => latest.current.onCantShow?.(by, reason),
+        canShow: () => latest.current.onCanShow?.(),
+      },
+    );
+    const stops: (() => void)[] = [];
+    // Others' bars, drawn again as their carets or the text move.
+    let drawing: ReturnType<typeof setTimeout> | null = null;
+    let drawn = false;
+    const draw = () => {
+      drawing = null;
+      const view = viewNow();
+      const write = writer.current;
+      const given = origin.current;
+      if (bound.current?.binding !== binding || !view || !write || !given) return;
+      const { doc } = view.state;
+      // Nobody else's caret, and none drawn: nothing to work out.
+      if (next.carets().length === 0) {
+        if (drawn) view.dispatch(setBars(view.state.tr, barDecorations(doc, [])));
+        drawn = false;
+        return;
+      }
+      // Once the writer has the page, as idle time gives it.
+      if (!write.ready(doc)) return void (drawing = setTimeout(draw, 200));
+      const { runs, spans } = write.layout(doc, endsInLine(given.markdown));
+      const mapping = binding.mapping(surface.read());
+      const carets = next.carets().flatMap((caret) => {
+        const at = resolveIn(next.text, caret.head);
+        if (at === null) return [];
+        return [{ ...caret, at: mapping ? mapping.toHeld(at) : at }];
+      });
+      const shown = barsOf(carets, (at) => blockAt(runs, spans, doc.childCount, at));
+      view.dispatch(setBars(view.state.tr, barDecorations(doc, shown)));
+      drawn = shown.length > 0;
+    };
+    bars.redraw = () => {
+      drawing ??= setTimeout(draw, 50);
+    };
+    // The person's caret, where the writer puts it in the shared text.
+    let sending: ReturnType<typeof setTimeout> | null = null;
+    // Tries left for a caret the writer can't place yet, as before it has the page.
+    let tries = 0;
+    const send = () => {
+      sending = null;
+      const view = viewNow();
+      if (bound.current?.binding !== binding || !view) return;
+      if (!view.hasFocus()) return next.cursor(null, 'visual');
+      const caret = surface.caret();
+      if (caret === null) {
+        if (tries-- > 0) sending = setTimeout(send, 200);
+        return;
+      }
+      const at = binding.mapping(surface.read())?.toBody(caret) ?? caret;
+      const position = Y.encodeRelativePosition(
+        Y.createRelativePositionFromTypeIndex(next.text, Math.min(at, next.text.length)),
+      );
+      next.cursor({ anchor: position, head: position }, 'visual');
+    };
+    bars.moved = () => {
+      tries = 5;
+      sending ??= setTimeout(send, CURSOR_MS);
+    };
+    stops.push(next.onCarets(() => bars.redraw?.()));
+    const composed = () => setTimeout(() => binding.composed(), 0);
+    view.dom.addEventListener('compositionend', composed);
+    stops.push(() => {
+      view.dom.removeEventListener('compositionend', composed);
+      if (drawing) clearTimeout(drawing);
+      if (sending) clearTimeout(sending);
+    });
+    bound.current = { live: next, binding, stops };
+    bars.redraw();
+    if (view.hasFocus()) bars.moved();
+  });
+  useEffect(() => {
+    bind(live ?? null, true);
+  }, [bind, live]);
+  // Gone with the editor, no longer bound; its last edit went in as it went.
+  useEffect(() => () => bind(null, false), [bind]);
+
   useEditor((root) => {
     const generation = ++made.current;
     const given = text.current;
@@ -624,6 +841,7 @@ function Surface({
         formatKeys,
         wrapSelection,
         visualFind(() => findReport.current),
+        liveBars(bars),
       ].flat(),
       view: {
         attributes: {
@@ -650,9 +868,11 @@ function Surface({
         // Text the session showed while it was being made, which reading it
         // as it is would replace.
         const shown = text.current;
-        if (shown !== given) surface.replace(shown);
+        if (shown !== given && !latest.current.live) surface.replace(shown);
         // Ready for the first edit, written meanwhile.
         else surface.later();
+        // In a live session, `body` is what it shows, caught up with by block.
+        bind(latest.current.live ?? null, false);
         // Focus asked for meanwhile, unless the person went elsewhere.
         const free = !document.activeElement || document.activeElement === document.body;
         if (focusing.current && free) surface.focus(focusing.current.at);
@@ -700,9 +920,24 @@ function Surface({
     () => ({
       findable,
       passages,
-      read: surface.read,
-      replace: surface.replace,
-      take: (markdown: string) => surface.take(markdown),
+      // In a live session, `body`, its own edit in it: the page holds that,
+      // and the binding takes text from it, never from what it's given.
+      read: () => bound.current?.binding.write() ?? surface.read(),
+      // Text given in a session that has been left is the page's from now
+      // on, whatever `body` holds: the binding goes first.
+      // In a session not yet bound, as while the editor is made, nothing goes
+      // in but by the binding, which starts from the text it was checked on.
+      replace: (markdown: string) => {
+        if (bound.current?.live.active?.() === false) bind(null, false);
+        if (bound.current) bound.current.binding.nudge();
+        else if (!inSession()) surface.replace(markdown);
+      },
+      take: (markdown: string) => {
+        if (bound.current?.live.active?.() === false) bind(null, false);
+        if (bound.current) bound.current.binding.nudge();
+        else if (!inSession()) return surface.take(markdown);
+        return true;
+      },
       caret: surface.caret,
       focus: surface.focus,
       insertCode: surface.insertCode,

@@ -873,14 +873,14 @@ export class LiveParticipant {
   /**
    * Hear just before someone else's change goes into the document, so an
    * edit an editor hasn't reported yet goes in first, as the change of the
-   * text it was made on.
+   * text it was made on; with who sent it, as the visual editor names them.
    */
-  onBeforeRemote(listener: () => void): () => void {
+  onBeforeRemote(listener: (senderId: IdentityId) => void): () => void {
     this.#beforeRemote.add(listener);
     return () => void this.#beforeRemote.delete(listener);
   }
 
-  readonly #beforeRemote = new Set<() => void>();
+  readonly #beforeRemote = new Set<(senderId: IdentityId) => void>();
 
   /** Hear every change to the document, `local` for this app's own. */
   onChange(listener: (local: boolean) => void): () => void {
@@ -2033,7 +2033,7 @@ export class LiveParticipant {
       if (key(opened) !== key(this.#me)) {
         for (const listener of this.#beforeRemote) {
           try {
-            listener();
+            listener(opened.senderId);
           } catch {
             // A listener's own failure stays its own.
           }
