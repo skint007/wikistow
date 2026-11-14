@@ -496,6 +496,30 @@ describe('text taken in by block', () => {
     }
   });
 
+  it('joins a line to the table, list or quote before it as reading whole does, keeping it as written', async () => {
+    // Beside a long list, the page is read whole (`show`).
+    const long = Array.from({ length: 1_500 }, (_, i) => `- item ${i}`).join('\n');
+    for (const block of ['| a |\n| - |\n| 1 |', '- x\n- y', '> x\n> y'])
+      for (const [after, byBlock] of [
+        ['', true],
+        [`\n\n${long}`, false],
+      ] as const) {
+        const page = `A\n\n${block}\n\nB${after}\n\nC\n`;
+        // The blank line before `B` gone, as a row, an item's line or the quote's.
+        const next = page.replace(`${block}\n\nB`, `${block}\nB`);
+        const m = await mount(page);
+        expect(await takeIn(m, next), next).toBe(byBlock);
+        if (!byBlock) await replaceWith(m, next);
+        expect(m.handle.read()).toBe(next);
+        expect(await showsAsRead(m, next), next).toBe(true);
+        // An edit elsewhere leaves it as it was given.
+        const view = viewOf(m.dom);
+        const written = await typeAt(m, find(view.state.doc, 'C') + 1, '!');
+        expect(written, next).toBe(next.replace(/C\n$/, 'C!\n'));
+        m.unmount();
+      }
+  });
+
   it('reads the page whole where a change reaches past its block', async () => {
     const page = 'One[^a].\n\n- a\n\nTwo.\n\nThree.\n\n[^a]: Note.\n\nFour.\n';
     for (const next of [

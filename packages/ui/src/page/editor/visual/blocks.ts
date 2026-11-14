@@ -70,7 +70,8 @@ function inPlace(doc: Node, next: Node, start: number, a: number, b: number): Sl
 /**
  * The least change that makes `doc` show as `next`, a reading of other
  * text: from `from` to `to` in `doc`, `slice` in their place, links it
- * changes inside keeping their ids; null if they show the same.
+ * changes inside keeping their ids; null if they show the same. Put in
+ * with `replace`, it gives `next`, whole top-level blocks where less wouldn't.
  */
 export function replacement(
   doc: Node,
@@ -78,12 +79,23 @@ export function replacement(
 ): { from: number; to: number; slice: Slice } | null {
   const mine = unnumbered(doc);
   const read = unnumbered(next);
-  const start = mine.content.findDiffStart(read.content);
+  let start = mine.content.findDiffStart(read.content);
   const end = mine.content.findDiffEnd(read.content);
   if (start === null || !end) return null;
   let { a, b } = end;
   const overlap = start - Math.min(a, b);
   if (overlap > 0) [a, b] = [a + overlap, b + overlap];
+  // ProseMirror fits a slice open inside a node into what's there, and that
+  // can make nodes neither had: a row a table takes in where the blank line
+  // after it went comes as a second table, with an empty header and row.
+  // Where it would, the top-level blocks the change is in go in whole.
+  if (!new Transform(mine).replace(start, a, read.slice(start, b)).doc.eq(read)) {
+    // What's before `start`, and after `a` and `b`, is the same in each, so
+    // the blocks they're in begin, and end, as far from each end.
+    const [$start, $a, $b] = [mine.resolve(start), mine.resolve(a), read.resolve(b)];
+    if ($start.depth > 0) start = $start.before(1);
+    if ($a.depth > 0) [a, b] = [$a.after(1), $b.after(1)];
+  }
   return { from: start, to: a, slice: inPlace(doc, next, start, a, b) };
 }
 
