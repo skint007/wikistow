@@ -1,4 +1,4 @@
-import type { AttachmentRef } from '@wikistow/client';
+import { COLORS, type AttachmentRef, type ColorName } from '@wikistow/client';
 import { Plugin, PluginKey, type Command, type EditorState } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
@@ -9,6 +9,7 @@ import {
   FileImage,
   FileText,
   FileUp,
+  Highlighter,
   Italic,
   Link,
   List,
@@ -70,6 +71,7 @@ import {
   removeLink,
   setLink,
 } from './links';
+import { colorAt, setColor, type ColorShown } from './highlight-marks';
 import type { Upload } from './plugins';
 
 let bars = 0;
@@ -87,6 +89,13 @@ type Status = {
   headings: boolean[];
   /** The kind of quote the selection is in, if any, and whether the quote menu applies. */
   quote: { kind: QuoteKind | undefined; applies: boolean };
+  /** The highlight and text colour all of the selection has (null if it mixes them), and whether each can be given. */
+  colors: {
+    highlight: ColorShown | null;
+    text: ColorShown | null;
+    highlights: boolean;
+    texts: boolean;
+  };
   link: { active: boolean; applies: boolean };
   /** Whether an attachment can go in at the selection. */
   attachment: boolean;
@@ -110,7 +119,13 @@ function statusOf(state: EditorState): Status {
   const headings = LEVELS.map(({ level: option, format }) => option === level || format.run(state));
   const link = { active: linkAround(state) !== null, applies: linkable(state) };
   const quote = { kind: quoteKind(state), applies: toQuote.run(state) };
-  return { style, level, formats, headings, quote, link, attachment: attachable(state) };
+  const colors = {
+    highlight: colorAt(state, 'highlight'),
+    text: colorAt(state, 'text'),
+    highlights: setColor('highlight', 'plain')(state),
+    texts: setColor('text', 'red')(state),
+  };
+  return { style, level, formats, headings, quote, colors, link, attachment: attachable(state) };
 }
 
 type Range = { from: number; to: number };
@@ -263,6 +278,7 @@ const BUTTONS: { name: FormatName; label: string; icon: LucideIcon }[][] = [
     { name: 'bold', label: 'Bold', icon: Bold },
     { name: 'italic', label: 'Italic', icon: Italic },
     { name: 'code', label: 'Inline code', icon: Code },
+    { name: 'highlight', label: 'Highlight', icon: Highlighter },
   ],
   [
     { name: 'quote', label: 'Quote', icon: TextQuote },
@@ -546,6 +562,135 @@ const QuoteKindMenu = memo(function QuoteKindMenu({
   );
 });
 
+const COLOR_LABELS: Record<ColorName, string> = {
+  red: 'Red',
+  orange: 'Orange',
+  yellow: 'Yellow',
+  green: 'Green',
+  blue: 'Blue',
+  purple: 'Purple',
+};
+
+// Each colour's swatch, as a highlight's background and as text: whole
+// class names, which Tailwind finds here.
+const HIGHLIGHT_SWATCHES: Record<ColorName | 'plain', string> = {
+  plain: 'bg-(--highlight)',
+  red: 'bg-(--highlight-red)',
+  orange: 'bg-(--highlight-orange)',
+  yellow: 'bg-(--highlight-yellow)',
+  green: 'bg-(--highlight-green)',
+  blue: 'bg-(--highlight-blue)',
+  purple: 'bg-(--highlight-purple)',
+};
+const TEXT_SWATCHES: Record<ColorName, string> = {
+  red: 'text-(--text-red)',
+  orange: 'text-(--text-orange)',
+  yellow: 'text-(--text-yellow)',
+  green: 'text-(--text-green)',
+  blue: 'text-(--text-blue)',
+  purple: 'text-(--text-purple)',
+};
+
+const Swatch = ({ className }: { className: string }) => (
+  <span
+    aria-hidden
+    className={cn(
+      'grid size-4 shrink-0 place-items-center rounded-[4px] text-xs font-bold',
+      className,
+    )}
+  />
+);
+
+/**
+ * The highlight's menu, beside its button: a plain highlight (`==text==`,
+ * as the button and Ctrl+Shift+H give), one in a theme colour, or none;
+ * then the text's colour, the theme's or one of its colours. Each choice
+ * replaces the selection's highlight or colour, or gives what's typed next
+ * at a cursor. Checked: what all of the selection has.
+ */
+const ColorMenu = memo(function ColorMenu({
+  watch,
+  highlight,
+  text,
+  highlights,
+  texts,
+  ...focus
+}: Roving & { watch: FormatWatch } & Status['colors']) {
+  const backToText = useBackToText(watch);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        {...roving('colors', focus)}
+        aria-label="Highlight and text colour"
+        data-hint="Highlight and text colour"
+        className={cn(CONTROL, 'w-4 rounded-l-none')}
+      >
+        <ChevronDown className="size-3.5" strokeWidth={1.75} />
+      </DropdownMenuTrigger>
+      {/* Two columns, the highlight's and the text's, side by side. */}
+      <DropdownMenuContent
+        align="start"
+        className="grid w-auto grid-cols-[auto_auto] gap-x-1"
+        {...backToText}
+      >
+        <DropdownMenuRadioGroup aria-label="Highlight" value={highlight ?? ''}>
+          <DropdownMenuLabel>Highlight</DropdownMenuLabel>
+          <DropdownMenuRadioItem
+            value="plain"
+            disabled={!highlights}
+            onSelect={() => watch.run(setColor('highlight', 'plain'))}
+          >
+            <Swatch className={HIGHLIGHT_SWATCHES.plain} />
+            Highlight
+            <DropdownMenuShortcut>{shortcutLabel(SHORTCUTS.highlight)}</DropdownMenuShortcut>
+          </DropdownMenuRadioItem>
+          {COLORS.map((color) => (
+            <DropdownMenuRadioItem
+              key={color}
+              value={color}
+              disabled={!highlights}
+              onSelect={() => watch.run(setColor('highlight', color))}
+            >
+              <Swatch className={HIGHLIGHT_SWATCHES[color]} />
+              {COLOR_LABELS[color]}
+            </DropdownMenuRadioItem>
+          ))}
+          <DropdownMenuRadioItem
+            value="none"
+            disabled={!highlights}
+            onSelect={() => watch.run(setColor('highlight', null))}
+          >
+            <Swatch className="border border-border" />
+            No highlight
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuRadioGroup aria-label="Text colour" value={text ?? ''}>
+          <DropdownMenuLabel>Text colour</DropdownMenuLabel>
+          <DropdownMenuRadioItem
+            value="none"
+            disabled={!texts}
+            onSelect={() => watch.run(setColor('text', null))}
+          >
+            <Swatch className="text-foreground after:content-['A']" />
+            Default
+          </DropdownMenuRadioItem>
+          {COLORS.map((color) => (
+            <DropdownMenuRadioItem
+              key={color}
+              value={color}
+              disabled={!texts}
+              onSelect={() => watch.run(setColor('text', color))}
+            >
+              <Swatch className={cn(TEXT_SWATCHES[color], "after:content-['A']")} />
+              {COLOR_LABELS[color]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+});
+
 // What tells attachments apart in the picker, beside their names: their
 // kind and size.
 function described(ref: AttachmentRef) {
@@ -630,7 +775,8 @@ const AttachmentControl = memo(function AttachmentControl({
 
 /**
  * Formatting for the visual editor: a heading menu, then bold, italic,
- * inline code, quote (with a menu of its kinds: an ordinary quote or one
+ * inline code, highlight (with a menu of the theme's colours for it and
+ * for text), quote (with a menu of its kinds: an ordinary quote or one
  * of GitHub's alerts), code block and lists, each pressed while the
  * selection has it and taking it off then, a link and an attachment
  * picker (`attachments`, the page's). One stop in the tab order:
@@ -706,9 +852,29 @@ export function FormatToolbar({
                 applies={status?.formats[button.name].applies ?? false}
                 tabbable={current === button.name}
                 onFocus={setCurrent}
-                className={button.name === 'quote' ? 'rounded-r-none' : undefined}
+                className={
+                  button.name === 'quote' || button.name === 'highlight'
+                    ? 'rounded-r-none'
+                    : undefined
+                }
               />
             );
+            // A split button: the highlight's toggle, then its colours and the text's.
+            if (button.name === 'highlight')
+              return (
+                <span key={button.name} className="flex">
+                  {control}
+                  <ColorMenu
+                    watch={watch}
+                    highlight={status?.colors.highlight ?? 'none'}
+                    text={status?.colors.text ?? 'none'}
+                    highlights={status?.colors.highlights ?? false}
+                    texts={status?.colors.texts ?? false}
+                    tabbable={current === 'colors'}
+                    onFocus={setCurrent}
+                  />
+                </span>
+              );
             if (button.name !== 'quote') return control;
             // A split button: the quote's toggle, then its kinds.
             return (

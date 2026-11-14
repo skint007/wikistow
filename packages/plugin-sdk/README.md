@@ -122,6 +122,8 @@ A theme is styles only: it runs no code and gets no page access. It can't load a
 | `--card-shadow`, `--badge-shadow`, `--slider-shadow`, `--shade`, `--shade-strong`, `--backdrop` | Shadows (`box-shadow` values), the shade over a bright fill when hovered and pressed, and the colour behind a dialog |
 | `--alert-note`, `--alert-tip`, `--alert-important`, `--alert-warning`, `--alert-caution` | A page's alerts: each type's label and edge |
 | `--code-comment`, `--code-keyword`, `--code-string`, `--code-number`, `--code-title`, `--code-deletion` | Highlighted code |
+| `--highlight`, `--highlight-red`, `--highlight-orange`, `--highlight-yellow`, `--highlight-green`, `--highlight-blue`, `--highlight-purple` | A page's highlights (`==text==`, `<mark>`), plain and in each of the theme's colours (`<mark data-color="red">`), behind text in `--foreground` |
+| `--text-red`, `--text-orange`, `--text-yellow`, `--text-green`, `--text-blue`, `--text-purple` | A page's text in each of the theme's colours (`<span data-color="red">`), on the card and on its own highlight |
 | `--banner-sunrise`, `--banner-ocean`, `--banner-meadow`, `--banner-lavender`, `--banner-dusk`, `--banner-stone` | The banner presets, the same in every palette |
 | `--font-sans`, `--font-mono` | Type |
 | `--radius-card`, `--radius-tile`, `--radius-control`, `--radius-row`, `--radius-folder` | Corner radii |

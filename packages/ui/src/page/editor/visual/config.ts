@@ -19,6 +19,7 @@ import {
 } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { $remark } from '@milkdown/kit/utils';
+import { escapeEquals } from '@wikistow/client/markdown';
 import { alertOf } from '@wikistow/client/reader';
 import type { Link, Nodes, Root, Text } from 'mdast';
 import { defaultHandlers, type State } from 'mdast-util-to-markdown';
@@ -27,9 +28,11 @@ import type { Pluggable } from 'unified';
 import { markdownSyntaxes } from '../../../registries';
 import { inertHost, type VisualHost } from './host';
 import { isLiteral } from './literals';
+import { HIGHLIGHT, highlightEditorNode, TEXT_COLOR } from './highlight-marks';
 import { leaveLastBlock } from './plugins';
 import { pluginInlineNode } from './plugin-inline';
 import { readAlone } from './read-alone';
+import { meaningOf } from './reader-fidelity';
 import { schemaChanges } from './schema';
 import { readingSpans } from './sources';
 import {
@@ -72,11 +75,13 @@ const WWW_DOT = /(?<=[Ww])\.(?=\\)/g;
 // (`b@x.org\_`).
 const EMAIL_AT = /(?<=[+\-.\w])@(?=[-.\w])/g;
 
-// A space in a link, starting text after more of it, as it's given to
-// Milkdown (`writable`): one that closes the link early, where a mark
-// around it ends, moves the spaces starting the rest out of it. This
-// private-use character it leaves be, and it's written as the space.
-const LINKED_SPACE = '\uE002';
+// A space at the edge of text in a mark that goes on past it, or in a
+// colour's HTML, as it's given to Milkdown (`writable`): Milkdown moves the
+// spaces at a mark's ends out of it as it closes it, and it closes a mark
+// early, to open it again, where one it opened later ends, parting
+// `**==a== b**`. This private-use character it leaves be, and it's
+// written as the space.
+const HELD_SPACE = '\uE002';
 
 /**
  * Text, escaped wherever Markdown would read more in it. Milkdown's own
@@ -94,7 +99,7 @@ const LINKED_SPACE = '\uE002';
  * an autolink (`<…>`), where nothing escapes, text is written as it is.
  */
 const escaped: Handle = (node: Text, parent, state, info) => {
-  const value = node.value.replaceAll(LINKED_SPACE, ' ');
+  const value = node.value.replaceAll(HELD_SPACE, ' ');
   if (state.stack.includes('autolink')) return value;
   // With the character written before it, which may be an address's, as
   // the `_` of a `__` before `@x.org` is. A `*` there may be written `_`
@@ -130,19 +135,60 @@ const DOLLAR = /(\\*)\$/g;
  * close math (`mathToMarkdownExtension`), checked again on what's written,
  * since remark skips some; and in a block with inline math, or a dollar in
  * its code or a link, every one (`nearMath`), as one that could open math
- * could close at that dollar.
+ * could close at that dollar. So is each `=` that could make a highlight
+ * (`escapeEquals`).
  */
 const text: Handle = (node: Text, parent, state, info) => {
   const escapedText = escaped(node, parent, state, info);
   const written = node.data?.alert ? escapedText.replace(/^\\\[/, '[') : escapedText;
   // Nothing escapes in an autolink, which math can't start in.
   if (state.stack.includes('autolink')) return written;
-  return written.replace(DOLLAR, (dollar, slashes: string, at: number) => {
+  const priced = written.replace(DOLLAR, (dollar, slashes: string, at: number) => {
     const next = written.charAt(at + dollar.length) || info.after.charAt(0);
     const bare = slashes.length % 2 === 0;
     return bare && (node.data?.nearMath || !/\d/.test(next)) ? `${slashes}\\$` : dollar;
   });
+  // The top-level block it's in.
+  const block = state.indexStack[0] ?? -1;
+  if (equals.bare.has(block)) return priced;
+  const safe = escapeEquals(priced, info.before, info.after);
+  if (safe !== priced) equals.escaped.add(block);
+  return safe;
 };
+
+// An `=` in an image's alt to be written escaped (`image`), which remark's
+// own escaping leaves be.
+const HELD_EQUALS = '\uE003';
+
+// Two `=` with only spaces on both sides, which can neither open nor close.
+const inert = (before: string | undefined, after: string | undefined) =>
+  /^\s$/.test(before ?? '') && /^\s$/.test(after ?? '');
+
+/**
+ * An image, its alt's `=` escaped as text's are (`escapeEquals`): Markdown
+ * reads highlights in an alt before it takes their text as the alt, so
+ * `![a==b==](u)` is the alt `ab`. Every run of two that could open or close
+ * is escaped, and kept so only if its block reads otherwise without
+ * (`whole`); a run of three or more is never a highlight's.
+ */
+type ImageArgs = Parameters<typeof defaultHandlers.image>;
+function image(...[node, parent, state, info]: ImageArgs) {
+  const block = state.indexStack[0] ?? -1;
+  const alt = equals.bare.has(block)
+    ? node.alt
+    : node.alt?.replace(/=+/g, (run, at: number, all: string) =>
+        run.length === 2 && !inert(all[at - 1], all[at + 2]) ? HELD_EQUALS.repeat(2) : run,
+      );
+  if (!alt || alt === node.alt) return defaultHandlers.image(node, parent, state, info);
+  equals.escaped.add(block);
+  return defaultHandlers
+    .image({ ...node, alt }, parent, state, info)
+    .replaceAll(HELD_EQUALS, '\\=');
+}
+
+// The top-level blocks whose text `text` is to leave each `=` in as it is,
+// and those it escaped one in (`whole`).
+const equals = { bare: new Set<number>(), escaped: new Set<number>() };
 
 // Whether `node`, not text, is or holds a dollar that could close math
 // opened in the text before it: inline math, or a dollar in code, a link's
@@ -244,11 +290,48 @@ function autolinked(node: Link, state: State): boolean {
 
 // The document, with no link split (`wholeLinks`).
 type RootArgs = Parameters<typeof defaultHandlers.root>;
-// Its text marked where it's near inline math (`markNearMath`).
+
+/**
+ * Its text marked where it's near inline math (`markNearMath`). A block
+ * whose text had a `=` escaped that could make a highlight
+ * (`escapeEquals`) is written with none escaped instead if, written alone
+ * so, it reads the same, as it does unless another `==` in it pairs with
+ * one: `a ==> b` and `x==y` stay as typed, each block as it reads itself.
+ * Writing it again starts from the state remark had, so a list's bullet
+ * is the one it would have been.
+ */
 function whole(...[node, parent, state, info]: RootArgs) {
   const tree = wholeLinks(node) as Root;
   markNearMath(tree);
-  return defaultHandlers.root(tree, parent, state, info);
+  const bullets = { current: state.bulletCurrent, last: state.bulletLastUsed };
+  const write = (root: Root, bare: Iterable<number>) => {
+    state.bulletCurrent = bullets.current;
+    state.bulletLastUsed = bullets.last;
+    equals.bare = new Set(bare);
+    equals.escaped = new Set();
+    try {
+      return defaultHandlers.root(root, parent, state, info);
+    } finally {
+      equals.bare = new Set();
+    }
+  };
+  const written = write(tree, []);
+  const escaped = [...equals.escaped];
+  const after = { current: state.bulletCurrent, last: state.bulletLastUsed };
+  const bare = escaped.filter((i) => {
+    const block = tree.children[i];
+    if (!block) return false;
+    const alone: Root = { type: 'root', children: [block] };
+    try {
+      return meaningOf(write(alone, [0])) === meaningOf(write(alone, []));
+    } catch {
+      return false;
+    }
+  });
+  if (bare.length > 0) return write(tree, bare);
+  state.bulletCurrent = after.current;
+  state.bulletLastUsed = after.last;
+  return written;
 }
 
 // Otherwise `<…>` where its text is its address and that reads as it,
@@ -270,7 +353,15 @@ link.peek = (...[node, , state]: LinkArgs) =>
   literalOf(node)?.charAt(0) ?? (autolinked(node, state) ? '<' : '[');
 
 // Marks as mdast writes them: nodes around the text they cover.
-const WRAPS = new Set(['strong', 'emphasis', 'delete', 'link']);
+const WRAPS = new Set([
+  'strong',
+  'emphasis',
+  'delete',
+  'link',
+  'highlight',
+  'colorHighlight',
+  'textColor',
+]);
 
 type Tree = { type: string; value?: string; children?: Tree[] };
 type Wrap = { key: string; node: Omit<Tree, 'children'> };
@@ -289,36 +380,59 @@ function leavesOf(nodes: readonly Tree[], marks: readonly Wrap[] = []): Leaf[] {
 
 const isLink = (wrap: Wrap) => wrap.node.type === 'link';
 
+// Marks that hold a space at their ends: a link's text, and a colour's HTML.
+const SPACED = new Set(['link', 'textColor', 'colorHighlight']);
+
 // `wrap` around `children`, with the spaces they start and end with
 // outside it, as Milkdown puts them: a delimiter beside a space isn't one.
+// A space held for Milkdown (`HELD_SPACE`) goes out too, but of a link or
+// a colour's HTML, which can hold it.
 function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[] {
   const inside = [...children];
+  // The spaces at one end, across text nodes of only spaces, as a held
+  // space and a soft line break are.
   const take = (first: boolean, edge: RegExp) => {
-    const node = first ? inside[0] : inside.at(-1);
-    if (node?.type !== 'text' || !node.value) return [];
-    const [space = ''] = edge.exec(node.value) ?? [];
-    const value = first
-      ? node.value.slice(space.length)
-      : node.value.slice(0, -space.length || undefined);
-    inside.splice(first ? 0 : -1, 1, ...(value ? [{ ...node, value }] : []));
-    return space ? [{ type: 'text', value: space }] : [];
+    const taken: Tree[] = [];
+    for (;;) {
+      const node = first ? inside[0] : inside.at(-1);
+      if (node?.type !== 'text' || !node.value) break;
+      const [space = ''] = edge.exec(node.value) ?? [];
+      if (!space) break;
+      const value = first
+        ? node.value.slice(space.length)
+        : node.value.slice(0, -space.length || undefined);
+      inside.splice(first ? 0 : -1, 1, ...(value ? [{ ...node, value }] : []));
+      const moved = { type: 'text', value: space };
+      if (first) taken.push(moved);
+      else taken.unshift(moved);
+      if (value) break;
+    }
+    return taken;
   };
-  const before = take(true, /^\s+/);
-  const after = take(false, /\s+$/);
+  const held = SPACED.has(wrap.type) ? '' : HELD_SPACE;
+  const before = take(true, new RegExp(`^[\\s${held}]+`));
+  const after = take(false, new RegExp(`[\\s${held}]+$`));
   return [...before, ...(inside.length > 0 ? [{ ...wrap, children: inside }] : []), ...after];
 }
+
+// Which marks go outside others over the same text: a colour, then a
+// highlight, as Obsidian writes `==**bold**==`, then the rest.
+const OUTER: Readonly<Record<string, number>> = { textColor: 0, colorHighlight: 1, highlight: 1 };
+const outer = (wrap: Wrap) => OUTER[wrap.node.type] ?? 2;
 
 // `leaves` nested in their marks, but those in `open`, which are around
 // them already. The mark opened first is the one that goes on furthest,
 // but never past the end of a link it would cut, which it ends before,
-// opening again inside; of those that go on as far, the one Milkdown put
-// outermost.
+// opening again inside; of those that go on as far, a colour or highlight
+// (`OUTER`), else the one Milkdown put outermost.
 function nest(leaves: readonly Leaf[], open: ReadonlySet<string> = new Set()): Tree[] {
   const nested: Tree[] = [];
   const has = (i: number, wrap: Wrap) => !!leaves[i]?.marks.some((m) => m.key === wrap.key);
   for (let i = 0; i < leaves.length;) {
     const leaf = leaves[i];
-    const marks = leaf?.marks.filter((wrap) => !open.has(wrap.key)) ?? [];
+    const marks = (leaf?.marks.filter((wrap) => !open.has(wrap.key)) ?? []).sort(
+      (a, b) => outer(a) - outer(b),
+    );
     let best: Wrap | undefined;
     let end = i + 1;
     for (const wrap of marks) {
@@ -365,14 +479,23 @@ const leafText = (leaf: Node) => (leaf.type.name === 'hardbreak' ? '\n' : '\uFFF
 export const holds = (atom: Node, mark: Mark) =>
   !mark.type.spec.code && !(atom.type.name === 'footnote_reference' && mark.type.name === 'link');
 
+// The marks Milkdown opens before the others (`visualPlugins`).
+const RANKED_FIRST = new Set([HIGHLIGHT, TEXT_COLOR]);
+
+// A colour's HTML, `<span data-color>` or `<mark data-color>`, which can
+// hold spaces at its ends, as `**` and `==` can't.
+const holdsSpaces = (mark: Mark) =>
+  mark.type.name === TEXT_COLOR || (mark.type.name === HIGHLIGHT && mark.attrs['color'] !== null);
+
 /**
  * `doc` without the marks Markdown can't hold. None on the spaces and line
- * breaks a mark's run starts or ends with, but code: delimiters can't sit
- * beside them, and Milkdown, which moves spaces out of a mark, wrote some
- * around nothing (`~~~~`, `[](…)`) and others differently each time. And
- * none an atom can't hold (`holds`). A space starting text in a link after
- * more of it is held for Milkdown, which may otherwise move it out
- * (`LINKED_SPACE`).
+ * breaks a mark's run starts or ends with, but code, and a colour's HTML on
+ * spaces (`holdsSpaces`): delimiters can't sit beside them, and Milkdown,
+ * which moves spaces out of a mark, wrote some around nothing (`~~~~`,
+ * `[](…)`) and others differently each time. And none an atom can't hold
+ * (`holds`). A space at the edge of text in a mark that goes on past it
+ * where Milkdown closes it to open it again, or in a colour's HTML, is held
+ * for Milkdown, which would otherwise move it out (`HELD_SPACE`).
  */
 function writable(doc: Node): Node {
   const tr = new Transform(doc);
@@ -395,23 +518,44 @@ function writable(doc: Node): Node {
     const text = block.textBetween(0, block.content.size, undefined, leafText);
     for (const { mark, from, to } of runs) {
       const inside = text.slice(from, to);
-      const lead = inside.length - inside.trimStart().length;
-      const trail = inside.length - inside.trimEnd().length;
+      // A colour's HTML keeps spaces at its ends, but not a line break.
+      const edge = (spaces: string) =>
+        holdsSpaces(mark) && !spaces.includes('\n') ? 0 : spaces.length;
+      const lead = edge(inside.slice(0, inside.length - inside.trimStart().length));
+      const trail = edge(inside.slice(inside.trimEnd().length));
       if (lead > 0) tr.removeMark(start + from, start + from + lead, mark);
       if (trail > 0 && lead < inside.length) tr.removeMark(start + to - trail, start + to, mark);
     }
     return false;
   });
-  const spaces: { pos: number; marks: readonly Mark[] }[] = [];
+  const spaces = new Map<number, readonly Mark[]>();
   tr.doc.descendants((node, pos, parent, index) => {
-    const before = index > 0 ? parent?.child(index - 1) : null;
-    const link = node.marks.find((mark) => mark.type.name === 'link');
-    const code = node.marks.some((mark) => mark.type.spec.code);
-    if (node.text?.startsWith(' ') && link?.isInSet(before?.marks ?? []) && !code)
-      spaces.push({ pos, marks: node.marks });
+    if (!node.isText || !node.text || node.marks.some((mark) => mark.type.spec.code)) return;
+    const beside = (at: number) =>
+      parent && at >= 0 && at < parent.childCount ? parent.child(at) : null;
+    const before = beside(index - 1);
+    const after = beside(index + 1);
+    // A mark going on from `other`, where Milkdown closes it to open it
+    // again: a link, after a space; any mark, where `other` has a highlight
+    // or colour this text hasn't, or this one has that `other` hasn't, as
+    // Milkdown opens those first (`visualPlugins`).
+    const held = (other: Node | null, start: boolean) => {
+      const going = node.marks.filter((mark) => !!other && mark.isInSet(other.marks));
+      const colored = (a: Node, b: Node) =>
+        a.marks.some((mark) => RANKED_FIRST.has(mark.type.name) && !mark.isInSet(b.marks));
+      const reopened = !!other && (colored(other, node) || colored(node, other));
+      return (
+        node.marks.some(holdsSpaces) ||
+        (start && going.some((mark) => mark.type.name === 'link')) ||
+        (reopened && going.length > 0)
+      );
+    };
+    if (node.text.startsWith(' ') && held(before, true)) spaces.set(pos, node.marks);
+    if (node.text.endsWith(' ') && held(after, false))
+      spaces.set(pos + node.text.length - 1, node.marks);
   });
-  for (const { pos, marks } of spaces)
-    tr.replaceWith(pos, pos + 1, doc.type.schema.text(LINKED_SPACE, marks));
+  for (const [pos, marks] of spaces)
+    tr.replaceWith(pos, pos + 1, doc.type.schema.text(HELD_SPACE, marks));
   return tr.doc;
 }
 
@@ -447,6 +591,11 @@ export function visualPlugins(host: VisualHost, nodes: readonly SyntaxNode[]): M
     leaveLastBlock,
     // Before Backspace and Delete join text into a plugin's block.
     pluginBlockUnits(host),
+    // Highlights and colours (`markdownSyntaxes`), ahead of bold and the
+    // other marks, so they're opened first: Milkdown keeps a mark open
+    // across text only inside the marks opened before it, and moves the
+    // spaces out of one it opens again, parting `==**bold** text==`.
+    ...highlightEditorNode(),
     // Ids on headings are the reader's, worked out as it renders. And `<br>`
     // is HTML, as the reader shows it, not an empty paragraph.
     ...commonmark.filter(
@@ -489,7 +638,7 @@ export function visualEditor({
         return {
           ...prev,
           ...STRINGIFY,
-          handlers: { ...kept, text, link, blockquote, root: whole },
+          handlers: { ...kept, text, link, image, blockquote, root: whole },
         };
       });
       if (view) ctx.update(editorViewOptionsCtx, (prev) => ({ ...prev, ...view }));
