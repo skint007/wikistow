@@ -17,6 +17,7 @@ import { OfflinePill } from './offline-pill';
 import { useOfflineChanges } from '../data/offline-changes';
 import { useTreeChanges } from '../data/tree-changes';
 import { useCommentChanges } from '../comments/changes';
+import { ClipReceiver } from '../clip/clip-receiver';
 import { OfflineChangesNote } from './offline-changes-note';
 import { desktopUpdateQuery } from '../desktop';
 import { useAppPlugins } from '../plugins/app-plugins';
@@ -139,6 +140,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SlotContext value={slot}>
       <PaletteOffersProvider value={offers}>
         <AppCommands />
+        <ClipReceiver />
         <SearchOpener value={search}>
           <SpaceMoves unlocked={vault.status === 'unlocked'} onOpen={closeDrawer}>
             <div

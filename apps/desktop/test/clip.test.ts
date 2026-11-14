@@ -481,8 +481,9 @@ describe.runIf(process.platform === 'linux')('browser clipping', () => {
       execPath: '/electron',
       version: '1.2.3',
       argv,
-      state: () => 'signed-out',
+      session: () => 'signed-out',
       show: () => {},
+      userAgent: 'WikiStow test',
     });
     await clipping.start();
     stops.push(async () => void (await clipping.set(false)));
@@ -503,7 +504,12 @@ describe.runIf(process.platform === 'linux')('browser clipping', () => {
 
   it('starts on, listens in the runtime folder, and answers hello with the app’s state', async () => {
     const { clipping, hostFile, socket, manifest } = await app();
-    expect(await clipping.state()).toEqual({ on: true, problem: null, browsers: ['chromium'] });
+    expect(await clipping.state()).toEqual({
+      on: true,
+      problem: null,
+      browsers: ['chromium'],
+      recent: [],
+    });
     expect(JSON.parse(await readFile(hostFile, 'utf8')).socket).toBe(socket);
     expect(JSON.parse(await readFile(manifest, 'utf8')).allowed_origins).toEqual([CALLER]);
     const written = JSON.parse(await readFile(hostFile, 'utf8')) as { token: string };
@@ -519,13 +525,27 @@ describe.runIf(process.platform === 'linux')('browser clipping', () => {
       appVersion: '1.2.3',
       protocols: { min: 1, max: 1 },
     });
-    client.send({ v: 1, id: 'b', type: 'clip' });
-    expect(await client.next()).toMatchObject({ id: 'b', type: 'error', code: 'failed' });
+    // Signed out, a clip is refused, and the popup keeps what the person typed.
+    client.send({
+      v: 1,
+      id: 'b',
+      type: 'clip',
+      mode: 'link',
+      url: 'https://example.com/',
+      title: 'Example',
+      folder: { spaceId: 'space1', folderId: null },
+    });
+    expect(await client.next()).toMatchObject({ id: 'b', type: 'error', code: 'signed-out' });
   });
 
   it('turned off, closes the socket and deletes the manifests, and stays off', async () => {
     const { clipping, hostFile, socket, manifest } = await app();
-    expect(await clipping.set(false)).toEqual({ on: false, problem: null, browsers: [] });
+    expect(await clipping.set(false)).toEqual({
+      on: false,
+      problem: null,
+      browsers: [],
+      recent: [],
+    });
     expect(existsSync(hostFile) || existsSync(socket) || existsSync(manifest)).toBe(false);
     expect(await clipping.set(true)).toMatchObject({ on: true, browsers: ['chromium'] });
     expect(existsSync(hostFile) && existsSync(manifest)).toBe(true);
@@ -533,7 +553,11 @@ describe.runIf(process.platform === 'linux')('browser clipping', () => {
 
   it('in development writes no manifests unless asked, and leaves the installed app’s alone', async () => {
     const { clipping, manifest } = await app([]);
-    expect(await clipping.state()).toEqual({ on: true, problem: 'development', browsers: [] });
+    expect(await clipping.state()).toMatchObject({
+      on: true,
+      problem: 'development',
+      browsers: [],
+    });
     expect(existsSync(manifest)).toBe(false);
     // As the installed app wrote it.
     await mkdir(join(manifest, '..'), { recursive: true });

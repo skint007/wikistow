@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import type { ClipBrowser, ClippingState, DesktopBridge } from '@wikistow/contracts';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Switch } from '@/components/ui/switch';
@@ -42,11 +43,18 @@ function clippingState(state: ClippingState | undefined) {
 /**
  * **Browser clipping** in the desktop app (ADR 0017, decision 2): whether
  * the WikiStow extension can reach the app on this computer. Off, the app
- * closes its socket and deletes the browsers' host manifests.
+ * closes its socket and deletes the browsers' host manifests. Under it,
+ * this session's last ten clips, each a link to its draft (decision 3).
  */
 export function BrowserClipping({ desktop }: { desktop: DesktopBridge }) {
   const queryClient = useQueryClient();
-  const { data } = useQuery({ queryKey: clippingKey, queryFn: () => desktop.clipping() });
+  // Read again on each visit, as clips land meanwhile.
+  const { data } = useQuery({
+    queryKey: clippingKey,
+    queryFn: () => desktop.clipping(),
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
   const change = useMutation({
     mutationFn: (on: boolean) => desktop.setClipping(on),
     onSuccess: (state) => queryClient.setQueryData(clippingKey, state),
@@ -66,6 +74,27 @@ export function BrowserClipping({ desktop }: { desktop: DesktopBridge }) {
       }
     >
       {change.error && <FormMessage>{errorMessage(change.error)}</FormMessage>}
+      {data && data.recent.length > 0 && (
+        <div className="grid gap-1">
+          <h4 className="text-[13px] font-bold text-muted-foreground">
+            Clipped since WikiStow opened
+          </h4>
+          <ul aria-label="Clipped since WikiStow opened" className="grid gap-0.5 text-sm">
+            {data.recent.map((clip) => (
+              <li key={`${clip.spaceId}/${clip.pageId}`} className="truncate">
+                <Link
+                  to="/s/$spaceId/p/$pageId"
+                  params={{ spaceId: clip.spaceId, pageId: clip.pageId }}
+                  className="quiet-link"
+                >
+                  {clip.title}
+                </Link>{' '}
+                <span className="text-muted-foreground">in {clip.path}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </SettingRow>
   );
 }
