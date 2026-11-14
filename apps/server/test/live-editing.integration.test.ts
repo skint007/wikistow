@@ -7,6 +7,7 @@ import { pageOperations as pages, sharingOperations as sharing } from '@wikistow
 import {
   changeText,
   joinLive,
+  LOCAL_ORIGIN,
   participantPorts,
   sessionState,
   type LiveParticipant,
@@ -217,6 +218,19 @@ describe('editing a page live', () => {
     const settled = (await row())?.lastPosition;
     await new Promise((resolve) => setTimeout(resolve, 3_000));
     expect((await row())?.lastPosition).toBe(settled);
+  });
+
+  it('stops, rather than hangs, when a member places a value the page can’t hold', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const mine = await join(owner, page);
+    const theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    // A dishonest app's change: past its own checks, signed and sealed as any is.
+    theirs.document.doc.transact(
+      () => theirs.document.map('extensions').set('x', 'not json'),
+      LOCAL_ORIGIN,
+    );
+    await expect.poll(() => mine.status().state.kind, { timeout: 15_000 }).toBe('stopped');
   });
 
   it('ends the session for everyone when a member is removed', async () => {
