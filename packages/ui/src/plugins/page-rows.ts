@@ -120,8 +120,8 @@ const PARTS = ['from', 'where', 'sort'] as const;
 
 /**
  * `query` as a block's lines read it, or `invalid` saying why it doesn't
- * read, as the block would. App code's arguments come unchecked, so each
- * part is checked here.
+ * read, as the block would, but taking Dataview's `file.mtime` for
+ * `updated`. App code's arguments come unchecked, so each part is checked here.
  */
 export function readPluginQuery(query: PageQuery): ReadQuery {
   if (typeof query !== 'object' || query === null) {
@@ -143,7 +143,8 @@ export function readPluginQuery(query: PageQuery): ReadQuery {
     }
     lines.push(`limit: ${limit}`);
   }
-  const read = parsePageQuery(lines.join('\n'));
+  // Dataview's `file.mtime` reads as `updated`, as Dataview's blocks become these.
+  const read = parsePageQuery(lines.join('\n'), { fileMtime: true });
   if (!read.ok) throw new PluginError('invalid', read.error);
   return read.query;
 }

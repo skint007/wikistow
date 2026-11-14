@@ -4,12 +4,14 @@
 //     TABLE servings, cook_time AS "Time"   (or LIST)
 //     FROM "Recipes"                         a folder, or #tag
 //     WHERE tried = true AND servings >= 2   or contains(tags, "soup")
-//     SORT cook_time DESC                    file.name sorts by title
+//     SORT file.mtime DESC                   file.name sorts by title,
+//                                            file.mtime by when it was saved
 //     LIMIT 10
 //
-// Anything else, such as FROM with OR, file.* fields but file.name, or
-// expressions, gives a line saying what isn't read, and the block shows
-// its text.
+// Anything else, such as FROM with OR, file.* fields but file.name and
+// file.mtime, or expressions, gives a line saying what isn't read, and the
+// block shows its text. The host reads file.mtime as `updated` in a
+// plugin's query; an app from before it did refuses the query.
 
 import type { PageQuery } from '@wikistow/plugin-sdk';
 
@@ -53,10 +55,14 @@ function splitOutside(text: string, separator: RegExp): string[] {
 /** A space before a clause's keyword, each clause starting at its keyword. */
 const CLAUSE = /\s(?=(?:FROM|WHERE|SORT|LIMIT)\b)/iy;
 
-/** A field as wikistow-query names it: `file.name` is the title. */
+/** When a page was saved, as Dataview names it, and a plugin's query takes it. */
+export const MTIME = 'file.mtime';
+
+/** A field as wikistow-query names it: `file.name` is the title; `file.mtime` the host takes. */
 function fieldName(field: string): string | null {
   const name = field.trim();
   if (name.toLowerCase() === 'file.name') return 'title';
+  if (name.toLowerCase() === MTIME) return MTIME;
   return /^[\p{L}\p{N}][\p{L}\p{M}\p{N} _-]*$/u.test(name) ? name : null;
 }
 

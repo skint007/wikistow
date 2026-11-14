@@ -12,7 +12,7 @@ import {
 } from '@wikistow/plugin-sdk';
 import { reactView } from '@wikistow/plugin-sdk/react';
 import { useEffect, useMemo, useState } from 'react';
-import { readDql, type Column } from './dql';
+import { MTIME, readDql, type Column } from './dql';
 
 /** A property's value by name, as `=name` finds it: whatever its case, with `_`, `-` and spaces alike. */
 function valueOf(row: PageRow, name: string): PropertyValue | undefined {
@@ -20,6 +20,14 @@ function valueOf(row: PageRow, name: string): PropertyValue | undefined {
   const fold = (key: string) => key.toLowerCase().replace(/[_\s-]+/g, ' ');
   const key = Object.keys(row.properties).find((other) => fold(other) === fold(name));
   return key === undefined ? undefined : row.properties[key];
+}
+
+/** When the row's version was saved, in the reader's time zone, or a dash when not known. */
+function saved(row: PageRow): string {
+  const at = row.updated ? new Date(row.updated) : null;
+  return at && !Number.isNaN(at.getTime())
+    ? at.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    : '—';
 }
 
 const shown = (value: PropertyValue | undefined): string =>
@@ -90,7 +98,7 @@ function Results({
                 <PageLink host={host} row={row} />
               </td>
               {columns.map(({ name }, i) => (
-                <td key={i}>{shown(valueOf(row, name))}</td>
+                <td key={i}>{name === MTIME ? saved(row) : shown(valueOf(row, name))}</td>
               ))}
             </tr>
           ))}

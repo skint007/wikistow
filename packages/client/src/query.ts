@@ -7,12 +7,20 @@
 //     sort: cook_time desc     a key or `title`, then `asc` or `desc`
 //     limit: 20                at most 500, 100 if left out
 //
+// `updated`, in `where`, `show` and `sort`, is when the version listed was
+// saved (`QueryPage.updated`), as a date, rather than a property so named.
+//
 // `parsePageQuery` reads a block's text, or says in one line why it can't.
 // `runPageQuery` lists the pages a query names among those it is given:
 // the viewer's search index in the app, the published versions in a
 // public copy. Both are pure and take time linear in what they're given.
 
-import { findProperty, isPropertyName, type PropertyData } from './markdown/properties.ts';
+import {
+  findProperty,
+  foldPropertyName,
+  isPropertyName,
+  type PropertyData,
+} from './markdown/properties.ts';
 import { foldTitle } from './links.ts';
 import { hasTag } from './search.ts';
 
@@ -59,13 +67,36 @@ type Line = (typeof LINES)[number];
 const fail = (error: string): ParsedQuery => ({ ok: false, error });
 
 /**
+ * The name for when the version a query lists was saved (`QueryPage.updated`),
+ * in `where`, `show` and `sort`, whatever its case: a page's own property
+ * of that name is out of their reach, as one named `title` is in `sort`.
+ */
+export const SAVED_TIME = 'updated';
+
+/** Whether `name` names when each version was saved (`SAVED_TIME`), not a property. */
+export const isSavedTime = (name: string) => foldPropertyName(name) === SAVED_TIME;
+
+/** How a query block's text is read. */
+export type QueryReading = {
+  /**
+   * Also read Dataview's `file.mtime`, whatever its case, as `updated`
+   * (`SAVED_TIME`): for plugins' queries, which Dataview's blocks become.
+   */
+  fileMtime?: boolean;
+};
+
+/** `name` as written, or `updated` for Dataview's `file.mtime` where `reading` takes it. */
+const nameIn = (name: string, { fileMtime = false }: QueryReading) =>
+  fileMtime && name.toLowerCase() === 'file.mtime' ? SAVED_TIME : name;
+
+/**
  * A query block's text as a query, or why it doesn't read, in one line.
  * Each line is `name: value`, with `from`, `where`, `show`, `sort` and
  * `limit` each at most once, in any order and any case; blank lines are
  * skipped. A name in a condition, a column or `sort` follows the rule a
  * reference's does (`isPropertyName`).
  */
-export function parsePageQuery(source: string): ParsedQuery {
+export function parsePageQuery(source: string, reading: QueryReading = {}): ParsedQuery {
   if (source.length > MAX_SOURCE) return fail('The query is too long.');
   const given = new Map<Line, string>();
   const lines = source.split(/\r\n?|\n/);
@@ -96,14 +127,14 @@ export function parsePageQuery(source: string): ParsedQuery {
     if (parts === null) return fail('A quote in where: isn’t closed.');
     if (parts.length > MAX_PARTS) return fail(`where: takes at most ${MAX_PARTS} conditions.`);
     for (const part of parts) {
-      const condition = readCondition(part);
+      const condition = readCondition(part, reading);
       if (typeof condition === 'string') return fail(condition);
       query.where.push(condition);
     }
   }
   const show = given.get('show');
   if (show !== undefined) {
-    const names = show.split(',').map((name) => name.trim());
+    const names = show.split(',').map((name) => nameIn(name.trim(), reading));
     if (names.length > MAX_PARTS) return fail(`show: takes at most ${MAX_PARTS} columns.`);
     for (const name of names) {
       if (!isPropertyName(name))
@@ -117,7 +148,7 @@ export function parsePageQuery(source: string): ParsedQuery {
     const space = Math.max(sort.lastIndexOf(' '), sort.lastIndexOf('\t'));
     const last = sort.slice(space + 1).toLowerCase();
     const directed = space >= 0 && (last === 'asc' || last === 'desc');
-    const name = (directed ? sort.slice(0, space) : sort).trim();
+    const name = nameIn((directed ? sort.slice(0, space) : sort).trim(), reading);
     const direction = directed ? last : 'asc';
     if (!isPropertyName(name)) {
       return fail('sort: takes a property name or title, then asc or desc if you like.');
@@ -176,7 +207,7 @@ function splitList(text: string): string[] | null {
 // An operator, the longest first, outside quotes; or ` has `.
 const OPERATORS = ['!=', '<=', '>=', '=', '<', '>'] as const;
 
-function readCondition(text: string): QueryCondition | string {
+function readCondition(text: string, reading: QueryReading): QueryCondition | string {
   const shape = `“${text}” isn’t a condition: a property name, then =, !=, <, <=, >, >= or has, then a value.`;
   // The operator is the first outside quotes, as a name holds none; ` has `
   // only where there is none of those, as a name may hold the word.
@@ -196,7 +227,7 @@ function readCondition(text: string): QueryCondition | string {
     if (has && !text.slice(0, has.index).includes('"')) [at, operator] = [has.index, 'has'];
   }
   if (operator === null) return shape;
-  const name = text.slice(0, at).trim();
+  const name = nameIn(text.slice(0, at).trim(), reading);
   const written = text.slice(at + (operator === 'has' ? 5 : operator.length)).trim();
   // A value starting as an operator does is a mistyped one: `==`, `=<`.
   if (!isPropertyName(name) || written === '' || /^[=<>!]/.test(written)) return shape;
@@ -216,15 +247,16 @@ function readCondition(text: string): QueryCondition | string {
 
 const NUMBER = /^-?\d+(?:\.\d+)?$/;
 const DATE =
-  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?: ?(Z|[+-]\d{2}(?::?\d{2})?))?)?$/;
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(?: ?(Z|[+-]\d{2}(?::?\d{2})?))?)?$/;
 
 /**
- * A date as a moment, for comparing: a day alone at its start, a time
- * with no zone as written, one with a zone at that moment; null if `text`
+ * A date as a moment, for comparing, to the millisecond: a day alone at its
+ * start, a time with no zone as written, one with a zone at that moment; null if `text`
  * isn't a date as property types read them.
  */
 export function dateMoment(text: string): number | null {
-  const [, year, month, day, hour = '0', minute = '0', second = '0', zone] = DATE.exec(text) ?? [];
+  const [, year, month, day, hour = '0', minute = '0', second = '0', fraction = '', zone] =
+    DATE.exec(text) ?? [];
   if (year === undefined) return null;
   const date = new Date(0);
   // Not `Date.UTC`, which reads years up to 99 as 1900 and on.
@@ -232,7 +264,13 @@ export function dateMoment(text: string): number | null {
   // A day the calendar hasn't, as 2024-02-30, isn't a date.
   if (date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day)) return null;
   if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return null;
-  date.setUTCHours(Number(hour), Number(minute), Number(second));
+  // To the millisecond, as times saved a moment apart sort apart.
+  date.setUTCHours(
+    Number(hour),
+    Number(minute),
+    Number(second),
+    Number(fraction.padEnd(3, '0').slice(0, 3)),
+  );
   let moment = date.getTime();
   if (zone !== undefined && zone !== 'Z') {
     const [, sign, hours, minutes = '0'] = /^([+-])(\d{2}):?(\d{2})?$/.exec(zone) ?? [];
@@ -264,6 +302,12 @@ export type QueryPage = {
   properties: readonly Readonly<PropertyData>[];
   /** The folders it is in, outermost first: the one it is directly in last. */
   folderIds: readonly string[];
+  /**
+   * When the version listed was saved, an ISO 8601 time (`IndexedEntry.updated`):
+   * the server's word, or this device's clock for a version saved here. Null
+   * or left out when not known, which a query reads as a missing value.
+   */
+  updated?: string | null;
 };
 
 /** A folder of the space, as a query's `from` names it. */
@@ -305,19 +349,38 @@ export function runPageQuery<P extends QueryPage>(
   } else if (from) {
     listed = pages.filter((page) => hasTag(page.properties, from.tag));
   }
-  const meets = listed.filter((page) =>
-    query.where.every((condition) => holds(page.properties, condition)),
-  );
+  const meets = listed.filter((page) => query.where.every((condition) => holds(page, condition)));
   const sorted = query.sort ? sortedBy(meets, query.sort) : meets;
   return {
     ok: true,
     columns: query.show,
     rows: sorted.slice(0, query.limit).map((page) => ({
       page,
-      values: query.show.map((name) => findProperty(page.properties, name)),
+      values: query.show.map((name) =>
+        isSavedTime(name) ? savedColumn(page) : valueOf(page, name),
+      ),
     })),
     total: meets.length,
   };
+}
+
+/**
+ * `page`'s value named `name`: its property, or for `updated` (`SAVED_TIME`)
+ * when its version was saved, as a date property.
+ */
+function valueOf(page: QueryPage, name: string): Readonly<PropertyData> | undefined {
+  if (!isSavedTime(name)) return findProperty(page.properties, name);
+  return page.updated ? { key: SAVED_TIME, type: 'date', value: page.updated } : undefined;
+}
+
+/**
+ * When `page`'s version was saved, as its column shows it: a date with its
+ * time to the minute, in UTC, which the reader's app shows in their own zone.
+ */
+function savedColumn(page: QueryPage): Readonly<PropertyData> | undefined {
+  const saved = page.updated ? Date.parse(page.updated) : NaN;
+  if (Number.isNaN(saved)) return valueOf(page, SAVED_TIME);
+  return { key: SAVED_TIME, type: 'date', value: `${new Date(saved).toISOString().slice(0, 16)}Z` };
 }
 
 /** The folder at `path`, or why there is none. */
@@ -402,13 +465,13 @@ function scalars(property: Readonly<PropertyData>): Comparable[] {
 }
 
 /**
- * Whether `properties` meet `condition`. `=` and `has` hold for a value
+ * Whether `page`'s values (`valueOf`) meet `condition`. `=` and `has` hold for a value
  * equal to it, or a list holding one; `!=` where `=` doesn't, a missing
  * value included. `<`, `<=`, `>` and `>=` compare a number or a date with
  * one of the same kind, never text or a list.
  */
-function holds(properties: readonly Readonly<PropertyData>[], condition: QueryCondition): boolean {
-  const property = findProperty(properties, condition.name);
+function holds(page: QueryPage, condition: QueryCondition): boolean {
+  const property = valueOf(page, condition.name);
   const values = property ? scalars(property) : [];
   switch (condition.operator) {
     case '=':
@@ -435,7 +498,7 @@ function sortedBy<P extends QueryPage>(pages: readonly P[], sort: NonNullable<Pa
     let key: Comparable | null;
     if (sort.by === 'title') key = { kind: 'text', value: page.title };
     else {
-      const property = findProperty(page.properties, sort.by.name);
+      const property = valueOf(page, sort.by.name);
       const values = property ? scalars(property) : [];
       key =
         values.length === 0

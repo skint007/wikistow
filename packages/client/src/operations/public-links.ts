@@ -41,6 +41,7 @@ import {
 } from '../markdown/index.ts';
 import type { PagePayload } from '../payload.ts';
 import {
+  isSavedTime,
   parsePageQuery,
   QUERY_LANGUAGE,
   runPageQuery,
@@ -335,8 +336,8 @@ async function otherValues(
       changed.flatMap(({ id, publishedHead }) => (publishedHead ? [{ id, publishedHead }] : [])),
     );
     for (const { id } of changed) {
-      const payload = batch.get(id);
-      opened.set(id, Promise.resolve(payload ? publicationOf(payload) : null));
+      const found = batch.get(id);
+      opened.set(id, Promise.resolve(found ? publicationOf(found.payload) : null));
     }
     const pages: LinkablePage[] = [];
     for (const [i, found] of linkable.entries()) {
@@ -410,7 +411,9 @@ function audienceOf(loaded: LoadedTree, page: PageRef) {
  * line break or any Markdown or HTML in a value is only text. A page's
  * cell is `[[Title]]` where `linked` says it may link, else its title. A
  * value is written as the rows show it, a date as written, a list
- * comma-separated; a missing one leaves its cell empty.
+ * comma-separated; a missing one leaves its cell empty. When a page was
+ * saved (`updated`) is written as the moment in UTC, `2026-11-13 09:30 UTC`,
+ * as a copy's reader may be anywhere.
  */
 export function queryTableMarkdown<P extends { title: string }>(
   { columns, rows }: { columns: readonly string[]; rows: readonly QueryRow<P>[] },
@@ -423,13 +426,25 @@ export function queryTableMarkdown<P extends { title: string }>(
     ...rows.map(({ page, values }) =>
       line([
         linked(page) ? `[[${page.title}]]` : markdownLiteral(page.title || 'Untitled'),
-        ...values.map((value) =>
-          value ? markdownLiteral(propertyText(value, { dates: 'as-written' })) : '',
+        ...values.map((value, i) =>
+          value
+            ? markdownLiteral(
+                isSavedTime(columns[i] ?? '') && typeof value.value === 'string'
+                  ? savedText(value.value)
+                  : propertyText(value, { dates: 'as-written' }),
+              )
+            : '',
         ),
       ]),
     ),
   ];
 }
+
+/** `2026-11-13T09:30Z`, a saved time as a query's column gives it, as `2026-11-13 09:30 UTC`. */
+const savedText = (column: string) =>
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(column)
+    ? `${column.slice(0, 10)} ${column.slice(11, 16)} UTC`
+    : column;
 
 /** A query block's text, as a public copy writes it: its table's lines, or undefined to leave it as written. */
 export type QueryTables = (source: string) => string[] | undefined;
@@ -448,7 +463,7 @@ function queryBlocks(body: string): string[] {
  * Each query block of the copied version as its public copy writes it
  * (ADR 0006, decision 9): the table as it stands now, run over the
  * published versions of the pages the copy may show (`audienceOf`), opened
- * here, never a draft. A page links only to a public page: one with a link
+ * here, never a draft, each with when it was saved (`updated`). A page links only to a public page: one with a link
  * of its own, named by its published title alone, which the server is
  * told as a target (`targets`), as for the body's wikilinks, unless the
  * body or another row writes that text for another page. Any other is its
@@ -457,7 +472,7 @@ function queryBlocks(body: string): string[] {
 async function queryTables(
   ctx: ClientContext,
   page: PageRef,
-  payload: PagePayload,
+  { revisionId, payload }: { revisionId: RevisionId; payload: PagePayload },
   tree: () => ReturnType<typeof loadTree>,
   body: { keys: ReadonlySet<string>; targets: ReadonlyMap<string, PageId> },
 ): Promise<{ tables: QueryTables; targets: { key: string; pageId: PageId }[] }> {
@@ -468,12 +483,13 @@ async function queryTables(
   const others = loaded.pages.filter(
     (summary) => summary.id !== page.pageId && published(summary.id),
   );
-  // Strict: a table missing pages that couldn't be fetched would be wrong, not empty.
+  // Strict: a table missing pages that couldn't be fetched would be wrong,
+  // not empty. Timed: each row says when its publication was saved (#427).
   const opened = await openPublications(
     ctx,
     page.spaceId,
     others.flatMap(({ id, publishedHead }) => (publishedHead ? [{ id, publishedHead }] : [])),
-    { strict: true },
+    { strict: true, timed: true },
   );
   // Each folder a reader of the copy sees: under the share's root, for a share.
   const parents = new Map<string, string | null>(
@@ -491,14 +507,18 @@ async function queryTables(
   const seen = (ids: readonly string[]) => root === undefined || ids[0] === root;
   const pages: (QueryPage & { pageId: PageId })[] = [];
   const own = readProperties(splitFrontmatter(payload.markdown).frontmatter);
+  // The copied version's time as this device holds it: this device's clock
+  // for one it just published, or the server's.
+  const ownTime =
+    ctx.revisions.get({ ...page, revisionId, audience: 'published' })?.createdAt ?? null;
   for (const summary of [summaries.get(page.pageId), ...others]) {
     if (!summary) continue;
     const version =
       summary.id === page.pageId
-        ? { title: payload.title, properties: own.ok ? own.properties : [] }
+        ? { title: payload.title, properties: own.ok ? own.properties : [], updated: ownTime }
         : (() => {
             const found = opened.get(summary.id);
-            return found && publicationOf(found);
+            return found && { ...publicationOf(found.payload), updated: found.createdAt };
           })();
     if (version) pages.push({ pageId: summary.id, folderIds: above(summary.parentId), ...version });
   }
@@ -696,7 +716,7 @@ export async function shareCopy(
   const tree = () => (loading ??= loadTree(ctx, page.spaceId));
   const others = await otherValues(ctx, page, payload, tree);
   const targets = await wikilinkTargets(ctx, page, payload, tree);
-  const listed = await queryTables(ctx, page, payload, tree, {
+  const listed = await queryTables(ctx, page, { revisionId, payload }, tree, {
     keys: new Set(
       findWikilinks(payload.markdown)
         .filter((link) => !link.embed)
