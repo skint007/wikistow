@@ -960,6 +960,8 @@ export class LiveParticipant {
      * may hold text nobody typed, so it is never saved over a draft unasked.
      */
     provisional: boolean;
+    /** Whether `base` is the draft head, a session draft the document holds. */
+    atHead: boolean;
   }> {
     const provisional = this.#provisional;
     const mine =
@@ -993,9 +995,10 @@ export class LiveParticipant {
         saved: saved && !provisional,
         mine,
         provisional,
+        atHead: true,
       };
     }
-    return { base: this.checkedDraft, payload, saved: false, mine, provisional };
+    return { base: this.checkedDraft, payload, saved: false, mine, provisional, atHead: false };
   }
 
   /**

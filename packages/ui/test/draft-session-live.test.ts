@@ -122,6 +122,8 @@ class FakeParticipant {
         payload: this.currentPayload(),
         saved: this.#status.saved,
         mine: this.typed,
+        provisional: false,
+        atHead: true,
       }
     );
   }
