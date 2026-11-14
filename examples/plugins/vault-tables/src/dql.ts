@@ -127,7 +127,7 @@ export function readDql(source: string): Dql {
       const conditions = splitOutside(body, /\s+AND\s+/iy).map(condition);
       if (conditions.some((read) => read === null))
         return fail(
-          'WHERE takes conditions joined by AND, as field = value or contains(field, value).',
+          'WHERE takes conditions joined by AND, as field = value or contains(field, value); for when a page was saved, file.mtime, as a property named saved can’t be read here.',
         );
       query.where = conditions.join(', ');
     } else if (keyword === 'SORT') {
@@ -135,7 +135,7 @@ export function readDql(source: string): Dql {
       const name = sort?.[1] ? queriedName(sort[1]) : null;
       if (!name)
         return fail(
-          'SORT takes one field, then ASC or DESC; for when a page was saved, file.mtime.',
+          'SORT takes one field, then ASC or DESC; for when a page was saved, file.mtime, as a property named saved can’t be sorted by here.',
         );
       query.sort = `${name} ${sort?.[2]?.toUpperCase().startsWith('DESC') ? 'desc' : 'asc'}`;
     } else {
