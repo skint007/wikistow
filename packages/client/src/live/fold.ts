@@ -213,9 +213,19 @@ export function reviewMerge(
   parts: readonly string[],
 ): Merge {
   const held = heldPayload(theirs);
-  const merge = withinTime(FOLD_MS, () =>
-    mergePayloads(heldPayload(base), heldPayload(ours), held),
-  );
+  // As the fold cut it: blocks that didn't fit where they went are overlaps of their own.
+  const merge = withinTime(FOLD_MS, () => {
+    let merged = mergePayloads(heldPayload(base), heldPayload(ours), held);
+    for (let round = 0; round < 8; round++) {
+      const choices = Object.fromEntries(
+        merged.overlaps.map((overlap) => [overlap.id, 'yours' as const]),
+      );
+      const resolved = resolve(merged, choices, { review: false });
+      if (resolved.ok) break;
+      merged = resolved.merge;
+    }
+    return merged;
+  });
   return narrowMerge(merge, (overlap) =>
     partsOf(merge, overlap, theirs).some((part) => named(part, parts)),
   );

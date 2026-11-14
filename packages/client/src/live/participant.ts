@@ -1772,6 +1772,10 @@ export class LiveParticipant {
       // Known before it is placed, as a note it places counts by it.
       if (this.#further.has(key(opened)) && held.decoded) {
         this.#furtherUpdates.set(stored.position, { join: key(opened), decoded: held.decoded });
+        // A fold's update is wanted only until its grant line and notice: the latest few.
+        for (const old of [...this.#furtherUpdates.keys()].slice(0, -64)) {
+          this.#furtherUpdates.delete(old);
+        }
       }
       const misplaced = this.document.apply(opened.content, REMOTE_ORIGIN);
       if (misplaced.length > 0) {
@@ -1962,12 +1966,25 @@ export class LiveParticipant {
       if (this.#drafts.has(head)) return;
       this.#outsiders.add(head);
       this.#outsiderDrafts.set(head, draft);
+      // Drafts from outside are wanted while they are head or a fold's base: the latest few.
+      for (const old of [...this.#outsiderDrafts.keys()].slice(0, -16)) {
+        if (old !== this.#head) this.#outsiderDrafts.delete(old);
+      }
       return;
     }
     if (!signer) {
       const since = (this.#unknownSigner ??= { head, at: Date.now() });
       if (since.head !== head) this.#unknownSigner = { head, at: Date.now() };
       else if (Date.now() - since.at > HOLD_MS) {
+        // Claiming typing of joins still here, this app just hasn't been sent it:
+        // folding it would put that typing in twice. It can't catch up instead.
+        const present = [...state.vector].some(([client, clock]) => {
+          const join = this.#joins.joinOf(client);
+          const lacking = (this.document.state().vector.get(client) ?? 0) < clock;
+          return lacking && join !== undefined && this.#present.get(key(join)) !== false;
+        });
+        if (present)
+          return this.#stop('messages from someone in the session never came', null, true);
         this.#outsiders.add(head);
         this.#outsiderDrafts.set(head, draft);
       } else if (!this.#checkTimer && this.#status.state.kind === 'live') {
@@ -2169,6 +2186,15 @@ export class LiveParticipant {
   // A fold grant, as the server told of it: who holds it, and once placed, where.
   #grant(grant: liveRoutes.Grant): void {
     const first = this.#placedAt.get(grant.subject);
+    const subject = RevisionId.safeParse(grant.subject);
+    if (grant.position !== null && subject.success && this.#ownSessionDraft(subject.data)) {
+      // A fold of a draft of the session: its holder shows itself dishonest.
+      return this.#stop(
+        'someone folded in a draft of this session as if from outside',
+        null,
+        false,
+      );
+    }
     if (grant.position !== null) {
       if (first && first.position !== grant.position) {
         // A second fold of one revision: its change would put theirs in twice.
@@ -2615,6 +2641,15 @@ export class LiveParticipant {
 
   // ---- Notes and Review (ADR 0015 decision 8) ----
 
+  // A draft this app counts as the session's by the ordinary rule: not one
+  // folded in, from outside or as a gone join's.
+  #ownSessionDraft(revision: RevisionId): boolean {
+    const draft = this.#drafts.get(revision);
+    if (!draft || draft.foldedBy || this.#goneJoins.has(revision)) return false;
+    // One claiming changes of joins gone without sending them is from outside.
+    return this.#goneFrom(draft, this.document.state(), { folded: true }) === null;
+  }
+
   /**
    * An `overlaps` entry changed. A note counts only when placed by the
    * further join that held that revision's fold grant; after that, any
@@ -2644,6 +2679,8 @@ export class LiveParticipant {
       }
       return;
     }
+    // Never one naming a draft this app counts as the session's (section 5.10, **The document**).
+    if (this.#ownSessionDraft(revision)) return;
     const item = (map as unknown as { _map: Map<string, Y.Item> })._map.get(revision);
     const join = item ? this.#joins.joinOf(item.id.client) : undefined;
     const grant = this.#grants.get(revision);
@@ -2734,9 +2771,26 @@ export class LiveParticipant {
     }
     if (!sameKeys(theirs, this.#opened)) return null;
     // Not a draft of the session, but one folded in as from outside since its join went.
-    const folded = this.#goneJoins.has(revision) || this.#placedAt.has(revision);
-    if (sessionState(theirs.payload, revision, this.sessionId) && !folded) {
-      return null;
+    // A draft naming this session only when it claims changes of joins gone without sending them.
+    const claimed = sessionState(theirs.payload, revision, this.sessionId);
+    if (claimed) {
+      const known = this.#drafts.get(revision);
+      const gone =
+        this.#goneJoins.has(revision) ||
+        known?.foldedBy !== undefined ||
+        this.#goneFrom(
+          {
+            revisionId: revision,
+            payload: theirs.payload,
+            state: claimed,
+            compared: false,
+            with: [],
+            openedAt: 0,
+          },
+          this.document.state(),
+          { folded: true },
+        ) !== null;
+      if (!gone) return null;
     }
     let base: PagePayload | null = null;
     if (note.carried) {

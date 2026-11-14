@@ -42,8 +42,8 @@ export type Run = { code: number | null; stdout: string; stderr: string };
 /**
  * One CLI installation: a home of its own, and a way to run the bundle in
  * it, against `server`, by default the browser tests' own. `selfSigned`
- * accepts the certificate the HTTPS server made for the run (the `live`
- * project's), which Node is told to trust for this process alone.
+ * turns certificate checks off in the CLI's process, for the certificate
+ * the HTTPS server made for the run (the `live` project's): test code only.
  */
 export async function cliInstall(
   bin: string,

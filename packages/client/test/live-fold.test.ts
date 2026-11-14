@@ -195,4 +195,14 @@ describe('Review', () => {
     const made = reviewTarget(none, { [a.id]: 'theirs' })?.frontmatter;
     expect(made).not.toContain('c: 7');
   });
+
+  it('offers a part the fold noted because a block didn’t fit where it went', () => {
+    const base = page('1. eggs\n2. milk\n');
+    const ours = page('- eggs\n- milk\n');
+    const theirs = page('1. eggs\n2. milk\n3. tea\n');
+    const folded = foldPayloads(base, ours, theirs);
+    expect(folded.parts.length).toBeGreaterThan(0);
+    const merge = reviewMerge(base, page(`${folded.target.body}`), theirs, folded.parts);
+    expect(merge.overlaps.length).toBeGreaterThan(0);
+  });
 });
