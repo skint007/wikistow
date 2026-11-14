@@ -858,6 +858,7 @@ export async function saveDraft(
     linkChoices,
     read,
     revisionId: given,
+    renames = true,
   }: {
     page: PageRef;
     basedOn: RevisionId;
@@ -869,6 +870,8 @@ export async function saveDraft(
     linkChoices?: ReadonlyMap<string, PageId>;
     read?: ReadWikilinks;
     revisionId?: RevisionId;
+    /** Whether a link names its page's current title (`writeLinks`); a live session's save renames none. */
+    renames?: boolean;
   },
 ): Promise<Written> {
   const generation = ctx.revisions.generation;
@@ -903,6 +906,7 @@ export async function saveDraft(
       published: publicationsFor(ctx, page.spaceId),
       ...(linkChoices ? { chosen: linkChoices } : {}),
       ...(read ? { read } : {}),
+      renames,
     });
     const { revisionId } = await writePage(ctx, page, async (keys, target) => {
       const commit = commitFor(ctx, keys, page, {

@@ -127,6 +127,17 @@ export class Autosave<T> {
     this.#set(this.#pending ? 'pending' : 'saved');
   }
 
+  /**
+   * Drop the edit waiting to be saved, as when a live session's saver
+   * saves it instead (ADR 0015 decision 5). A save under way goes on.
+   */
+  discard() {
+    this.#clearTimer();
+    this.#pending = null;
+    this.#firstPendingAt = null;
+    if (!this.#stopped && !this.#running) this.#set('saved');
+  }
+
   /** The edit not yet saved, if any. */
   unsaved(): T | null {
     return this.#pending?.value ?? null;
