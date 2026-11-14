@@ -2015,8 +2015,21 @@ export class LiveParticipant {
         });
         if (present)
           return this.#stop('messages from someone in the session never came', null, true);
-        this.#outsiders.add(head);
-        this.#outsiderDrafts.set(head, draft);
+        // A session draft as it was, its signer's typing gone: folded as a gone join's is.
+        const gone = [...state.vector].flatMap(([client, clock]) =>
+          (held.get(client) ?? 0) < clock ? [client] : [],
+        );
+        const filed: SessionDraft = {
+          revisionId: head,
+          payload: draft.payload,
+          state,
+          compared: false,
+          with: withOf(draft.payload),
+          openedAt: Date.now(),
+          opened: draft,
+        };
+        this.#asOutsider(filed, draft, gone);
+        return;
       } else if (!this.#checkTimer && this.#status.state.kind === 'live') {
         this.#lastCheckAt = 0;
         this.#checkTimer = setTimeout(() => {
@@ -2164,6 +2177,8 @@ export class LiveParticipant {
   // the range of each client's clocks it puts in: what it lacked of the draft's claims.
   readonly #ignoring = new Map<number, GoneRange>();
   readonly #goneRanges = new Map<RevisionId, Map<number, GoneRange>>();
+  // Gone joins' clients the fold running now drops, until it places its change.
+  #unplaced = new Map<number, GoneRange>();
   // The clients of gone joins whose changes a fold put in: once is all (A2),
   // for every join of this app in the session, so joining again forgets nothing.
   get #foldedGone(): Map<number, GoneRange> {
@@ -2318,6 +2333,9 @@ export class LiveParticipant {
       .catch(() => this.#armFold())
       .finally(() => {
         if (this.#folding === run) this.#folding = null;
+        // A fold that placed nothing drops nothing of a gone join after all.
+        for (const client of this.#unplaced.keys()) this.#ignoring.delete(client);
+        this.#unplaced = new Map();
       });
     this.#folding = run;
     void this.#tracked(run);
@@ -2464,20 +2482,25 @@ export class LiveParticipant {
     ) {
       return this.#armFold();
     }
-    // A gone join's changes about to go in, and the clocks of each that the fold puts in.
+    // A gone join's changes about to go in, of drafts not folded yet, and the
+    // clocks of each that the fold puts in: dropped from now on, unless it doesn't.
     const goneNow = new Map<number, GoneRange>();
     for (const [revision, clients] of this.#goneJoins) {
+      if (this.#folded.has(revision)) continue;
       if (revision !== head && !this.#chainHas(head, revision)) continue;
       for (const client of clients) {
         const range = this.#goneRanges.get(revision)?.get(client);
-        if (range) goneNow.set(client, range);
+        if (range && !this.#ignoring.has(client)) goneNow.set(client, range);
       }
     }
+    for (const [client, range] of goneNow) this.#ignoring.set(client, range);
+    this.#unplaced = goneNow;
     const before = this.document.state();
     let folded: Folded;
     try {
+      // A gone join's session draft itself, as Review of its note cuts it too.
       folded = foldPayloads(base.payload, this.#payload(base.payload), draft.payload, {
-        gone: goneNow.size > 0,
+        gone: this.#goneJoins.has(head),
       });
     } catch {
       return this.#stop(
@@ -2585,8 +2608,6 @@ export class LiveParticipant {
           carried: false,
         });
       }
-      // From here, what the server relays of a gone join within what this puts in is dropped.
-      for (const [client, range] of goneNow) this.#ignoring.set(client, range);
       this.document.apply(update, COPY_ORIGIN);
       await send(placing, { fold: head });
       const revisionId = saved?.revisionId ?? head;
@@ -2603,6 +2624,7 @@ export class LiveParticipant {
       this.#outsiders.delete(head);
       // In once: never again, for any join of this app in the session.
       for (const [client, range] of goneNow) this.#foldedGone.set(client, range);
+      this.#unplaced = new Map();
       if (saved && this.#head === head) this.#head = saved.revisionId;
       if (saved) this.#basedOn.set(saved.revisionId, head);
       if (this.#drafts.get(revisionId)?.compared) this.#checked = revisionId;

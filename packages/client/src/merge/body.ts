@@ -378,10 +378,6 @@ export function mergeBlocks(base: string, yours: string, theirs: string): BlockM
 
 const isReal = (blocks: readonly Block[]) => blocks.some((block) => block.kind !== 'blank');
 
-/**
- * Two additions at one place, theirs first. Blocks both start with, or
- * both end with, appear once, if they hold more than blank lines.
- */
 // Whether `longer`, added at a place, holds every block `shorter` added
 // there, at its start or its end: one side went on from the other, so
 // taking the longer puts nothing in twice.
@@ -393,6 +389,10 @@ function extends_(longer: readonly Block[], shorter: readonly Block[]): boolean 
   return same(0) || same(l.length - s.length);
 }
 
+/**
+ * Two additions at one place, theirs first. Blocks both start with, or
+ * both end with, appear once, if they hold more than blank lines.
+ */
 function union(theirs: readonly Block[], yours: readonly Block[]): Block[] {
   let p = 0;
   while (p < theirs.length && p < yours.length && theirs[p]?.key === yours[p]?.key) p++;
