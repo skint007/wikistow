@@ -129,7 +129,7 @@ describe('highlights', () => {
         const written = stringify(parseMarkdown(body));
         expect(meaning(written), JSON.stringify(body)).toEqual(meaning(body));
       }
-  });
+  }, 60_000); // Given time on a busy runner: alone it takes well under a second.
 });
 
 describe('colours', () => {
