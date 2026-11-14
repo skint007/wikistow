@@ -57,7 +57,6 @@ import * as Y from 'yjs';
 import type { LiveSource } from '../source/live';
 import { resolveIn } from '../live-cursor';
 import { VisualBinding, type Taking } from './live-binding';
-import { Mapping } from './live-text';
 import { barDecorations, barsOf, blockAt, liveBars, setBars, type BarsHost } from './live-bars';
 
 export { checkFidelity, type Fidelity } from './fidelity';
@@ -745,9 +744,7 @@ function Surface({
       // Once the writer has the page, as idle time gives it.
       if (!write.ready(doc)) return void (drawing = setTimeout(draw, 200));
       const { runs, spans } = write.layout(doc, endsInLine(given.markdown));
-      const written = surface.read();
-      const body = next.text.toJSON();
-      const mapping = body === written ? null : new Mapping(written, body);
+      const mapping = binding.mapping(surface.read());
       const carets = next.carets().flatMap((caret) => {
         const at = resolveIn(next.text, caret.head);
         if (at === null) return [];
@@ -774,9 +771,7 @@ function Surface({
         if (tries-- > 0) sending = setTimeout(send, 200);
         return;
       }
-      const written = surface.read();
-      const body = next.text.toJSON();
-      const at = body === written ? caret : new Mapping(written, body).toBody(caret);
+      const at = binding.mapping(surface.read())?.toBody(caret) ?? caret;
       const position = Y.encodeRelativePosition(
         Y.createRelativePositionFromTypeIndex(next.text, Math.min(at, next.text.length)),
       );

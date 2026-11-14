@@ -239,6 +239,9 @@
     line-height: 15px;
     font-weight: 600;
     white-space: nowrap;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     pointer-events: none;
     user-select: none;
   }

@@ -59,7 +59,7 @@ describe('carried onto body', () => {
     const held = 'The cat sat.\n';
     const body = 'The black cat sat.\n';
     const next = 'The cat sat down.\n';
-    const carried = new Mapping(held, body).carry(ownChanges(held, next));
+    const carried = Mapping.between(held, body).carry(ownChanges(held, next));
     expect(applyTo(body, carried)).toBe('The black cat sat down.\n');
   });
 
@@ -67,7 +67,7 @@ describe('carried onto body', () => {
     const held = 'one two four\n';
     const body = 'one two-and-a-half four\n';
     const next = 'one four\n';
-    const carried = new Mapping(held, body).carry(ownChanges(held, next));
+    const carried = Mapping.between(held, body).carry(ownChanges(held, next));
     // "two " goes, by character, and what Sam typed after "two" stays.
     expect(applyTo(body, carried)).toBe('one -and-a-halffour\n');
   });
@@ -76,7 +76,7 @@ describe('carried onto body', () => {
     const held = 'hello world\n';
     const body = 'hello ld\n';
     const next = 'hello there\n';
-    const carried = new Mapping(held, body).carry(ownChanges(held, next));
+    const carried = Mapping.between(held, body).carry(ownChanges(held, next));
     expect(applyTo(body, carried)).toBe('hello there\n');
   });
 
@@ -84,7 +84,7 @@ describe('carried onto body', () => {
     const held = 'A.\n\nB.\n\nC.\n';
     const body = 'A.\n\nB, by Sam.\n\nC.\n';
     const next = 'A!\n\nB.\n\nC!\n';
-    const carried = new Mapping(held, body).carry(ownChanges(held, next));
+    const carried = Mapping.between(held, body).carry(ownChanges(held, next));
     expect(applyTo(body, carried)).toBe('A!\n\nB, by Sam.\n\nC!\n');
   });
 
@@ -92,14 +92,14 @@ describe('carried onto body', () => {
     const held = '😀 a\n';
     const body = '😀😁 a\n';
     const next = '😀 ab\n';
-    const carried = new Mapping(held, body).carry(ownChanges(held, next));
+    const carried = Mapping.between(held, body).carry(ownChanges(held, next));
     const result = applyTo(body, carried);
     expect(result).toBe('😀😁 ab\n');
     expect(result.isWellFormed()).toBe(true);
   });
 
   it('maps places both ways', () => {
-    const mapping = new Mapping('abc def', 'abc XX def');
+    const mapping = Mapping.between('abc def', 'abc XX def');
     expect(mapping.toBody(4)).toBe(7);
     expect(mapping.toHeld(7)).toBe(4);
     expect(mapping.toHeld(5)).toBe(4);
@@ -200,6 +200,7 @@ describe('the binding', () => {
 
   // Someone else's change, as the participant applies it: its listeners hear first.
   const theirs = (sender: string, change: (text: Y.Text) => void) => {
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc, Y.encodeStateVector(remote)));
     change(remote.getText('body'));
     const update = Y.encodeStateAsUpdate(remote, Y.encodeStateVector(doc));
     for (const listener of before) listener(sender);
@@ -321,13 +322,44 @@ describe('the binding', () => {
     await vi.advanceTimersByTimeAsync(400);
     await settle();
     expect(text.toJSON()).toBe('```\nOne.\n\nTwo!\n');
-    // Changed while it was checked: the newer text is checked before it goes in.
-    expect(editor.checks).toEqual(['```\nOne.\n\nTwo.\n', '```\nOne.\n\nTwo!\n']);
-    expect(editor.wholes).toEqual([]);
-    await vi.advanceTimersByTimeAsync(500);
-    await settle();
+    // Only the person changed it meanwhile: what the editor wrote goes in with what was checked.
+    expect(editor.checks).toEqual(['```\nOne.\n\nTwo.\n']);
     expect(editor.wholes).toEqual(['```\nOne.\n\nTwo!\n']);
     expect(editor.shown).toBe('```\nOne.\n\nTwo!\n');
+  });
+
+  it('shows its own typing during a whole read, which nobody else changed', async () => {
+    editor.byBlock = false;
+    editor.checkMs = 300;
+    theirs('sam', (body) => body.insert(0, '```\n'));
+    await vi.advanceTimersByTimeAsync(TAKE_MS + 100);
+    editor.shown = 'One.\n\nTwo!\n';
+    binding.write();
+    await vi.advanceTimersByTimeAsync(200);
+    await settle();
+    expect(editor.checks).toHaveLength(1);
+    expect(editor.shown).toBe('```\nOne.\n\nTwo!\n');
+  });
+
+  it('never hides the person’s typing when others type through every check too', async () => {
+    editor.byBlock = false;
+    editor.checkMs = 300;
+    theirs('sam', (body) => body.insert(0, '```\n'));
+    await vi.advanceTimersByTimeAsync(TAKE_MS);
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(150);
+      theirs('sam', (body) => body.insert(body.length, String(i)));
+      editor.shown = editor.shown.replace('Two', `Two${i}`);
+      binding.write();
+      await vi.advanceTimersByTimeAsync(150);
+      await settle();
+      expect(editor.shown).toContain(`Two${i}`);
+    }
+    expect(editor.wholes).toEqual([]);
+    // Once others pause, it catches up.
+    await vi.advanceTimersByTimeAsync(WHOLE_MS * 3);
+    await settle();
+    expect(editor.shown).toBe(text.toJSON());
   });
 
   it('shows only text it checked, while others type on through every check', async () => {
@@ -404,6 +436,82 @@ describe('the binding', () => {
     binding.write();
     await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
     expect(editor.taken).toEqual([]);
+  });
+
+  it('carries its edit by how Yjs said body changed, never deleting what someone else put in', () => {
+    text.delete(0, text.length);
+    text.insert(0, 'fix teh typo\n');
+    editor.shown = 'fix teh typo\n';
+    binding.destroy();
+    binding = new VisualBinding(
+      {
+        text,
+        edit: (change) => doc.transact(change, LOCAL),
+        onBeforeRemote: (listener) => {
+          before.add(listener);
+          return () => void before.delete(listener);
+        },
+        active: () => true,
+      },
+      editor,
+    );
+    // Sam puts "the" in place of "teh"; a diff would line his "e" up with the old one.
+    theirs('sam', (body) => {
+      body.delete(4, 3);
+      body.insert(4, 'the');
+    });
+    // Before it takes his in, the person deletes "teh".
+    editor.shown = 'fix  typo\n';
+    binding.write();
+    expect(text.toJSON()).toBe('fix the typo\n');
+  });
+
+  it('keeps everything someone else put in, whatever the person changes meanwhile', () => {
+    let seed = 7;
+    const next = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const pick = (n: number) => Math.floor(next() * n);
+    for (let round = 0; round < 300; round++) {
+      text.delete(0, text.length);
+      text.insert(0, 'ab cd\nef gh\n');
+      editor.shown = text.toJSON();
+      binding.destroy();
+      binding = new VisualBinding(
+        {
+          text,
+          edit: (change) => doc.transact(change, LOCAL),
+          onBeforeRemote: () => () => {},
+          active: () => true,
+        },
+        editor,
+      );
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc, Y.encodeStateVector(remote)));
+      // Someone's changes, each mark one nobody else types.
+      const marks: string[] = [];
+      for (let i = 0; i < 1 + pick(3); i++) {
+        theirs('sam', (body) => {
+          const at = pick(body.length + 1);
+          if (next() < 0.4 && body.length > 0)
+            body.delete(Math.min(at, body.length - 1), 1 + pick(2));
+          const mark = String.fromCharCode(65 + marks.length);
+          marks.push(mark);
+          body.insert(Math.min(at, body.length), mark);
+        });
+      }
+      const kept = marks.filter((mark) => text.toJSON().includes(mark));
+      // The person's: a few deletions and lower-case typing, of what the editor shows.
+      let shown = editor.shown;
+      for (let i = 0; i < 1 + pick(3); i++) {
+        const from = pick(shown.length + 1);
+        const to = Math.min(shown.length, from + pick(4));
+        shown = shown.slice(0, from) + 'xyz'.slice(0, pick(3)) + shown.slice(to);
+      }
+      editor.shown = shown;
+      binding.write();
+      for (const mark of kept) expect(text.toJSON()).toContain(mark);
+    }
   });
 
   it('gives what the page holds even when the session takes no more changes', () => {

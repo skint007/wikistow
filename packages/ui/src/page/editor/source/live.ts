@@ -69,9 +69,10 @@ export type LiveSource = {
   ): void;
   /**
    * Hear just before someone else's change goes into the document, with
-   * who sent it, so an edit not yet in it goes in first (the visual editor's).
+   * who sent it (null: the person, from another tab or device), so an edit
+   * not yet in it goes in first (the visual editor's).
    */
-  onBeforeRemote?(listener: (senderId: string) => void): () => void;
+  onBeforeRemote?(listener: (senderId: string | null) => void): () => void;
   /** The name a person is shown by, as their caret is. */
   nameOf?(id: string): string;
   /** Whether the session still takes the person's changes: not once it has been left. */

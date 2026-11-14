@@ -86,9 +86,13 @@ export function useLiveSource(
         participant.setCursor(cursor);
         if (moved) participant.presenceChanged();
       },
-      onBeforeRemote: (listener) => participant.onBeforeRemote(listener),
+      // The person's own other tabs and devices are the person, named by nobody.
+      onBeforeRemote: (listener) =>
+        participant.onBeforeRemote((senderId) =>
+          listener(senderId === ctx.identity.public.id ? null : senderId),
+        ),
       nameOf: (id) => names.current?.get(id)?.name ?? 'Someone',
       active: () => participant.status().state.kind === 'live',
     };
-  }, [participant, pageId]);
+  }, [participant, pageId, ctx]);
 }
