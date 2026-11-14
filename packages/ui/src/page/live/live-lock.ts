@@ -16,10 +16,10 @@ export function onLivePageReleased(listener: () => void): () => void {
   return () => void released.delete(listener);
 }
 
-/** Hold the page's live lock until the returned function is called. */
-export function holdLivePage(pageId: PageId): () => void {
+/** Hold the page's live lock until the returned function is called; null where there are no Web Locks. */
+export function holdLivePage(pageId: PageId): (() => void) | null {
   const manager = locks();
-  if (!manager) return () => {};
+  if (!manager) return null;
   let release = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
   const request = manager.request(lockName(pageId), { mode: 'shared' }, () => held);

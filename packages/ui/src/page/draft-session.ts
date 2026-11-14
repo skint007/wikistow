@@ -167,9 +167,9 @@ export type LivePorts = {
   /**
    * Hold the page's live lock while this draft is in, or joining, its
    * session, so this app's queue holds the page's change back meanwhile
-   * (ADR 0015 decision 1). The result lets it go.
+   * (ADR 0015 decision 1). The result lets it go; null where nothing can hold it.
    */
-  hold?(): () => void;
+  hold?(): (() => void) | null;
   /**
    * Claim the page's waiting change for putting it into the session, so no
    * other tab or window puts it in at once: the release, or null while
@@ -1453,6 +1453,13 @@ export class DraftSession {
     return release;
   }
 
+  // A change kept on this device, or put in, that a saved draft holds: it goes.
+  #withdrawKept() {
+    const kept = this.#kept;
+    this.#kept = null;
+    if (kept) void this.#ports.withdraw?.(kept.version).catch(() => false);
+  }
+
   // Whether what is kept on this device is the document as it is now.
   #keptFresh = false;
 
@@ -1656,6 +1663,8 @@ export class DraftSession {
           this.#content = back.content;
           this.#extensions = back.extensions;
           this.#region = null;
+          // Nothing of the person's: a change kept or put in that the head holds goes.
+          this.#withdrawKept();
           if (this.#live) this.#surface.current?.replace(this.#content.markdown);
           this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
           return true;
@@ -1719,9 +1728,7 @@ export class DraftSession {
       else {
         this.#set({ status: 'saved' });
         // The head holds what was kept or put in: it goes.
-        const kept = this.#kept;
-        this.#kept = null;
-        if (kept) void this.#ports.withdraw?.(kept.version).catch(() => false);
+        this.#withdrawKept();
       }
       return false;
     } finally {
@@ -1787,6 +1794,7 @@ export class DraftSession {
     if (same) {
       this.#keptLive = null;
       this.#set({ status: 'saved' });
+      this.#withdrawKept();
     } else this.#schedule();
     return true;
   }
