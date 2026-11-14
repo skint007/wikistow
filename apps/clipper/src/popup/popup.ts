@@ -7,6 +7,7 @@
 import { api } from '../api.ts';
 import {
   POPUP_PORT,
+  type Call,
   type CallName,
   type Calls,
   type ClipView,
@@ -42,16 +43,43 @@ const save = element<HTMLButtonElement>('save');
 const modes = [...form.querySelectorAll<HTMLInputElement>('input[name=mode]')];
 const hosts = [...document.querySelectorAll<HTMLInputElement>('input[name=host]')];
 
-const port = api.runtime.connect({ name: POPUP_PORT });
 let nextId = 1;
-const pending = new Map<number, (result: unknown) => void>();
+/** Calls waiting for their answer, each with what it sent. */
+const pending = new Map<number, { resolve: (result: unknown) => void; sent: Call }>();
+let port: chrome.runtime.Port | null = null;
+
+/**
+ * The port to the background, opened again if it closed: Chrome stops an
+ * idle service worker even while a popup's port is open, which closes it.
+ * Calls still unanswered go again on the new one, save a `save`, which
+ * the background answers as it starts and mustn't send twice.
+ */
+function background(): chrome.runtime.Port {
+  if (port) return port;
+  const opened = api.runtime.connect({ name: POPUP_PORT });
+  port = opened;
+  opened.onMessage.addListener(heard);
+  opened.onDisconnect.addListener(() => {
+    if (port === opened) port = null;
+    for (const [id, { resolve, sent }] of pending) {
+      if (sent.call !== 'save') {
+        background().postMessage(sent);
+        continue;
+      }
+      pending.delete(id);
+      resolve(null);
+    }
+  });
+  return opened;
+}
 
 /** Ask the background, and take its answer. */
 function call<K extends CallName>(name: K, args: Calls[K]['args']): Promise<Calls[K]['result']> {
   const id = nextId++;
+  const sent = { id, call: name, ...args } as Call;
   return new Promise((resolve) => {
-    pending.set(id, resolve as (result: unknown) => void);
-    port.postMessage({ id, call: name, ...args });
+    pending.set(id, { resolve: resolve as (result: unknown) => void, sent });
+    background().postMessage(sent);
   });
 }
 
@@ -260,9 +288,9 @@ function showView(next: View) {
   render();
 }
 
-port.onMessage.addListener((message: FromBackground) => {
+function heard(message: FromBackground) {
   if ('id' in message) {
-    pending.get(message.id)?.(message.result);
+    pending.get(message.id)?.resolve(message.result);
     pending.delete(message.id);
   } else if (message.push === 'view') {
     showView(message.view);
@@ -272,7 +300,7 @@ port.onMessage.addListener((message: FromBackground) => {
     renderClip();
     renderForm();
   }
-});
+}
 
 noticeAction.addEventListener('click', async () => {
   noticeAction.disabled = true;

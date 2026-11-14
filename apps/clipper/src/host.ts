@@ -27,7 +27,7 @@ export class TimedOut extends Error {}
 
 /** What a conversation's listener can do: wait longer, or say it's done. */
 export type Conversation = {
-  /** Wait `ms` from now for the next answer, rather than what was set. */
+  /** Wait `ms` for each answer from now on, rather than what was set. */
   wait(ms: number): void;
 };
 
@@ -56,6 +56,8 @@ export function converse(
     }
     let answered = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    /** How long to wait for the next answer, as last set. */
+    let patience = options.ms;
     const end = (error?: Error) => {
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', aborted);
@@ -66,6 +68,7 @@ export function converse(
     };
     const conversation: Conversation = {
       wait(ms) {
+        patience = ms;
         clearTimeout(timer);
         timer = setTimeout(() => {
           port.disconnect();
@@ -76,7 +79,7 @@ export function converse(
     const message = (answer: unknown) => {
       answered = true;
       if (!answer || typeof answer !== 'object') return;
-      conversation.wait(options.ms);
+      conversation.wait(patience);
       let done: boolean | void;
       try {
         done = heard(answer as Answer, conversation);
@@ -136,7 +139,14 @@ async function hello(host: HostKey): Promise<Found | null> {
   const version = api.runtime.getManifest().version;
   try {
     const answer = await ask(host, { type: 'hello', extension: version, browser: browserName() });
-    return answer.type === 'status' ? { host, status: answer } : null;
+    if (answer.type === 'status') return { host, status: answer };
+    // An app that doesn't take this version answers `hello` itself so,
+    // naming the versions it takes.
+    if (answer.type === 'error' && answer.code === 'version' && answer.min !== undefined) {
+      const protocols = { min: answer.min, max: answer.max ?? answer.min };
+      return { host, status: { type: 'status', app: 'ready', protocols } };
+    }
+    return null;
   } catch {
     return null;
   }

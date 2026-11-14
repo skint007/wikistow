@@ -42,8 +42,18 @@ async function files(folder: string): Promise<string[]> {
   return found.sort();
 }
 
-// SOURCE_DATE_EPOCH, or the earliest time a zip can hold.
-const mtime = new Date(Number(process.env['SOURCE_DATE_EPOCH'] ?? 315_532_800) * 1000);
+// SOURCE_DATE_EPOCH, or the earliest day a zip can hold. A zip keeps a
+// time without its zone, which fflate reads from the Date as local time:
+// so the Date is made of the UTC time's parts, read the same in any zone.
+const utc = new Date(Number(process.env['SOURCE_DATE_EPOCH'] ?? 315_532_800) * 1000);
+const mtime = new Date(
+  utc.getUTCFullYear(),
+  utc.getUTCMonth(),
+  utc.getUTCDate(),
+  utc.getUTCHours(),
+  utc.getUTCMinutes(),
+  utc.getUTCSeconds(),
+);
 for (const build of builds) {
   const out = join(dist, build.name);
   await rm(out, { recursive: true, force: true });

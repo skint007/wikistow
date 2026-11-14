@@ -185,6 +185,11 @@ test('an article goes to the folder found, and opens in WikiStow', async () => {
   await popup.getByLabel('Tags').fill('baking, bread, baking');
   if (SCREENSHOTS)
     await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-ready.png') });
+  // Chrome stops an idle service worker though the popup's port is open,
+  // which closes it: the popup opens another.
+  const devtools = await context!.newCDPSession(popup);
+  await devtools.send('ServiceWorker.enable');
+  await devtools.send('ServiceWorker.stopAllWorkers');
   await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
   await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
   if (SCREENSHOTS)

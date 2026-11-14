@@ -9,12 +9,12 @@ The extension sends only to **the WikiStow desktop app on your computer**, throu
 When you clip, it sends the app:
 
 - the tab's address and title;
-- what you chose to clip from that tab: the link (with any text you selected, and your note), the selected part of the page, the article Mozilla's Readability finds in it, or the whole page, each as HTML;
+- what you chose to clip from that tab: the link (with any text you selected, and your note), the selected part of the page, the article Mozilla's Readability finds in it, or the whole page, each as HTML and as its plain text, and for an article its byline and site's name;
 - the title, tags and folder you chose in the popup.
 
 The desktop app encrypts the clip and saves it, as a draft, on the WikiStow server you signed in to, which is yours or your organisation's. The app downloads the clip's images itself, from the sites they're on, without your cookies.
 
-To show you where a clip can go, the extension asks the app for folders matching what you type, and the five folders clips went to last. It asks the app how it is (closed, locked, signed out, ready, offline) each time you open the popup, and when you choose **Open in WikiStow**, asks it to show the draft it just saved.
+To show you where a clip can go, the extension asks the app for folders matching what you type, and the five folders clips went to last. It asks the app how it is (closed, starting, locked, signed out, ready, offline) when you open the popup, every few seconds while the popup is open and the app is starting, locked or signed out, and before each clip, saying the extension's version and which kind of browser it's in. When you choose **Open WikiStow**, it asks the app to open or come forward, and when you choose **Open in WikiStow**, to show the draft it just saved.
 
 ## What it reads
 

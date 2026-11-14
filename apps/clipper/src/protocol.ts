@@ -19,6 +19,10 @@ export const MAX_MESSAGE_BYTES = 48 * 1024 * 1024;
 /** At most this much HTML, or text, in a clip. */
 export const MAX_CLIP_CHARS = 16 * 1024 * 1024;
 export const MAX_TITLE = 500;
+/** A byline or a site's name, at most. */
+export const MAX_NAME = 500;
+/** A tab's address, at most. */
+export const MAX_URL = 32 * 1024;
 export const MAX_NOTE = 10_000;
 export const MAX_TAGS = 20;
 export const MAX_TAG = 100;

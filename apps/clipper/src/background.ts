@@ -24,9 +24,11 @@ import {
   HOSTS,
   MAX_CLIP_CHARS,
   MAX_MESSAGE_BYTES,
+  MAX_NAME,
   MAX_NOTE,
   MAX_QUERY,
   MAX_TITLE,
+  MAX_URL,
   PROTOCOL,
   speaks,
   type Clip,
@@ -232,11 +234,13 @@ async function send(tabId: number, form: Form) {
       tags: form.tags,
       html: captured.html,
       text: captured.text,
-      byline: captured.byline,
-      siteName: captured.siteName,
+      byline: captured.byline?.slice(0, MAX_NAME) ?? null,
+      siteName: captured.siteName?.slice(0, MAX_NAME) ?? null,
       folder: { spaceId: form.folder.spaceId, folderId: form.folder.folderId },
     };
     if (!clip.url) return fail('capture', 'WikiStow can’t read this tab’s address.');
+    if (clip.url.length > MAX_URL)
+      return fail('too-long', 'This tab’s address is too long to clip.');
     if (form.mode === 'selection' && !clip.html.trim()) {
       return fail('capture', 'Select some of the page first, or choose another mode.');
     }
@@ -403,11 +407,21 @@ api.runtime.onInstalled.addListener(() => {
   });
 });
 api.contextMenus.onClicked.addListener((info, tab) => void menuClicked(info, tab));
+// Firefox wakes its background to show the context menu, before the click,
+// so the last folder is read by then, and a click with none can open the
+// popup at once, as Firefox asks. Chrome has no `onShown`, and opens the
+// popup after a wait too. A shortcut has no such warning: pressed while
+// Firefox's background sleeps, with no folder yet, it shows `!` instead.
+(api.contextMenus as { onShown?: chrome.events.Event<() => void> }).onShown?.addListener(
+  () => void readLastFolder(),
+);
 api.commands.onCommand.addListener((command, tab) => void commanded(command, tab));
 
-void session().then((kept) => {
+async function readLastFolder() {
+  const kept = await session();
   lastFolder ??= kept.lastFolder ?? null;
-});
+}
+void readLastFolder();
 
 declare global {
   var wikistowClipper: { menuClicked: typeof menuClicked; commanded: typeof commanded } | undefined;
