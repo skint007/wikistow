@@ -282,8 +282,17 @@ export function frontmatterPieces(block: Block): { text: string; key: string }[]
  * where either block isn't keys, or `ours` has no block to put one in.
  */
 export function takeKeys(ours: Block, from: Block, keys: readonly string[]): Block | undefined {
+  // No block on the page: one made of the chosen keys' lines alone.
+  if (ours === null) {
+    const f = readKeys(from);
+    if (!f) return undefined;
+    const lines = f.entries
+      .filter((entry) => keys.includes(entry.key))
+      .map((entry) => entry.lines.replace(/(?<!\n)$/, '\n'));
+    return lines.length > 0 ? `---\n${lines.join('')}---\n` : null;
+  }
   const [o, f] = [readKeys(ours), readKeys(from)];
-  if (!o || !f || ours === null) return undefined;
+  if (!o || !f) return undefined;
   type Edit = { start: number; end: number; text: string };
   const edits: Edit[] = [];
   for (const key of new Set(keys)) {
@@ -297,5 +306,7 @@ export function takeKeys(ours: Block, from: Block, keys: readonly string[]): Blo
   for (const { start, end, text } of edits.sort((a, b) => b.start - a.start || b.end - a.end)) {
     block = block.slice(0, start) + text + block.slice(end);
   }
-  return block;
+  // A block left with no keys, where it had some, goes, as a whole merge drops it.
+  const left = readKeys(block);
+  return left && left.entries.length === 0 && o.entries.length > 0 ? null : block;
 }

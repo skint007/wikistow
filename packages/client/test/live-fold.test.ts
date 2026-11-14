@@ -182,4 +182,17 @@ describe('Review', () => {
       '---\nstatus: todo\ntags: c\n---\n',
     );
   });
+
+  it('makes a block of the chosen key alone when the page has none, and drops one left empty', () => {
+    const none = reviewMerge(
+      page('---\na: 1\nb: 1\n---\nText.\n'),
+      page('Text.\n'),
+      page('---\na: 3\nb: 5\nc: 7\n---\nText.\n'),
+      ['property:0'],
+    );
+    const a = none.overlaps.find((overlap) => overlap.part !== 'body');
+    if (!a) throw new Error('no overlap');
+    const made = reviewTarget(none, { [a.id]: 'theirs' })?.frontmatter;
+    expect(made).not.toContain('c: 7');
+  });
 });
