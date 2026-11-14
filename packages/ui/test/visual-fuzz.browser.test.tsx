@@ -14,6 +14,7 @@ import { inlineHtml } from '../src/page/editor/visual/read-alone.ts';
 import VisualSurface from '../src/page/editor/visual/visual-surface.tsx';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import { viewOf } from './editor-view.ts';
+import { pollActing } from './acting.ts';
 
 // Random edits, made as ProseMirror transactions on the real visual
 // surface, on each corpus page in LF and CRLF: after each, what it writes
@@ -96,7 +97,7 @@ async function mount(initial: string) {
       />,
     ),
   );
-  await act(() => expect.poll(() => container.querySelector('#page-visual')).not.toBeNull());
+  await pollActing(() => container.querySelector('#page-visual')).not.toBeNull();
   const dom = container.querySelector('#page-visual');
   if (!ref.current || !dom) throw new Error('The editor did not mount');
   const view = viewOf(dom);
