@@ -159,6 +159,10 @@ export class MeaningIndexer {
   #wakeAt: { at: number; cancel: () => void } | null = null;
   /** The word index shown is partial (`indexChanged`): nothing is let go of. */
   #partial = false;
+  /** Since the word index went (`indexGone`), no whole one has come: what a lost grant took may still be here. */
+  #unsure = false;
+  /** Reading the kept file failed: this session writes nothing over it. */
+  #unread = false;
   /** A write came while no word index was shown: it follows the next. */
   #deferred = false;
   /** Pages passed over as their passages failed twice, by the version that failed, and the first failure. */
@@ -176,7 +180,14 @@ export class MeaningIndexer {
   async #open() {
     try {
       const file = await this.#work.file();
-      const sealed = file && (await file.read());
+      let sealed: Uint8Array | null = null;
+      try {
+        sealed = file && (await file.read());
+      } catch (error) {
+        // Unread, it may hold what this session would write over.
+        this.#unread = true;
+        throw error;
+      }
       if (this.#stopped || !sealed) return;
       // Opening takes some milliseconds a thousand pages: in a moment free.
       await this.#work.idle();
@@ -185,7 +196,7 @@ export class MeaningIndexer {
       if (!kept || this.#stopped) return;
       for (const [revisionId, passages] of kept) this.#store(revisionId, passages);
     } catch {
-      // Nothing kept, or it can't be read: every page is embedded again.
+      // Nothing kept, or it can't be opened: every page is embedded again.
     } finally {
       this.#isOpen = true;
     }
@@ -211,6 +222,7 @@ export class MeaningIndexer {
   #follow(index: searchOperations.PageIndex, partial: boolean) {
     if (this.#stopped) return;
     this.#partial = partial;
+    if (!partial) this.#unsure = false;
     const before = this.#shown;
     const shown = new Map<string, IndexedPage>();
     for (const page of index.pages()) shown.set(keyOf(page.doc.spaceId, page.doc.pageId), page);
@@ -258,6 +270,7 @@ export class MeaningIndexer {
   indexGone() {
     if (this.#stopped || !this.#index) return;
     this.#index = null;
+    this.#unsure = true;
     this.#shown = new Map();
     this.#todo = [];
     this.#cursor = 0;
@@ -519,7 +532,7 @@ export class MeaningIndexer {
             this.#failing = again ? null : { key, revisionId: page.doc.revisionId };
             if (again) {
               this.#failed.set(key, page.doc.revisionId);
-              this.#plan();
+              if (this.#index) this.#plan();
               continue;
             }
           }
@@ -646,8 +659,10 @@ export class MeaningIndexer {
     if (file && !this.#stopped) await this.#work.idle();
     // Stopped meanwhile, the keys may be gone: nothing is sealed with them.
     if (!file || this.#stopped) return;
-    // Built afresh as access changed: kept once the next index lets go.
-    if (!this.#index) {
+    // Kept file unread: nothing written over it, this session.
+    if (this.#unread) return;
+    // Built afresh as access changed: kept once a whole index lets go.
+    if (!this.#index || this.#unsure) {
       this.#deferred = true;
       return;
     }

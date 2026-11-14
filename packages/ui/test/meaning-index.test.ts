@@ -81,7 +81,10 @@ function fakeWork() {
   let mostInFlight = 0;
   let kept: Uint8Array | null = null;
   const file: MeaningFile = {
-    read: async () => kept,
+    read: async () => {
+      if (state.unreadable) throw new Error('IndexedDB refused');
+      return kept;
+    },
     write: async (sealed) => {
       kept = sealed;
       writes.push(readMeaningBytes(sealed)!);
@@ -89,6 +92,8 @@ function fakeWork() {
   };
   const state = {
     busy: false,
+    /** Reading the kept file fails. */
+    unreadable: false,
     failNext: false,
     /** The model won't load, this many times more. */
     unavailable: 0,
@@ -463,6 +468,36 @@ describe('MeaningIndexer', () => {
     expect([...fake.writes.at(-1)!.keys()].sort()).toEqual([rev('beach-d1'), rev('boiler-1')]);
   });
 
+  it('after access changes, a partial index keeps nothing until a whole one comes', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    const writes = fake.writes.length;
+    indexer.indexGone();
+    // Rebuilt offline: the beach's space may be the one lost.
+    indexer.indexChanged(wordIndex([boiler, soupBook]), { partial: true });
+    await settle();
+    expect(fake.embedded).toHaveLength(4);
+    expect(fake.writes).toHaveLength(writes);
+    indexer.indexChanged(wordIndex([boiler, soupBook]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect([...fake.writes.at(-1)!.keys()].sort()).toEqual([rev('boiler-1'), rev('soups-1')]);
+  });
+
+  it('a page’s second failure as the index goes leaves the status as it went', async () => {
+    const fake = fakeWork();
+    fake.state.failOn = 'Cornwall';
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    // The first failure, then the retry a minute later, which fails as the index goes.
+    await vi.advanceTimersByTimeAsync(60_000 + EMBED_MS * 1.5);
+    expect(fake.embedder.embed).toHaveBeenCalledTimes(2);
+    indexer.indexGone();
+    await settle();
+    expect(indexer.status()).toBeNull();
+  });
+
   it('while the word index is built afresh, as access changes, nothing is found or kept', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);
@@ -513,6 +548,16 @@ describe('MeaningIndexer', () => {
     const done = fake.writes.length;
     await vi.advanceTimersByTimeAsync(KEEP_MS * 4);
     expect(fake.writes).toHaveLength(done);
+  });
+
+  it('writes nothing over a kept file it couldn’t read', async () => {
+    const fake = fakeWork();
+    fake.state.unreadable = true;
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    await settle();
+    expect(fake.embedded).toHaveLength(1);
+    expect(fake.writes).toHaveLength(0);
   });
 
   it('keeps nothing where the device keeps no file', async () => {
