@@ -126,6 +126,16 @@ class FakeParticipant {
     this.set({ saved: true });
     return true;
   }
+  /** What the editor said at a publish's press: whether it was behind. */
+  published: { behind: boolean; text: string }[] = [];
+  press(behind: () => boolean) {
+    const at = { behind: behind(), text: this.document.text('body').toJSON() };
+    this.published.push(at);
+    return at;
+  }
+  async publish<T>(publish: (draft: RevisionId, check: () => void) => Promise<T>) {
+    return publish(R0, () => {});
+  }
   async settle() {
     return (
       this.settled ?? {
@@ -214,6 +224,8 @@ function session(
     entry,
     seen = entry?.version,
     claimed = false,
+    catchUp,
+    duringJoin,
   }: {
     waiting?: boolean;
     /** The page's change waiting here, which a join puts in. */
@@ -222,6 +234,10 @@ function session(
     seen?: number | null;
     /** Another tab holds that change: putting it in, or keeping it for its session. */
     claimed?: boolean;
+    /** The first join catches up from an ended session, saving this draft on top of the head. */
+    catchUp?: { revisionId: RevisionId; payload: PagePayload };
+    /** Run as the join is under way, as the person typing meanwhile. */
+    duringJoin?: () => void;
   } = {},
 ) {
   const surface = new FakeSurface(payload.markdown);
@@ -294,7 +310,14 @@ function session(
       head: async () => ({ revisionId: R0, payload: shared, region: OWNER_REGION }),
       descends: async () => true,
       claim: async () => (claimed ? null : () => {}),
-      async join() {
+      async join(_opening, caughtUp) {
+        duringJoin?.();
+        if (catchUp) {
+          const { revisionId, payload: caught } = catchUp;
+          catchUp = undefined;
+          caughtUp?.({ kind: 'saved', revisionId, basedOn: R0, payload: caught, overlapped: 0 });
+          return { kind: 'caught-up', revisionId, basedOn: R0, payload: caught };
+        }
         const participant = new FakeParticipant(shared);
         joins.push(participant);
         return participant as unknown as LiveParticipant;
@@ -781,5 +804,82 @@ describe('a change another tab keeps for its live session', () => {
     free.draft.noticeHead(RevisionId.parse('r-someone'));
     await settle();
     expect(free.draft.snapshot().status).toBe('conflict');
+  });
+});
+
+describe('catching up from an ended live session', () => {
+  const caught = newPayload({ title: 'Notes', markdown: 'Start. Left unsaved.', extensions: {} });
+  const R9 = RevisionId.parse('r9');
+
+  it('goes on from the draft caught up, says so, and joins again', async () => {
+    const { draft, surface, joins } = session(undefined, caught, {
+      catchUp: { revisionId: R9, payload: caught },
+    });
+    await draft.joinLive();
+    expect(draft.snapshot().markdown).toBe('Start. Left unsaved.');
+    expect(surface.text).toBe('Start. Left unsaved.');
+    expect(draft.snapshot().liveNotice).toBe(
+      'Saved what a live session that ended had left unsaved.',
+    );
+    // Its own: the head caught up is no one else's save.
+    draft.noticeHead(R9);
+    expect(draft.snapshot().status).toBe('saved');
+    await expect.poll(() => joins.length, { timeout: 3_000 }).toBe(1);
+    expect(draft.snapshot().live?.kind).toBe('live');
+  });
+
+  it('takes the draft caught up as its own when the page heard of it first', async () => {
+    let heard = () => {};
+    const s = session(undefined, caught, {
+      catchUp: { revisionId: R9, payload: caught },
+      duringJoin: () => heard(),
+    });
+    heard = () => s.draft.noticeHead(R9);
+    await s.draft.joinLive();
+    expect(s.draft.snapshot().markdown).toBe('Start. Left unsaved.');
+    expect(s.draft.snapshot().status).toBe('saved');
+    await expect.poll(() => s.joins.length, { timeout: 3_000 }).toBe(1);
+  });
+
+  it('leaves typing done meanwhile as it is, to meet the draft caught up as someone else’s', async () => {
+    let typing = () => {};
+    const s = session(undefined, caught, {
+      catchUp: { revisionId: R9, payload: caught },
+      duringJoin: () => typing(),
+    });
+    typing = () => s.type('Start. Typed meanwhile.');
+    await s.draft.joinLive();
+    expect(s.draft.snapshot().markdown).toBe('Start. Typed meanwhile.');
+    s.draft.noticeHead(R9);
+    expect(s.draft.snapshot().status).toBe('conflict');
+  });
+});
+
+describe('publishing in a live session', () => {
+  it('takes the press as the editor holds it, and whether the editor is behind', async () => {
+    const { draft, surface, joins } = session();
+    await draft.joinLive();
+    const [participant] = joins;
+    if (!participant) throw new Error('not joined');
+    let behind = true;
+    (surface as FakeSurface & { behind: () => boolean }).behind = () => behind;
+    // Typed, not yet reported.
+    surface.text = 'Start. Pressed.';
+    const pressed = draft.pressLive();
+    // What others type after the press isn't the press.
+    participant.theirs('Start. Pressed. Theirs after.');
+    expect(await pressed?.(async (head) => head)).toBe(R0);
+    behind = false;
+    await draft.pressLive()?.(async (head) => head);
+    expect(participant.published).toEqual([
+      { behind: true, text: 'Start. Pressed.' },
+      { behind: false, text: 'Start. Pressed. Theirs after.' },
+    ]);
+  });
+
+  it('is null outside a session', async () => {
+    const { draft, noJoining } = session();
+    noJoining();
+    expect(draft.pressLive()).toBeNull();
   });
 });

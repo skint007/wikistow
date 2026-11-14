@@ -4,11 +4,10 @@
 // sending its own typing and presence, the saver's autosave of the shared
 // document as draft revisions, and when its own typing counts as saved.
 //
-// Not here yet (ADR 0015 step 7): folding in drafts written outside the
-// session, Review, offline resume and putting typing back by block. A
-// draft from outside, a join that lapsed or a session this app can't catch
-// up with makes it leave, and the editor goes on as a writer outside the
-// session, with today's conflict and **Merge…**.
+// Drafts written outside the session are folded in (`fold.ts`), typing is
+// put back by block after a longer drop, an ended session kept with unsaved
+// changes is caught up from as joining finds it (`catch-up.ts`), and a
+// publish saves what the editor showed at the press while the saver holds.
 import {
   IdentityId,
   JoinId,
@@ -61,8 +60,9 @@ import {
   type ReviewTarget,
 } from './fold.ts';
 import type { Choice, Merge } from '../merge/index.ts';
+import { catchUpEnded, listedOf, ofAnotherSession, sameKeys, type CaughtUp } from './catch-up.ts';
 import { draftLive, sessionState, withLive } from './extension.ts';
-import { LiveJoins, type JoinRef, type ListedJoin } from './joins.ts';
+import { LiveJoins, type JoinRef } from './joins.ts';
 import {
   liveClientId,
   openLiveMessage,
@@ -135,6 +135,8 @@ export type ParticipantPorts = {
   visible(): boolean;
   /** Which editor shows the page. */
   editor(): 'source' | 'visual';
+  /** What catching up from an ended session kept with unsaved changes came to, as joining found one. */
+  caughtUp?(caught: CaughtUp): void;
 };
 
 /** Why an app isn't in a session. */
@@ -148,7 +150,19 @@ export type NotJoined =
   /** It refused the session, or can't take part: it edits as a writer outside it. */
   | { kind: 'refused'; why: string }
   /** The person typed before the session was joined, and it holds other text. */
-  | { kind: 'typed-meanwhile' };
+  | { kind: 'typed-meanwhile' }
+  /**
+   * It saved what an ended session kept unsaved (section 5.10, **Ending**),
+   * as `revisionId`, the draft head now: the editor goes on from there and
+   * joins again.
+   */
+  | { kind: 'caught-up'; revisionId: RevisionId; basedOn: RevisionId; payload: PagePayload }
+  /**
+   * An ended session kept unsaved is being caught up elsewhere, or may be
+   * caught up once a passing failure passes: no new session starts, since
+   * its first save would leave that one never caught up. It tries again.
+   */
+  | { kind: 'waiting' };
 
 /** Where a participant is. */
 export type ParticipantState =
@@ -252,6 +266,31 @@ export const REMOTE_ORIGIN = Symbol('live-remote');
 /** The origin of a change this app made in a copy and saved itself, as for a file it uploaded. */
 export const COPY_ORIGIN = Symbol('live-copy');
 
+/**
+ * A publish in a session that stopped before anything went out (section
+ * 5.10, **Saving**): `changed`, the page changed after the press, so what
+ * was typed since isn't published under the publisher's name; `behind`,
+ * the editor hadn't shown everything others had typed yet; `unchecked`,
+ * the document isn't checked against a saved draft yet; `left`, the app
+ * isn't in the session. The person publishes again.
+ */
+export class LivePublishStopped extends Error {
+  readonly reason: 'changed' | 'behind' | 'unchecked' | 'left';
+  constructor(reason: LivePublishStopped['reason']) {
+    super(
+      reason === 'changed'
+        ? 'The page changed while it was being published, so nothing was published. Publish again to publish it as it is now.'
+        : reason === 'behind'
+          ? 'Others’ changes came in as you pressed Publish, and the page doesn’t show them yet. Check the page and publish again.'
+          : reason === 'unchecked'
+            ? 'The page is still being checked against what everyone typed. Publish again in a moment.'
+            : 'The page isn’t in its live session any more. Publish again.',
+    );
+    this.name = 'LivePublishStopped';
+    this.reason = reason;
+  }
+}
+
 const SEND_MS = 100;
 const PRESENCE_MS = 15_000;
 const DEBOUNCE_MS = 1_000;
@@ -261,6 +300,9 @@ const CHECK_MS = 10_000;
 const HOLD_MS = 30_000;
 const GRACE_MS = 25_000;
 const SNAPSHOT_BYTES = 256 * 1024;
+// A publish holds the saver's saves this long, at most once a minute for each person.
+const PUBLISH_HOLD_MS = 10_000;
+const HOLD_EVERY_MS = 60_000;
 // A base's own client: one no join derives (53 bits, all set), and which never writes.
 const BASE_CLIENT = 0x1fffffffffffff;
 
@@ -291,6 +333,19 @@ type Held = {
 
 type Outgoing = { message: LiveMessage; covers?: number };
 
+/** The press of **Publish** in a session (`LiveParticipant.press`), for `publish`. */
+export type LivePress = { readonly __press: unique symbol };
+
+/** The document as a publish's press found it. */
+type Pressed = {
+  state: LiveState;
+  stateBytes: Uint8Array;
+  covers: number;
+  payload: PagePayload;
+  /** The choices between pages of one title the document held then. */
+  links: Map<string, PageId>;
+};
+
 /**
  * Join the page's live session, the editor having opened the draft
  * `opening` (ADR 0015 decision 1): the open session as a newcomer, or a
@@ -311,6 +366,48 @@ export async function joinLive(
     } catch (error) {
       if (error instanceof ApiError && error.code === 'not-found') return { kind: 'older-server' };
       throw error;
+    }
+    if (served.ended && !caughtFrom.has(served.ended.sessionId)) {
+      // Kept with changes nobody saved: caught up from first, by one app.
+      // Whatever it comes to, joining goes on.
+      const id = served.ended.sessionId;
+      const known = triedFrom.get(id);
+      const caught: CaughtUp =
+        known && known.until > Date.now()
+          ? known.caught
+          : await catchUpEnded(ports, served.ended, served.draftHead).catch(
+              (error: unknown): CaughtUp => ({
+                kind: 'cant',
+                why: error instanceof Error ? error.message : 'it failed',
+                lasting: false,
+              }),
+            );
+      const waitingSince = known?.waitingSince ?? Date.now();
+      if (caught.kind === 'saved' || caught.kind === 'held') {
+        triedFrom.delete(id);
+        // Once a run: a server serving it again after its notice gets nothing more.
+        caughtFrom.add(id);
+      } else if (caught !== known?.caught) {
+        // Not tried again this run once the session fails its checks; otherwise in a minute.
+        const lasts = caught.kind === 'cant' && caught.lasting;
+        triedFrom.set(id, {
+          caught,
+          until: lasts ? Infinity : Date.now() + TRY_AGAIN_MS,
+          waitingSince,
+        });
+      }
+      try {
+        ports.caughtUp?.(caught);
+      } catch {
+        // The app's own failure stays its own.
+      }
+      if (caught.kind === 'saved') {
+        const { revisionId, basedOn, payload } = caught;
+        return { kind: 'caught-up', revisionId, basedOn, payload };
+      }
+      // For a while only: one that never passes doesn't keep live editing off the page.
+      const passes = caught.kind === 'elsewhere' || (caught.kind === 'cant' && !caught.lasting);
+      if (passes && !served.open && Date.now() - waitingSince < WAIT_MS) return { kind: 'waiting' };
     }
     if (served.open) return newcomer(ports, served.open, served.draftHead);
     if (served.draftHead !== opening.revisionId) return { kind: 'stale-head' };
@@ -379,16 +476,6 @@ function starterJoins(
   joins.take(message);
   return joins;
 }
-
-const listedOf = (joins: readonly liveRoutes.Join[]): ListedJoin[] =>
-  joins.map((join) => ({
-    senderId: join.senderId,
-    senderKeyVersion: join.senderKeyVersion,
-    joinId: join.joinId,
-    // A further join's parent is always the same person's.
-    parent: join.parent ? { senderId: join.senderId, joinId: join.parent } : null,
-    present: join.present,
-  }));
 
 async function newcomer(
   ports: ParticipantPorts,
@@ -579,11 +666,6 @@ function signedInSession(
   );
 }
 
-// A draft under the session record's key material: its region, and in a share its key version.
-const sameKeys = (draft: OpenedDraft, opened: OpenedLiveSession) =>
-  sameRegion(draft.region, opened.region) &&
-  (opened.region.kind === 'owner' || draft.keyVersion === opened.keyVersion);
-
 type Opening = {
   opened: OpenedLiveSession;
   joinId: JoinId;
@@ -724,6 +806,12 @@ export class LiveParticipant {
   #unsavedSince: number | null = null;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
   #saving: Promise<boolean> | null = null;
+  // A publish of this app's own is under way: its presence says so.
+  #publishing = false;
+  // Holds for others' publishes, by join, until when; joins whose presence says publishing; each person's last hold.
+  readonly #holds = new Map<string, number>();
+  readonly #publishingJoins = new Set<string>();
+  readonly #heldFor = new Map<IdentityId, number>();
   #retryAt = 0;
   #bytesSinceSnapshot = 0;
   #snapshotBytes: number;
@@ -1046,6 +1134,180 @@ export class LiveParticipant {
       if (this.#status.saved) return true;
     }
     return this.#status.saved;
+  }
+
+  /**
+   * Take the press of **Publish** (section 5.10, **Saving**): the document
+   * as it is now, and the payload a save would write from it. Refused at
+   * once when the editor hadn't shown everything others typed yet
+   * (`behind`), when this app isn't in the session, or when it is built
+   * from a snapshot nobody has checked yet, which is never saved whole.
+   */
+  press(behind: () => boolean = () => false): LivePress {
+    if (this.#status.state.kind !== 'live' || !this.#keyed()) {
+      throw new LivePublishStopped('left');
+    }
+    if (behind()) throw new LivePublishStopped('behind');
+    if (this.#provisional) throw new LivePublishStopped('unchecked');
+    const pressed: Pressed = {
+      state: this.document.state(),
+      stateBytes: this.document.stateBytes(),
+      covers: this.#covers,
+      payload: this.#payload(),
+      links: this.#linkChoices(),
+    };
+    return pressed as unknown as LivePress;
+  }
+
+  /**
+   * Publish the page as it was at `press` (section 5.10, **Saving**). Its
+   * presence says it is publishing, so the saver holds its saves. The
+   * document as it was then is saved, never caught up and saved on top,
+   * unless the head is a draft of the session with exactly its state whose
+   * payload is the one pressed; `publish` then publishes that draft, which
+   * must still be the head, once `check` has found the draft it opens to
+   * publish is the one pressed. If either meets `stale-head`, the newer
+   * head is published only if it is a session draft with exactly the state
+   * pressed and the payload pressed; otherwise it stops
+   * (`LivePublishStopped`), so nothing typed after the press goes out
+   * under the publisher's name.
+   */
+  async publish<T>(
+    publish: (draft: RevisionId, check: (payload: PagePayload) => void) => Promise<T>,
+    press: LivePress = this.press(),
+  ): Promise<T> {
+    const pressed = press as unknown as Pressed;
+    if (this.#status.state.kind !== 'live' || !this.#keyed()) {
+      throw new LivePublishStopped('left');
+    }
+    const check = (payload: PagePayload) => {
+      if (!samePayload(pressed.payload, payload)) throw new LivePublishStopped('changed');
+    };
+    this.#publishing = true;
+    this.#publishingSeen(key(this.#me), this.#me.senderId, true);
+    this.#presenceDirty = true;
+    this.#schedule();
+    try {
+      let draft = await this.#saveAtPress(pressed);
+      for (let tries = 0; ; tries++) {
+        try {
+          return await publish(draft, check);
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.code !== 'stale-head' || tries >= 2)
+            throw error;
+          const detail = error.detail as { draftHead?: unknown } | undefined;
+          const parsed = RevisionId.safeParse(detail?.draftHead);
+          if (parsed.success) this.#setHead(parsed.data);
+          draft = await this.#pressedHead(pressed);
+        }
+      }
+    } finally {
+      this.#publishing = false;
+      this.#publishingSeen(key(this.#me), this.#me.senderId, false);
+      this.#presenceDirty = true;
+      this.#schedule();
+    }
+  }
+
+  // The draft that holds the document as at the press: the head, when it
+  // has exactly that state and checks equal, or one saved now.
+  async #saveAtPress(pressed: Pressed): Promise<RevisionId> {
+    await this.#ensureHead();
+    const headId = this.#head;
+    const head = headId ? this.#drafts.get(headId) : undefined;
+    // A head from outside, not folded in yet, or one holding what the press didn't show.
+    if (!headId || !head || !holdsState(pressed.state, head.state)) {
+      throw new LivePublishStopped('changed');
+    }
+    if (holdsState(head.state, pressed.state)) return this.#pressedHead(pressed);
+    // One save at a time: autosave's waits.
+    while (this.#saving) await this.#saving.catch(() => false);
+    if (this.#status.state.kind !== 'live' || this.#stopSending) {
+      throw new LivePublishStopped('left');
+    }
+    if (this.#head !== headId) return this.#saveAtPress(pressed);
+    let release = (_saved: boolean) => {};
+    const mine = new Promise<boolean>((resolve) => (release = resolve));
+    this.#saving = mine;
+    // Let go before resolving: a save waiting on it then finds the way clear.
+    const letGo = (saved: boolean) => {
+      if (this.#saving === mine) this.#saving = null;
+      release(saved);
+    };
+    try {
+      // What this app typed up to the press goes out before its Saved notice names the draft.
+      await this.flush();
+      const revisionId = newId(RevisionId);
+      const people = new Set<IdentityId>([...head.with, ...this.#typed]);
+      const table = head.payload.extensions[LINKS_NAMESPACE];
+      const onHead = withoutLinkTable(pressed.payload);
+      const payload =
+        table === undefined
+          ? onHead
+          : { ...onHead, extensions: { ...onHead.extensions, [LINKS_NAMESPACE]: table } };
+      let result: { revisionId: RevisionId; payload: PagePayload };
+      try {
+        result = await this.#ports.saveDraft({
+          basedOn: headId,
+          revisionId,
+          payload: withLive(payload, {
+            revision: revisionId,
+            session: this.sessionId,
+            state: pressed.stateBytes,
+            with: [...people],
+          }),
+          linkChoices: pressed.links,
+        });
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.code !== 'stale-head') throw error;
+        // Saved by someone else first: only a draft of exactly what was pressed goes out.
+        const detail = error.detail as { draftHead?: unknown } | undefined;
+        const parsed = RevisionId.safeParse(detail?.draftHead);
+        if (parsed.success) this.#setHead(parsed.data);
+        letGo(false);
+        return await this.#pressedHead(pressed);
+      }
+      const compared = samePayload(payload, result.payload);
+      this.#drafts.set(result.revisionId, {
+        ours: true,
+        revisionId: result.revisionId,
+        payload: result.payload,
+        state: pressed.state,
+        compared,
+        with: [...people],
+        openedAt: Date.now(),
+      });
+      if (this.#head === headId) this.#head = result.revisionId;
+      if (compared) this.#checked = result.revisionId;
+      this.#seenOwn(result.revisionId, headId);
+      this.#saveFailing = null;
+      this.#unsavedSince = holdsState(pressed.state, this.document.state())
+        ? null
+        : this.#changedAt;
+      this.#queueSaved(result.revisionId, pressed.stateBytes, pressed.covers);
+      this.#scheduleSave();
+      this.#update();
+      letGo(true);
+      if (!compared) throw new LivePublishStopped('changed');
+      return result.revisionId;
+    } finally {
+      letGo(false);
+    }
+  }
+
+  // The head, once known, if it is a session draft with exactly the state
+  // pressed whose payload is the one pressed: else the page changed.
+  async #pressedHead(pressed: Pressed): Promise<RevisionId> {
+    await this.#ensureHead();
+    const head = this.#head ? this.#drafts.get(this.#head) : undefined;
+    if (
+      !head ||
+      !sameState(head.state, pressed.state) ||
+      !(head.compared || samePayload(pressed.payload, head.payload))
+    ) {
+      throw new LivePublishStopped('changed');
+    }
+    return head.revisionId;
   }
 
   /**
@@ -1945,7 +2207,43 @@ export class LiveParticipant {
       return;
     }
     this.#verified.add(key(ref));
-    this.#presence.set(key(ref), readPresence(opened.content));
+    const read = readPresence(opened.content);
+    this.#presence.set(key(ref), read);
+    this.#publishingSeen(key(ref), message.senderId, read.shown?.publishing === true);
+  }
+
+  /**
+   * A join's presence said whether it is publishing (section 5.10,
+   * **Saving**): the saver holds its saves for up to 10 s, once each time
+   * that join starts publishing and at most once a minute for each person,
+   * so the head stays put while the publish goes out.
+   */
+  #publishingSeen(join: string, person: IdentityId, publishing: boolean): void {
+    if (!publishing) {
+      this.#publishingJoins.delete(join);
+      if (this.#holds.delete(join)) this.#scheduleSave();
+      return;
+    }
+    if (this.#publishingJoins.has(join)) return;
+    this.#publishingJoins.add(join);
+    const now = Date.now();
+    if (now - (this.#heldFor.get(person) ?? -Infinity) < HOLD_EVERY_MS) return;
+    this.#heldFor.set(person, now);
+    this.#holds.set(join, now + PUBLISH_HOLD_MS);
+  }
+
+  // Until when a publish holds this app's saves as the saver: 0 for none.
+  #heldUntil(): number {
+    const now = Date.now();
+    let until = 0;
+    for (const [join, at] of this.#holds) {
+      if (at <= now || (join !== key(this.#me) && this.#present.get(join) !== true)) {
+        this.#holds.delete(join);
+        continue;
+      }
+      until = Math.max(until, at);
+    }
+    return until;
   }
 
   #receive(stored: liveRoutes.StoredMessage): void {
@@ -3349,6 +3647,13 @@ export class LiveParticipant {
       }
       return false;
     }
+    // Someone is publishing: the head stays put for a while. The 20 s rule doesn't wait for it.
+    const held = !force && !waited ? this.#heldUntil() : 0;
+    if (held > Date.now()) {
+      this.#retryAt = Math.max(this.#retryAt, held);
+      this.#scheduleSave();
+      return false;
+    }
     const headId = this.#head;
     const head = headId ? this.#drafts.get(headId) : undefined;
     if (!headId || !head) {
@@ -3783,7 +4088,7 @@ export class LiveParticipant {
       format: { major: 1, minor: 0 },
       editor: this.#ports.editor(),
       visible: this.#ports.visible(),
-      publishing: false,
+      publishing: this.#publishing,
       saveFailing: this.#saveFailing,
       cursor: cursor && { anchor: toBase64Url(cursor.anchor), head: toBase64Url(cursor.head) },
     };
@@ -4046,19 +4351,20 @@ function writeTarget(document: LiveDocument, target: FoldTarget): void {
   );
 }
 
-// A draft whose own `wikistow.live` names another session (section 5.10, **Saving**).
-function ofAnotherSession(draft: OpenedDraft, sessionId: string): boolean {
-  // A person's: an agent never saves a session's drafts.
-  if (isAgentId(draft.authorId)) return false;
-  const live = draftLive(draft.payload, draft.revisionId);
-  return live.kind === 'live' && live.extension.session !== sessionId;
-}
-
 // Gone joins' clients whose changes a fold put in, by session: kept across
 // this app's joins of a session, so joining again never folds them twice.
 const foldedGone = new Map<string, Map<number, GoneRange>>();
 
 /** The clocks of a gone join's client a fold put in, from what the folding app held to what the draft claimed. */
 type GoneRange = { from: number; to: number };
+// Ended sessions this app caught up from.
+const caughtFrom = new Set<string>();
+// Ended sessions this app couldn't catch up from, and until when that stands.
+const triedFrom = new Map<string, { caught: CaughtUp; until: number; waitingSince: number }>();
+const TRY_AGAIN_MS = 60_000;
+// How long joining waits for an ended session to be caught up, elsewhere or
+// once a failure passes: past a catch-up grant's 10 minutes, so a grant
+// whose holder went lapses first, and nobody starts a session over it.
+const WAIT_MS = 11 * 60_000;
 // Sessions this app left once because it couldn't catch up with the others.
 const cantCatchUp = new Set<string>();

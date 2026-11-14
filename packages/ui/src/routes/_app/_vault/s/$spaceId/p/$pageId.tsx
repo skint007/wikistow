@@ -88,6 +88,7 @@ import { EmojiPicker } from '../../../../../../page/cover/emoji-picker';
 import { useCoverEditor } from '../../../../../../page/cover/use-cover-editor';
 import { DraftEditor, type DraftEditorHandle } from '../../../../../../page/draft-editor';
 import type { Queued } from '../../../../../../page/use-draft-session';
+import type { LivePublish } from '../../../../../../page/draft-session';
 import { DetachDialog } from '../../../../../../page/detach-dialog';
 import { Markdown } from '../../../../../../page/markdown';
 import { DeletePageDialog } from '../../../../../../page/delete-dialog';
@@ -117,7 +118,7 @@ import { TableOfContents, useHeadings } from '../../../../../../page/table-of-co
 import { UnpublishDialog } from '../../../../../../page/unpublish-dialog';
 import { isUnpublishedCopy, pageViewModel, type Pill } from '../../../../../../page/view-model';
 import { PageCard, PageColumns, PageToolbar } from '../../../../../../page/page-layout';
-import { LivePeople } from '../../../../../../page/live/live-people';
+import { LivePeople, useEditingToo } from '../../../../../../page/live/live-people';
 import { useAppPlugins } from '../../../../../../plugins/app-plugins';
 import { PagePlugins } from '../../../../../../plugins/page-plugins';
 import { OWN_PANELS, Place, Replaceable, type OpenPanel } from '../../../../../../plugins/places';
@@ -531,7 +532,36 @@ function PageBody({
     }
   }
 
-  const publishDraft = async () => {
+  // The press of Publish in a live session, while the public link dialog asks first.
+  const pressedAt = useRef<LivePublish | null>(null);
+  // Others in the page's live session: Publish says so.
+  const editingToo = useEditingToo(ctx, page.pageId);
+  // In a live session, Publish publishes the page as it was at the press,
+  // taken before anything is awaited (ADR 0015 decision 5).
+  const publishDraft = async (pressed = editor.current?.pressLive() ?? null) => {
+    if (pressed) {
+      const written = await pressed(async (draftHead, check) => {
+        const { heads } = await pageOperations.loadPage(ctx, page.pageId);
+        if (heads.draftHead !== draftHead) {
+          throw new ApiError(409, 'stale-head', 'The draft moved on', {
+            draftHead: heads.draftHead,
+          });
+        }
+        // The draft as it is published: only the one pressed goes out.
+        const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', draftHead, {
+          fresh: true,
+        });
+        if (draft.opened.kind !== 'current') throw new Error('Update the app to publish this page');
+        check(draft.opened.payload);
+        return pageOperations.publishPage(ctx, page, {
+          read: readWikilinks,
+          expected: { draftHead, publishedHead: heads.publishedHead },
+          draft,
+        });
+      });
+      await contentChanged(queryClient, ctx, page);
+      return written;
+    }
     await editor.current?.flush();
     const written = await pageOperations.publishPage(ctx, page, { read: readWikilinks });
     await contentChanged(queryClient, ctx, page);
@@ -551,6 +581,8 @@ function PageBody({
     // a live session it goes to the server, never behind what this tab
     // keeps on the device for the session (ADR 0015 decision 1).
     const live = editor.current?.live() ?? false;
+    // The press, before anything is awaited: what goes out is what the page showed now.
+    const pressed = live && !availability.offline ? (editor.current?.pressLive() ?? null) : null;
     if (availability.offline || (waiting !== 'none' && !live)) {
       await editor.current?.flush();
       const { draftHead } = info.heads;
@@ -562,10 +594,12 @@ function PageBody({
     const links = await queryClient.ensureQueryData(publicLinksQuery(ctx, page.spaceId));
     if (links.some((link) => link.pageId === page.pageId)) {
       setPublishingMarkdown(editor.current?.markdown() ?? null);
+      // The dialog publishes what this press took, however long it asks.
+      pressedAt.current = pressed;
       setPublishingFrom(from);
       return;
     }
-    await publishDraft();
+    await publishDraft(pressed);
     await showPublished(from);
   };
 
@@ -980,6 +1014,7 @@ function PageBody({
                 <Button
                   size="sm"
                   disabled={busy}
+                  {...(editingToo && { title: editingToo, 'aria-description': editingToo })}
                   {...here.click(publishKind, () => void publish())}
                 >
                   <Check strokeWidth={1.75} /> Publish
@@ -1401,7 +1436,12 @@ function PageBody({
         markdown={publishingMarkdown}
         open={publishingFrom !== null}
         onOpenChange={(open) => !open && setPublishingFrom(null)}
-        publish={publishDraft}
+        publish={() => {
+          // Once: after a stop, Publish again takes a press of its own.
+          const pressed = pressedAt.current;
+          pressedAt.current = null;
+          return publishDraft(pressed ?? undefined);
+        }}
         onDone={() => publishingFrom !== null && void showPublished(publishingFrom)}
       />
       {/* Kept while open, so losing publish rights meanwhile doesn't take what it says away. */}

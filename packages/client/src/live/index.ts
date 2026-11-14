@@ -2,6 +2,7 @@
 // sessions' records, messages, client IDs, the strict decoding of what they
 // carry, and the snapshot check. Its own entry point, `@wikistow/client/live`,
 // so Yjs loads only where the editor does.
+export * from './catch-up.ts';
 export * from './decode.ts';
 export * from './document.ts';
 export * from './extension.ts';
