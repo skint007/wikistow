@@ -5,7 +5,9 @@
 // server's grant, checked before anything is saved; and a publish saves
 // what the editor showed at the press while the saver holds its saves.
 import { newId, pageOperations as pages } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
 import {
+  catchUpEnded,
   changeText,
   joinLive,
   LivePublishStopped,
@@ -150,11 +152,11 @@ describe('an ended live session with unsaved typing', () => {
     expect(caught).toMatchObject([{ kind: 'saved', overlapped: 0 }]);
     const head = await draftOf(owner, page);
     expect(head.payload.markdown).toContain('Never saved.');
-    // Naming the ended session, so no later catch-up puts it in again; none of its drafts, by its signer.
-    expect(head.payload.extensions['wikistow.live']).toMatchObject({
-      session: theirs.sessionId,
-      revision: head.revisionId,
-    });
+    // Marked with the ended session, so no later catch-up puts it in again,
+    // naming the draft it was checked against, so it counts as no session's draft.
+    const mark = head.payload.extensions['wikistow.live'] as { session: string; revision: string };
+    expect(mark.session).toBe(theirs.sessionId);
+    expect(mark.revision).not.toBe(head.revisionId);
     // Its Saved notice lets the server delete it.
     await expect.poll(async () => (await liveOf(owner, page.pageId)).ended).toBeNull();
 
@@ -187,6 +189,67 @@ describe('an ended live session with unsaved typing', () => {
     const now = await draftOf(owner, page);
     expect(now.payload.title).toBe('Renamed from outside');
     expect(now.payload.markdown).toContain('Saved first.\n\nThen typed.');
+    await expect.poll(async () => (await liveOf(owner, page.pageId)).ended).toBeNull();
+  });
+
+  it('is found in already by a second catch-up when the first one’s Saved notice was lost', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const saving = { held: false };
+    const theirs = await join(editor, page, saving);
+    type(theirs, '\n\nSaved first.\n');
+    await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
+    saving.held = true;
+    type(theirs, '\nThen typed.\n');
+    await endUnsaved(editor, theirs, page);
+    const head = await draftOf(owner, page);
+    await pages.saveDraft(owner.ctx, {
+      page,
+      basedOn: head.revisionId,
+      payload: { ...head.payload, title: 'Renamed from outside' },
+    });
+
+    // The first catch-up saves, but its Saved notice never lands: the session stays.
+    const call = editor.ctx.api.call.bind(editor.ctx.api);
+    const losing = {
+      ...editor.ctx,
+      api: {
+        ...editor.ctx.api,
+        call: ((route: unknown, args: { body?: { messages?: unknown[] } }) =>
+          route === liveRoutes.sendMessages && (args.body?.messages?.length ?? 0) > 0
+            ? Promise.reject(new ApiError(429, 'rate-limited', 'Too many'))
+            : call(route as never, args as never)) as typeof editor.ctx.api.call,
+      },
+    };
+    const served = async () => {
+      const { ended, draftHead } = await liveOf(editor, page.pageId);
+      if (!ended) throw new Error('not kept');
+      return { ended, draftHead };
+    };
+    const ports = (ctx: typeof editor.ctx, person: Person) =>
+      participantPorts(ctx, page, () => head.region, { live: { fetch: person.browser.fetch } });
+    const first = await served();
+    expect(await catchUpEnded(ports(losing, editor), first.ended, first.draftHead)).toMatchObject({
+      kind: 'saved',
+    });
+    const caught = await draftOf(owner, page);
+    expect(caught.payload.title).toBe('Renamed from outside');
+    expect(caught.payload.markdown).toContain('Then typed.');
+    // Someone changes the page from outside again.
+    await pages.saveDraft(owner.ctx, {
+      page,
+      basedOn: caught.revisionId,
+      payload: { ...caught.payload, title: 'Renamed again' },
+    });
+
+    // The next catch-up, another person's as the grant lapsed from the editor, finds it in:
+    // nothing is saved, and the session goes.
+    await expect.poll(async () => (await liveOf(owner, page.pageId)).ended).not.toBeNull();
+    const second = await served();
+    expect(await catchUpEnded(ports(owner.ctx, owner), second.ended, second.draftHead)).toEqual({
+      kind: 'held',
+    });
+    const now = await draftOf(owner, page);
+    expect(now.payload.title).toBe('Renamed again');
     await expect.poll(async () => (await liveOf(owner, page.pageId)).ended).toBeNull();
   });
 

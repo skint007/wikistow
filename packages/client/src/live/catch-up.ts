@@ -7,18 +7,26 @@
 // from it, takes the server's grant so nobody else puts it in too, saves
 // what the head doesn't hold, and sends a Saved notice, so the server
 // deletes it.
-import { IdentityId, JoinId, RevisionId, liveRoutes, type PageId } from '@wikistow/contracts';
+import {
+  JoinId,
+  LIVE_NAMESPACE,
+  LiveExtension,
+  RevisionId,
+  liveRoutes,
+  type PageId,
+} from '@wikistow/contracts';
 import * as Y from 'yjs';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { isAgentId } from '../identity.ts';
+import { fromBase64 } from '../encoding.ts';
 import { newId } from '../ids.ts';
 import { LINKS_NAMESPACE } from '../link-table.ts';
 import { checkTime, withinTime } from '../merge/body.ts';
 import { mergePayloads, resolve } from '../merge/payload.ts';
 import type { PagePayload } from '../payload.ts';
 import { sameRegion } from '../regions.ts';
-import { decodeUpdate, holdsState, sameState, type LiveState } from './decode.ts';
+import { decodeState, decodeUpdate, holdsState, sameState, type LiveState } from './decode.ts';
 import { LiveDocument, samePayload } from './document.ts';
 import { draftLive, sessionState, withLive, withoutLive } from './extension.ts';
 import { heldPayload } from './fold.ts';
@@ -503,7 +511,13 @@ async function putIn(
     done = result.noticed && (result.caught.kind === 'saved' || result.caught.kind === 'held');
     return result.caught;
   } finally {
-    if (!done) void transport.leave(joinId).catch(() => {});
+    // Gone before it answers, so a try that follows finds the grant free:
+    // through the API, as a page that stays open leaves.
+    if (!done) {
+      await ctx.api
+        .call(liveRoutes.leave, { params: { sessionId }, body: { joinId } })
+        .catch(() => {});
+    }
   }
 }
 
@@ -542,13 +556,15 @@ async function saveAndNotice(
       const saved = await ports.saveDraft({
         basedOn: head,
         revisionId,
-        // Naming the ended session and what of it the draft holds, so a later
-        // catch-up's walk stops here and never puts it in again.
+        // Marked with the ended session and what of it the draft holds, so a
+        // later catch-up's walk finds it in and never puts it in again.
+        // Naming the session's draft it was checked against, not itself, it
+        // counts as no session's draft: one open now folds it in as an outsider's.
         payload: withLive(target.payload, {
-          revision: revisionId,
+          revision: latest.revisionId,
           session: sessionId,
           state: document.stateBytes(),
-          with: [...built.signers].filter((id) => IdentityId.safeParse(id).success) as IdentityId[],
+          with: [],
         }),
         linkChoices: linkChoices(document),
       });
@@ -637,6 +653,11 @@ async function targetOn(
   let base: { payload: PagePayload; state: LiveState } | null = null;
   let at: OpenedDraft | null = headDraft;
   for (let steps = 0; at && steps < CHAIN_STEPS; steps++) {
+    // A draft that says it holds exactly the ended document, a catch-up's
+    // marked save included: it is in already. Never a base, as a catch-up's
+    // text is the document merged onto a head, not the document.
+    const marked = markedState(at.payload, sessionId);
+    if (marked && sameState(marked, document.state())) return { kind: 'held' };
     if (at.revisionId === latest.revisionId) {
       base = latest;
       break;
@@ -656,14 +677,12 @@ async function targetOn(
     }
     const state = sessionState(at.payload, at.revisionId, sessionId);
     if (state) {
-      // The first draft naming this session stops the walk: one of its drafts is the base.
+      // The first draft of this session stops the walk: it is the base, if it checks.
       if (sessionDraft(at, opened, built.signers)) {
         base = { payload: at.payload, state };
         break;
       }
-      // A catch-up's own save, which names it: caught up already when it holds the ended document.
-      if (sameState(state, document.state())) return { kind: 'held' };
-      // Or a draft of it whose signer's messages weren't served: never walked past.
+      // One whose signer's messages weren't served is never walked past.
       return { kind: 'cant', why: 'a draft of it since can’t be checked', lasting: true };
     }
     at = at.basedOn ? await ports.openDraft(at.basedOn) : null;
@@ -705,6 +724,19 @@ async function targetOn(
   });
   if (samePayload(heldPayload(payload), heldPayload(headDraft.payload))) return { kind: 'held' };
   return { kind: 'save', payload, overlapped };
+}
+
+// The state a draft's `wikistow.live` says it holds of `sessionId`, whatever
+// revision it names: a session draft's own, a catch-up's mark, or one an
+// older app copied onto its save; null for none.
+function markedState(payload: PagePayload, sessionId: string): LiveState | null {
+  const parsed = LiveExtension.safeParse(payload.extensions[LIVE_NAMESPACE]);
+  if (!parsed.success || parsed.data.session !== sessionId) return null;
+  try {
+    return decodeState(fromBase64(parsed.data.state));
+  } catch {
+    return null;
+  }
 }
 
 // The choices between pages of one title the session made, which a save's link table keeps.
