@@ -57,7 +57,12 @@ export type PagePanelProps = {
   /** The publication shown, or null in the draft view. */
   published: RevisionId | null;
   /** In the draft view: save what's typed, and open the draft afresh. */
-  draft: { flush: () => Promise<void>; reopen: () => Promise<void> } | null;
+  draft: {
+    flush: () => Promise<void>;
+    reopen: () => Promise<void>;
+    /** Save, and leave the page's live session, before a version is restored (ADR 0015 step 6). */
+    beforeRestore?: () => Promise<void>;
+  } | null;
 };
 
 /** One of the page's own panels, opened by a button of its own in the page's toolbar. */
@@ -79,7 +84,7 @@ export const OWN_PANELS: readonly OwnPanel[] = [
         {...props}
         canRestore={editor}
         showing={published}
-        beforeRestore={draft?.flush}
+        beforeRestore={draft?.beforeRestore ?? draft?.flush}
         onRestored={draft?.reopen}
       />
     ),

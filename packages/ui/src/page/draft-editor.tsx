@@ -62,6 +62,12 @@ export type DraftEditorHandle = {
    * Throws if it can't be, so callers don't move on.
    */
   flush(): Promise<void>;
+  /**
+   * Save, and leave the page's live session, before a version is restored:
+   * the restore is saved from outside the session, and the draft view opens
+   * again on it, joining a new one (ADR 0015 step 6).
+   */
+  beforeRestore(): Promise<void>;
   /** Change the draft from outside the editor, as the cover pickers do, given the draft as it is now. */
   revise(changes: (current: PagePayload) => PayloadChanges): void;
   /** Work saves and leaving wait for, as for a file uploading: a banner image, say. */
@@ -213,6 +219,10 @@ export function DraftEditor({
     ref,
     () => ({
       flush: () => session.saveOrThrow(),
+      beforeRestore: async () => {
+        await session.leaveLive();
+        await session.saveOrThrow();
+      },
       revise: (changes) => session.revise(changes),
       track: (work) => session.track(work),
       checkSize: (changes) => session.checkSize(changes),
@@ -437,7 +447,7 @@ function LiveNote({ live }: { live: DraftSnapshot['live'] }) {
         : null;
   if (!text) return null;
   return (
-    <p role="status" className="rounded-control bg-muted px-3 py-2 text-sm">
+    <p role="note" className="rounded-control bg-muted px-3 py-2 text-sm">
       {text}
     </p>
   );

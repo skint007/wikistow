@@ -25,6 +25,7 @@ import * as Y from 'yjs';
 import { ApiError, outcomeUnknown } from '../api/client.ts';
 import { CryptoError } from '../errors.ts';
 import { isAgentId } from '../identity.ts';
+import { changePending, requireNotBehind } from '../key-versions.ts';
 import { newId } from '../ids.ts';
 import { LINKS_NAMESPACE } from '../link-table.ts';
 import type { ClientContext } from '../operations/session.ts';
@@ -309,11 +310,25 @@ async function newcomer(
   served: liveRoutes.ServedSession,
   head: RevisionId | null,
 ): Promise<LiveParticipant | NotJoined> {
+  let opened: OpenedLiveSession | null = null;
+  const joined = await newcomerFrom(ports, served, head, (session) => (opened = session));
+  // A session this app didn't join leaves no key behind.
+  if (!(joined instanceof LiveParticipant)) (opened as OpenedLiveSession | null)?.key.fill(0);
+  return joined;
+}
+
+async function newcomerFrom(
+  ports: ParticipantPorts,
+  served: liveRoutes.ServedSession,
+  head: RevisionId | null,
+  keep: (opened: OpenedLiveSession) => void,
+): Promise<LiveParticipant | NotJoined> {
   const { ctx, page } = ports;
   const access = await ports.access(false);
   let opened: OpenedLiveSession;
   try {
     opened = openServedSession(ctx, served, page, access);
+    keep(opened);
   } catch (error) {
     if (error instanceof CryptoError) {
       return error.code === 'unsupported-format'
@@ -523,6 +538,8 @@ export class LiveParticipant {
   #presenceTimer: ReturnType<typeof setInterval> | null = null;
   #saveFailing: string | null = null;
   #stopSending = false;
+  // This join's clock as it joined: the starter's counts the page's text.
+  readonly #startClock: number;
   // A change of this app's own copy is on its way: the main join waits for it.
   #placing = false;
   // Whether the server has made this app's join: the starter's with the
@@ -565,6 +582,7 @@ export class LiveParticipant {
     this.#verified.add(key(this.#me));
     for (const join of opening.verified ?? []) this.#verified.add(join);
     this.#present.set(key(this.#me), true);
+    this.#startClock = Y.getState(opening.document.doc.store, opening.document.clientId);
     this.#position = opening.position;
     this.#covers = opening.position;
     this.#kept = opening.kept;
@@ -624,6 +642,7 @@ export class LiveParticipant {
 
   /** Open the stream: take part from here on. */
   start(): void {
+    if (this.#status.state.kind !== 'live') return;
     void this.#run();
     this.#presenceTimer = setInterval(() => {
       this.#presenceDirty = true;
@@ -711,11 +730,15 @@ export class LiveParticipant {
    */
   async recheck(): Promise<void> {
     if (this.#status.state.kind !== 'live') return;
+    // At once, from the marks as read already: a change pending or a mark raised stops sending.
+    if (!this.#accessHolds()) return;
     let access: LiveAccess;
     try {
       access = await this.#ports.access(true);
     } catch {
-      return;
+      // Access that can't be read again can't be checked: stop, and join again later.
+      this.#stopSending = true;
+      return this.#stop('access to the page couldn’t be checked', null, true);
     }
     try {
       requireLiveAccess(this.#opened, access);
@@ -723,6 +746,35 @@ export class LiveParticipant {
       if (!(error instanceof CryptoError)) throw error;
       this.#stopSending = true;
       this.#stop(error.message, null, true);
+    }
+  }
+
+  /**
+   * The checks of `requireLiveAccess` this app can make at once, from the
+   * marks it holds (section 6.8): in a share, no change of the share
+   * pending and no No going back mark above the session's key version.
+   * Leaves when they fail.
+   */
+  #accessHolds(): boolean {
+    const { region } = this.#opened;
+    if (region.kind !== 'share') return true;
+    const { marks } = this.#ports.ctx;
+    try {
+      if (changePending(marks, region.spaceId, region.shareId)) {
+        throw new CryptoError('key-version', 'A change of the share is waiting for its answer');
+      }
+      requireNotBehind({
+        marks,
+        spaceId: region.spaceId,
+        shareId: region.shareId,
+        keyVersion: this.#opened.keyVersion ?? 0,
+      });
+      return true;
+    } catch (error) {
+      if (!(error instanceof CryptoError)) throw error;
+      this.#stopSending = true;
+      this.#stop(error.message, null, true);
+      return false;
     }
   }
 
@@ -756,10 +808,12 @@ export class LiveParticipant {
    * join sends nothing built on it until it is placed. Whether it went in.
    */
   async commitOwn(change: (document: LiveDocument) => void): Promise<boolean> {
-    if (this.#status.state.kind !== 'live' || this.#stopSending) return false;
+    if (!this.#keyed()) return false;
     await this.flush();
+    await this.#ensureHead();
     const headId = this.#head;
     const head = headId ? this.#drafts.get(headId) : undefined;
+    if (!this.#keyed() || this.#pending.length > 0 || this.#queue.length > 0) return false;
     if (!headId || !head || !holdsState(this.document.state(), head.state)) return false;
     const further = newId(JoinId);
     const ctx = this.#ports.ctx;
@@ -772,6 +826,8 @@ export class LiveParticipant {
     });
     const copy = new LiveDocument(clientId);
     if (copy.apply(Y.encodeStateAsUpdate(this.document.doc), 'copy').length > 0) return false;
+    // What the copy holds of the stored messages: everything up to here.
+    const covers = this.#covers;
     const updates: Uint8Array[] = [];
     copy.doc.on('update', (update: Uint8Array, origin: unknown) => {
       if (origin === LOCAL_ORIGIN) updates.push(update);
@@ -780,29 +836,25 @@ export class LiveParticipant {
       return false;
     }
     const update = Y.mergeUpdates(updates);
-    const send = (seq: number, kind: 'update' | 'saved', clock: number, content: Uint8Array) =>
-      sealLiveMessage({
-        sender: ctx.identity,
-        binding: this.#binding,
-        kind,
-        joinId: further,
-        seq,
-        clock,
-        content,
-      });
-    try {
-      // The further join, made before the save, belonging to this app's join.
-      await this.#transport.send({
+    const seal = (seq: number, kind: 'update' | 'saved', clock: number, content: Uint8Array) =>
+      this.#seal({ kind, joinId: further, seq, clock, content });
+    const send = (message: LiveMessage, covers?: number) =>
+      this.#sendAgain({
         joinId: further,
         parent: this.#me.joinId,
-        messages: [{ message: send(1, 'update', 0, new Uint8Array([0, 0])) }],
+        messages: [{ message, ...(covers !== undefined && { covers }) }],
       });
-      const revisionId = newId(RevisionId);
-      const stateBytes = copy.stateBytes();
-      const savedState = copy.state();
-      const people = new Set<IdentityId>([...head.with, ...this.#typed]);
-      const payload = this.#payload(head.payload, copy);
-      const result = await this.#ports.saveDraft({
+    let result: { revisionId: RevisionId; payload: PagePayload };
+    const revisionId = newId(RevisionId);
+    const stateBytes = copy.stateBytes();
+    const savedState = copy.state();
+    const people = new Set<IdentityId>([...head.with, ...this.#typed]);
+    const payload = this.#payload(head.payload, copy);
+    try {
+      // The further join, made before the save, belonging to this app's join.
+      await send(seal(1, 'update', 0, new Uint8Array([0, 0])));
+      if (!this.#keyed()) return false;
+      result = await this.#ports.saveDraft({
         basedOn: headId,
         revisionId,
         payload: withLive(payload, {
@@ -813,16 +865,17 @@ export class LiveParticipant {
         }),
         linkChoices: new Map(),
       });
-      // Landed: the change goes into this app's document and out to everyone.
-      this.#placing = true;
+    } catch {
+      // Nothing of it went to anyone: a refused save leaves nothing behind.
+      return false;
+    }
+    if (!this.#keyed()) return false;
+    // Landed: the change goes into this app's document and out to everyone.
+    this.#placing = true;
+    try {
       this.document.apply(update, COPY_ORIGIN);
       const clock = Y.getState(copy.doc.store, clientId);
-      const { positions } = await this.#transport.send({
-        joinId: further,
-        parent: this.#me.joinId,
-        messages: [{ message: send(2, 'update', clock, update) }],
-      });
-      this.#placing = false;
+      await send(seal(2, 'update', clock, update));
       this.#drafts.set(result.revisionId, {
         revisionId: result.revisionId,
         payload: result.payload,
@@ -833,24 +886,56 @@ export class LiveParticipant {
       });
       if (this.#head === headId) this.#head = result.revisionId;
       this.#checked = result.revisionId;
-      await this.#transport.send({
-        joinId: further,
-        parent: this.#me.joinId,
-        messages: [
-          {
-            message: send(3, 'saved', clock, stateContent(result.revisionId, stateBytes)),
-            covers: positions[0] ?? this.#covers,
-          },
-        ],
-      });
-      this.#schedule();
-      this.#update();
-      return true;
+      if (!this.#keyed()) return true;
+      await send(seal(3, 'saved', clock, stateContent(result.revisionId, stateBytes)), covers);
     } catch {
+      // The draft claims a change the others never got: the session can't go on with it.
+      this.#stop('a file’s change couldn’t be sent', null, true);
+      return false;
+    } finally {
       this.#placing = false;
       this.#schedule();
-      return false;
+      this.#update();
     }
+    return true;
+  }
+
+  /**
+   * Send a request from one of this app's joins, again unchanged after a
+   * lost answer or a refusal to hurry, until it is answered.
+   */
+  async #sendAgain(body: Parameters<LiveTransport['send']>[0]) {
+    for (let tries = 0; ; tries++) {
+      try {
+        return await this.#transport.send(body);
+      } catch (error) {
+        const again =
+          error instanceof ApiError && (outcomeUnknown(error) || error.code === 'rate-limited');
+        if (!again || tries >= 20 || !this.#keyed()) throw error;
+        await sleep(Math.min(250 * 2 ** tries, 2_000), this.#abort.signal);
+      }
+    }
+  }
+
+  // Whether the session key is still this app's to seal with: it is wiped on leaving and locking.
+  #keyed(): boolean {
+    return this.#status.state.kind === 'live' && !this.#stopSending && !this.#abort.signal.aborted;
+  }
+
+  /** Seal a message as this person, never once the session key is wiped or sending stopped. */
+  #seal(message: {
+    kind: LiveMessage['kind'];
+    joinId: JoinId;
+    seq: number;
+    clock: number;
+    content: Uint8Array;
+  }): LiveMessage {
+    if (!this.#keyed()) throw new CryptoError('malformed', 'This app is no longer in the session');
+    return sealLiveMessage({
+      sender: this.#ports.ctx.identity,
+      binding: this.#binding,
+      ...message,
+    });
   }
 
   /**
@@ -865,7 +950,18 @@ export class LiveParticipant {
     base: { revisionId: RevisionId; payload: PagePayload } | null;
     payload: PagePayload | null;
     saved: boolean;
+    /** Whether the person changed anything in the session. */
+    mine: boolean;
+    /**
+     * Built from a later snapshot and never compared equal: the document
+     * may hold text nobody typed, so it is never saved over a draft unasked.
+     */
+    provisional: boolean;
   }> {
+    const provisional = this.#provisional;
+    const mine =
+      Y.getState(this.document.doc.store, this.#clientId) > this.#startClock ||
+      this.#ownDeletes.size > 0;
     if (this.#head && !this.#drafts.has(this.#head) && !this.#outsiders.has(this.#head)) {
       await this.#openHead(this.#head);
     }
@@ -887,9 +983,15 @@ export class LiveParticipant {
         head.compared = samePayload(this.document.payload(head.payload), head.payload);
       }
       const saved = head.compared && sameState(state, head.state);
-      return { base: { revisionId: head.revisionId, payload: head.payload }, payload, saved };
+      return {
+        base: { revisionId: head.revisionId, payload: head.payload },
+        payload,
+        saved: saved && !provisional,
+        mine,
+        provisional,
+      };
     }
-    return { base: this.checkedDraft, payload, saved: false };
+    return { base: this.checkedDraft, payload, saved: false, mine, provisional };
   }
 
   /** Send everything typed here that isn't sent yet. */
@@ -898,7 +1000,7 @@ export class LiveParticipant {
       if (this.#sending) await this.#sending.catch(() => {});
       if (this.#pending.length === 0 && this.#queue.length === 0) return;
       if (this.#stopSending || this.#status.state.kind !== 'live') return;
-      if (!this.#joined) await sleep(SEND_MS, this.#abort.signal);
+      if (!this.#joined || this.#placing) await sleep(SEND_MS, this.#abort.signal);
       else await this.#send();
     }
   }
@@ -1052,9 +1154,11 @@ export class LiveParticipant {
       if (opened.kind === 'update') decoded = decodeUpdate(opened.content);
       else if (opened.kind === 'snapshot') {
         const read = readSnapshot(opened.content);
-        if (read.kind === 'newer-format')
-          return this.#stop('update the app to edit with others', null, false);
-        decoded = decodeUpdate(read.state);
+        // One already in the session never applies a later snapshot: a newer format changes nothing here.
+        decoded =
+          read.kind === 'newer-format'
+            ? { structs: [], deletes: new Map() }
+            : decodeUpdate(read.state);
       }
     } catch (error) {
       if (error instanceof CryptoError) {
@@ -1159,14 +1263,18 @@ export class LiveParticipant {
    * session, its signer is a person with a join this app took a message
    * from, and it is under the record's key material.
    */
-  async #learnHead(): Promise<void> {
+  async #learnHead(force = false): Promise<void> {
     const head = this.#head;
-    if (!head || this.#drafts.has(head) || this.#outsiders.has(head) || this.#opening) {
+    if (this.#opening) {
+      await this.#opening;
+      if (this.#head !== head) return this.#learnHead(force);
+    }
+    if (!head || this.#drafts.has(head) || this.#outsiders.has(head)) {
       this.#compare();
       return;
     }
     const wait = this.#lastCheckAt + CHECK_MS - Date.now();
-    if (wait > 0 && this.#drafts.size > 0) {
+    if (!force && wait > 0 && this.#drafts.size > 0) {
       if (!this.#checkTimer) {
         this.#checkTimer = setTimeout(() => {
           this.#checkTimer = null;
@@ -1184,9 +1292,25 @@ export class LiveParticipant {
       // A draft written outside the session: folding it in is step 7's.
       return this.#stop('someone saved this page from outside the live session', null, false);
     }
+    // A save waiting for the head can go now; and the 20 s a save may wait start again.
+    const opened = this.#drafts.get(head);
+    if (opened && this.#head === head) {
+      try {
+        this.#unsavedSince = holdsState(opened.state, this.document.state()) ? null : Date.now();
+      } catch {
+        // A state Yjs wrote: it decodes.
+      }
+    }
     this.#compare();
+    this.#scheduleSave();
     this.#update();
     if (this.#head !== head) void this.#learnHead();
+  }
+
+  /** Open the head now, if it is new, as a save that must run at once needs it. */
+  async #ensureHead(): Promise<void> {
+    const head = this.#head;
+    if (head && !this.#drafts.has(head) && !this.#outsiders.has(head)) await this.#learnHead(true);
   }
 
   /**
@@ -1365,8 +1489,9 @@ export class LiveParticipant {
     const headId = this.#head;
     const head = headId ? this.#drafts.get(headId) : undefined;
     if (!headId || !head) {
-      await this.#learnHead();
-      return false;
+      await this.#ensureHead();
+      if (!this.#head || !this.#drafts.has(this.#head)) return false;
+      return this.#saveOnce(force);
     }
     const state = this.document.state();
     if (!holdsState(state, head.state)) return false;
@@ -1458,9 +1583,8 @@ export class LiveParticipant {
   }
 
   #queueSaved(revisionId: RevisionId, state: Uint8Array, covers: number): void {
-    const message = sealLiveMessage({
-      sender: this.#ports.ctx.identity,
-      binding: this.#binding,
+    if (!this.#keyed()) return;
+    const message = this.#seal({
       kind: 'saved',
       joinId: this.#me.joinId,
       seq: this.#seq,
@@ -1486,25 +1610,24 @@ export class LiveParticipant {
     if (!sameState(this.document.state(), state)) return;
     const update = Y.encodeStateAsUpdate(this.document.doc);
     const further = newId(JoinId);
-    const sender = this.#ports.ctx.identity;
     try {
-      const empty = sealLiveMessage({
-        sender,
-        binding: this.#binding,
-        kind: 'update',
-        joinId: further,
-        seq: 1,
-        clock: 0,
-        content: new Uint8Array([0, 0]),
-      });
-      await this.#transport.send({
+      await this.#sendAgain({
         joinId: further,
         parent: this.#me.joinId,
-        messages: [{ message: empty }],
+        messages: [
+          {
+            message: this.#seal({
+              kind: 'update',
+              joinId: further,
+              seq: 1,
+              clock: 0,
+              content: new Uint8Array([0, 0]),
+            }),
+          },
+        ],
       });
-      const message = sealLiveMessage({
-        sender,
-        binding: this.#binding,
+      // Sealed only while the key is still this app's to seal with.
+      const message = this.#seal({
         kind: 'snapshot',
         joinId: further,
         seq: 2,
@@ -1572,16 +1695,15 @@ export class LiveParticipant {
   }
 
   async #sendOnce(): Promise<void> {
-    const sender = this.#ports.ctx.identity;
+    // Nothing goes out once access to the page may have changed (section 5.10).
+    if (!this.#keyed() || !this.#accessHolds()) return;
     if (this.#pending.length > 0) {
       const merged = Y.mergeUpdates(this.#pending);
       this.#pending = [];
       const clock = Y.getState(this.document.doc.store, this.#clientId);
       let message: LiveMessage;
       try {
-        message = sealLiveMessage({
-          sender,
-          binding: this.#binding,
+        message = this.#seal({
           kind: 'update',
           joinId: this.#me.joinId,
           seq: this.#seq,
@@ -1601,16 +1723,22 @@ export class LiveParticipant {
       this.#queue.push({ message });
       this.#bytesSinceSnapshot += message.sealed.ciphertext.length;
     }
-    const batch = this.#queue.slice(0, 32);
+    // Within the request limit: at most 32 messages, and about 700 KB of them.
+    let size = 0;
+    let count = 0;
+    for (const item of this.#queue) {
+      size += item.message.sealed.ciphertext.length + 256;
+      if (count > 0 && (count >= 32 || size > 700_000)) break;
+      count++;
+    }
+    const batch = this.#queue.slice(0, count);
     const messages: Outgoing[] = [...batch];
     // A presence carries the `seq` and `clock` of the last stored message before it.
     const last = batch.at(-1)?.message.seq ?? this.#sentSeq;
     const presence = this.#presenceDirty || Date.now() - this.#presenceAt >= PRESENCE_MS;
     if (presence) {
       messages.push({
-        message: sealLiveMessage({
-          sender,
-          binding: this.#binding,
+        message: this.#seal({
           kind: 'presence',
           joinId: this.#me.joinId,
           seq: last,

@@ -25,6 +25,15 @@ import type { EditorSurfaceHandle } from '../src/page/editor/surface.ts';
 class FakeSurface implements EditorSurfaceHandle {
   text: string;
   replaced: string[] = [];
+  /** As the page editor holds them: frontmatter in Properties, the body in the editor. */
+  frontmatter: string | null = null;
+  parts() {
+    return { frontmatter: this.frontmatter, body: this.text };
+  }
+  replaceParts(parts: { frontmatter: string | null; body: string }) {
+    this.frontmatter = parts.frontmatter;
+    this.text = parts.body;
+  }
   constructor(text: string) {
     this.text = text;
   }
@@ -49,6 +58,7 @@ class FakeParticipant {
   #status: ParticipantStatus;
   left = false;
   closed = false;
+  typed = false;
   settled: Awaited<ReturnType<LiveParticipant['settle']>> | null = null;
 
   constructor(payload: PagePayload) {
@@ -92,6 +102,7 @@ class FakeParticipant {
         else this.document.map(root).set(key, value);
       }
     });
+    this.typed = true;
     this.set({ saved: false });
     for (const listener of this.#changes) listener(true);
   }
@@ -110,6 +121,7 @@ class FakeParticipant {
         base: { revisionId: R0, payload: this.base },
         payload: this.currentPayload(),
         saved: this.#status.saved,
+        mine: this.typed,
       }
     );
   }
@@ -299,6 +311,29 @@ describe('a draft session in a live session', () => {
     await draft.flush();
     expect([...(joins[0]?.document.map('attachments').keys() ?? [])]).toEqual(['a-photo.png']);
     expect(joins[0]?.document.text('body').toJSON()).toContain('(attachment:a-photo.png)');
+  });
+
+  it('keeps body text that reads like frontmatter in the body', async () => {
+    const { draft, surface, joins } = session();
+    await draft.joinLive();
+    const typed = '---\ntags: x\n---\nStart.';
+    surface.text = typed;
+    draft.edit(typed);
+    expect(joins[0]?.document.text('frontmatter').toJSON()).toBe('');
+    expect(joins[0]?.document.text('body').toJSON()).toBe(typed);
+    // Someone else's change shows the parts as the document holds them.
+    joins[0]?.theirs(`${typed} More.`);
+    expect(surface.frontmatter).toBeNull();
+    expect(surface.text).toBe(`${typed} More.`);
+  });
+
+  it('edits Properties as the frontmatter part', async () => {
+    const { draft, surface, joins } = session();
+    await draft.joinLive();
+    surface.frontmatter = '---\ntags: x\n---\n';
+    draft.edit(`${surface.frontmatter}Start.`);
+    expect(joins[0]?.document.text('frontmatter').toJSON()).toBe('---\ntags: x\n---\n');
+    expect(joins[0]?.document.text('body').toJSON()).toBe('Start.');
   });
 
   it('leaves at once, its key wiped, when the vault locks', async () => {

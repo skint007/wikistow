@@ -18,11 +18,24 @@ import {
   withoutLinkTable,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
-import type { LiveParticipant, NotJoined, ParticipantStatus } from '@wikistow/client/live';
+import type {
+  LiveParticipant,
+  NotJoined,
+  ParticipantState,
+  ParticipantStatus,
+} from '@wikistow/client/live';
 import { ATTACHMENT_SCHEME } from './attachments';
 import { Autosave, type SaveStatus } from './autosave';
-import { lineBreakOf, type EditorSurfaceHandle } from './editor/surface';
+import { lineBreakOf, type EditorSurfaceHandle, type MarkdownParts } from './editor/surface';
+import { joinPage } from './properties';
 import { uploadMessage } from './messages';
+
+// Extensions a save works out or drops, which a live session's document never holds.
+const UNHELD = new Set(['wikistow.live', 'wikistow.links', 'wikistow.change', 'wikistow.overlaps']);
+
+/** `extensions` without those the document never holds, as edits made outside a session keep them. */
+const held = (extensions: PagePayload['extensions']): PagePayload['extensions'] =>
+  Object.fromEntries(Object.entries(extensions).filter(([namespace]) => !UNHELD.has(namespace)));
 
 /** Saving stopped at a conflict: someone else saved this draft meanwhile. */
 export class DraftConflict extends Error {
@@ -207,6 +220,7 @@ export class DraftSession {
     this.#content = { title, markdown, attachments };
     this.#autosave = new Autosave(
       async (build) => {
+        if (this.#settling) await this.#settling;
         const trimming = this.#trim();
         if (trimming) await trimming;
         return this.#save(build());
@@ -296,8 +310,25 @@ export class DraftSession {
 
   /** The surface's text, if it holds an edit it hasn't reported yet. */
   #pull() {
-    const markdown = this.#surface.current?.read();
+    const surface = this.#surface.current;
+    // In a live session, the parts as the editor holds them, never split again.
+    const parts = this.#participant ? surface?.parts?.() : undefined;
+    if (parts) return this.editParts(parts);
+    const markdown = surface?.read();
     if (markdown !== undefined) this.edit(markdown);
+  }
+
+  /**
+   * The page editor's frontmatter and body after the person edited them:
+   * in a live session, each into its own part of the shared document as
+   * the smallest change, as the editor holds them, so body text that reads
+   * like frontmatter stays in the body.
+   */
+  editParts({ frontmatter, body }: MarkdownParts) {
+    const participant = this.#participant;
+    if (!participant) return this.edit(joinPage(frontmatter, body));
+    this.#unreported = false;
+    participant.change({ texts: { frontmatter: frontmatter ?? '', body } });
   }
 
   setTitle(title: string) {
@@ -322,8 +353,12 @@ export class DraftSession {
   edit(markdown: string) {
     this.#unreported = false;
     if (this.#participant) {
-      // Into the shared document, as the smallest change to each part.
-      const { frontmatter, body } = splitFrontmatter(markdown);
+      // Into the shared document, as the smallest change to each part: the
+      // parts as the page editor holds them, never split again, so body text
+      // that reads like frontmatter stays in the body.
+      const held = this.#surface.current?.parts?.();
+      const parts = held && joinPage(held.frontmatter, held.body) === markdown ? held : null;
+      const { frontmatter, body } = parts ?? splitFrontmatter(markdown);
       return this.#participant.change({ texts: { frontmatter: frontmatter ?? '', body } });
     }
     if (markdown !== this.#content.markdown) this.#change({ markdown });
@@ -377,7 +412,8 @@ export class DraftSession {
       entries: [{ root: 'links', key, value: JSON.stringify(pageId) }],
     });
     this.#set({ links: this.#table() });
-    this.#schedule();
+    // In a live session, the session's saver saves it.
+    if (!this.#participant) this.#schedule();
     return true;
   }
 
@@ -506,6 +542,7 @@ export class DraftSession {
   }
 
   hasUnsaved() {
+    if (this.#settling) return true;
     if (this.#participant) return this.#unreported || !this.#participant.status().saved;
     return this.#unreported || this.#autosave.unsaved() !== null;
   }
@@ -530,6 +567,7 @@ export class DraftSession {
 
   /** A save is waiting for its answer, or a file is still uploading. */
   isBusy() {
+    if (this.#settling) return true;
     if (this.#participant) return !this.#participant.status().saved || this.#uploads.size > 0;
     return this.#autosave.isSaving() || this.#uploads.size > 0;
   }
@@ -755,6 +793,18 @@ export class DraftSession {
 
   #participant: LiveParticipant | null = null;
   #unlive: (() => void)[] = [];
+  // What this draft held as it joined: what it goes back to if it leaves having changed nothing.
+  #beforeLive: {
+    base: RevisionId;
+    payload: PagePayload;
+    content: Content;
+    extensions: PagePayload['extensions'];
+  } | null = null;
+
+  /** The page's live session this draft is in, if any, for the editor's binding. */
+  get participant(): LiveParticipant | null {
+    return this.#participant;
+  }
   #joining = false;
   #rejoin: ReturnType<typeof setTimeout> | null = null;
   #rejoins = 0;
@@ -809,31 +859,51 @@ export class DraftSession {
     const mine = this.#current();
     const sameAttachments = (a: readonly AttachmentRef[], b: readonly AttachmentRef[]) =>
       a.length === b.length && a.every((ref) => b.some((other) => other.id === ref.id));
+    // Extensions the person changed, but those the document never holds.
+    const namespaces = new Set([
+      ...Object.keys(mine.extensions),
+      ...Object.keys(opening.extensions),
+    ]);
+    const changed = [...namespaces].filter(
+      (namespace) =>
+        !UNHELD.has(namespace) &&
+        JSON.stringify(mine.extensions[namespace]) !==
+          JSON.stringify(opening.extensions[namespace]),
+    );
     const typed =
       mine.title !== opening.title ||
       mine.markdown !== opening.markdown ||
       !sameAttachments(mine.attachments, opening.attachments) ||
-      Object.keys(this.#extensions).length > 0;
+      changed.length > 0;
     if (typed) {
       // Files uploaded meanwhile aren't committed yet, and text needs the text it was typed on.
       if (!sameAttachments(mine.attachments, opening.attachments)) return false;
       if (shared.title !== opening.title || shared.markdown !== opening.markdown) return false;
     }
+    const parts = this.#surface.current?.parts?.() ?? splitFrontmatter(mine.markdown);
     this.#participant = participant;
+    this.#beforeLive = {
+      base: this.#base,
+      payload: this.#payload,
+      content: this.#content,
+      extensions: this.#extensions,
+    };
     this.#autosave.discard();
     this.#unlive.push(
       participant.subscribe(() => this.#liveStatus()),
       participant.onChange((local) => this.#fromDocument(!local)),
     );
     if (typed) {
-      const { frontmatter, body } = splitFrontmatter(mine.markdown);
       participant.change({
-        texts: { title: mine.title, frontmatter: frontmatter ?? '', body },
-        entries: Object.entries(this.#extensions).map(([namespace, value]) => ({
-          root: 'extensions' as const,
-          key: namespace,
-          value: value === undefined ? null : JSON.stringify(value),
-        })),
+        texts: { title: mine.title, frontmatter: parts.frontmatter ?? '', body: parts.body },
+        entries: changed.map((namespace) => {
+          const value = mine.extensions[namespace];
+          return {
+            root: 'extensions' as const,
+            key: namespace,
+            value: value === undefined ? null : JSON.stringify(value),
+          };
+        }),
       });
     }
     this.#rejoins = 0;
@@ -860,10 +930,18 @@ export class DraftSession {
     const { title, markdown, attachments } = payload;
     const moved = markdown !== this.#content.markdown;
     this.#content = { title, markdown, attachments };
-    this.#extensions = payload.extensions;
-    if (show && moved && this.#live) {
-      // An edit the surface hasn't reported yet goes in first, so it isn't lost.
-      this.#surface.current?.replace(markdown);
+    this.#extensions = held(payload.extensions);
+    if (show && this.#live) {
+      // The editor shows the document's parts as they are, never split again.
+      const surface = this.#surface.current;
+      const { frontmatter, body } = participant.document.content();
+      const parts = { frontmatter: frontmatter === '' ? null : frontmatter, body };
+      const shown = surface?.parts?.();
+      if (shown && surface?.replaceParts) {
+        if (shown.frontmatter !== parts.frontmatter || shown.body !== parts.body) {
+          surface.replaceParts(parts);
+        }
+      } else if (moved) surface?.replace(markdown);
     }
     this.#set({ title, markdown, attachments, links: this.#table() });
   }
@@ -891,26 +969,7 @@ export class DraftSession {
     if (this.#participant !== participant) return;
     this.#detach();
     const { state } = status;
-    const settled = await participant.settle();
-    const base =
-      state.kind === 'stopped' && state.saveOver
-        ? { revisionId: state.saveOver, payload: settled.base?.payload ?? this.#payload }
-        : settled.base;
-    if (base) {
-      this.#base = base.revisionId;
-      this.#known.add(base.revisionId);
-      this.#payload = base.payload;
-      this.#region = null;
-    }
-    const payload = settled.payload;
-    if (payload) {
-      this.#content = {
-        title: payload.title,
-        markdown: payload.markdown,
-        attachments: payload.attachments,
-      };
-      this.#extensions = payload.extensions;
-    }
+    const untouched = await this.#goOn(participant, state);
     const why =
       state.kind === 'ended'
         ? state.reason === 'access'
@@ -919,11 +978,96 @@ export class DraftSession {
         : state.kind === 'stopped'
           ? `Live editing stopped: ${state.why}.`
           : 'You left live editing.';
-    this.#set({ live: { kind: 'left', why }, ...this.#content, links: this.#table() });
-    if (!settled.saved || (state.kind === 'stopped' && state.saveOver)) this.#schedule();
-    else this.#set({ status: 'saved' });
-    const again = state.kind === 'ended' || (state.kind === 'stopped' && state.rejoin);
+    this.#set({ live: { kind: 'left', why } });
+    // An app that changed nothing ended a session it couldn't take part
+    // in: the next start makes a fresh one, from the head.
+    const again =
+      state.kind === 'ended' || (state.kind === 'stopped' && (state.rejoin || untouched));
     if (again) this.#rejoinWhenSaved();
+  }
+
+  /**
+   * Save what's typed and leave the page's live session, going on outside
+   * it, as before a restore, which is written from outside the session.
+   */
+  async leaveLive(): Promise<void> {
+    const participant = this.#participant;
+    if (!participant) return;
+    await participant.saveNow().catch(() => false);
+    this.#detach();
+    await this.#goOn(participant, { kind: 'left' });
+    await participant.leave();
+    this.#set({ live: null });
+  }
+
+  // While a session left is settled: saves wait for it, and nothing shows as saved.
+  #settling: Promise<void> | null = null;
+
+  // Go on from what the session held, as a writer outside it. Whether the
+  // draft went back to what it opened, holding nothing of the person's.
+  async #goOn(participant: LiveParticipant, state: ParticipantState): Promise<boolean> {
+    // At once: the document's text, so typing meanwhile builds on it.
+    try {
+      const now = participant.currentPayload();
+      this.#content = { title: now.title, markdown: now.markdown, attachments: now.attachments };
+      this.#extensions = held(now.extensions);
+    } catch {
+      // A value the document refused: the editor's text stays as it is.
+    }
+    const captured = this.#content;
+    let release = () => {};
+    this.#settling = new Promise((resolve) => (release = resolve));
+    try {
+      const settled = await participant.settle();
+      const typedMeanwhile = this.#content !== captured;
+      const before = this.#beforeLive;
+      this.#beforeLive = null;
+      const saveOver = state.kind === 'stopped' ? state.saveOver : null;
+      if (!settled.mine && !typedMeanwhile && before && !saveOver) {
+        // Nothing of the person's is in it: back to the draft as it opened.
+        this.#base = before.base;
+        this.#known.add(before.base);
+        this.#payload = before.payload;
+        this.#content = before.content;
+        this.#extensions = before.extensions;
+        this.#region = null;
+        if (this.#live) this.#surface.current?.replace(this.#content.markdown);
+        this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
+        return true;
+      }
+      if (settled.provisional && before) {
+        // Its document may hold text nobody typed: never saved over a draft
+        // unasked. The person chooses, with Merge… from the draft it opened.
+        this.#base = before.base;
+        this.#payload = before.payload;
+        this.#region = null;
+        this.#theirs = settled.base?.revisionId ?? null;
+        this.#set({ ...this.#content, links: this.#table() });
+        if (this.#theirs) this.#autosave.hold(() => this.#current());
+        return false;
+      }
+      const base = saveOver
+        ? { revisionId: saveOver, payload: settled.base?.payload ?? this.#payload }
+        : settled.base;
+      if (base) {
+        this.#base = base.revisionId;
+        this.#known.add(base.revisionId);
+        this.#payload = base.payload;
+        this.#region = null;
+      }
+      if (settled.payload && !typedMeanwhile) {
+        const { title, markdown, attachments } = settled.payload;
+        this.#content = { title, markdown, attachments };
+        this.#extensions = held(settled.payload.extensions);
+      }
+      this.#set({ ...this.#content, links: this.#table() });
+      if (!settled.saved || saveOver || typedMeanwhile) this.#schedule();
+      else this.#set({ status: 'saved' });
+      return false;
+    } finally {
+      this.#settling = null;
+      release();
+    }
   }
 
   // Join the next session once what this session holds is saved, trying
@@ -960,7 +1104,7 @@ export class DraftSession {
       ? now.filter((ref) => !attachments.some((a) => a.id === ref.id))
       : [];
     const entries = [
-      ...Object.entries(extensions).map(([namespace, value]) => ({
+      ...Object.entries(held(extensions)).map(([namespace, value]) => ({
         root: 'extensions' as const,
         key: namespace,
         value: value === undefined ? null : JSON.stringify(value),
