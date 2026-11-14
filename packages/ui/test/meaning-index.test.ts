@@ -438,6 +438,31 @@ describe('MeaningIndexer', () => {
     expect(indexer.status()).toEqual({ pages: 2, total: 2 });
   });
 
+  it('a draft embedded while the index is partial lets go of nothing either', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    const ref = { spaceId: home, pageId: PageId.parse('beach') };
+    const draft = { ...beach, revisionId: 'beach-d1', text: 'Soup at the beach.' };
+    indexer.saved({ ...ref, revisionId: rev('beach-d1'), basedOn: rev('beach-1') });
+    indexer.indexChanged(wordIndex([draft, boiler]));
+    // Offline within the pause, and the boiler isn't kept on this device.
+    indexer.indexChanged(wordIndex([draft]), { partial: true });
+    await settle(1);
+    expect(fake.embedded).toHaveLength(3);
+    expect([...fake.writes.at(-1)!.keys()].sort()).toEqual([
+      rev('beach-1'),
+      rev('beach-d1'),
+      rev('boiler-1'),
+    ]);
+    // Back online: the boiler needs nothing, and the version before goes.
+    indexer.indexChanged(wordIndex([draft, boiler]));
+    await settle(1);
+    expect(fake.embedded).toHaveLength(3);
+    expect([...fake.writes.at(-1)!.keys()].sort()).toEqual([rev('beach-d1'), rev('boiler-1')]);
+  });
+
   it('while the word index is built afresh, as access changes, nothing is found or kept', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);

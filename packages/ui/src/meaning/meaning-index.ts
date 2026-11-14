@@ -157,6 +157,8 @@ export class MeaningIndexer {
   /** When the rest after the last passage ends. */
   #restUntil = 0;
   #wakeAt: { at: number; cancel: () => void } | null = null;
+  /** The word index shown is partial (`indexChanged`): nothing is let go of. */
+  #partial = false;
   /** A write came while no word index was shown: it follows the next. */
   #deferred = false;
   /** Pages passed over as their passages failed twice, by the version that failed, and the first failure. */
@@ -208,6 +210,7 @@ export class MeaningIndexer {
 
   #follow(index: searchOperations.PageIndex, partial: boolean) {
     if (this.#stopped) return;
+    this.#partial = partial;
     const before = this.#shown;
     const shown = new Map<string, IndexedPage>();
     for (const page of index.pages()) shown.set(keyOf(page.doc.spaceId, page.doc.pageId), page);
@@ -583,7 +586,8 @@ export class MeaningIndexer {
     this.#rewritten.delete(revisionId);
     const held = this.#held.get(key);
     this.#held.delete(key);
-    if (held !== undefined) this.#prune();
+    // The version that stood in goes, unless the index may lack pages.
+    if (held !== undefined && !this.#partial) this.#prune();
     const status = this.#status;
     if (status && !had) this.#setStatus({ pages: status.pages + 1, total: status.total });
     this.#keep(false);
