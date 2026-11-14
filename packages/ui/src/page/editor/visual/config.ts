@@ -312,15 +312,25 @@ const SPACED = new Set(['link', 'textColor', 'colorHighlight']);
 // a colour's HTML, which can hold it.
 function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[] {
   const inside = [...children];
+  // The spaces at one end, across text nodes of only spaces, as a held
+  // space and a soft line break are.
   const take = (first: boolean, edge: RegExp) => {
-    const node = first ? inside[0] : inside.at(-1);
-    if (node?.type !== 'text' || !node.value) return [];
-    const [space = ''] = edge.exec(node.value) ?? [];
-    const value = first
-      ? node.value.slice(space.length)
-      : node.value.slice(0, -space.length || undefined);
-    inside.splice(first ? 0 : -1, 1, ...(value ? [{ ...node, value }] : []));
-    return space ? [{ type: 'text', value: space }] : [];
+    const taken: Tree[] = [];
+    for (;;) {
+      const node = first ? inside[0] : inside.at(-1);
+      if (node?.type !== 'text' || !node.value) break;
+      const [space = ''] = edge.exec(node.value) ?? [];
+      if (!space) break;
+      const value = first
+        ? node.value.slice(space.length)
+        : node.value.slice(0, -space.length || undefined);
+      inside.splice(first ? 0 : -1, 1, ...(value ? [{ ...node, value }] : []));
+      const moved = { type: 'text', value: space };
+      if (first) taken.push(moved);
+      else taken.unshift(moved);
+      if (value) break;
+    }
+    return taken;
   };
   const held = SPACED.has(wrap.type) ? '' : HELD_SPACE;
   const before = take(true, new RegExp(`^[\\s${held}]+`));

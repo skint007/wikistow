@@ -1,3 +1,4 @@
+import type { Mark } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { act, createRef } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -189,6 +190,34 @@ describe('highlights and colours in the visual editor', () => {
       await reported(m, expected);
       expect(fidelityOf(expected, t).visual, expected).toBe(true);
       unmounts.pop()?.();
+    }
+  });
+
+  it('leave a held space out of a mark before a soft line break', async () => {
+    const t = await transformer();
+    const { schema } = t.parse('x').type;
+    const [strong, em, strike] = ['strong', 'emphasis', 'strike_through'].map((name) => {
+      const mark = schema.marks[name]?.create();
+      if (!mark) throw new Error(`No mark ${name}`);
+      return mark;
+    }) as [Mark, Mark, Mark];
+    const soft = schema.nodes['hardbreak']?.create({ isInline: true });
+    if (!soft) throw new Error('No line break');
+    for (const [outer, written] of [
+      [strong, '**a *b***\n*c*\n'],
+      [strike, '~~a *b*~~\n*c*\n'],
+    ] as const) {
+      const doc = schema.topNodeType.create(
+        null,
+        schema.node('paragraph', null, [
+          schema.text('a ', [outer]),
+          schema.text('b', [outer, em]),
+          schema.text(' ', [em]),
+          soft.mark([em]),
+          schema.text('c', [em]),
+        ]),
+      );
+      expect(t.serialize(doc)).toBe(written);
     }
   });
 
