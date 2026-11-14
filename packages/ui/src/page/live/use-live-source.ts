@@ -6,6 +6,7 @@ import type { DraftSession, LiveShown } from '../draft-session';
 import { colourOf } from '../editor/source/live-colours';
 import type { LiveSource, RemoteCaret } from '../editor/source/live';
 import { showLivePeople } from './live-people';
+import { forgetLiveEditor, liveEditorOf as liveEditorNow, showLiveEditor } from './live-editor';
 
 /**
  * What the source editor binds to while the draft is in a live session:
@@ -27,7 +28,16 @@ export function useLiveSource(
   useEffect(() => {
     showLivePeople(pageId, people);
   }, [pageId, people]);
-  useEffect(() => () => showLivePeople(pageId, null), [pageId]);
+  useEffect(
+    () => () => {
+      showLivePeople(pageId, null);
+      forgetLiveEditor(pageId);
+    },
+    [pageId],
+  );
+  // Names, for the visual editor's note of who added what it can't show.
+  const names = useRef(named);
+  names.current = named;
 
   // Others' carets, read by the binding as they change.
   const carets = useRef<{ list: RemoteCaret[]; listeners: Set<() => void> }>({
@@ -39,7 +49,8 @@ export function useLiveSource(
     for (const person of people ?? []) {
       const name = named?.get(person.id)?.name ?? '…';
       for (const join of person.joins) {
-        if (!join.cursor || join.editor !== 'source') continue;
+        // A caret from either editor: the visual editor's is where its writer puts it.
+        if (!join.cursor) continue;
         try {
           list.push({
             key: `${person.id} ${join.joinId}`,
@@ -68,7 +79,20 @@ export function useLiveSource(
         carets.current.listeners.add(listener);
         return () => void carets.current.listeners.delete(listener);
       },
-      cursor: (cursor) => participant.setCursor(cursor),
+      cursor: (cursor, editor = 'source') => {
+        // A cursor gone from an editor it had already left for the other.
+        if (cursor === null && editor !== liveEditorNow(pageId)) return;
+        const moved = showLiveEditor(pageId, editor);
+        participant.setCursor(cursor);
+        if (moved) participant.presenceChanged();
+      },
+      // The person's own other tabs and devices are the person, named by nobody.
+      onBeforeRemote: (listener) =>
+        participant.onBeforeRemote((senderId) =>
+          listener(senderId === ctx.identity.public.id ? null : senderId),
+        ),
+      nameOf: (id) => names.current?.get(id)?.name ?? 'Someone',
+      active: () => participant.status().state.kind === 'live',
     };
-  }, [participant]);
+  }, [participant, pageId, ctx]);
 }
