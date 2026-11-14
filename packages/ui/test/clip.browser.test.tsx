@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import { htmlMarkdown } from '../src/page/editor/visual/html-markdown.ts';
 import { saveClip } from '../src/clip/save-clip.ts';
 
-// A clip from the browser saved as a draft (ADR 0017, step 4), with the
+// A clip from the browser saved as a draft (ADR 0017, steps 4 and 6), with the
 // paste path itself turning its HTML into Markdown, in Chromium.
 
 const spaceId = newId(SpaceId);
@@ -48,6 +48,7 @@ async function save(fields: Partial<DesktopClip>) {
       text: '',
       byline: null,
       folder: { spaceId, folderId },
+      screenshot: null,
       waited: false,
       made: null,
       ...fields,
@@ -109,5 +110,23 @@ describe('a clip saved as a page', () => {
       html: '<p>Shown</p><p style="display:none">Hidden</p><script>alert(1)</script>',
     });
     expect(first).toBe(`${HEAD}Shown\n`);
+  });
+
+  it('shows a screenshot from its attachment, above the link, with the note first', async () => {
+    const { outcome, first, saved } = await save({
+      mode: 'screenshot',
+      title: 'A [story] *now*',
+      note: '# Look',
+      screenshot: { bytes: PNG, mediaType: 'image/png' },
+    });
+    expect(outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    const link = '[A \\[story\\] \\*now\\*](https://news.example/story)\n';
+    expect(first).toBe(`${HEAD}\\# Look\n\n${link}`);
+    expect(saved?.payload.markdown).toBe(
+      `${HEAD}\\# Look\n\n![Screenshot](attachment:A1)\n\n${link}`,
+    );
+    expect(saved?.payload.attachments).toEqual([
+      expect.objectContaining({ id: 'A1', name: 'Screenshot.png', mediaType: 'image/png' }),
+    ]);
   });
 });

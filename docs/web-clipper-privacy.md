@@ -9,7 +9,7 @@ The extension sends only to **the WikiStow desktop app on your computer**, throu
 When you clip, it sends the app:
 
 - the tab's address and title;
-- what you chose to clip from that tab: the link (with any text you selected, and your note), the selected part of the page, the article Mozilla's Readability finds in it, or the whole page, each as HTML and as its plain text, and for an article its byline and site's name;
+- what you chose to clip from that tab: the link (with any text you selected, and your note), the selected part of the page, the article Mozilla's Readability finds in it, or the whole page, each as HTML and as its plain text, and for an article its byline and site's name; or a screenshot of what the tab shows, or of the area you drag out over it, as a PNG image, with your note;
 - the title, tags and folder you chose in the popup.
 
 The desktop app encrypts the clip and saves it, as a draft, on the WikiStow server you signed in to, which is yours or your organisation's. The app downloads the clip's images itself, from the sites they're on, without your cookies.
@@ -18,12 +18,12 @@ To show you where a clip can go, the extension asks the app for folders matching
 
 ## What it reads
 
-The extension reads a page only when you clip from it: when you press its toolbar button, choose **Send link to WikiStow** or **Send selection to WikiStow** in the context menu, or use its keyboard shortcuts. Then it reads only that tab, through the browser's `activeTab` permission. It doesn't read the pages you visit otherwise, and has no access to any site until you clip from it.
+The extension reads a page only when you clip from it: when you press its toolbar button, choose **Send link to WikiStow** or **Send selection to WikiStow** in the context menu, or use its keyboard shortcuts. Then it reads only that tab, through the browser's `activeTab` permission, which also lets it take that tab's screenshot when you choose one. It doesn't read the pages you visit otherwise, and has no access to any site until you clip from it.
 
 ## What it keeps
 
 - **On disk:** only its own setting, which WikiStow app to use if you run both the stable app and the beta.
-- **For the browser's session,** in memory, gone when the browser closes (`storage.session`): the folder your last clip went to, with its name, so the next clip can go there too; what you typed in the popup for a page, until a clip of it is saved; and how your last clip went, with the saved page's title and folder.
+- **For the browser's session,** in memory, gone when the browser closes (`storage.session`): the folder your last clip went to, with its name, so the next clip can go there too; what you typed in the popup for a page, until a clip of it is saved; how your last clip went, with the saved page's title and folder; and, while you choose an area for a screenshot, the title, note, tags and folder for it, until you've chosen. A screenshot itself is never kept: it goes to the app as it's taken.
 
 It keeps no keys, passwords or tokens, and no folder names on disk.
 
@@ -32,8 +32,8 @@ It keeps no keys, passwords or tokens, and no folder names on disk.
 | Permission | Why |
 | --- | --- |
 | `nativeMessaging` | To send clips to the WikiStow desktop app on your computer. |
-| `activeTab` | To read the tab you clip from, only when you clip. |
-| `scripting` | To read that tab's page, its selection, article or whole page, when you clip. |
+| `activeTab` | To read the tab you clip from, or take its screenshot, only when you clip. |
+| `scripting` | To read that tab's page, its selection, article or whole page, or show the overlay to choose an area of it, when you clip. |
 | `contextMenus` | For **Send link to WikiStow** and **Send selection to WikiStow**. |
 | `storage` | For its setting, and what it keeps for the browser's session. |
 

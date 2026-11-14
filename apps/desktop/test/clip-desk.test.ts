@@ -147,6 +147,7 @@ describe('a clip', () => {
         text: '',
         byline: 'Ann',
         folder: { spaceId: 'space1', folderId: 'folder1' },
+        screenshot: null,
         waited: false,
         made: null,
       },
@@ -347,10 +348,73 @@ describe('the clip’s schema', () => {
     expect(parse({ tags: Array(21).fill('a') })).toBe(false);
     expect(parse({ tags: ['x'.repeat(101)] })).toBe(false);
     expect(parse({ mode: 'screenshot' })).toBe(false);
+    expect(parse({ mode: 'screenshot', screenshot: '' })).toBe(false);
+    expect(parse({ mode: 'screenshot', screenshot: 'iVBORw0K' })).toBe(true);
+    expect(parse({ mode: 'screenshot', screenshot: 'not base64!' })).toBe(false);
+    expect(parse({ mode: 'screenshot', screenshot: 'iVBORw0' })).toBe(false);
+    expect(parse({ mode: 'link', screenshot: 'iVBORw0K' })).toBe(false);
+    expect(parse({ mode: 'screenshot', screenshot: 'iVBORw0K', html: '<p>x</p>' })).toBe(false);
     expect(parse({ folder: { spaceId: '../x', folderId: null } })).toBe(false);
     expect(parse({ folder: undefined })).toBe(false);
     expect(parse({ url: '' })).toBe(false);
     expect(parse({ cookie: 'a' })).toBe(false);
+  });
+});
+
+describe('a screenshot', () => {
+  const base64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
+
+  it('goes to the page as its bytes, told PNG or JPEG by them', () => {
+    const { desk, requests } = setup();
+    desk.setPageState({ vault: 'unlocked', offline: false });
+    for (const [bytes, mediaType] of [
+      [PNG, 'image/png'],
+      [JPEG, 'image/jpeg'],
+    ] as const) {
+      const { open, replies } = connection();
+      const message = clipMessage({ mode: 'screenshot', html: '', screenshot: base64(bytes) });
+      desk.answer(message, open);
+      expect(replies).toEqual([{ id: message.id, type: 'accepted', waits: null }]);
+      const request = requests.at(-1)!;
+      if (request.kind !== 'clip') throw new Error('Not a clip');
+      expect(request.clip).toMatchObject({ mode: 'screenshot', html: '', text: '' });
+      expect(request.clip.screenshot?.mediaType).toBe(mediaType);
+      expect([...request.clip.screenshot!.bytes]).toEqual([...bytes]);
+      desk.done(request.clip.id, SAVED);
+    }
+  });
+
+  it('refuses what isn’t a PNG or JPEG by its bytes, whatever it claims', () => {
+    const { desk, requests } = setup();
+    desk.setPageState({ vault: 'unlocked', offline: false });
+    for (const bytes of [
+      new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>'),
+      new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0]),
+    ]) {
+      const { open, replies } = connection();
+      const message = clipMessage({ mode: 'screenshot', html: '', screenshot: base64(bytes) });
+      desk.answer(message, open);
+      expect(replies).toEqual([
+        { id: message.id, type: 'error', code: 'invalid', message: expect.any(String) },
+      ]);
+    }
+    expect(requests).toEqual([]);
+    expect(desk.holding()).toEqual([]);
+  });
+
+  it('refuses one over 24 MiB as too large, before holding it', () => {
+    const { desk, requests } = setup();
+    desk.setPageState({ vault: 'unlocked', offline: false });
+    const big = new Uint8Array(24 * 1024 * 1024 + 1);
+    big.set(PNG);
+    const { open, replies } = connection();
+    const message = clipMessage({ mode: 'screenshot', html: '', screenshot: base64(big) });
+    desk.answer(message, open);
+    expect(replies).toEqual([
+      { id: message.id, type: 'error', code: 'too-large', message: expect.any(String) },
+    ]);
+    expect(requests).toEqual([]);
   });
 });
 

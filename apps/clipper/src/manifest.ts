@@ -20,8 +20,9 @@ export type ManifestOptions = {
   firefoxId?: string;
   /**
    * For the tests alone: Chrome's public key, which fixes an unpacked
-   * build's ID, and host permissions to clip from the tests' site without
-   * the toolbar's click, which grants `activeTab` only by hand.
+   * build's ID, and host permissions to clip, and take screenshots, from
+   * the tests' site without the toolbar's click, which grants `activeTab`
+   * only by hand.
    */
   test?: { key?: string; hosts: string[] };
 };

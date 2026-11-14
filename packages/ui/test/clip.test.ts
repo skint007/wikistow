@@ -37,6 +37,7 @@ const clip = (fields: Partial<DesktopClip> = {}): DesktopClip => ({
   text: '',
   byline: null,
   folder: { spaceId, folderId },
+  screenshot: null,
   waited: false,
   made: null,
   ...fields,
@@ -57,7 +58,13 @@ describe('a clip’s pieces', () => {
     );
   });
 
-  it('makes a link the note, the selection as a quote, and the link', () => {
+  it('makes a link the note, the selection as a quote, and the link; a screenshot its note and link apart', () => {
+    expect(
+      clipParts(clip({ mode: 'screenshot', note: 'Look', text: 'no', html: '<p>no</p>' })),
+    ).toEqual([
+      { html: '<p>Look</p>', text: '' },
+      { html: '<p><a href="https://news.example/story?id=1">A story</a></p>', text: '' },
+    ]);
     expect(
       clipParts(clip({ mode: 'link', note: 'Read # later', text: 'Quoted', html: '<p>no</p>' })),
     ).toEqual([
@@ -211,7 +218,7 @@ describe('the folder search', () => {
 });
 
 /** A page writer that records what it's asked, as the server or queue would answer. */
-function fakeWriter({ refuse }: { refuse?: 'page' | 'attach' | 'save' } = {}) {
+function fakeWriter({ refuse }: { refuse?: 'page' | 'attach' | 'attach-failed' | 'save' } = {}) {
   const calls: { call: string; input: unknown }[] = [];
   const revisionId = newId(RevisionId);
   let n = 0;
@@ -224,8 +231,13 @@ function fakeWriter({ refuse }: { refuse?: 'page' | 'attach' | 'save' } = {}) {
     async attach(_page: unknown, file: { name: string; mediaType: string; bytes: Uint8Array }) {
       calls.push({ call: 'attach', input: file.name });
       if (refuse === 'attach') throw new ApiError(413, 'payload-too-large', 'Too large');
+      if (refuse === 'attach-failed') throw new Error('Gone');
       n += 1;
       return { id: `att${n}`, name: file.name, mediaType: file.mediaType } as AttachmentRef;
+    },
+    async deleteNode(input: unknown) {
+      calls.push({ call: 'deleteNode', input });
+      return 'trashed';
     },
     draft() {
       return {
@@ -436,5 +448,85 @@ describe('saving a clip', () => {
     );
     expect(saved.outcome).toMatchObject({ ok: false, code: 'too-large' });
     expect(read).toBe(false);
+  });
+});
+
+describe('saving a screenshot', () => {
+  const shot = (fields: Partial<DesktopClip> = {}) =>
+    clip({
+      mode: 'screenshot',
+      html: '',
+      title: 'A [story]',
+      note: 'Look at this',
+      screenshot: { bytes: PNG, mediaType: 'image/png' },
+      ...fields,
+    });
+
+  it('makes the page with its note and link, then shows the screenshot above the link', async () => {
+    const { writer, calls, revisionId } = fakeWriter();
+    const run = deps({
+      writer,
+      // As `htmlMarkdown` writes a paragraph and a link.
+      convert: async (html) => ({
+        markdown: `${html
+          .replace(/<a href="([^"]*)">([^<]*)<\/a>/g, '[$2]($1)')
+          .replace(/<[^>]+>/g, '')}\n`,
+        faithful: true,
+      }),
+    });
+    const saved = await saveClip(shot(), run);
+    expect(saved.outcome).toEqual({
+      ok: true,
+      spaceId,
+      pageId: expect.any(String),
+      title: 'A [story]',
+      path: 'Home / News',
+      images: { saved: 1, skipped: 0 },
+      faithful: true,
+    });
+    expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'save']);
+    const front = '---\nsource: https://news.example/story?id=1\nclipped: 2026-11-13\n---\n';
+    expect(calls[0]?.input).toMatchObject({
+      markdown: `${front}Look at this\n\n[A [story]](https://news.example/story?id=1)\n`,
+    });
+    expect(calls[1]?.input).toBe('Screenshot.png');
+    const save = calls[2]?.input as DraftSave;
+    expect(save.basedOn).toBe(revisionId);
+    expect(save.payload.markdown).toBe(
+      `${front}Look at this\n\n![Screenshot](attachment:att1)\n\n[A [story]](https://news.example/story?id=1)\n`,
+    );
+    expect(save.payload.attachments).toEqual([expect.objectContaining({ id: 'att1' })]);
+    expect(run.asked).toEqual([]);
+  });
+
+  it('names a JPEG as one', async () => {
+    const { writer, calls } = fakeWriter();
+    await saveClip(
+      shot({ screenshot: { bytes: new Uint8Array([0xff, 0xd8, 0xff]), mediaType: 'image/jpeg' } }),
+      deps({ writer }),
+    );
+    expect(calls[1]?.input).toBe('Screenshot.jpg');
+  });
+
+  it('refuses one the server won’t take as too large, putting the page it made in the trash', async () => {
+    const { writer, calls } = fakeWriter({ refuse: 'attach' });
+    const saved = await saveClip(shot(), deps({ writer }));
+    expect(saved.outcome).toMatchObject({ ok: false, code: 'too-large' });
+    expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'deleteNode']);
+    expect(calls[2]?.input).toMatchObject({ spaceId, node: 'page', dropChanges: true });
+  });
+
+  it('fails, putting the page in the trash, if the screenshot can’t be attached', async () => {
+    const { writer, calls } = fakeWriter({ refuse: 'attach-failed' });
+    const saved = await saveClip(shot(), deps({ writer }));
+    expect(saved.outcome).toMatchObject({ ok: false, code: 'failed' });
+    expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'deleteNode']);
+  });
+
+  it('refuses a screenshot clip with no screenshot, making nothing', async () => {
+    const { writer, calls } = fakeWriter();
+    const saved = await saveClip(shot({ screenshot: null }), deps({ writer }));
+    expect(saved.outcome).toMatchObject({ ok: false, code: 'failed' });
+    expect(calls).toEqual([]);
   });
 });

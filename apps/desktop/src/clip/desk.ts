@@ -21,7 +21,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AddressKind } from './addresses.ts';
-import { MAX_IMAGE_BYTES, type imageFetcher } from './images.ts';
+import { MAX_IMAGE_BYTES, sniffImage, type imageFetcher } from './images.ts';
 import type { ClipConnection } from './listener.ts';
 import type { ClipAppState, ClipMessage, ErrorCode, Message } from './protocol.ts';
 
@@ -36,6 +36,8 @@ export const IMAGES_PER_CLIP = 50;
 export const IMAGE_BYTES_PER_CLIP = 100 * 1024 * 1024;
 /** How long a clip's images may take in all, from its first, so a slow site can't hold the one clip. */
 export const IMAGES_MS = 2 * 60_000;
+/** A screenshot's image, at most: what the extension's 32 MiB of base64 holds (ADR 0017, decision 4). */
+export const MAX_SCREENSHOT_BYTES = 24 * 1024 * 1024;
 /** Answers to the extension name at most this many folders, paths cut this short. */
 const RECENT_FOLDERS = 5;
 const MATCHED_FOLDERS = 50;
@@ -153,6 +155,29 @@ export function clipDesk(options: DeskOptions) {
   const refuse = (connection: ClipConnection, id: string, code: ErrorCode, message: string) =>
     connection.reply({ id, type: 'error', code, message });
 
+  /**
+   * A screenshot's image from its base64, told PNG or JPEG by its bytes,
+   * whatever the extension says: the page attaches it as it is.
+   */
+  function screenshotOf(
+    message: ClipMessage,
+  ): DesktopClip['screenshot'] | { code: ErrorCode; message: string } {
+    if (message.mode !== 'screenshot') return null;
+    // Base64 is 4 characters to 3 bytes: refused before it's decoded.
+    if ((message.screenshot.length / 4) * 3 - 2 > MAX_SCREENSHOT_BYTES) {
+      return { code: 'too-large', message: 'This screenshot is too large. Choose a smaller area.' };
+    }
+    const bytes = new Uint8Array(Buffer.from(message.screenshot, 'base64'));
+    if (bytes.length > MAX_SCREENSHOT_BYTES) {
+      return { code: 'too-large', message: 'This screenshot is too large. Choose a smaller area.' };
+    }
+    const mediaType = sniffImage(bytes);
+    if (mediaType !== 'image/png' && mediaType !== 'image/jpeg') {
+      return { code: 'invalid', message: 'That screenshot isn’t a PNG or JPEG image.' };
+    }
+    return { bytes, mediaType };
+  }
+
   function clip(message: ClipMessage, connection: ClipConnection) {
     const at = state();
     if (at === 'signed-out') {
@@ -169,6 +194,10 @@ export function clipDesk(options: DeskOptions) {
         'That’s a lot of clips. Wait a minute and try again.',
       );
     }
+    const screenshot = screenshotOf(message);
+    if (screenshot && 'code' in screenshot) {
+      return refuse(connection, message.id, screenshot.code, screenshot.message);
+    }
     const waits = at === 'ready' ? null : at === 'starting' ? 'starting' : 'unlock';
     const desk: DesktopClip = {
       id: randomUUID(),
@@ -181,6 +210,7 @@ export function clipDesk(options: DeskOptions) {
       text: message.text,
       byline: message.byline,
       folder: { spaceId: message.folder.spaceId, folderId: message.folder.folderId },
+      screenshot,
       waited: waits !== null,
       made: null,
     };

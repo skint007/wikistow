@@ -25,6 +25,7 @@ import {
   imageName,
   mayFit,
   planImages,
+  screenshotMarkdown,
 } from './clip-page';
 import { samePlace, type ClipPlace } from './clip-places';
 
@@ -72,6 +73,10 @@ const savedTo = (path: readonly string[]) => path.join(' / ');
 /** Save `clip` as a new draft. Never throws: a failure is an outcome, said in the app's words. */
 export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<Saved> {
   const title = clipTitle(clip);
+  const shot = clip.mode === 'screenshot' ? clip.screenshot : null;
+  if (clip.mode === 'screenshot' && !shot && !clip.made) {
+    return failed('failed', 'WikiStow couldn’t read this screenshot.');
+  }
   // Made before a reload cut it short: its text is saved, so it's done.
   if (clip.made) {
     const { spaceId, pageId, path } = clip.made;
@@ -107,11 +112,15 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
 
   let body = '';
   let faithful = true;
+  /** Where the last piece starts: a screenshot's link, which its image goes above. */
+  let last = 0;
   try {
     for (const part of clipParts(clip)) {
       const written = await deps.convert(part.html, part.text);
       if (!written.markdown.trim()) continue;
-      body += (body ? '\n' : '') + written.markdown;
+      body += body ? '\n' : '';
+      last = body.length;
+      body += written.markdown;
       faithful &&= written.faithful;
     }
   } catch {
@@ -132,6 +141,11 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   }
   const first = plan.written(new Map());
   if (!fitsPage(first)) return failed('too-large', TOO_LONG);
+  // A screenshot's page, its image above the link: its note and link
+  // name no images, so `first` is `markdown`.
+  const at = markdown.length - body.length + last;
+  const shown = (id: string) => first.slice(0, at) + screenshotMarkdown(id) + first.slice(at);
+  if (shot && !fitsPage(shown('x'.repeat(22)))) return failed('too-large', TOO_LONG);
 
   const { spaceId, folderId } = place;
   let made: { pageId: PageId; revisionId: RevisionId };
@@ -151,6 +165,54 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   }
   const page = { spaceId, pageId: made.pageId };
   await deps.made?.({ spaceId, pageId: made.pageId, path: savedTo(place.path) }).catch(() => {});
+
+  if (shot) {
+    let ref: AttachmentRef;
+    try {
+      ref = await deps.writer.attach(page, {
+        name: `Screenshot.${shot.mediaType === 'image/jpeg' ? 'jpg' : 'png'}`,
+        mediaType: shot.mediaType,
+        bytes: shot.bytes,
+      });
+    } catch (error) {
+      // A page that was to show a screenshot, without it, isn't the clip:
+      // it goes in the trash, and the extension says why.
+      await deps.writer
+        .deleteNode({ spaceId, nodeId: made.pageId, node: 'page', name: title, dropChanges: true })
+        .catch(() => {});
+      return error instanceof ApiError && error.status === 413
+        ? failed(
+            'too-large',
+            'This screenshot is larger than your WikiStow server takes. Choose a smaller area.',
+          )
+        : failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
+    }
+    try {
+      const drafts = deps.writer.draft(page, { seen: null });
+      const basedOn = (await drafts.waitingHead()) ?? made.revisionId;
+      await drafts.save({
+        basedOn,
+        payload: { ...newPayload({ title, markdown: shown(ref.id) }), attachments: [ref] },
+      });
+    } catch {
+      await deps.writer
+        .deleteNode({ spaceId, nodeId: made.pageId, node: 'page', name: title, dropChanges: true })
+        .catch(() => {});
+      return failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
+    }
+    return {
+      outcome: {
+        ok: true,
+        spaceId,
+        pageId: made.pageId,
+        title,
+        path: savedTo(place.path),
+        images: { saved: 1, skipped: 0 },
+        faithful,
+      },
+      place,
+    };
+  }
 
   // Images, one at a time, each kept only once attached.
   const attached = new Map<string, string>();

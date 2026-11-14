@@ -169,8 +169,8 @@ export type ClippedPage = {
   path: string;
 };
 
-/** What a clip captured (ADR 0017, decision 5). Screenshots come later (step 6). */
-export type ClipMode = 'link' | 'selection' | 'article' | 'page';
+/** What a clip captured (ADR 0017, decision 5). */
+export type ClipMode = 'link' | 'selection' | 'article' | 'page' | 'screenshot';
 
 /**
  * A clip from the browser extension, as main hands it to the page to save
@@ -195,6 +195,11 @@ export type DesktopClip = {
   byline: string | null;
   /** Where it goes: a folder, or the top of a space for a null `folderId`. */
   folder: { spaceId: SpaceId; folderId: FolderId | null };
+  /**
+   * A screenshot's image, for `screenshot` mode alone: PNG or JPEG, as
+   * main told by its bytes, at most 24 MiB. Null for every other mode.
+   */
+  screenshot: { bytes: Uint8Array; mediaType: 'image/png' | 'image/jpeg' } | null;
   /** It came while the app was starting or locked, so its answer may reach no popup. */
   waited: boolean;
   /**

@@ -18,6 +18,8 @@ export type HostKey = keyof typeof HOSTS;
 export const MAX_MESSAGE_BYTES = 48 * 1024 * 1024;
 /** At most this much HTML, or text, in a clip. */
 export const MAX_CLIP_CHARS = 16 * 1024 * 1024;
+/** A screenshot's base64, at most: 24 MiB of image (ADR 0017, decision 4). */
+export const MAX_SCREENSHOT_CHARS = 32 * 1024 * 1024;
 export const MAX_TITLE = 500;
 /** A byline or a site's name, at most. */
 export const MAX_NAME = 500;
@@ -53,7 +55,9 @@ export type ErrorCode =
   | 'busy'
   | 'failed';
 
-export type ClipMode = 'link' | 'selection' | 'article' | 'page';
+/** The modes the content script captures as HTML or text. */
+export type TextMode = 'link' | 'selection' | 'article' | 'page';
+export type ClipMode = TextMode | 'screenshot';
 
 export type Saved = {
   type: 'saved';
@@ -87,6 +91,8 @@ export type Clip = {
   byline: string | null;
   siteName: string | null;
   folder: { spaceId: string; folderId: string | null };
+  /** A screenshot's PNG as base64, in `screenshot` mode alone, which has no HTML or text. */
+  screenshot?: string;
 };
 
 export type Request =

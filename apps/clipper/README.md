@@ -18,11 +18,11 @@ That gives, in `apps/clipper/dist`:
 | --- | --- |
 | `chrome/`, `wikistow-clipper-<version>-chrome.zip` | The Chrome Web Store's build, for Chrome, Edge and Brave |
 | `firefox/`, `wikistow-clipper-<version>-firefox.zip` | Mozilla Add-ons' build |
-| `chrome-test/` | The tests' build: a fixed ID, and access to `http://127.0.0.1` to clip from the tests' site |
+| `chrome-test/` | The tests' build: a fixed ID, and access to every site (`<all_urls>`), to clip and take screenshots from the tests' site without the toolbar's click |
 
 `CLIPPER_FIREFOX_ID` sets Firefox's add-on ID. Without it, the Firefox build names a placeholder, which no desktop app trusts.
 
-The scripts are bundled unminified by `vp pack` (Rolldown): `background.js` from `src/background.ts`, `capture.js` from `src/capture.ts` with Mozilla's Readability, and `popup.js` from `src/popup/popup.ts`. `scripts/assemble.ts` writes each build's `manifest.json` (`src/manifest.ts`) and copies the popup's page, its styles and the icons. Mozilla's linter warns twice about `innerHTML` in `capture.js`: both are Readability's own, run on a copy of the page made with `document.implementation.createHTMLDocument`, where nothing loads or runs.
+The scripts are bundled unminified by `vp pack` (Rolldown): `background.js` from `src/background.ts`, `capture.js` from `src/capture.ts` with Mozilla's Readability, `area.js` from `src/area.ts`, the overlay for a screenshot's area, and `popup.js` from `src/popup/popup.ts`. `scripts/assemble.ts` writes each build's `manifest.json` (`src/manifest.ts`) and copies the popup's page, its styles and the icons. Mozilla's linter warns twice about `innerHTML` in `capture.js`: both are Readability's own, run on a copy of the page made with `document.implementation.createHTMLDocument`, where nothing loads or runs.
 
 ## Trying it
 
@@ -30,7 +30,7 @@ Load `dist/chrome-test` unpacked in Chrome or Chromium, or `dist/firefox` as a t
 
 ## Tests
 
-- `vp test --project unit apps/clipper`: the store manifests ask for what ADR 0017 lists, and nothing more.
+- `vp test --project unit apps/clipper`: the store manifests ask for what ADR 0017 lists, and nothing more; a screenshot's area is cut in the screen's pixels.
 - `pnpm -C apps/clipper e2e`: the tests' build in Chromium against a fake native host (`e2e/fake-host.ts`), after a build.
 - `apps/desktop/e2e/clip.spec.ts` clips with the tests' build into the real desktop app, through the real helper.
 - `web-ext lint` on the Firefox build, in CI's `clipper` job.

@@ -2,7 +2,7 @@
 // popup opens (`api.runtime.connect({ name: POPUP_PORT })`). The popup
 // calls; the background answers each call by its `id`, and tells every
 // open popup how the app and the clip are as they change.
-import type { AppState, ClipMode, ErrorCode, Folder, HostKey, Saved } from './protocol.ts';
+import type { AppState, ErrorCode, Folder, HostKey, Saved, TextMode } from './protocol.ts';
 
 export const POPUP_PORT = 'popup';
 
@@ -15,8 +15,16 @@ export type View =
 /** Why a clip wasn't saved: the app's codes, and the extension's own. */
 export type Failure = ErrorCode | 'too-long' | 'capture' | 'missing' | 'closed';
 
+/**
+ * What the popup offers: the modes the content script captures, and two
+ * screenshots, of the visible area or of an area the person drags out,
+ * each sent as `screenshot` mode.
+ */
+export type FormMode = TextMode | 'visible' | 'area';
+
 /** How the clip last sent is going. */
 export type ClipView =
+  | { phase: 'choosing' }
   | { phase: 'sending' }
   | { phase: 'waiting'; waits: 'starting' | 'unlock' }
   | { phase: 'still-waiting' }
@@ -25,7 +33,7 @@ export type ClipView =
 
 /** What the person filled in. */
 export type Form = {
-  mode: ClipMode;
+  mode: FormMode;
   title: string;
   note: string;
   tags: string[];
@@ -72,9 +80,13 @@ export type SessionState = {
   clip?: ClipView;
   /** What the person typed for a page, kept if the popup closes before it's sent. */
   draft?: Draft;
+  /** An area being chosen on a page, which its overlay names by `nonce` once dragged out. */
+  choosing?: Choosing;
 };
 
-export type Draft = { url: string; mode: ClipMode; title: string; note: string; tags: string };
+export type Choosing = { nonce: string; tabId: number; form: Form; until: number };
+
+export type Draft = { url: string; mode: FormMode; title: string; note: string; tags: string };
 
 /** What it keeps in `storage.local`, on disk: settings only, never a folder's name. */
 export type LocalState = { host?: HostKey | 'auto' };
