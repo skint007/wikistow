@@ -5,12 +5,13 @@ import {
   mayReferOtherPages,
   PageId,
   type ClientContext,
-  type pageOperations,
+  pageOperations,
   type PagePayload,
   type PayloadChanges,
   type Region,
   type RevisionId,
 } from '@wikistow/client';
+import { RevisionId as RevisionIdSchema } from '@wikistow/contracts';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { Paperclip, Trash2 } from 'lucide-react';
@@ -79,6 +80,12 @@ export type DraftEditorHandle = {
   restoreLive(write: Parameters<DraftSession['restoreLive']>[0]): Promise<boolean>;
   /** Change the draft from outside the editor, as the cover pickers do, given the draft as it is now. */
   revise(changes: (current: PagePayload) => PayloadChanges): void;
+  /**
+   * In a live session, a change made on the older draft `base`, merged
+   * from it into the page as it is now; false where it overlaps, or the
+   * draft isn't in a session.
+   */
+  reviseFrom(base: string, changes: PayloadChanges): Promise<boolean>;
   /** Work saves and leaving wait for, as for a file uploading: a banner image, say. */
   track(work: Promise<unknown>): void;
   /**
@@ -235,6 +242,16 @@ export function DraftEditor({
       },
       restoreLive: (write) => session.restoreLive(write),
       revise: (changes) => session.revise(changes),
+      reviseFrom: async (base, changes) => {
+        if (!session.participant) return false;
+        const parsed = RevisionIdSchema.safeParse(base);
+        if (!parsed.success) return false;
+        const opened = await pageOperations
+          .openRevisionOf(ctx, page, 'draft', parsed.data)
+          .catch(() => null);
+        if (opened?.opened.kind !== 'current') return false;
+        return session.reviseFrom(opened.opened.payload, changes);
+      },
       track: (work) => session.track(work),
       checkSize: (changes) => session.checkSize(changes),
       saved: () => session.savedRevision(),

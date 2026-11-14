@@ -26,7 +26,7 @@ import type {
   ParticipantState,
   ParticipantStatus,
 } from '@wikistow/client/live';
-import type { pageMerge } from '@wikistow/client';
+import { pageMerge } from '@wikistow/client';
 import { ATTACHMENT_SCHEME } from './attachments';
 import { Autosave, type SaveStatus } from './autosave';
 import { lineBreakOf, type EditorSurfaceHandle, type MarkdownParts } from './editor/surface';
@@ -415,6 +415,32 @@ export class DraftSession {
     if (content.markdown !== undefined && content.markdown !== this.#content.markdown)
       this.#surface.current?.replace(content.markdown);
     this.#change(content);
+  }
+
+  /**
+   * In a live session, a change made on an older draft, whose payload was
+   * `base`, merged by block from it into the page as it is now, as the
+   * person's change (ADR 0015 decision 8). False, changing nothing, where
+   * it overlaps what changed since.
+   */
+  reviseFrom(base: PagePayload, changes: PayloadChanges): boolean {
+    if (!this.#participant) return false;
+    this.#pull();
+    const current = this.#current();
+    const strip = (payload: PagePayload) => ({ ...payload, extensions: held(payload.extensions) });
+    const yours = revisePayload({ kind: 'current', payload: base }, changes);
+    const merge = pageMerge.mergePayloads(strip(base), strip(yours), strip(current));
+    if (merge.overlaps.length > 0) return false;
+    const resolved = pageMerge.resolve(merge, {});
+    if (!resolved.ok) return false;
+    const { title, markdown, attachments } = resolved.payload;
+    this.#reviseLive({
+      title,
+      markdown,
+      attachments,
+      extensions: over(current.extensions, held(resolved.payload.extensions)),
+    });
+    return true;
   }
 
   removeAttachment(id: string) {

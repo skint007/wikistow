@@ -790,6 +790,8 @@ function PageBody({
             saved: () => editor.current?.saved() ?? null,
             fits: (changes) => editor.current?.checkSize(changes),
             revise: (changes) => editor.current?.revise(() => changes),
+            reviseFrom: async (base, changes) =>
+              (await editor.current?.reviseFrom(base, changes)) ?? false,
             selection: () => editor.current?.selection() ?? '',
             insert: (markdown) => editor.current?.insert(markdown),
           }

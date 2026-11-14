@@ -2617,14 +2617,14 @@ export class LiveParticipant {
    * everyone has, and typing meanwhile stays where it goes.
    */
   async #renameLinks(saved: RevisionId): Promise<void> {
-    const renamed = this.#ports.renamed;
-    if (!renamed || Date.now() - this.#renamedAt < 30_000) return;
+    const ports = this.#ports;
+    if (!ports.renamed || Date.now() - this.#renamedAt < 30_000) return;
     this.#renamedAt = Date.now();
     const draft = this.#drafts.get(saved);
     if (!draft) return;
     let markdown: string | null;
     try {
-      markdown = await renamed(draft.payload, saved);
+      markdown = await ports.renamed(draft.payload, saved);
     } catch {
       return;
     }
