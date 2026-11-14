@@ -230,6 +230,14 @@ describe('HTML to Markdown without an editor', () => {
     expect(markdown).toBe('');
   });
 
+  it('writes a long clip out whole, a slice at a time', async () => {
+    const rows = Array.from({ length: 2000 }, (_, i) => `Row ${i} with **bold** text.`);
+    const html = rows.map((row) => `<p>${row.replace(/\*\*(\w+)\*\*/, '<b>$1</b>')}</p>`).join('');
+    const { markdown, faithful } = await bothWays(html);
+    expect(markdown).toBe(`${rows.join('\n\n')}\n`);
+    expect(faithful).toBe(true);
+  });
+
   it('starts afresh for each', async () => {
     await htmlMarkdown('<p>First</p>');
     const { markdown } = await htmlMarkdown('<p>Second</p>');

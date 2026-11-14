@@ -58,15 +58,28 @@ function paster(): Promise<Paster> {
   return shared;
 }
 
-// The writer reads back a slice of this long at a time, letting the page
-// get on between, so a long clip doesn't hold up typing.
+// The writer reads back a slice this long at a time, letting the page get
+// on between, so writing a long clip out doesn't hold up typing; the paste
+// before it is done at once, as a paste is. Each slice waits on a message,
+// not a timer: a clip mostly comes while the app is in the background,
+// where Chromium runs chained timers as rarely as once a minute.
 const SLICE_MS = 10;
+
+const nextTask = () =>
+  new Promise<void>((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    port1.onmessage = () => {
+      port1.close();
+      resolve();
+    };
+    port2.postMessage(null);
+  });
 
 async function prepared(writer: Writer, doc: Node) {
   for (;;) {
     const end = performance.now() + SLICE_MS;
     if (writer.prepare(doc, () => performance.now() < end)) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTask();
   }
 }
 
