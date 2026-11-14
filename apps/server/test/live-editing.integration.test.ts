@@ -233,6 +233,20 @@ describe('editing a page live', () => {
     await expect.poll(() => mine.status().state.kind, { timeout: 15_000 }).toBe('stopped');
   });
 
+  it('saves both apps’ typing when both save at once, as when both lock', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const mine = await join(owner, page);
+    const theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    type(mine, ' mine');
+    type(theirs, ' theirs');
+    // One of the two saves meets the other's as `stale-head`, and goes on from it.
+    expect(await Promise.all([mine.saveNow(), theirs.saveNow()])).toEqual([true, true]);
+    const head = await draftOf(owner, page);
+    expect(head.payload.markdown).toContain('mine');
+    expect(head.payload.markdown).toContain('theirs');
+  });
+
   it('ends the session for everyone when a member is removed', async () => {
     const { owner, editor, lib, shareId, page } = await sharedPage();
     const mine = await join(owner, page);
