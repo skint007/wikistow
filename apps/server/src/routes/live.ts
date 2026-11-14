@@ -117,6 +117,8 @@ type Followed = {
   snapshotCovers: number;
   /** Ended or gone: its head and what it holds stand as they were then. */
   over: boolean;
+  /** Made for a presence with no stream open: whose, counted against their streams. */
+  keptFor: string | null;
 };
 
 const joinKey = (identityId: string, joinId: string) => `${identityId} ${joinId}`;
@@ -376,7 +378,14 @@ export function mountLiveRoutes(
   function relay(change: Relay) {
     let session = followed.get(change.sessionId);
     // A presence sent with no stream open is kept for the first that opens.
-    if (!session && !change.ended && !change.deleted && change.sent.some((i) => 'presence' in i)) {
+    const keptBy = [...followed.values()].filter((s) => s.keptFor === change.accountId).length;
+    if (
+      !session &&
+      !change.ended &&
+      !change.deleted &&
+      change.sent.some((i) => 'presence' in i) &&
+      keptBy + (streaming.get(change.accountId) ?? 0) < MAX_STREAMS_PER_ACCOUNT
+    ) {
       session = {
         pageId: change.pageId,
         streams: new Set(),
@@ -387,6 +396,7 @@ export function mountLiveRoutes(
         grants: new Map(),
         snapshotCovers: 0,
         over: false,
+        keptFor: change.accountId,
       };
       followed.set(change.sessionId, session);
     }
@@ -673,10 +683,13 @@ export function mountLiveRoutes(
           grants: new Map(),
           snapshotCovers: joined.snapshotCovers,
           over: false,
+          keptFor: null,
         };
         followed.set(sessionId, session);
       }
       const here = session;
+      // A stream follows it now: no longer kept for someone's presence alone.
+      here.keptFor = null;
       here.snapshotCovers = Math.max(here.snapshotCovers, joined.snapshotCovers);
       setHead(here, joined.draftHead, joined.draftCount);
       // A newer stream of a join replaces the older one, which sends nothing more.

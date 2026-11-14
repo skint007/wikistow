@@ -1366,6 +1366,8 @@ export type Relay = {
   /** The page's draft head as the request saw it, and how many drafts it had then. */
   draftHead: string | null;
   draftCount: number;
+  /** The sender's account, whose presence the hub may keep with no stream open. */
+  accountId: string;
 };
 
 type StoreInput = {
@@ -1532,28 +1534,33 @@ export async function sendLive(db: Database, input: SendLive) {
       ended,
       draftHead: null,
       draftCount: 0,
+      accountId: caller.accountId,
     };
-    // What is new in it is charged before anything is written, so a request
-    // refused for its size writes nothing.
+    // What is new in it is charged once, after its first new message's own
+    // checks and before anything is written, so a request refused for its
+    // size writes nothing, and one refused for its content says so. Only what
+    // it adds: a presence, an ask or a resend stores nothing, over quota or not.
     const fresh = input.messages.filter(
       ({ message }) => message.kind !== 'presence' && message.seq > join.lastSeq,
     );
-    const sizes = fresh.map(({ message }) => decodedLength(message.sealed.ciphertext));
-    await spendStoredBytes(
-      tx,
-      caller.accountId,
-      sizes.reduce((total, size) => total + size + LIVE_MESSAGE_BYTES, 0),
-      input.storedBytesPerMinute,
-    );
-    // Only what it adds: a presence, an ask or a resend stores nothing, over quota or not.
-    if (sizes.length > 0) {
+    let charged = false;
+    const chargeOnce = async () => {
+      if (charged) return;
+      charged = true;
+      const sizes = fresh.map(({ message }) => decodedLength(message.sealed.ciphertext));
+      await spendStoredBytes(
+        tx,
+        caller.accountId,
+        sizes.reduce((total, size) => total + size + LIVE_MESSAGE_BYTES, 0),
+        input.storedBytesPerMinute,
+      );
       await chargeLive(
         tx,
         caller.accountId,
         sizes.reduce((total, size) => total + storedSize(size), 0),
         input.storageBytes,
       );
-    }
+    };
     const positions: (number | null)[] = [];
     const updates: number[] = [];
     const resent: number[] = [];
@@ -1603,6 +1610,7 @@ export async function sendLive(db: Database, input: SendLive) {
       if (covers !== undefined && covers > session.lastPosition) {
         throw new ContentError('invalid-request', 'A saved covers only what was stored before it');
       }
+      if (message.seq > join.lastSeq) await chargeOnce();
       const stored = await storeMessage(tx, session, join, caller, {
         message,
         covers: covers ?? null,
@@ -1916,6 +1924,7 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       ended: false,
       draftHead: heads.draftHead,
       draftCount: heads.draftCount,
+      accountId: caller.accountId,
     };
     return { position, relay };
   });
@@ -2214,6 +2223,7 @@ async function sweepSome(
         due,
         keep: {
           settled: !joins.some((j) => !j.catchUp && present.has(joinKey(j.identityId, j.joinId))),
+          lastPosition: session.lastPosition,
         },
       };
     });
@@ -2223,7 +2233,10 @@ async function sweepSome(
         await db
           .update(liveSessions)
           .set({ keptAt: read.keep.settled ? sql`now()` : null })
-          .where(eq(liveSessions.id, id));
+          // Only over what was read: a saved landing meanwhile moved it on.
+          .where(
+            and(eq(liveSessions.id, id), eq(liveSessions.lastPosition, read.keep.lastPosition)),
+          );
       }
       continue;
     }
