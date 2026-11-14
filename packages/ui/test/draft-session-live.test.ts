@@ -169,6 +169,7 @@ class FakeParticipant {
 function session(
   payload = newPayload({ title: 'Notes', markdown: 'Start.', extensions: {} }),
   shared = payload,
+  { waiting = false }: { waiting?: boolean } = {},
 ) {
   const surface = new FakeSurface(payload.markdown);
   const saves: Parameters<DraftPorts['saveDraft']>[0][] = [];
@@ -206,6 +207,7 @@ function session(
     saved: async () => {},
     overtaken: () => undefined,
     readLinks: async () => [],
+    waitingChange: async () => (waiting ? { version: 1, head: R0, payload } : null),
     live: {
       allowed: () => joinable,
       async join() {
@@ -358,6 +360,13 @@ describe('a draft session in a live session', () => {
     draft.edit(`${surface.frontmatter}Start.`);
     expect(joins[0]?.document.text('frontmatter').toJSON()).toBe('---\ntags: x\n---\n');
     expect(joins[0]?.document.text('body').toJSON()).toBe('Start.');
+  });
+
+  it('doesn’t join while a change for the page waits on this device', async () => {
+    const { draft, joins } = session(undefined, undefined, { waiting: true });
+    await draft.joinLive();
+    expect(joins).toHaveLength(0);
+    expect(draft.participant).toBeNull();
   });
 
   it('leaves at once, its key wiped, when the vault locks', async () => {
