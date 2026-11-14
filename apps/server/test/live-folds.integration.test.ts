@@ -166,7 +166,11 @@ describe('a draft saved from outside a live session', () => {
     await expect.poll(() => body(theirs), { timeout: 60_000 }).toContain('Saved, never sent.');
     expect(theirs.status().state).toEqual({ kind: 'live' });
     await expect.poll(() => theirs.status().saved, { timeout: 30_000 }).toBe(true);
-    expect((await draftOf(editor, page)).payload.markdown).toContain('Saved, never sent.');
+    const settled = await draftOf(editor, page);
+    expect(settled.payload.markdown).toContain('Saved, never sent.');
+    // Folded once, and then quiet: no more saves while nobody types.
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    expect((await draftOf(editor, page)).revisionId).toBe(settled.revisionId);
   });
 
   it('folds without a save when the session changed nothing since', async () => {

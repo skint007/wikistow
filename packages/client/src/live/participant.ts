@@ -779,6 +779,10 @@ export class LiveParticipant {
       }
     });
     this.#status = this.#computeStatus({ kind: 'live' });
+    if (this.#stopLater) {
+      const { why, saveOver, rejoin, end } = this.#stopLater;
+      this.#stop(why, saveOver, rejoin, end || true);
+    }
     this.document.map('overlaps').observe((event) => {
       for (const changed of event.keysChanged) {
         try {
@@ -929,6 +933,8 @@ export class LiveParticipant {
   }
 
   #recheckFailures = 0;
+  #stopLater: { why: string; saveOver: RevisionId | null; rejoin: boolean; end: boolean } | null =
+    null;
 
   /**
    * The checks of `requireLiveAccess` this app can make at once, from the
@@ -1033,7 +1039,7 @@ export class LiveParticipant {
         this.#queue.length === 0 &&
         !this.#placing &&
         head !== undefined &&
-        holdsState(this.#holds(), head.state);
+        holdsState(this.document.state(), head.state);
       if (ready) break;
       head = undefined;
       await sleep(300, this.#abort.signal);
@@ -1184,7 +1190,7 @@ export class LiveParticipant {
     if (!this.#keyed() || this.#pending.length > 0 || this.#queue.length > 0) return false;
     // One copy at a time: the main join waits for each to be placed.
     if (this.#placing) return false;
-    if (!headId || !head || !holdsState(this.#holds(), head.state)) return false;
+    if (!headId || !head || !holdsState(this.document.state(), head.state)) return false;
     const further = newId(JoinId);
     const ctx = this.#ports.ctx;
     const clientId = liveClientId({
@@ -1428,7 +1434,7 @@ export class LiveParticipant {
     const head = this.#head ? this.#drafts.get(this.#head) : undefined;
     let state: LiveState | null = null;
     try {
-      state = this.#holds();
+      state = this.document.state();
     } catch {
       state = null;
     }
@@ -1466,7 +1472,7 @@ export class LiveParticipant {
       if (!head) return;
       let state: LiveState;
       try {
-        state = this.#holds();
+        state = this.document.state();
       } catch {
         return;
       }
@@ -1757,6 +1763,10 @@ export class LiveParticipant {
           }
         }
       }
+      // Known before it is placed, as a note it places counts by it.
+      if (this.#further.has(key(opened)) && held.decoded) {
+        this.#furtherUpdates.set(stored.position, { join: key(opened), decoded: held.decoded });
+      }
       const misplaced = this.document.apply(opened.content, REMOTE_ORIGIN);
       if (misplaced.length > 0) {
         return this.#stop(
@@ -1777,7 +1787,6 @@ export class LiveParticipant {
       this.#lastUpdate = Math.max(this.#lastUpdate, stored.position);
       // A further join's, which may be a fold's grant placed (section 5.10, **Saving**).
       if (this.#further.has(key(ref)) && held.decoded) {
-        this.#furtherUpdates.set(stored.position, { join: key(ref), decoded: held.decoded });
         for (const [revision, notice] of [...this.#foldNotices]) {
           if (this.#grants.get(revision)?.position === stored.position) {
             queueMicrotask(() => this.#foldNotice(revision, notice.join, notice.state));
@@ -1905,7 +1914,7 @@ export class LiveParticipant {
     const opened = this.#drafts.get(head);
     if (opened && this.#head === head) {
       try {
-        this.#unsavedSince = holdsState(opened.state, this.#holds()) ? null : Date.now();
+        this.#unsavedSince = holdsState(opened.state, this.document.state()) ? null : Date.now();
       } catch {
         // A state Yjs wrote: it decodes.
       }
@@ -1990,7 +1999,7 @@ export class LiveParticipant {
     if (!head || head.compared) return;
     let state: LiveState;
     try {
-      state = this.#holds();
+      state = this.document.state();
     } catch {
       return;
     }
@@ -1999,6 +2008,13 @@ export class LiveParticipant {
       // draft from outside, folded in (section 5.10, **Saving**).
       const gone = holdsState(state, head.state) ? null : this.#goneFrom(head, state);
       if (gone && head.opened) return this.#asOutsider(head, head.opened, gone);
+      const again = [...head.state.vector].some(
+        ([client, clock]) =>
+          this.#foldedGone.has(client) && (state.vector.get(client) ?? 0) < clock,
+      );
+      if (again) {
+        return this.#stop('this app can’t catch up with the others', null, true);
+      }
       // The 30 s rule: a draft whose state this app still doesn't hold.
       if (!holdsState(state, head.state) && Date.now() - head.openedAt > HOLD_MS) {
         this.#stop('the saved page claims changes that never came', null, false);
@@ -2049,6 +2065,9 @@ export class LiveParticipant {
     }
     if (clients.size === 0) return null;
     for (const client of clients) {
+      // Its changes were folded in once already: putting them in again would
+      // copy the text each time. This app can't catch up instead.
+      if (this.#foldedGone.has(client)) return null;
       const join = this.#joins.joinOf(client);
       if (!join || this.#present.get(key(join)) !== false) return null;
     }
@@ -2057,50 +2076,8 @@ export class LiveParticipant {
 
   // Joins whose changes a draft claims but that went without sending them, by that draft.
   readonly #goneJoins = new Map<RevisionId, number[]>();
-  // What drafts claimed of joins that went without sending it, once folded
-  // in: held from then on, so the same changes aren't folded in again.
-  #forgiven: LiveState = { vector: new Map(), deletes: new Map() };
-
-  /** The document's state, with what folds of gone joins' changes put in instead. */
-  #holds(): LiveState {
-    const state = this.document.state();
-    const vector = new Map(state.vector);
-    for (const [client, clock] of this.#forgiven.vector) {
-      vector.set(client, Math.max(vector.get(client) ?? 0, clock));
-    }
-    const deletes = new Map([...state.deletes].map(([client, ranges]) => [client, [...ranges]]));
-    for (const [client, ranges] of this.#forgiven.deletes) {
-      deletes.set(client, [...(deletes.get(client) ?? []), ...ranges]);
-    }
-    return { vector, deletes };
-  }
-
-  // Whether `ancestor` is in `revision`'s signed `basedOn` chain, as this app has read it.
-  #chainHas(revision: RevisionId, ancestor: RevisionId): boolean {
-    let at = this.#basedOn.get(revision) ?? null;
-    for (let steps = 0; at && steps < 256; steps++) {
-      if (at === ancestor) return true;
-      at = this.#basedOn.get(at) ?? null;
-    }
-    return false;
-  }
-
-  // A draft's claims under `clients`, now folded in, counted as held.
-  #forgive(state: LiveState, clients: readonly number[]): void {
-    for (const client of clients) {
-      const clock = state.vector.get(client);
-      if (clock !== undefined) {
-        this.#forgiven.vector.set(client, Math.max(this.#forgiven.vector.get(client) ?? 0, clock));
-      }
-      const ranges = state.deletes.get(client);
-      if (ranges) {
-        this.#forgiven.deletes.set(client, [
-          ...(this.#forgiven.deletes.get(client) ?? []),
-          ...ranges,
-        ]);
-      }
-    }
-  }
+  // The clients of gone joins whose changes a fold put in: once is all (A2).
+  readonly #foldedGone = new Set<number>();
 
   // A session draft holding changes of joins gone without sending them: from outside, folded in.
   #asOutsider(draft: SessionDraft, opened: OpenedDraft, gone: number[]): void {
@@ -2108,7 +2085,6 @@ export class LiveParticipant {
     this.#outsiders.add(draft.revisionId);
     this.#outsiderDrafts.set(draft.revisionId, opened);
     this.#goneJoins.set(draft.revisionId, gone);
-    this.#goneStates.set(draft.revisionId, draft.state);
     if (this.#lastHead?.revisionId === draft.revisionId) {
       const before = opened.basedOn;
       const parent = before ? this.#drafts.get(before) : undefined;
@@ -2126,8 +2102,16 @@ export class LiveParticipant {
     if (draft && this.#head === revisionId) this.#sawHead(draft);
   }
 
-  // The gone-join drafts' states, which their folds forgive.
-  readonly #goneStates = new Map<RevisionId, LiveState>();
+  // Whether `ancestor` is in `revision`'s signed `basedOn` chain, as this app has read it.
+  #chainHas(revision: RevisionId, ancestor: RevisionId): boolean {
+    let at = this.#basedOn.get(revision) ?? null;
+    for (let steps = 0; at && steps < 256; steps++) {
+      if (at === ancestor) return true;
+      at = this.#basedOn.get(at) ?? null;
+    }
+    return false;
+  }
+
   #lastHeadBefore: SessionDraft | null = null;
 
   // A session draft is head: what it descends from can't be head again.
@@ -2329,7 +2313,7 @@ export class LiveParticipant {
         false,
       );
     }
-    if (!holdsState(this.#holds(), base.state)) {
+    if (!holdsState(this.document.state(), base.state)) {
       // Its changes may still be on their way: given 30 s, as any draft is.
       const since = this.#outsiderSince;
       if (since?.head === head && Date.now() - since.at < HOLD_MS) return this.#armFold();
@@ -2361,18 +2345,16 @@ export class LiveParticipant {
     ) {
       return this.#armFold();
     }
-    // A gone join's changes are about to go in: its messages are refused from
-    // here on, and what its drafts claimed of it counts as held.
+    // A gone join's changes are about to go in: its messages are refused from here on.
     for (const [revision, clients] of this.#goneJoins) {
       if (revision !== head && !this.#chainHas(head, revision)) continue;
       for (const client of clients) {
+        this.#foldedGone.add(client);
         const join = this.#joins.joinOf(client);
         if (join) this.#joins.refuse(join, 'its changes were folded in after it went');
       }
-      const claimed = this.#goneStates.get(revision);
-      if (claimed) this.#forgive(claimed, clients);
     }
-    const before = this.#holds();
+    const before = this.document.state();
     let folded: Folded;
     try {
       folded = foldPayloads(base.payload, this.#payload(base.payload), draft.payload);
@@ -2696,7 +2678,10 @@ export class LiveParticipant {
       return null;
     }
     if (!sameKeys(theirs, this.#opened)) return null;
-    if (sessionState(theirs.payload, revision, this.sessionId)) return null;
+    // Not a draft of the session, but one folded in as from outside since its join went.
+    if (sessionState(theirs.payload, revision, this.sessionId) && !this.#goneJoins.has(revision)) {
+      return null;
+    }
     let base: PagePayload | null = null;
     if (note.carried) {
       // In the starting draft's own chain: its base is the draft it was saved over.
@@ -2893,7 +2878,7 @@ export class LiveParticipant {
       if (!this.#head || !this.#drafts.has(this.#head)) return false;
       return this.#saveOnce(force);
     }
-    const state = this.#holds();
+    const state = this.document.state();
     if (!holdsState(state, head.state)) return false;
     if (holdsState(head.state, state)) {
       // Nothing the head doesn't hold.
@@ -2940,7 +2925,7 @@ export class LiveParticipant {
       this.#seenOwn(result.revisionId, headId);
       this.#saveFailing = null;
       this.#retryAt = 0;
-      this.#unsavedSince = holdsState(savedState, this.#holds()) ? null : this.#changedAt;
+      this.#unsavedSince = holdsState(savedState, this.document.state()) ? null : this.#changedAt;
       this.#queueSaved(result.revisionId, stateBytes, covers);
       this.#presenceDirty = true;
       void this.#maybeSnapshot(result.revisionId, savedState, covers);
@@ -3013,7 +2998,7 @@ export class LiveParticipant {
     await this.flush();
     if (this.#head !== saved || !this.#keyed() || this.#leaving) return;
     if (this.#pending.length > 0 || this.#queue.length > 0 || this.#placing) return;
-    if (!sameState(this.#holds(), draft.state)) return;
+    if (!sameState(this.document.state(), draft.state)) return;
     const { frontmatter, body } = splitFrontmatter(markdown);
     const now = this.document.content();
     const was = splitFrontmatter(draft.payload.markdown);
@@ -3082,7 +3067,7 @@ export class LiveParticipant {
     const head = this.#head ? this.#drafts.get(this.#head) : undefined;
     if (!head?.ours || !head.compared) return;
     try {
-      if (!sameState(this.#holds(), head.state)) return;
+      if (!sameState(this.document.state(), head.state)) return;
     } catch {
       return;
     }
@@ -3333,6 +3318,11 @@ export class LiveParticipant {
    * otherwise only this app leaves (section 5.10, **Saving**).
    */
   #stop(why: string, saveOver: RevisionId | null, rejoin: boolean, end = false): void {
+    // Before it is made, as from a grant served with the session: once it is.
+    if (!this.#status) {
+      this.#stopLater ??= { why, saveOver, rejoin, end };
+      return;
+    }
     if (this.#status.state.kind !== 'live') return;
     end ||= this.#joining;
     this.#stopSending = true;
@@ -3354,7 +3344,8 @@ export class LiveParticipant {
     let saved = false;
     if (head?.compared && this.#pending.length === 0) {
       try {
-        saved = holdsState(head.state, this.#ownState()) && holdsState(this.#holds(), head.state);
+        saved =
+          holdsState(head.state, this.#ownState()) && holdsState(this.document.state(), head.state);
       } catch {
         saved = false;
       }
