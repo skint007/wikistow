@@ -268,6 +268,7 @@ export function liveBinding(source: LiveSource): Extension {
       readonly #view: EditorView;
       readonly #stop: (() => void)[] = [];
       #destroyed = false;
+      #retries = 0;
       #cursorTimer: ReturnType<typeof setTimeout> | null = null;
 
       constructor(view: EditorView) {
@@ -406,8 +407,10 @@ export function liveBinding(source: LiveSource): Extension {
         // Not while CodeMirror updates: then, once it has.
         try {
           view.dispatch({ effects: setCarets.of(builder.finish()) });
+          this.#retries = 0;
         } catch {
-          if (!this.#destroyed) queueMicrotask(() => this.#drawCarets());
+          // Once CodeMirror has finished its update: a few tries, never a spin.
+          if (!this.#destroyed && this.#retries++ < 3) queueMicrotask(() => this.#drawCarets());
         }
       }
     },
