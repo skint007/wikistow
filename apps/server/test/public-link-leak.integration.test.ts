@@ -650,6 +650,49 @@ describe('a public page holding a query table (ADR 0006, decision 9)', () => {
     expect(html).toContain('<p>After.</p>');
   });
 
+  it('writes when each listed publication was saved, by the server, in UTC (#427)', async () => {
+    const owner = await personWithVault(t);
+    const spaceId = await spaceOperations.createSpace(owner.ctx, { name: 'Diary' });
+    const create = async (title: string, markdown = '') => {
+      const ref = {
+        spaceId,
+        pageId: await pages.createPage(owner.ctx, { spaceId, parentId: null, title, markdown }),
+      };
+      await pages.publishPage(owner.ctx, ref);
+      return ref;
+    };
+    const first = await create('First');
+    const second = await create('Second');
+    // A draft since doesn't count: a copy shows the publication.
+    await pages.editDraft(owner.ctx, first, { markdown: 'later draft' });
+    const notes = await create(
+      'Notes',
+      '```wikistow-query\nshow: saved\nsort: saved desc\nwhere: saved > 2000-01-01\n```\n',
+    );
+    const id = await links.turnOn(owner.ctx, notes.pageId);
+    await links.shareCopy(owner.ctx, notes);
+    const savedAt = async (pageId: PageId) => {
+      const [row] = await t.db
+        .select({ at: schema.revisions.createdAt })
+        .from(schema.pageHeads)
+        .innerJoin(schema.revisions, eq(schema.revisions.id, schema.pageHeads.publishedHead))
+        .where(eq(schema.pageHeads.pageId, pageId));
+      const at = row?.at.toISOString() ?? '';
+      return `${at.slice(0, 10)} ${at.slice(11, 16)} UTC`;
+    };
+    const html = await (await visit(`/p/${id}`)).text();
+    const rows = [...html.matchAll(/<tr>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>/g)].map(
+      ([, title, at]) => [title, at],
+    );
+    // The copied page itself among them, by the time this device took for it.
+    expect(rows.map(([title]) => title)).toEqual(['Notes', 'Second', 'First']);
+    expect(rows.slice(1)).toEqual([
+      ['Second', await savedAt(second.pageId)],
+      ['First', await savedAt(first.pageId)],
+    ]);
+    expect(rows[0]?.[1]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/);
+  });
+
   it('lists in a page in a share no page its readers can’t open', async () => {
     const n = randomBytes(4).toString('hex');
     const outside = `PLAINTEXT-OWNERS-ONLY-TITLE-${n}`;
