@@ -113,6 +113,14 @@ function byCodePoint(a: string, b: string): number {
 export const namespacesOf = (payload: PagePayload): string[] =>
   Object.keys(payload.extensions).sort(byCodePoint);
 
+// Each payload's keys, read once however many property overlaps name them.
+const keysRead = new WeakMap<PagePayload, string[]>();
+function keysOf(payload: PagePayload): string[] {
+  let keys = keysRead.get(payload);
+  if (!keys) keysRead.set(payload, (keys = propertyKeysOf(payload)));
+  return keys;
+}
+
 /** `payload`'s front matter keys as `property:<n>` counts them: in order, from 0. */
 export function propertyKeysOf(payload: PagePayload): string[] {
   const read = readProperties(splitFrontmatter(payload.markdown).frontmatter);
@@ -162,7 +170,7 @@ export function partsOf(merge: Merge, overlap: Overlap, theirs: PagePayload): st
     case 'frontmatter':
       return ['frontmatter'];
     case 'property': {
-      const at = overlap.key === null ? -1 : propertyKeysOf(theirs).indexOf(overlap.key);
+      const at = overlap.key === null ? -1 : keysOf(theirs).indexOf(overlap.key);
       return [at === -1 ? 'frontmatter' : `property:${at}`];
     }
     case 'banner':

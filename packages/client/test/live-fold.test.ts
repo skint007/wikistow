@@ -8,7 +8,8 @@ import {
   reviewMerge,
   reviewTarget,
 } from '../src/live/fold.ts';
-import { MergeTooLarge } from '../src/merge/body.ts';
+import { MergeTooLarge, type Choice } from '../src/merge/body.ts';
+import { resolve } from '../src/merge/payload.ts';
 import { PAYLOAD_FORMAT, type PagePayload } from '../src/payload.ts';
 
 const page = (markdown: string, more: Partial<PagePayload> = {}): PagePayload => ({
@@ -204,5 +205,23 @@ describe('Review', () => {
     expect(folded.parts.length).toBeGreaterThan(0);
     const merge = reviewMerge(base, page(`${folded.target.body}`), theirs, folded.parts);
     expect(merge.overlaps.length).toBeGreaterThan(0);
+  });
+
+  it('applies a choice of theirs that made blocks not fit, once those are chosen too', () => {
+    const merge = reviewMerge(
+      page('- eggs\n- milk\n'),
+      page('- eggs, ours\n- milk\n- tea\n'),
+      page('1. eggs, theirs\n2. milk\n3. jam\n'),
+      ['body:0-1'],
+    );
+    const [first] = merge.overlaps;
+    if (!first) throw new Error('no overlap');
+    let choices: Record<string, Choice> = { [first.id]: 'theirs' };
+    const resolved = resolve(merge, choices);
+    const settled = resolved.ok ? merge : resolved.merge;
+    choices = Object.fromEntries(
+      settled.overlaps.map((overlap) => [overlap.id, choices[overlap.id] ?? ('theirs' as const)]),
+    );
+    expect(reviewTarget(settled, choices)).not.toBeNull();
   });
 });

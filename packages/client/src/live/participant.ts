@@ -57,6 +57,7 @@ import {
   UNHELD_NAMESPACES,
   type FoldTarget,
   type Folded,
+  type ReviewTarget,
 } from './fold.ts';
 import type { Choice, Merge } from '../merge/index.ts';
 import { draftLive, sessionState, withLive } from './extension.ts';
@@ -1978,9 +1979,10 @@ export class LiveParticipant {
       else if (Date.now() - since.at > HOLD_MS) {
         // Claiming typing of joins still here, this app just hasn't been sent it:
         // folding it would put that typing in twice. It can't catch up instead.
+        const held = this.document.state().vector;
         const present = [...state.vector].some(([client, clock]) => {
           const join = this.#joins.joinOf(client);
-          const lacking = (this.document.state().vector.get(client) ?? 0) < clock;
+          const lacking = (held.get(client) ?? 0) < clock;
           return lacking && join !== undefined && this.#present.get(key(join)) !== false;
         });
         if (present)
@@ -2035,7 +2037,12 @@ export class LiveParticipant {
       const placed = this.#placedAt.get(head.revisionId);
       if (placed && !head.foldedBy && !holdsState(state, head.state)) {
         if (Date.now() - placed.at > HOLD_MS) {
-          return this.#stop('a change folded in from outside never said it was saved', null, false);
+          return this.#stop(
+            'a change folded in from outside never said it was saved',
+            null,
+            true,
+            true,
+          );
         }
         if (!this.#noticeTimer) {
           this.#noticeTimer = setTimeout(() => {
@@ -2286,7 +2293,9 @@ export class LiveParticipant {
     const placed = this.#placedAt.get(head);
     if (!grant || grant.position === null || !placed) return;
     if (Date.now() - placed.at < HOLD_MS || this.#drafts.get(head)?.foldedBy) return;
-    this.#stop('a change folded in from outside never said it was saved', null, false);
+    // Nobody can save over it, and the server grants it no second fold: the
+    // session ends, so the next starts from the head (section 5.10, **Saving**).
+    this.#stop('a change folded in from outside never said it was saved', null, true, true);
   }
 
   // Look at a draft from outside again soon: its grant may lapse, or its fold arrive.
@@ -2855,7 +2864,14 @@ export class LiveParticipant {
     choices: Readonly<Record<string, Choice>>,
   ): boolean {
     if (!this.#keyed() || !this.#notes.has(opened.revision)) return false;
-    const now = reviewMerge(opened.base, this.#payload(), opened.theirs, opened.parts);
+    const page = this.#payload();
+    // The page as Review opened it: the choices as made, the blocks they made not fit included.
+    if (samePayload(page, opened.ours)) {
+      const target = reviewTarget(chosen, choices);
+      if (!target) return false;
+      return this.#putReview(opened.revision, target);
+    }
+    const now = reviewMerge(opened.base, page, opened.theirs, opened.parts);
     const carried = carryChoices(chosen, choices, now);
     // A choice of theirs at a part someone changed meanwhile is asked again, never dropped.
     const changing = (picked: Readonly<Record<string, Choice>>) =>
@@ -2867,6 +2883,11 @@ export class LiveParticipant {
     if (changing(carried) < asked) return false;
     const target = reviewTarget(now, carried);
     if (!target) return false;
+    return this.#putReview(opened.revision, target);
+  }
+
+  // Review's choices into the document, as the person's change to those parts, and the note out.
+  #putReview(revision: RevisionId, target: ReviewTarget): boolean {
     const { extensions = {}, ...texts } = target;
     this.change(
       {
@@ -2877,7 +2898,7 @@ export class LiveParticipant {
             key: namespace,
             value: value === null ? null : JSON.stringify(value),
           })),
-          { root: 'overlaps', key: opened.revision, value: null },
+          { root: 'overlaps', key: revision, value: null },
         ],
       },
       { byLines: true },

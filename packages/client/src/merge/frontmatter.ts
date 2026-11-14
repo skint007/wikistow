@@ -8,7 +8,7 @@ import {
   type Property,
   type PropertyScalar,
 } from '../markdown/index.ts';
-import type { Choice } from './body.ts';
+import { checkTime, type Choice } from './body.ts';
 
 /** A front matter block as `splitFrontmatter` gives it, or null for none. */
 type Block = string | null;
@@ -136,6 +136,7 @@ export function mergeFrontmatter(base: Block, yours: Block, theirs: Block): Fron
   const combined = { yours: 0, theirs: 0 };
   const names = [...new Set([...y.entries, ...t.entries, ...b.entries].map(({ key }) => key))];
   for (const key of names) {
+    checkTime();
     const [be, ye, te] = [find(b, key), find(y, key), find(t, key)];
     const yoursChanged = ye?.value !== be?.value;
     const theirsChanged = te?.value !== be?.value;
@@ -195,6 +196,7 @@ export function writeFrontmatter(
   );
   let edited = false;
   for (const change of merge.keys) {
+    checkTime();
     if (change.from === 'items') {
       const edit = setProperty(
         block,

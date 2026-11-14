@@ -287,7 +287,9 @@ const keysOf = (blocks: readonly Block[]) => blocks.map((block) => block.key).jo
  */
 export function mergeBlocks(base: string, yours: string, theirs: string): BlockMerge {
   const o = blocksOf(ended(base));
+  checkTime();
   const sides = { yours: blocksOf(ended(yours)), theirs: blocksOf(ended(theirs)) };
+  checkTime();
   const aligned = { yours: align(o, sides.yours), theirs: align(o, sides.theirs) };
   keepApart(o, [aligned.yours, sides.yours], [aligned.theirs, sides.theirs]);
   type Side = keyof typeof sides;

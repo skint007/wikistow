@@ -409,7 +409,14 @@ export function resolve(
   const extensions = { ...plan.theirs.extensions };
   const set = (namespace: string, value: Json | null) => {
     if (value === null) delete extensions[namespace];
-    else extensions[namespace] = value;
+    // As an own property, a `__proto__` namespace included.
+    else
+      Object.defineProperty(extensions, namespace, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
   };
   for (const [namespace, merged] of plan.data)
     set(namespace, pick(`data:${namespace}`, merged, noEdit));
