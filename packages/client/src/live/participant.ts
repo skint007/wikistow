@@ -48,7 +48,6 @@ import {
 import { LiveDocument, samePayload } from './document.ts';
 import { splitFrontmatter } from '../markdown/index.ts';
 import {
-  carryChoices,
   carryInto,
   foldPayloads,
   targetOf,
