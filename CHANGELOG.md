@@ -4,7 +4,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.26.0-beta.1 - 2026-11-15
+
 ### Highlights
+
+#### Upgrade notes
+
+- To edit pages live in a browser, serve WikiStow over HTTP/2, as Operations, Serve over HTTP/2 says. The desktop app needs nothing.
 
 #### Features
 
@@ -51,8 +57,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - A line given to the visual editor under a table, where the blank line after it went, shows as the table's last row, as reading the page does, from Split or a change the app makes. It showed as a second table, with an empty header and row, which the next edit wrote out in the editor's style. (#436)
 
-- Query tables and plugins' queries can name `saved`, when the version listed was saved: `sort: saved desc` lists the pages saved last first, `show: saved` shows the time, in your time zone, and `where: saved > 2026-01-01` the pages saved since. A time not known yet sorts last and leaves its cell empty. `saved` is the time plugins' rows give as `updated`. It means the time, not a property of that name, so a query that named a property called `saved` now reads the time instead; a property named `updated` is like any other. A plugin's query also takes Dataview's `file.mtime` for it. The `vault-tables` example reads `SORT file.mtime DESC`, `WHERE file.mtime > date(…)` and a `file.mtime` column, and refuses `WHERE` or `SORT` on a property named `saved`. A public link's copy writes each listed publication's time, in UTC. Dates in queries now compare to the millisecond. (#427)
-- Text typed offline over a page's draft is found by search, and shown in query tables and plugins' page rows, as typed. The index took it only over a published page: over a draft it named the same version, so the index kept the draft as it was before the edit. Once the page's space is listed again online, the index holds the page as the server has it, and a kept index never keeps what was typed as that version's text. Plugins hear `index.changed` for it. (#423)
+- Query tables and plugins' queries can name `saved`, when the version listed was saved: `sort: saved desc` lists the pages saved last first, `show: saved` shows the time, in your time zone, and `where: saved > 2026-01-01` the pages saved since. A time not known yet sorts last and leaves its cell empty. `saved` is the time plugins' rows give as `updated`. It means the time, not a property of that name, so a query that named a property called `saved` now reads the time instead; a property named `updated` is like any other. A plugin's query also takes Dataview's `file.mtime` for it. The `vault-tables` example reads `SORT file.mtime DESC`, `WHERE file.mtime > date(…)` and a `file.mtime` column, and refuses `WHERE` or `SORT` on a property named `saved`. A public link's copy writes each listed publication's time, in UTC. Dates in queries now compare to the millisecond. (#461)
+- Text typed offline over a page's draft is found by search, and shown in query tables and plugins' page rows, as typed. The index took it only over a published page: over a draft it named the same version, so the index kept the draft as it was before the edit. Once the page's space is listed again online, the index holds the page as the server has it, and a kept index never keeps what was typed as that version's text. Plugins hear `index.changed` for it. (#454)
 
 #### Desktop
 
@@ -79,6 +85,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Releases and packaging
 
+- Electron 44.11.3, from 44.11.1.
 - The web build carries the model search by meaning will run, step 2 of ADR 0016 (#324): `bge-small-en-v1.5` at 8 bits, fetched from Hugging Face at a pinned revision and checked against its SHA-256, with its tokenizer and ONNX Runtime Web's WebAssembly, each with a Brotli copy. The server sends `/assets/*` as their Brotli copies to browsers that accept them. The service worker keeps none of them, so nobody downloads them who doesn't use them, and the desktop app ships them without the copies, about 50 MB more. `/third-party-notices.txt` gives the model's, the runtime's and the tokenizer's licences, and `/third-party-notices-onnxruntime.txt` the runtime's own notices. A build fails if the service worker would keep a file over 4 MB. Nothing embeds yet. (#430)
 - `@electron/asar` 4.3.2, from 4.3.1, which builds the desktop app's `app.asar`. It brings `glob` 14 and `minimatch` 11, past their security advisories. (#418)
 - Every desktop package carries the web clipper's helper: the release archive and the AUR packages, the `.deb` and `.rpm`, the Windows installers and the Mac apps, where it's signed with the app. The Windows installer waits for it to close, as for the app, and its uninstaller deletes the host manifests and their keys; uninstalling the Homebrew cask deletes the Mac manifests. CI builds the helper with Go for every system in its build job, tests it against a fake app on Linux, Windows and macOS, and checks that each package's copy answers. (#432)
@@ -98,6 +105,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - The client's `meaning` module, step 3 of ADR 0016 (search by meaning, #324): a page's reduced text cut into passages of at most 256 tokens at its headings, then its paragraphs; vectors kept as signed bytes with one scale; the scan for the pages nearest a query, each by its best passage; and the file the vectors are kept in, sealed under `meaning-index-key/v1` and bound by `meaning-index/v1` to the model's hash and how passages are cut, not to the build. The search index keeps where each heading starts in a page's text, so its kept file from an earlier build is read again, as after any update. Nothing calls the module yet. Test vectors pin the two new domains. (#429)
 - The copy sweep's integration test analyzes `nodes` before inserting its 33,000 hidden pages. Without it, each row's parent check could reuse a plan its connection made while the table was nearly empty, which looks the parent up by space alone, and the insert ran past the test's 60 s. (#435)
 - HTML made Markdown with no editor open, step 3 of ADR 0017 (the web clipper, #406), for clips to become pages as a paste of them would. `htmlMarkdown` in `packages/ui` pastes the HTML into an empty page in a visual editor nobody sees, with the same cleaning (`unstyled`), schema, paste handling and rules for each change as a paste, and writes it with the visual editor's writer. It runs in the app's page, not its main process, as it reads HTML and styles with a browser's DOM, as a paste does. The visual editor and it share one list of those rules (`changeRules`). Tests check that a clip and a paste of the same HTML give the same Markdown: hidden content, images and their sources, Word's lists, links, footnotes, tables, and HTML that can't be read. (#434)
+- ADR 0015 (live editing, #321) is accepted, reviewed in protocol review rounds 22 to 30, and built. ADR 0016 (search by meaning, #324) is accepted and built. ADR 0017 (the web clipper, #406) is accepted, and built up to its store listings. (#396, #414, #421, #424)
 
 ## 0.25.0 - 2026-11-11
 
