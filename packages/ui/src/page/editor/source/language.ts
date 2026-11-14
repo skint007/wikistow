@@ -1,6 +1,6 @@
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { Language, LanguageSupport } from '@codemirror/language';
-import { tags as t } from '@lezer/highlight';
+import { Tag, tags as t } from '@lezer/highlight';
 import { MarkdownParser, type LeafBlockParser, type MarkdownConfig } from '@lezer/markdown';
 
 // A `---` first line opens the frontmatter block, closed by a `---` or `...`
@@ -171,11 +171,56 @@ const longDefinitions: MarkdownConfig = {
   ],
 };
 
+/** What the source editor shows a highlight's text with (`sourceTheme`). */
+export const highlightTag = Tag.define();
+
+const HIGHLIGHT = { resolve: 'Highlight', mark: 'HighlightMark' };
+const EQUALS = 61;
+const PUNCTUATION = /[\p{P}\p{S}]/u;
+
+/**
+ * `==text==` as a highlight, as the reader reads it (`highlightSyntax`):
+ * exactly two `=`, not after another unless it's escaped, opening and
+ * closing by GFM's rules for `~~`, so `a == b` stays text. Its marks show
+ * as other syntax's do.
+ */
+const highlights: MarkdownConfig = {
+  defineNodes: [
+    { name: 'Highlight', style: { 'Highlight/...': highlightTag } },
+    { name: 'HighlightMark', style: t.processingInstruction },
+  ],
+  parseInline: [
+    {
+      name: 'Highlight',
+      after: 'Emphasis',
+      parse(cx, next, pos) {
+        if (next !== EQUALS || cx.char(pos + 1) !== EQUALS || cx.char(pos + 2) === EQUALS)
+          return -1;
+        // One after a `=` an escape doesn't take is no sequence's start.
+        if (cx.char(pos - 1) === EQUALS && cx.char(pos - 2) !== 92) return -1;
+        const before = cx.slice(pos - 1, pos);
+        const after = cx.slice(pos + 2, pos + 3);
+        const spaceBefore = /^\s?$/.test(before);
+        const spaceAfter = /^\s?$/.test(after);
+        const markBefore = PUNCTUATION.test(before);
+        const markAfter = PUNCTUATION.test(after);
+        return cx.addDelimiter(
+          HIGHLIGHT,
+          pos,
+          pos + 2,
+          !spaceAfter && (!markAfter || spaceBefore || markBefore),
+          !spaceBefore && (!markBefore || spaceAfter || markAfter),
+        );
+      },
+    },
+  ],
+};
+
 const { parser } = markdownLanguage;
 if (!(parser instanceof MarkdownParser)) throw new Error('unreachable: a Markdown parser');
 
 /**
- * Markdown as GitHub writes it, with frontmatter, and a paragraph too long
+ * Markdown as GitHub writes it, with frontmatter and highlights, and a paragraph too long
  * to match its inline syntax quickly shown as plain text, read without the
  * parser's slow cases on bare URLs and long definitions. Built from the
  * language rather than with `markdown()`, which adds HTML, CSS and
@@ -185,7 +230,7 @@ if (!(parser instanceof MarkdownParser)) throw new Error('unreachable: a Markdow
 export const sourceLanguage = new LanguageSupport(
   new Language(
     markdownLanguage.data,
-    parser.configure([frontmatter, longParagraphs, autolink, longDefinitions]),
+    parser.configure([frontmatter, longParagraphs, autolink, longDefinitions, highlights]),
     [],
     'markdown',
   ),

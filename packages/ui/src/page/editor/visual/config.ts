@@ -19,6 +19,7 @@ import {
 } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { $remark } from '@milkdown/kit/utils';
+import { escapeEquals } from '@wikistow/client/markdown';
 import { alertOf } from '@wikistow/client/reader';
 import type { Link, Nodes, Root, Text } from 'mdast';
 import { defaultHandlers, type State } from 'mdast-util-to-markdown';
@@ -27,6 +28,7 @@ import type { Pluggable } from 'unified';
 import { markdownSyntaxes } from '../../../registries';
 import { inertHost, type VisualHost } from './host';
 import { isLiteral } from './literals';
+import { highlightEditorNode } from './highlight-marks';
 import { leaveLastBlock } from './plugins';
 import { pluginInlineNode } from './plugin-inline';
 import { readAlone } from './read-alone';
@@ -130,18 +132,20 @@ const DOLLAR = /(\\*)\$/g;
  * close math (`mathToMarkdownExtension`), checked again on what's written,
  * since remark skips some; and in a block with inline math, or a dollar in
  * its code or a link, every one (`nearMath`), as one that could open math
- * could close at that dollar.
+ * could close at that dollar. So is each `=` that could make a highlight
+ * (`escapeEquals`).
  */
 const text: Handle = (node: Text, parent, state, info) => {
   const escapedText = escaped(node, parent, state, info);
   const written = node.data?.alert ? escapedText.replace(/^\\\[/, '[') : escapedText;
   // Nothing escapes in an autolink, which math can't start in.
   if (state.stack.includes('autolink')) return written;
-  return written.replace(DOLLAR, (dollar, slashes: string, at: number) => {
+  const priced = written.replace(DOLLAR, (dollar, slashes: string, at: number) => {
     const next = written.charAt(at + dollar.length) || info.after.charAt(0);
     const bare = slashes.length % 2 === 0;
     return bare && (node.data?.nearMath || !/\d/.test(next)) ? `${slashes}\\$` : dollar;
   });
+  return escapeEquals(priced, info.before, info.after);
 };
 
 // Whether `node`, not text, is or holds a dollar that could close math
@@ -270,7 +274,15 @@ link.peek = (...[node, , state]: LinkArgs) =>
   literalOf(node)?.charAt(0) ?? (autolinked(node, state) ? '<' : '[');
 
 // Marks as mdast writes them: nodes around the text they cover.
-const WRAPS = new Set(['strong', 'emphasis', 'delete', 'link']);
+const WRAPS = new Set([
+  'strong',
+  'emphasis',
+  'delete',
+  'link',
+  'highlight',
+  'colorHighlight',
+  'textColor',
+]);
 
 type Tree = { type: string; value?: string; children?: Tree[] };
 type Wrap = { key: string; node: Omit<Tree, 'children'> };
@@ -308,17 +320,24 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
   return [...before, ...(inside.length > 0 ? [{ ...wrap, children: inside }] : []), ...after];
 }
 
+// Which marks go outside others over the same text: a colour, then a
+// highlight, as Obsidian writes `==**bold**==`, then the rest.
+const OUTER: Readonly<Record<string, number>> = { textColor: 0, colorHighlight: 1, highlight: 1 };
+const outer = (wrap: Wrap) => OUTER[wrap.node.type] ?? 2;
+
 // `leaves` nested in their marks, but those in `open`, which are around
 // them already. The mark opened first is the one that goes on furthest,
 // but never past the end of a link it would cut, which it ends before,
-// opening again inside; of those that go on as far, the one Milkdown put
-// outermost.
+// opening again inside; of those that go on as far, a colour or highlight
+// (`OUTER`), else the one Milkdown put outermost.
 function nest(leaves: readonly Leaf[], open: ReadonlySet<string> = new Set()): Tree[] {
   const nested: Tree[] = [];
   const has = (i: number, wrap: Wrap) => !!leaves[i]?.marks.some((m) => m.key === wrap.key);
   for (let i = 0; i < leaves.length;) {
     const leaf = leaves[i];
-    const marks = leaf?.marks.filter((wrap) => !open.has(wrap.key)) ?? [];
+    const marks = (leaf?.marks.filter((wrap) => !open.has(wrap.key)) ?? []).sort(
+      (a, b) => outer(a) - outer(b),
+    );
     let best: Wrap | undefined;
     let end = i + 1;
     for (const wrap of marks) {
@@ -447,6 +466,11 @@ export function visualPlugins(host: VisualHost, nodes: readonly SyntaxNode[]): M
     leaveLastBlock,
     // Before Backspace and Delete join text into a plugin's block.
     pluginBlockUnits(host),
+    // Highlights and colours (`markdownSyntaxes`), ahead of bold and the
+    // other marks, so they're opened first: Milkdown keeps a mark open
+    // across text only inside the marks opened before it, and moves the
+    // spaces out of one it opens again, parting `==**bold** text==`.
+    ...highlightEditorNode(),
     // Ids on headings are the reader's, worked out as it renders. And `<br>`
     // is HTML, as the reader shows it, not an empty paragraph.
     ...commonmark.filter(

@@ -311,6 +311,48 @@
   .page-body td {
     @apply border-t border-border px-3 py-2;
   }
+  /* Highlights and the theme's colours (see packages/client/src/markdown/highlight.ts): a
+     `<mark>` in `--highlight`, or the `--highlight-*` its `data-color` names, under the page's
+     own text colour; a span's `data-color` colours its text in that `--text-*`. */
+  .page-body mark {
+    @apply rounded-[3px] bg-(--highlight) px-0.5 text-inherit [box-decoration-break:clone];
+  }
+  .page-body mark[data-color='red'] {
+    @apply bg-(--highlight-red);
+  }
+  .page-body mark[data-color='orange'] {
+    @apply bg-(--highlight-orange);
+  }
+  .page-body mark[data-color='yellow'] {
+    @apply bg-(--highlight-yellow);
+  }
+  .page-body mark[data-color='green'] {
+    @apply bg-(--highlight-green);
+  }
+  .page-body mark[data-color='blue'] {
+    @apply bg-(--highlight-blue);
+  }
+  .page-body mark[data-color='purple'] {
+    @apply bg-(--highlight-purple);
+  }
+  .page-body span[data-color='red'] {
+    @apply text-(--text-red);
+  }
+  .page-body span[data-color='orange'] {
+    @apply text-(--text-orange);
+  }
+  .page-body span[data-color='yellow'] {
+    @apply text-(--text-yellow);
+  }
+  .page-body span[data-color='green'] {
+    @apply text-(--text-green);
+  }
+  .page-body span[data-color='blue'] {
+    @apply text-(--text-blue);
+  }
+  .page-body span[data-color='purple'] {
+    @apply text-(--text-purple);
+  }
   /* Raw HTML a page may hold (see packages/client/src/reader/page-html.ts). */
   .page-body kbd {
     @apply rounded-[6px] border border-b-2 border-border bg-card px-1.5 py-0.5 font-mono text-[0.85em];

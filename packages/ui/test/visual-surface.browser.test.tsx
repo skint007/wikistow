@@ -216,14 +216,19 @@ describe('the fidelity check', () => {
       '> [!note] Title\n> body\n',
       'Hidden %%note%% text\n',
       '#project starts a line\n',
-      '==marked== starts a line\n',
       '[a][r]\n\n[r]: https://example.test\n',
     ])
       expect(visual(body), body).toBe(false);
     // Text Markdown writes back the same stays visual, as does math, a
-    // price beside it too.
+    // price beside it too, and highlights and colours (#403), one starting
+    // a line too.
     for (const body of [
       'A #tag mid-line, $5 and $10, ==marked== and ^block\n',
+      '==marked== starts a line\n',
+      'Text\n==marked== starts its second line, and a == b, x==y==z and ===\n',
+      '- ==**item**== <span data-color="red">red</span> <mark data-color="blue">blue</mark>\n',
+      '| a |\n| - |\n| ==b== <span data-color="green">c</span> |\n',
+      '<span data-color="pink">not a colour</span> <span data-color="red">open\n',
       '> [!NOTE]\n> body\n',
       'Speed is $v = d / t$ here.\n',
       'It costs \\$5, so $x^2$ more.\n',

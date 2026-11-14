@@ -52,9 +52,10 @@ export const stays = (what: string): Unkept => ({
 // Obsidian syntax that Markdown reads as text, which the visual editor would
 // write back escaped, or edit as if it were text: callouts (`> [!note]`)
 // other than GitHub's alerts (`alertOf`), which it keeps, comments
-// (`%%`), and tags (`#tag`) and highlights (`==text==`) starting a line,
-// which Markdown escapes there. Math is read as math (`mathSyntax`).
-const LINE_STARTS = { tags: /^[ \t]*#[^\s#]/, highlights: /^[ \t]*==[^\s=]/ };
+// (`%%`), and tags (`#tag`) starting a line, which Markdown escapes there.
+// Math is read as math (`mathSyntax`), and highlights as highlights
+// (`highlightSyntax`).
+const LINE_STARTS = { tags: /^[ \t]*#[^\s#]/ };
 
 const CALLOUT = /^\[!([^\]\n]*)\]?/;
 
@@ -108,9 +109,57 @@ function obsidianSyntax(tree: Root, body: string): Unkept | null {
  */
 export const withLf = (markdown: string) => markdown.replace(/\r\n?/g, '\n');
 
-// What a tree says, without where each node sat or which line breaks it has.
+// Marks as Markdown writes them, around text: two around exactly the same
+// text show the same in either order (`==**a**==`, `**==a==**`).
+const NESTING = new Set<string>([
+  'emphasis',
+  'strong',
+  'delete',
+  'highlight',
+  'colorHighlight',
+  'textColor',
+]);
+
+// A tree as `inOneOrder` sees it.
+type Tree = { type: string; color?: string; children?: Tree[] };
+const nestingKey = (node: Tree) => `${node.type}:${node.color ?? ''}`;
+const byKey = (a: Tree, b: Tree) => nestingKey(a).localeCompare(nestingKey(b));
+
+/**
+ * `tree`, each run of marks one inside the other around the same text put
+ * in one order, by type, so the order they're written in says nothing. In
+ * place, without recursion.
+ */
+function inOneOrder(tree: Root): Root {
+  const stack: Tree[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    const children = node.children ?? [];
+    for (const [i, child] of children.entries()) {
+      // The marks around the same text, outermost first, and what they hold.
+      const chain: Tree[] = [];
+      let content = [child];
+      for (let at = child; NESTING.has(at.type) && at.children;) {
+        chain.push(at);
+        content = at.children;
+        const [only] = at.children;
+        if (at.children.length !== 1 || !only) break;
+        at = only;
+      }
+      if (chain.length > 1) {
+        const shells = chain.map((wrap) => ({ ...wrap })).sort(byKey);
+        shells.forEach((shell, k) => (shell.children = shells[k + 1] ? [shells[k + 1]!] : content));
+        children[i] = shells[0] ?? child;
+      }
+      stack.push(...(chain.length > 1 ? content : [child]));
+    }
+  }
+  return tree;
+}
+
+// What a tree says, without where each node sat, which line breaks it has,
+// or the order of marks around the same text.
 const meaning = (tree: Root) =>
-  JSON.stringify(tree, (key, value: unknown) =>
+  JSON.stringify(inOneOrder(tree), (key, value: unknown) =>
     key === 'position' ? undefined : typeof value === 'string' ? withLf(value) : value,
   );
 

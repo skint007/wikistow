@@ -230,6 +230,35 @@ describe('an Obsidian vault', () => {
     expect(await importFromOf(JEX)).toBe('joplin');
   });
 
+  it('names a colour plugin’s styled text and highlights by the nearest theme colour', async () => {
+    const note = [
+      '---',
+      'note: <span style="color: #ff0000">kept</span>',
+      '---',
+      'A <span style="color:#e03e2d">red</span>, <span style="color: rgb(46, 125, 50);">green</span> and <span style=\'color: #1e88e5\'>blue</span> word, ==highlighted==.',
+      '<mark style="background: #FFF3A3A6;">yellow</mark> <mark style="background-color: #FF5582A6">red</mark> <mark style="background: #ABF7F7A6;">cyan</mark> <span style="color: purple">named</span>',
+      '',
+      '<span style="color: #888888">grey</span> <span style="color: red; font-weight: bold">two rules</span> <font color="#ff0000">font</font> <span style="background: #ff0000">a span’s background</span>',
+      '',
+      '`<span style="color: #ff0000">code</span>`',
+      '',
+    ].join('\n');
+    const vault = await readObsidianVault([
+      file('.obsidian/app.json', '{}'),
+      file('Colours.md', note),
+    ]);
+    expect(vault.notes[0]?.markdown).toBe(
+      note
+        .replace('<span style="color:#e03e2d">', '<span data-color="red">')
+        .replace('<span style="color: rgb(46, 125, 50);">', '<span data-color="green">')
+        .replace("<span style='color: #1e88e5'>", '<span data-color="blue">')
+        .replace('<mark style="background: #FFF3A3A6;">', '<mark data-color="yellow">')
+        .replace('<mark style="background-color: #FF5582A6">', '<mark data-color="red">')
+        .replace('<mark style="background: #ABF7F7A6;">', '<mark data-color="blue">')
+        .replace('<span style="color: purple">', '<span data-color="purple">'),
+    );
+  });
+
   it('becomes folders and notes titled by name, its links rewritten only where they must be', async () => {
     const vault = await readObsidianVault(VAULT);
     expect(vault.folders.map((f) => f.key)).toEqual(['Archive', 'Projects', 'Recipes']);

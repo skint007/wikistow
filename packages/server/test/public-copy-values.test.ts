@@ -18,6 +18,8 @@ const HOSTILE = [
   '&lt;b&gt;',
   '[^1]',
   '# heading',
+  '==marked== and x==y==',
+  '<span data-color="red">red</span> <mark data-color="blue">blue</mark>',
 ];
 
 /** A page with each hostile value as a property, referred to in a paragraph and a table cell. */
@@ -55,7 +57,18 @@ const shown = (value: string) => (value === '[[Secret page]]' ? 'Secret page' : 
 describe('values written into a public copy', () => {
   it('render as their text, in a paragraph and in table cells, making no HTML', () => {
     const html = rendered(publicLinkOperations.copyBody(page()));
-    for (const tag of ['img', 'script', 'em', 'strong', 'del', 'code', 'h1', 'sup']) {
+    for (const tag of [
+      'img',
+      'script',
+      'em',
+      'strong',
+      'del',
+      'code',
+      'h1',
+      'sup',
+      'mark',
+      'span',
+    ]) {
       expect(html, tag).not.toMatch(new RegExp(`<${tag}[\\s>]`));
     }
     // GFM links a web address in text, escaped or not: only such, as written.
@@ -105,6 +118,16 @@ describe('values written into a public copy', () => {
     for (const tag of ['a', 'span']) expect(html, tag).not.toMatch(new RegExp(`<${tag}[\\s>]`));
     // A heading, as the app shows it, an empty value a dash in it.
     expect(textOf(/<h2[^>]*>[\s\S]*?<\/h2>/.exec(html)?.[0] ?? '')).toBe('Para\n–');
+  });
+
+  it('keeps the page’s own highlights and theme colours, and no other colour', () => {
+    const html = rendered(
+      '==a== <span data-color="red">b</span> <mark data-color="green">c</mark> <span data-color="red" style="color: #f00">d</span> <span style="color: #f00">e</span>\n',
+    );
+    expect(html).toContain(
+      '<mark>a</mark> <span data-color="red">b</span> <mark data-color="green">c</mark> <span data-color="red">d</span> <span>e</span>',
+    );
+    expect(html).not.toContain('style=');
   });
 
   it('links an address a value makes with the text after it whole, as GFM links one', () => {
