@@ -1751,7 +1751,7 @@ export class DraftSession {
         this.#payload = before.payload;
         this.#extensions = over(before.payload.extensions, this.#extensions);
         this.#region = null;
-        this.#theirs = settled.base?.revisionId ?? null;
+        this.#theirs = settled.base?.revisionId ?? participant.status().head;
         this.#set({ ...this.#content, links: this.#table() });
         if (this.#theirs) this.#autosave.hold(() => this.#current());
         return false;

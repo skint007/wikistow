@@ -536,7 +536,7 @@ export class OfflineQueue {
     onTop = false,
     linkChoices,
     live,
-    stopped = false,
+    stopped,
   }: {
     page: PageRef;
     basedOn: RevisionId;
@@ -547,7 +547,11 @@ export class OfflineQueue {
     linkChoices?: ReadonlyMap<string, PageId>;
     /** Made from a live session's document: what is kept beside it; left as it was when absent. */
     live?: KeptLive | null;
-    /** Kept stopped as a conflict, never sent until the person merges it (a provisional document). */
+    /**
+     * Kept stopped as a conflict, never sent until the person merges it (a
+     * provisional document), or, false, sendable whatever stopped it before;
+     * left as it was when absent.
+     */
     stopped?: boolean;
   }): Promise<number> {
     const picks = Object.fromEntries(linkChoices ?? []);
@@ -609,9 +613,12 @@ export class OfflineQueue {
             at: this.#at(),
             live: live ?? null,
           };
-      const kept: QueuedPage = stopped ? { ...entry, failure: { kind: 'conflict' } } : entry;
+      const kept: QueuedPage =
+        stopped === undefined
+          ? entry
+          : { ...entry, failure: stopped ? { kind: 'conflict' } : null };
       await this.#write(kept);
-      return { entry: kept, made: !before || rebased || stopped };
+      return { entry: kept, made: !before || rebased || stopped !== undefined };
     });
     this.#emit({ kind: 'saved', entry });
     if (made) this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });

@@ -604,8 +604,10 @@ function PageBody({
             sending: change.sending?.revisionId ?? null,
             live: change.live ?? null,
             // Someone saved since it was based: it opens as the conflict it came back as.
+            // One kept from a live session merges from its kept base, the head unchanged too.
             theirs:
-              change.failure?.kind === 'conflict' && info.heads.draftHead !== change.basedOn
+              change.failure?.kind === 'conflict' &&
+              (info.heads.draftHead !== change.basedOn || change.live)
                 ? info.heads.draftHead
                 : null,
           },

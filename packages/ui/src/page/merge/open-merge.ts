@@ -54,8 +54,11 @@ export async function openOnlineMerge(
   ]);
   const basePayload = kept ?? (base?.opened.kind === 'current' ? base.opened.payload : null);
   if (!basePayload || theirs.opened.kind !== 'current') throw new CantMerge(NEWER);
+  // From a kept base, both sides adding at one place is the person's to settle:
+  // what they typed may be in theirs already, so both are never kept unasked.
+  const merged = () => pageMerge.mergePayloads(basePayload, versions.yours, theirs.opened.payload);
   return {
-    merge: pageMerge.mergePayloads(basePayload, versions.yours, theirs.opened.payload),
+    merge: kept ? pageMerge.addsOverlap(merged) : merged(),
     theirs: await whoseIs(ctx, queryClient, theirs.record.authorId),
     over: { kind: 'draft', revisionId: versions.theirs, region: theirs.region },
     attachments: [...versions.yours.attachments, ...theirs.opened.payload.attachments],
