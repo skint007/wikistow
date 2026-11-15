@@ -56,14 +56,29 @@ function style(element: HTMLElement, rules: Record<string, string>) {
 }
 
 /** How long to wait for the page to be drawn again, at most: a hidden tab draws no frames. */
-const DRAWN_MS = 500;
+const DRAWN_MS = 1000;
 
-/** Two frames: the page is drawn without the overlay by then. Not in a hidden tab, which isn't shown. */
+/**
+ * Animation frames to wait for the browser to show the page without the
+ * overlay. The screenshot is of what the browser shows, which can be
+ * frames behind what the page has drawn: in Chrome, the first frame's
+ * callbacks run as the page draws the change (frame N), the second's once
+ * N is handed to the compositor, but N can still be waiting to be drawn
+ * for the screen. The compositor holds the page back, though: it takes
+ * frame N + 2 only once N is drawn, so by the fourth frame's callbacks
+ * (N + 3) it has gone to the screen. Two frames weren't enough on a busy
+ * machine, where the screenshot kept the overlay's edge.
+ */
+const FRAMES = 4;
+
+/** The page shown without the overlay, after `FRAMES` frames. Not in a hidden tab, which isn't shown. */
 const drawn = () =>
   new Promise<void>((resolve) => {
     if (document.hidden) return resolve();
     setTimeout(resolve, DRAWN_MS);
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    let left = FRAMES;
+    const frame = () => (--left > 0 ? requestAnimationFrame(frame) : resolve());
+    requestAnimationFrame(frame);
   });
 
 /**
