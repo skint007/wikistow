@@ -27,10 +27,11 @@ declare const queued: unique symbol;
 export type Writer = { readonly accountId: string; readonly [queued]: true };
 
 /**
- * Queue a write that charges `accountId`'s storage, or a live request of
- * theirs, behind the account's others, before it holds anything a change
- * of access waits on. Each such write holds the space and its page shared
- * while it waits on the account's quota; without this queue, one person's
+ * Queue a write of `accountId`'s that waits on one of the account's locks
+ * (its quota, or its count of items in `requireCapacity`), or a live
+ * request of theirs, behind the account's others, before it holds anything
+ * a change of access waits on. Each such write holds the space and its
+ * page shared while it waits on the account's lock; without this queue, one person's
  * writes on several pages at once overlap without end, and a removal from
  * the space or the end of a share, which waits for no shared holder to
  * remain, waits as long as they keep writing (#439). Queued, only one of
@@ -38,9 +39,9 @@ export type Writer = { readonly accountId: string; readonly [queued]: true };
  *
  * Taken first in its transaction, before any row lock or any advisory lock
  * that waits, so it never waits in a ring: a transaction that holds it
- * waits only on what transactions without it hold. A charge takes the
- * `Writer` this answers, so none charges unqueued. Taken again in one
- * transaction, it holds as before.
+ * waits only on what transactions without it hold. A charge and a count
+ * of items take the `Writer` this answers, so neither goes unqueued. Taken
+ * again in one transaction, it holds as before.
  */
 export async function queueWriter(tx: Database, accountId: string): Promise<Writer> {
   await tx.execute(
