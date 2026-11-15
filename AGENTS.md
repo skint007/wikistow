@@ -1,8 +1,16 @@
 # WikiStow agent instructions
 
-## Issues
+## Tracking work
 
-Issues are tracked on the [project board](docs/project-board.md). Give every issue you file an `area:` label, and move an issue to In Progress when you start it. The doc has the commands and IDs.
+The [project board](docs/project-board.md) holds where work stands, including what waits on Scott. Change it with `node scripts/board.ts`; the doc has the commands.
+
+- Memory never records whether an issue or PR is open, merged or waiting. Run `board list` to see. Memory keeps gotchas and reasons.
+- File issues with `board add` and their `area:` labels. Run `board start` when you start one, and put `Closes #N` in its PR.
+- A question for Scott that outlives your turn gets a card: `board ask`, or `board wait` on an open issue, with a one-sentence Next step. Record his answer in the ADR's Decided section or on the issue, then clear it.
+- Only Scott drops work. Ask first, then `board drop --why`, quoting him. Plain duplicates you may drop yourself.
+- An unbuilt ADR step names its issue; the PR that builds it marks the step "(built, PR #N)".
+- After pushing a beta tag, `board ask "Is <version> good?" --waiting try`. The promotion PR closes it.
+- Run `board check` after each batch and before cutting a release.
 
 ## Releasing
 
