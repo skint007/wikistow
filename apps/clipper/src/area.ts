@@ -63,11 +63,12 @@ const DRAWN_MS = 1000;
  * overlay. The screenshot is of what the browser shows, which can be
  * frames behind what the page has drawn: in Chrome, the first frame's
  * callbacks run as the page draws the change (frame N), the second's once
- * N is handed to the compositor, but N can still be waiting to be drawn
- * for the screen. The compositor holds the page back, though: it takes
- * frame N + 2 only once N is drawn, so by the fourth frame's callbacks
- * (N + 3) it has gone to the screen. Two frames weren't enough on a busy
- * machine, where the screenshot kept the overlay's edge.
+ * N is handed to the compositor, but N can still be waiting to be drawn,
+ * and the screenshot is of the last frame drawn. The compositor holds the
+ * page back, taking a new frame only once it has drawn the one before, so
+ * two frames more are a margin, not a proof. Two frames in all weren't
+ * enough on a busy machine, where the screenshot kept the overlay's edge;
+ * four held there.
  */
 const FRAMES = 4;
 

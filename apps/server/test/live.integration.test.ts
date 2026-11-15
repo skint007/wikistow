@@ -857,9 +857,9 @@ describe('ending', () => {
           identityId: editor.vault.identity.public.id,
         }),
     );
-    expect(through).toBe(true);
+    expect(through, 'the removal went through while the flood ran').toBe(true);
     expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
-  }, 30_000);
+  });
 
   it.each(['remove from space', 'end share'] as const)(
     'lets a change that holds the space through while one person floods sessions on four pages (%s)',
@@ -908,7 +908,7 @@ describe('ending', () => {
                 plan as Awaited<ReturnType<typeof groupOperations.planRemovalEverywhere>>,
               ),
       );
-      expect(through).toBe(true);
+      expect(through, 'the change went through while the flood ran').toBe(true);
       for (const { session } of floods) {
         expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
       }

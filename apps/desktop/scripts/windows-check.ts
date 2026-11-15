@@ -207,7 +207,7 @@ try {
 // A silent uninstall gives up at once, removing nothing, while WikiStow.exe
 // or the helper still runs. Each can take a moment to go once it's done:
 // the app's own processes after it quits, the helper after its last
-// answer. On the Arm runner that was sometimes after the uninstall began.
+// answer. Likely why the Arm runner's uninstall sometimes left everything.
 await until('the app and its helper to exit', async () => notRunning(exe) && notRunning(helper));
 // The uninstaller copies itself away to remove its folder, so it returns at
 // once. A slow runner gets a while longer, and says what was left.
