@@ -4,6 +4,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.26.0-beta.2 - 2026-11-15
+
+### Highlights
+
+#### Fixes
+
+- Clipping a page whose images are junk or fail to load no longer downloads more than the clip’s 100 MiB: every byte the app reads for a clip’s images counts toward it.
+- Removing someone from a shared folder no longer waits while they keep saving on several pages at once.
+- **Choose an area** in the web clipper no longer leaves the edge of its overlay in the screenshot.
+
 ### Changes
 
 #### Desktop
@@ -13,6 +23,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Server
 
 - One person's saves, comments, uploads and other writes take turns, so an owner removing them from a shared folder no longer waits for as long as they keep writing on several pages at once. (#607)
+
+#### Releases and packaging
+
+- The web clipper's **Choose an area** waits four frames, not two, after taking its overlay off before the screenshot, at most a second: the browser can show a frame or two behind what the page drew, and the overlay's white edge showed in the corners. The Windows package check waits for the app and the clip helper to exit before uninstalling, as a silent uninstall gives up while either runs, and gives the uninstall two minutes. The live-session tests check that a removal goes through while a member floods the session, not that it takes under 2 s. (#606)
 
 ## 0.26.0-beta.1 - 2026-11-15
 
