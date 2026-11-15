@@ -186,23 +186,24 @@ describe('a removal while one person floods charged writes on four pages', () =>
       await new Promise((resolve) => setTimeout(resolve, 300));
       // Every kind of write was landing when the removal began.
       const before = [...landed];
-      const began = Date.now();
       const removed = sharing.removeMember(owner.ctx, {
         spaceId: lib.spaceId,
         shareId,
         identityId: editor.vault.identity.public.id,
       });
-      const took = await Promise.race([
-        removed.then(() => Date.now() - began),
-        new Promise<null>((resolve) => setTimeout(resolve, 10_000, null)),
+      // The flood runs until the removal is done, or for 10 s at most.
+      // Unqueued, the removal waited for as long as the flood ran, so it
+      // never went through within those 10 s. A limit on how long it took,
+      // instead, would fail on a busy runner, as in #579.
+      const through = await Promise.race([
+        removed.then(() => true),
+        new Promise<false>((resolve) => setTimeout(resolve, 10_000, false)),
       ]);
       flooding = false;
       await Promise.all(loops);
       await removed;
       expect(before.every((count) => count > 0)).toBe(true);
-      // Unqueued, the removal waited for as long as the flood ran.
-      expect(took).not.toBeNull();
-      expect(took).toBeLessThan(3000);
+      expect(through, 'the removal went through while the flood ran').toBe(true);
     },
     30_000,
   );
