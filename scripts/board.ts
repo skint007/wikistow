@@ -290,22 +290,83 @@ function items(): Item[] {
   }
 }
 
-/** The issue's or PR's item, adding it to the board if it isn't there. Adding returns an existing item. */
-function itemId(number: number): string {
-  const nodeId = gh(['api', `repos/${REPO}/issues/${number}`, '-q', '.node_id']).trim();
-  const data = graphql<{ addProjectV2ItemById: { item: { id: string } } }>(
+/** The board's item for an issue or PR, or undefined when it isn't on the board. */
+function findItem(number: number): { item: string | undefined; content: string } {
+  const data = graphql<{
+    repository: {
+      issueOrPullRequest: {
+        id: string;
+        projectItems: { nodes: { id: string; project: { number: number } }[] };
+      } | null;
+    };
+  }>(
     `
-      mutation ($project: ID!, $content: ID!) {
-        addProjectV2ItemById(input: { projectId: $project, contentId: $content }) {
-          item {
-            id
+      query ($owner: String!, $name: String!, $number: Int!) {
+        repository(owner: $owner, name: $name) {
+          issueOrPullRequest(number: $number) {
+            ... on Issue {
+              id
+              projectItems(first: 20) {
+                nodes {
+                  id
+                  project {
+                    number
+                  }
+                }
+              }
+            }
+            ... on PullRequest {
+              id
+              projectItems(first: 20) {
+                nodes {
+                  id
+                  project {
+                    number
+                  }
+                }
+              }
+            }
           }
         }
       }
     `,
-    { project: loadProject().id, content: nodeId },
+    { owner: OWNER, name: REPO.split('/')[1], number },
   );
-  return data.addProjectV2ItemById.item.id;
+  const found = data.repository.issueOrPullRequest;
+  if (!found) fail([`#${number} isn't an issue or PR of ${REPO}.`]);
+  return {
+    item: found.projectItems.nodes.find((n) => n.project.number === NUMBER)?.id,
+    content: found.id,
+  };
+}
+
+/**
+ * The issue's or PR's item, adding it to the board if it isn't there. The
+ * board's auto-add may add a new issue at the same moment, and then adding
+ * fails as already there, so look again.
+ */
+function itemId(number: number): string {
+  const { item, content } = findItem(number);
+  if (item) return item;
+  try {
+    const data = graphql<{ addProjectV2ItemById: { item: { id: string } } }>(
+      `
+        mutation ($project: ID!, $content: ID!) {
+          addProjectV2ItemById(input: { projectId: $project, contentId: $content }) {
+            item {
+              id
+            }
+          }
+        }
+      `,
+      { project: loadProject().id, content },
+    );
+    return data.addProjectV2ItemById.item.id;
+  } catch (error) {
+    const again = findItem(number).item;
+    if (again) return again;
+    throw error;
+  }
 }
 
 /** Sets a field by name: an option's name for a select, text otherwise. An empty value clears it. */
