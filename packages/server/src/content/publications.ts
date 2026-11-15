@@ -41,6 +41,7 @@ import { placeAtEnd } from './order.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { endCopies } from '../public-links/endings.ts';
 import { requireCaller, type Actor } from './identities.ts';
+import { queueWriter } from './quota.ts';
 import {
   replayed,
   requirePage,
@@ -206,6 +207,7 @@ export async function openPublication(
 ) {
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
+    const writer = await queueWriter(tx, caller.accountId);
     const source = await requireSourcePublisher(tx, caller, input.sourcePageId);
     // An opening nobody has seen yet is no page to publish from: it goes
     // without ending anything published from it.
@@ -279,12 +281,7 @@ export async function openPublication(
     if ((await holdSource(tx, source.id)).getTime() !== source.createdAt.getTime()) {
       throw new ContentError('not-found');
     }
-    await requireCapacity(
-      tx,
-      caller.accountId,
-      'page',
-      input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages,
-    );
+    await requireCapacity(tx, writer, 'page', input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages);
     const created = await tx
       .insert(nodes)
       .values({
@@ -414,6 +411,7 @@ export async function sendPublication(
 ) {
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
+    const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
     if (!publishes(access)) throw new ContentError('forbidden');
@@ -449,7 +447,7 @@ export async function sendPublication(
     });
     const publishedSeq = (heads?.publishedCount ?? 0) + 1;
     await storeRevision(tx, input, {
-      accountId: caller.accountId,
+      writer,
       storageBytes: input.storageBytes,
       draftSeq: null,
       publishedSeq,
@@ -496,6 +494,7 @@ export async function detachPublication(
 ) {
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
+    const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
     if (!canEdit(access)) throw new ContentError('not-found');
@@ -525,7 +524,7 @@ export async function detachPublication(
       heads: current,
     });
     await storeRevision(tx, input, {
-      accountId: caller.accountId,
+      writer,
       storageBytes: input.storageBytes,
       draftSeq: heads.draftCount + 1,
       publishedSeq: null,

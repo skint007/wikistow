@@ -8,7 +8,7 @@ import { contactsRecords } from '../db/schema/index.ts';
 import { readSettings } from '../settings.ts';
 import { ContentError } from './errors.ts';
 import { currentIdentity } from './identities.ts';
-import { charge } from './quota.ts';
+import { charge, queueWriter } from './quota.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 
 /**
@@ -77,6 +77,7 @@ export async function writeContacts(
   return db.transaction(async (tx) => {
     const identity = await currentIdentity(tx, input.accountId);
     if (!identity) throw new ContentError('vault-missing', 'Set up your vault first');
+    const writer = await queueWriter(tx, input.accountId);
     await lockContacts(tx, input.accountId);
     const [current] = await tx
       .select()
@@ -120,7 +121,7 @@ export async function writeContacts(
         );
     }
     const size = JSON.stringify(input.record).length;
-    await charge(tx, input.accountId, size, input.storageBytes);
+    await charge(tx, writer, size, input.storageBytes);
     await tx.insert(contactsRecords).values({
       accountId: input.accountId,
       version: next.version,

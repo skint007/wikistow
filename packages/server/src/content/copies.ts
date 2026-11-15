@@ -60,7 +60,7 @@ import { placesAtEnd } from './order.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { recordMoves } from './moved.ts';
-import { charge } from './quota.ts';
+import { charge, queueWriter, type Writer } from './quota.ts';
 import {
   deleteUnlistedFile,
   holdSubtree,
@@ -258,6 +258,7 @@ export async function openCopy(
 ) {
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
+    const writer = await queueWriter(tx, caller.accountId);
     if (input.kind === 'move' && input.sourceSpaceId === input.destinationSpaceId) {
       throw new ContentError('forbidden', 'A move within one space is an ordinary move');
     }
@@ -317,7 +318,7 @@ export async function openCopy(
         kind === 'folder'
           ? (input.maxFolders ?? DEFAULT_CONTENT_LIMITS.folders)
           : (input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages);
-      await requireCapacity(tx, caller.accountId, kind, maximum, adding);
+      await requireCapacity(tx, writer, kind, maximum, adding);
     }
     const opened = await tx
       .insert(copies)
@@ -505,6 +506,7 @@ export async function sendCopyRecords(
   try {
     await db.transaction(async (tx) => {
       const caller = await requireCaller(tx, input.actor);
+      const writer = await queueWriter(tx, caller.accountId);
       const found = await requireOpener(tx, caller, input.copyId);
       opener = caller;
       await lockSpace(tx, found.destinationSpaceId);
@@ -555,7 +557,7 @@ export async function sendCopyRecords(
         if (node.kind !== entry.kind) {
           throw new ContentError('binding-mismatch', 'Those records are for another kind of node');
         }
-        targets.push({ copy, share, caller, sourceId: node.sourceId });
+        targets.push({ copy, share, caller, writer, sourceId: node.sourceId });
         if (entry.kind === 'page') {
           if (entry.published && !(copy.bringsPublished && access.canPublish)) {
             throw new ContentError('forbidden', 'This copy brings no published versions');
@@ -574,7 +576,7 @@ export async function sendCopyRecords(
             : entry.metadata.payload.ciphertext.length),
         0,
       );
-      await charge(tx, caller.accountId, bytes, input.storageBytes);
+      await charge(tx, writer, bytes, input.storageBytes);
       for (const [i, entry] of input.nodes.entries()) {
         const target = targets[i] as Target;
         if (entry.kind === 'page') await storePage(tx, entry, target);
@@ -594,6 +596,7 @@ type Target = {
   copy: CopyRow;
   share: ShareRow | null;
   caller: Caller;
+  writer: Writer;
   sourceId: string;
 };
 
@@ -656,7 +659,7 @@ async function requireSourceRevision(
 async function storePage(
   tx: Database,
   entry: Extract<Entry, { kind: 'page' }>,
-  { copy, share, caller, sourceId }: Target,
+  { copy, share, caller, writer, sourceId }: Target,
 ) {
   // The draft first: a published version names it as its base when the
   // source's was made from its current draft, or it had none, so the copy
@@ -687,7 +690,7 @@ async function storePage(
       heads: null,
     });
     await storeRevision(tx, commit, {
-      accountId: caller.accountId,
+      writer,
       // Charged with the rest of its batch.
       storageBytes: null,
       draftSeq: audience === 'draft' ? 1 : null,
@@ -716,7 +719,7 @@ async function storePage(
 async function storeFolder(
   tx: Database,
   entry: Extract<Entry, { kind: 'folder' }>,
-  { copy, share, caller, sourceId }: Target,
+  { copy, share, caller, writer, sourceId }: Target,
 ) {
   const [source] = await tx
     .select({ id: metadataRevisions.id })
@@ -738,7 +741,7 @@ async function storeFolder(
     share,
   });
   // Charged with the rest of its batch.
-  await storeMetadata(tx, entry, { accountId: caller.accountId, storageBytes: null });
+  await storeMetadata(tx, entry, { writer, storageBytes: null });
   await tx
     .update(nodes)
     .set({ metadataHead: entry.metadata.record.metadataRevisionId })

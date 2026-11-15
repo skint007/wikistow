@@ -10,7 +10,14 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import { writeTargetOf } from '@wikistow/client/testing';
-import { fileBlobStore, schema, storeRevision, sweepBlobs, sweepDrafts } from '@wikistow/server';
+import {
+  fileBlobStore,
+  queueWriter,
+  schema,
+  storeRevision,
+  sweepBlobs,
+  sweepDrafts,
+} from '@wikistow/server';
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vite-plus/test';
 import { personWithVault } from './support/content.ts';
@@ -75,6 +82,7 @@ async function branch(
     blobRefs: payload.attachments.map((a) => a.blobHash),
   };
   await t.db.transaction(async (tx) => {
+    const writer = await queueWriter(tx, person.id);
     const [heads] = await tx
       .select()
       .from(schema.pageHeads)
@@ -82,7 +90,7 @@ async function branch(
       .for('update');
     if (!heads) throw new Error('expected heads');
     await storeRevision(tx, commit, {
-      accountId: person.id,
+      writer,
       draftSeq: heads.draftCount + 1,
       publishedSeq: null,
       restoredFrom,

@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - A clip's images count every byte main reads for them toward the clip's 100 MiB, not only those that turn out to be images, and a response stops at its first bytes when they aren't an image's. A compressed one counts what was sent as well as what it undid to. (#604)
 
+#### Server
+
+- One person's saves, comments, uploads and other writes take turns, so an owner removing them from a shared folder no longer waits for as long as they keep writing on several pages at once. (#607)
+
 ## 0.26.0-beta.1 - 2026-11-15
 
 ### Highlights

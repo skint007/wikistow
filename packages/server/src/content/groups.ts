@@ -32,6 +32,7 @@ import {
 } from './effective.ts';
 import { ContentError } from './errors.ts';
 import { lookupIdentities } from './identities.ts';
+import { queueWriter } from './quota.ts';
 import { peopleById } from './people.ts';
 import { servedMetadata } from './serving.ts';
 import {
@@ -211,6 +212,7 @@ export async function createGroup(
 ) {
   await db.transaction(async (tx) => {
     const identity = await requireIdentity(tx, input.accountId);
+    const writer = await queueWriter(tx, input.accountId);
     await lockSpaceForUpdate(tx, input.spaceId);
     await requireOwner(tx, identity, input.spaceId);
     const commit = { ...input, wrap: null };
@@ -233,7 +235,7 @@ export async function createGroup(
       .onConflictDoNothing()
       .returning({ id: groups.id });
     if (made.length === 0) throw new ContentError('duplicate', 'That group ID is taken');
-    await storeMetadata(tx, commit, input);
+    await storeMetadata(tx, commit, { writer, storageBytes: input.storageBytes });
     await audit(tx, {
       actor: input.accountId,
       action: 'group.created',
@@ -264,6 +266,7 @@ export async function renameGroup(
 ) {
   await db.transaction(async (tx) => {
     const identity = await requireIdentity(tx, input.accountId);
+    const writer = await queueWriter(tx, input.accountId);
     const { group } = await lockGroup(tx, identity, input.groupId);
     const commit = { ...input, wrap: null };
     await verifyMetadataCommit(tx, commit, {
@@ -274,7 +277,7 @@ export async function renameGroup(
       basedOn: group.metadataHead,
       share: null,
     });
-    await storeMetadata(tx, commit, input);
+    await storeMetadata(tx, commit, { writer, storageBytes: input.storageBytes });
     await tx
       .update(groups)
       .set({ metadataHead: input.metadata.record.metadataRevisionId })

@@ -2,6 +2,7 @@ import { and, count, eq, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { nodes, spaces } from '../db/schema/index.ts';
 import { ContentError } from './errors.ts';
+import type { Writer } from './quota.ts';
 
 export const DEFAULT_CONTENT_LIMITS = { spaces: 100, folders: 10_000, pages: 100_000 };
 export type ContentLimits = typeof DEFAULT_CONTENT_LIMITS;
@@ -10,13 +11,15 @@ export type ContentLimits = typeof DEFAULT_CONTENT_LIMITS;
  * Count live items created for an account, including its agents' work.
  * Call after existing space/share/node locks and before inserting the item.
  * The account lock makes concurrent creates in different spaces count once.
+ * The account's writes are queued first (`queueWriter`): this lock is
+ * waited on with the space held, as a charge is.
  * Deleting an item, a space included, frees capacity; sharing or moving it
  * does not transfer it. An item counts against its creator even after they
  * lose access, as storage does.
  */
 export async function requireCapacity(
   tx: Database,
-  accountId: string,
+  { accountId }: Writer,
   kind: 'space' | 'folder' | 'page',
   maximum: number,
   /** How many are about to be made at once. */

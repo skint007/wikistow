@@ -54,7 +54,7 @@ import { isCommentVersion } from './comments.ts';
 import { isLiveVersion } from './live.ts';
 import { checkKeyMaterial } from './key-material.ts';
 import { latestAgentEdit, listPages, requirePublished } from './pages.ts';
-import { charge } from './quota.ts';
+import { charge, queueWriter, type Writer } from './quota.ts';
 import { servedMetadata } from './serving.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 
@@ -140,7 +140,7 @@ export async function verifyMetadataCommit(
 export async function storeMetadata(
   tx: Database,
   { metadata, envelopes, wrap }: MetadataCommit,
-  { accountId, storageBytes }: { accountId: string; storageBytes: number | null },
+  { writer, storageBytes }: { writer: Writer; storageBytes: number | null },
 ) {
   const { record } = metadata;
   // Comment, session and metadata versions are one set of IDs (sections 5.9 and 5.10).
@@ -151,7 +151,7 @@ export async function storeMetadata(
     throw new ContentError('duplicate', 'That version ID is taken');
   }
   if (storageBytes !== null) {
-    await charge(tx, accountId, metadata.payload.ciphertext.length, storageBytes);
+    await charge(tx, writer, metadata.payload.ciphertext.length, storageBytes);
   }
   const inserted = await tx
     .insert(metadataRevisions)
@@ -207,12 +207,8 @@ export async function createSpace(
 ): Promise<void> {
   await db.transaction(async (tx) => {
     const identity = await requireIdentity(tx, input.accountId);
-    await requireCapacity(
-      tx,
-      input.accountId,
-      'space',
-      input.maxSpaces ?? DEFAULT_CONTENT_LIMITS.spaces,
-    );
+    const writer = await queueWriter(tx, input.accountId);
+    await requireCapacity(tx, writer, 'space', input.maxSpaces ?? DEFAULT_CONTENT_LIMITS.spaces);
     const created = await tx
       .insert(spaces)
       .values({ id: input.spaceId, kind: input.kind, createdBy: input.accountId })
@@ -233,7 +229,7 @@ export async function createSpace(
       basedOn: null,
       share: null,
     });
-    await storeMetadata(tx, commit, input);
+    await storeMetadata(tx, commit, { writer, storageBytes: input.storageBytes });
     await tx
       .update(spaces)
       .set({ metadataHead: input.metadata.record.metadataRevisionId })
@@ -284,6 +280,7 @@ export async function createFolder(
   await transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     const { identity } = caller;
+    const writer = await queueWriter(tx, caller.accountId);
     await lockSpace(tx, input.spaceId);
     const access = await requireAccess(tx, caller, {
       spaceId: input.spaceId,
@@ -304,12 +301,7 @@ export async function createFolder(
       basedOn: null,
       share,
     });
-    await requireCapacity(
-      tx,
-      caller.accountId,
-      'folder',
-      input.maxFolders ?? DEFAULT_CONTENT_LIMITS.folders,
-    );
+    await requireCapacity(tx, writer, 'folder', input.maxFolders ?? DEFAULT_CONTENT_LIMITS.folders);
     const created = await tx
       .insert(nodes)
       .values({
@@ -325,7 +317,7 @@ export async function createFolder(
       .onConflictDoNothing()
       .returning({ id: nodes.id });
     if (created.length === 0) throw new ContentError('duplicate', 'That folder ID is taken');
-    await storeMetadata(tx, input, { ...input, accountId: caller.accountId });
+    await storeMetadata(tx, input, { writer, storageBytes: input.storageBytes });
     await tx
       .update(nodes)
       .set({ metadataHead: input.metadata.record.metadataRevisionId })
@@ -358,6 +350,7 @@ export async function updateMetadata(
   await transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     const { identity } = caller;
+    const writer = await queueWriter(tx, caller.accountId);
     const folderId = record.subjectKind === 'folder' ? record.subjectId : null;
     if (!RENAMED.has(record.subjectKind)) throw new ContentError('binding-mismatch');
     if (record.subjectKind === 'space' && record.subjectId !== input.spaceId)
@@ -379,7 +372,7 @@ export async function updateMetadata(
       basedOn: subject.metadataHead,
       share,
     });
-    await storeMetadata(tx, input, { ...input, accountId: caller.accountId });
+    await storeMetadata(tx, input, { writer, storageBytes: input.storageBytes });
     const head = { metadataHead: record.metadataRevisionId };
     if (folderId === null) await tx.update(spaces).set(head).where(eq(spaces.id, input.spaceId));
     else await tx.update(nodes).set(head).where(eq(nodes.id, folderId));

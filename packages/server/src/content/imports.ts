@@ -9,6 +9,7 @@ import { accessTo, canEdit, lockShare, lockSpace, type ShareRow } from './access
 import { ContentError } from './errors.ts';
 import { requireCaller, type Actor } from './identities.ts';
 import { createPage, publish, saveDraft } from './pages.ts';
+import { queueWriter } from './quota.ts';
 import { createFolder } from './structure.ts';
 
 type Batch = z.output<typeof importRoutes.batch.body>;
@@ -70,6 +71,7 @@ export async function importBatch(
 /**
  * Hold, before any step, what the batch's steps hold for the nodes already
  * there that the caller may edit, each in the mode its step takes: the
+ * caller's place in their account's queue of writes (`queueWriter`), the
  * space, then the shares they are in, then the space's row if something
  * goes at its top, then the folders things go in and the pages saved or
  * published, then those pages' heads. Shares and nodes go in ID order,
@@ -86,6 +88,7 @@ async function holdForBatch(
   { actor, spaceId, folders, pages }: { actor: Actor; spaceId: string } & Batch,
 ) {
   const caller = await requireCaller(tx, actor);
+  await queueWriter(tx, caller.accountId);
   await lockSpace(tx, spaceId);
   const made = new Set<string>([
     ...folders.map((folder) => folder.folderId),
