@@ -208,12 +208,7 @@ export async function createSpace(
   await db.transaction(async (tx) => {
     const identity = await requireIdentity(tx, input.accountId);
     const writer = await queueWriter(tx, input.accountId);
-    await requireCapacity(
-      tx,
-      input.accountId,
-      'space',
-      input.maxSpaces ?? DEFAULT_CONTENT_LIMITS.spaces,
-    );
+    await requireCapacity(tx, writer, 'space', input.maxSpaces ?? DEFAULT_CONTENT_LIMITS.spaces);
     const created = await tx
       .insert(spaces)
       .values({ id: input.spaceId, kind: input.kind, createdBy: input.accountId })
@@ -306,12 +301,7 @@ export async function createFolder(
       basedOn: null,
       share,
     });
-    await requireCapacity(
-      tx,
-      caller.accountId,
-      'folder',
-      input.maxFolders ?? DEFAULT_CONTENT_LIMITS.folders,
-    );
+    await requireCapacity(tx, writer, 'folder', input.maxFolders ?? DEFAULT_CONTENT_LIMITS.folders);
     const created = await tx
       .insert(nodes)
       .values({

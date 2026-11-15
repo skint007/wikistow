@@ -386,12 +386,7 @@ export async function createPage(
     // A retry after a lost response is answered as before; a taken ID is refused.
     if (await replayed(tx, input.revision, { pageId: input.pageId, audience: 'draft' }))
       return { revisionId: input.revision.record.revisionId };
-    await requireCapacity(
-      tx,
-      caller.accountId,
-      'page',
-      input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages,
-    );
+    await requireCapacity(tx, writer, 'page', input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages);
     const created = await tx
       .insert(nodes)
       .values({

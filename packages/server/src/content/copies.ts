@@ -258,6 +258,7 @@ export async function openCopy(
 ) {
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
+    const writer = await queueWriter(tx, caller.accountId);
     if (input.kind === 'move' && input.sourceSpaceId === input.destinationSpaceId) {
       throw new ContentError('forbidden', 'A move within one space is an ordinary move');
     }
@@ -317,7 +318,7 @@ export async function openCopy(
         kind === 'folder'
           ? (input.maxFolders ?? DEFAULT_CONTENT_LIMITS.folders)
           : (input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages);
-      await requireCapacity(tx, caller.accountId, kind, maximum, adding);
+      await requireCapacity(tx, writer, kind, maximum, adding);
     }
     const opened = await tx
       .insert(copies)

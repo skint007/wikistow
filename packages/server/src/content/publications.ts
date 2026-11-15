@@ -207,6 +207,7 @@ export async function openPublication(
 ) {
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
+    const writer = await queueWriter(tx, caller.accountId);
     const source = await requireSourcePublisher(tx, caller, input.sourcePageId);
     // An opening nobody has seen yet is no page to publish from: it goes
     // without ending anything published from it.
@@ -280,12 +281,7 @@ export async function openPublication(
     if ((await holdSource(tx, source.id)).getTime() !== source.createdAt.getTime()) {
       throw new ContentError('not-found');
     }
-    await requireCapacity(
-      tx,
-      caller.accountId,
-      'page',
-      input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages,
-    );
+    await requireCapacity(tx, writer, 'page', input.maxPages ?? DEFAULT_CONTENT_LIMITS.pages);
     const created = await tx
       .insert(nodes)
       .values({
