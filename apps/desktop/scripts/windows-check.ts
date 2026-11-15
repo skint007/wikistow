@@ -12,7 +12,7 @@
 // everything away again. The runner is fresh, so the app runs on its own
 // data folder.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const [given] = process.argv.slice(2);
@@ -74,6 +74,20 @@ async function askHelper(message: object): Promise<Record<string, unknown>> {
     }
   }
   throw new Error('The helper answered nothing');
+}
+
+/**
+ * Whether no program runs from `file`: Windows won't open a running
+ * program's file for writing, which is how the installer and uninstaller
+ * tell (`WaitUntilClosed` in packaging/windows.nsi).
+ */
+function notRunning(file: string) {
+  try {
+    closeSync(openSync(file, 'r+'));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function until<T>(what: string, look: () => Promise<T | null | undefined>, ms = 30_000) {
@@ -190,9 +204,18 @@ try {
   if (app.exitCode === null) spawnSync('taskkill', ['/F', '/T', '/PID', String(app.pid)]);
 }
 
-// The uninstaller copies itself away to remove its folder, so it returns at once.
+// A silent uninstall gives up at once, removing nothing, while WikiStow.exe
+// or the helper still runs. Each can take a moment to go once it's done:
+// the app's own processes after it quits, the helper after its last
+// answer. Likely why the Arm runner's uninstall sometimes left everything.
+await until('the app and its helper to exit', async () => notRunning(exe) && notRunning(helper));
+// The uninstaller copies itself away to remove its folder, so it returns at
+// once. A slow runner gets a while longer, and says what was left.
 execFileSync(join(folder, 'Uninstall WikiStow.exe'), ['/S'], { stdio: 'inherit' });
-await until('the uninstall', async () => !existsSync(folder) || null);
+await until('the uninstall', async () => !existsSync(folder) || null, 120_000).catch((error) => {
+  const left = existsSync(folder) ? readdirSync(folder).join(', ') : '';
+  throw new Error(`${(error as Error).message} (left: ${left})`);
+});
 check(!existsSync(shortcut), 'the Start menu entry is gone');
 check(registry(LINKS) === null && registry(UNINSTALL) === null, 'the registry keys are gone');
 check(
