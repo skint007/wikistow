@@ -627,8 +627,9 @@ function fileIssue(title: string, bodyFile: string | undefined, labels: string[]
     ...labels.flatMap((l) => ['--label', l]),
   ]).trim();
   const number = Number(url.split('/').pop());
-  itemId(number);
+  // Said first, so a failure below still shows the issue was filed.
   say(url);
+  itemId(number);
   return number;
 }
 
