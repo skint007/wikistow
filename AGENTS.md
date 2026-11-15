@@ -1,5 +1,9 @@
 # WikiStow agent instructions
 
+## Issues
+
+Issues are tracked on the [project board](docs/project-board.md). Give every issue you file an `area:` label, and move an issue to In Progress when you start it. The doc has the commands and IDs.
+
 ## Releasing
 
 Follow `docs/releasing.md`. These rules cover where a release can stall.
