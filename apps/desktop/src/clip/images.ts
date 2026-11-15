@@ -7,7 +7,9 @@
 // name is looked up here, and the connection goes to the address checked,
 // so a name can't change its answer between the check and the request.
 // What comes back must say it's an image and read as one, within the
-// size given.
+// size given, as sent and as undone; it stops at the first bytes that
+// aren't an image's. Every byte read is counted (`onRead`), whatever comes
+// of it, so a clip's budget holds against a site that sends junk.
 import type { ClipImage } from '@wikistow/contracts';
 import { lookup as dnsLookup } from 'node:dns';
 import { request as httpRequest, type IncomingMessage, type RequestOptions } from 'node:http';
@@ -122,8 +124,14 @@ export type FetchImageOptions = {
   allowed: ReadonlySet<AddressKind>;
   /** The clipped page's address, whose origin goes as `Referer`. */
   page: string;
+  /** The most it reads of one response, as sent and as undone. */
   maxBytes: number;
   signal?: AbortSignal;
+  /**
+   * Bytes read, as they come, whatever comes of the fetch: the more of
+   * what was sent and what it undid to. A `data:` image counts as decoded.
+   */
+  onRead?: (bytes: number) => void;
 };
 
 export type ImageFetcherOptions = {
@@ -187,7 +195,11 @@ export function imageFetcher({
     } catch {
       return { ok: false, reason: 'refused' };
     }
-    if (current.protocol === 'data:') return dataImage(url, options.maxBytes);
+    if (current.protocol === 'data:') {
+      const answer = dataImage(url, options.maxBytes);
+      if (answer.ok) options.onRead?.(answer.bytes.length);
+      return answer;
+    }
     const timeout = AbortSignal.timeout(timeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
     try {
@@ -206,7 +218,7 @@ export function imageFetcher({
           current = new URL(location, current);
           continue;
         }
-        return await image(response, options.maxBytes, signal);
+        return await image(response, options.maxBytes, signal, options.onRead);
       }
     } catch {
       return { ok: false, reason: 'failed' };
@@ -268,10 +280,14 @@ function referrer(page: string, to: URL): string | null {
   }
 }
 
+/** Enough of a body to tell an image by (`sniffImage`). */
+const SNIFF_BYTES = 16;
+
 async function image(
   response: IncomingMessage,
   maxBytes: number,
   signal: AbortSignal,
+  onRead?: (bytes: number) => void,
 ): Promise<ClipImage> {
   const status = response.statusCode ?? 0;
   const type = (response.headers['content-type'] ?? '').toLowerCase().trim();
@@ -285,10 +301,10 @@ async function image(
   if (declared > maxBytes) return refuse('too-large');
   const body = decoded(response);
   if (!body) return refuse('failed');
-  const bytes = await capped(body, maxBytes, signal).finally(() => response.destroy());
-  if (bytes === 'too-large') return { ok: false, reason: 'too-large' };
-  const mediaType = sniffImage(bytes);
-  return mediaType ? { ok: true, bytes, mediaType } : { ok: false, reason: 'not-image' };
+  return read(response, body, maxBytes, signal, onRead).finally(() => {
+    body.destroy();
+    response.destroy();
+  });
 }
 
 /** The body as sent, undone from its content coding, or null for one this doesn't read. */
@@ -310,33 +326,70 @@ function decoded(response: IncomingMessage): Readable | null {
   return response.pipe(decoder);
 }
 
-/** Every byte of `stream`, or `too-large` as soon as there are more than `maxBytes`. */
-function capped(stream: Readable, maxBytes: number, signal: AbortSignal) {
-  return new Promise<Buffer | 'too-large'>((resolve, reject) => {
+/**
+ * The image `body` holds, undone from `response`. It stops as soon as more
+ * than `maxBytes` came, as sent or as undone, or once its first bytes
+ * aren't an image's, and counts every byte as it comes (`onRead`).
+ */
+function read(
+  response: IncomingMessage,
+  body: Readable,
+  maxBytes: number,
+  signal: AbortSignal,
+  onRead?: (bytes: number) => void,
+) {
+  return new Promise<ClipImage>((resolve, reject) => {
     const chunks: Buffer[] = [];
+    let sent = 0;
     let size = 0;
-    const aborted = () => {
-      stream.destroy();
-      reject(signal.reason);
+    let counted = 0;
+    let sniffed = false;
+    let settled = false;
+    const settle = (end: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', aborted);
+      end();
     };
+    const stop = (reason: 'not-image' | 'too-large') =>
+      settle(() => resolve({ ok: false, reason }));
+    // What's read is the more of what was sent and what it undid to: a
+    // body can undo to nothing, or to far more than was sent.
+    const count = () => {
+      const most = Math.max(sent, size);
+      if (most > counted) onRead?.(most - counted);
+      counted = most;
+    };
+    const aborted = () => settle(() => reject(signal.reason));
     signal.addEventListener('abort', aborted, { once: true });
-    const done = () => signal.removeEventListener('abort', aborted);
-    stream.on('data', (chunk: Buffer) => {
+    if (signal.aborted) return aborted();
+    if (body !== response) {
+      response.on('data', (chunk: Buffer) => {
+        if (settled) return;
+        sent += chunk.length;
+        count();
+        if (sent > maxBytes) stop('too-large');
+      });
+    }
+    body.on('data', (chunk: Buffer) => {
+      if (settled) return;
       size += chunk.length;
-      if (size > maxBytes) {
-        done();
-        stream.destroy();
-        return resolve('too-large');
-      }
+      if (body === response) sent = size;
+      count();
+      if (size > maxBytes) return stop('too-large');
       chunks.push(chunk);
+      if (!sniffed && size >= SNIFF_BYTES) {
+        sniffed = true;
+        if (!sniffImage(Buffer.concat(chunks))) stop('not-image');
+      }
     });
-    stream.once('end', () => {
-      done();
-      resolve(Buffer.concat(chunks));
-    });
-    stream.once('error', (error) => {
-      done();
-      reject(error);
-    });
+    body.once('end', () =>
+      settle(() => {
+        const bytes = Buffer.concat(chunks);
+        const mediaType = sniffImage(bytes);
+        resolve(mediaType ? { ok: true, bytes, mediaType } : { ok: false, reason: 'not-image' });
+      }),
+    );
+    body.once('error', (error) => settle(() => reject(error)));
   });
 }

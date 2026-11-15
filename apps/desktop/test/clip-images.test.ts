@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { gzipSync } from 'node:zlib';
+import { crc32, deflateRawSync, gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { addressKind, type AddressKind } from '../src/clip/addresses.ts';
 import { dataImage, imageFetcher, sniffImage } from '../src/clip/images.ts';
@@ -343,6 +343,106 @@ describe('the image fetcher', () => {
       bytes: PNG,
       mediaType: 'image/png',
     });
+  });
+
+  it('counts every byte it reads, whatever comes of it', async () => {
+    const junk = Buffer.alloc(5000, 0x41);
+    const { port } = await serve((request, response) => {
+      if (request.url === '/gone') {
+        response.writeHead(404, { 'content-type': 'image/png' });
+        return response.end(junk);
+      }
+      response.writeHead(200, { 'content-type': 'image/png' });
+      if (request.url === '/png') return response.end(PNG);
+      // Past the size given, its first bytes an image's.
+      response.write(PNG);
+      response.end(junk);
+    });
+    const { allowedFor, fetchImage } = fetcher();
+    const page = 'https://site.test/';
+    const allowed = await allowedFor(page);
+    const read = async (path: string) => {
+      let bytes = 0;
+      const answer = await fetchImage(`http://cdn.test:${port}/${path}`, {
+        allowed,
+        page,
+        maxBytes: 4000,
+        onRead: (more) => (bytes += more),
+      });
+      return { answer, bytes };
+    };
+    expect(await read('png')).toMatchObject({ answer: { ok: true }, bytes: PNG.length });
+    let decoded = 0;
+    await fetchImage(`data:image/png;base64,${PNG.toString('base64')}`, {
+      allowed,
+      page,
+      maxBytes: 4000,
+      onRead: (more) => (decoded += more),
+    });
+    expect(decoded).toBe(PNG.length);
+    const large = await read('large');
+    expect(large.answer).toEqual({ ok: false, reason: 'too-large' });
+    expect(large.bytes).toBeGreaterThan(4000);
+    // A body it never reads isn't counted.
+    expect(await read('gone')).toEqual({ answer: { ok: false, reason: 'failed' }, bytes: 0 });
+  });
+
+  it('stops at the first bytes that aren’t an image’s, and counts them', async () => {
+    // Junk called a PNG, sent on and on as a slow site would.
+    const junk = Buffer.alloc(1024, 0x41);
+    const { port } = await serve((_request, response) => {
+      response.writeHead(200, { 'content-type': 'image/png' });
+      response.write(junk);
+    });
+    const { allowedFor, fetchImage } = fetcher(5_000);
+    const page = 'https://site.test/';
+    let bytes = 0;
+    const started = Date.now();
+    expect(
+      await fetchImage(`http://cdn.test:${port}/a.png`, {
+        allowed: await allowedFor(page),
+        page,
+        maxBytes: 1_000_000,
+        onRead: (more) => (bytes += more),
+      }),
+    ).toEqual({ ok: false, reason: 'not-image' });
+    expect(bytes).toBe(junk.length);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('counts compressed bytes as they come, even those that undo to nothing', async () => {
+    // A gzip body of empty stored blocks, then a PNG: large on the wire,
+    // a few bytes once undone.
+    const empty = Buffer.from([0x00, 0x00, 0x00, 0xff, 0xff]);
+    const raw = Buffer.concat([Buffer.concat(Array(2000).fill(empty)), deflateRawSync(PNG)]);
+    const trailer = Buffer.alloc(8);
+    trailer.writeUInt32LE(crc32(PNG), 0);
+    trailer.writeUInt32LE(PNG.length, 4);
+    const header = Buffer.from([0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0xff]);
+    const body = Buffer.concat([header, raw, trailer]);
+    const { port } = await serve((_request, response) => {
+      response.writeHead(200, { 'content-type': 'image/png', 'content-encoding': 'gzip' });
+      response.end(body);
+    });
+    const { allowedFor, fetchImage } = fetcher();
+    const page = 'https://site.test/';
+    const fetchWithin = async (maxBytes: number) => {
+      let bytes = 0;
+      const answer = await fetchImage(`http://cdn.test:${port}/a.png`, {
+        allowed: await allowedFor(page),
+        page,
+        maxBytes,
+        onRead: (more) => (bytes += more),
+      });
+      return { answer, bytes };
+    };
+    expect(await fetchWithin(1_000_000)).toEqual({
+      answer: { ok: true, bytes: PNG, mediaType: 'image/png' },
+      bytes: body.length,
+    });
+    const cut = await fetchWithin(4000);
+    expect(cut.answer).toEqual({ ok: false, reason: 'too-large' });
+    expect(cut.bytes).toBeGreaterThan(4000);
   });
 
   it('gives up on a site too slow to answer', async () => {

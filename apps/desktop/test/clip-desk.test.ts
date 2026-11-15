@@ -6,6 +6,15 @@ import type { ClipConnection } from '../src/clip/listener.ts';
 import { Message, type ClipMessage } from '../src/clip/protocol.ts';
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const mib = 1024 * 1024;
+
+/** A fetch that read `bytes` and gave `answer`, as the fetcher counts them. */
+function read(options: FetchImageOptions, bytes: number, answer: ClipImage): ClipImage {
+  options.onRead?.(bytes);
+  return answer;
+}
+const image = (options: FetchImageOptions, bytes: number): ClipImage =>
+  read(options, bytes, { ok: true, bytes: new Uint8Array(bytes), mediaType: 'image/png' });
 
 function connection() {
   const replies: Record<string, unknown>[] = [];
@@ -26,11 +35,10 @@ function setup({ session = 'signed-in' as 'starting' | 'signed-out' | 'signed-in
   const handlers = new Map<string, () => void>();
   const fetches: { url: string; options: FetchImageOptions }[] = [];
   const allowedFor: string[] = [];
-  let fetched: (url: string, options: FetchImageOptions) => Promise<ClipImage> = async () => ({
-    ok: true,
-    bytes: PNG,
-    mediaType: 'image/png',
-  });
+  let fetched: (url: string, options: FetchImageOptions) => Promise<ClipImage> = async (
+    _url,
+    options,
+  ) => read(options, PNG.length, { ok: true, bytes: PNG, mediaType: 'image/png' });
   const desk = clipDesk({
     session: () => signedIn,
     show: () => void shown.push(time),
@@ -579,8 +587,7 @@ describe('a clip’s images', () => {
 
   it('are at most 100 MiB a clip', async () => {
     const { desk, clipId, fetches, fetchWith } = heldClip();
-    const mib = 1024 * 1024;
-    fetchWith(async () => ({ ok: true, bytes: new Uint8Array(20 * mib), mediaType: 'image/png' }));
+    fetchWith(async (_url, options) => image(options, 20 * mib));
     for (let i = 0; i < 5; i++) await desk.image(clipId, `https://cdn.example/${i}.png`);
     expect(await desk.image(clipId, 'https://cdn.example/x.png')).toEqual({
       ok: false,
@@ -591,14 +598,13 @@ describe('a clip’s images', () => {
 
   it('are fetched one at a time, so asking for many at once stays in the clip’s bytes', async () => {
     const { desk, clipId, fetches, fetchWith } = heldClip();
-    const mib = 1024 * 1024;
     let running = 0;
     let most = 0;
-    fetchWith(async () => {
+    fetchWith(async (_url, options) => {
       most = Math.max(most, ++running);
       await new Promise((resolve) => setTimeout(resolve, 5));
       running--;
-      return { ok: true, bytes: new Uint8Array(20 * mib), mediaType: 'image/png' };
+      return image(options, 20 * mib);
     });
     const answers = await Promise.all(
       Array.from({ length: 8 }, (_, i) => desk.image(clipId, `https://cdn.example/${i}.png`)),
@@ -622,11 +628,10 @@ describe('a clip’s images', () => {
 
   it('are what’s left of the clip’s bytes, at most', async () => {
     const { desk, clipId, fetches, fetchWith } = heldClip();
-    const mib = 1024 * 1024;
     fetchWith(async (_url, options) =>
       options.maxBytes < 24 * mib
-        ? { ok: false, reason: 'too-large' }
-        : { ok: true, bytes: new Uint8Array(23 * mib), mediaType: 'image/png' },
+        ? read(options, options.maxBytes + 1, { ok: false, reason: 'too-large' })
+        : image(options, 23 * mib),
     );
     for (let i = 0; i < 4; i++) await desk.image(clipId, `https://cdn.example/${i}.png`);
     // 92 MiB taken: the next may be 8 MiB at most, and over that is the clip's limit.
@@ -635,6 +640,30 @@ describe('a clip’s images', () => {
       reason: 'limit',
     });
     expect(fetches.at(-1)?.options.maxBytes).toBe(8 * mib);
+  });
+
+  it('count every byte fetched against the clip’s, whatever came of it', async () => {
+    const { desk, clipId, fetches, fetchWith } = heldClip();
+    // Junk called a PNG, cut off past its size, a site that failed midway, and an image.
+    const answers: ClipImage[] = [
+      { ok: false, reason: 'not-image' },
+      { ok: false, reason: 'too-large' },
+      { ok: false, reason: 'failed' },
+      { ok: true, bytes: new Uint8Array(24 * mib), mediaType: 'image/png' },
+    ];
+    let at = 0;
+    fetchWith(async (_url, options) =>
+      read(options, Math.min(24 * mib, options.maxBytes + 1), answers[at++ % answers.length]!),
+    );
+    for (let i = 0; i < 4; i++) await desk.image(clipId, `https://cdn.example/${i}.png`);
+    // 96 MiB read: the next may read 4 MiB at most.
+    await desk.image(clipId, 'https://cdn.example/4.png');
+    expect(fetches.at(-1)?.options.maxBytes).toBe(4 * mib);
+    expect(await desk.image(clipId, 'https://cdn.example/5.png')).toEqual({
+      ok: false,
+      reason: 'limit',
+    });
+    expect(fetches).toHaveLength(5);
   });
 
   it('are at most 200 a minute across clips', async () => {

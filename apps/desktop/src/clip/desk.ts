@@ -31,7 +31,7 @@ export const CLIPS_PER_MINUTE = 30;
 export const SEARCHES_PER_MINUTE = 60;
 /** Images fetched in a minute, at most, across clips. */
 export const IMAGES_PER_MINUTE = 200;
-/** Images one clip may ask for, and their bytes in all. */
+/** Images one clip may ask for, and the bytes their fetches may read in all. */
 export const IMAGES_PER_CLIP = 50;
 export const IMAGE_BYTES_PER_CLIP = 100 * 1024 * 1024;
 /** How long a clip's images may take in all, from its first, so a slow site can't hold the one clip. */
@@ -70,6 +70,7 @@ type Held = {
   messageId: string;
   connection: ClipConnection;
   images: number;
+  /** Bytes its image fetches read, whatever came of them. */
   bytes: number;
   allowed: Promise<Set<AddressKind>> | null;
   /** When its images must be fetched by, once one was asked for. */
@@ -300,8 +301,9 @@ export function clipDesk(options: DeskOptions) {
       page: one.clip.url,
       maxBytes,
       signal: AbortSignal.any([one.done.signal, AbortSignal.timeout(time)]),
+      // Every byte read, junk and failures too, so a site can't send more than the clip's.
+      onRead: (bytes) => (one.bytes += bytes),
     });
-    if (answer.ok) one.bytes += answer.bytes.length;
     // Past what's left of the clip's, not the image's own.
     if (!answer.ok && answer.reason === 'too-large' && maxBytes < MAX_IMAGE_BYTES) {
       return { ok: false, reason: 'limit' };
