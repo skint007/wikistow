@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Desktop
+
+- A clip's images count every byte main reads for them toward the clip's 100 MiB, not only those that turn out to be images, and a response stops at its first bytes when they aren't an image's. A compressed one counts what was sent as well as what it undid to. (#604)
+
 ## 0.26.0-beta.1 - 2026-11-15
 
 ### Highlights
