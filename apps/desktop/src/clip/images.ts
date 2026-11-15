@@ -129,7 +129,8 @@ export type FetchImageOptions = {
   signal?: AbortSignal;
   /**
    * Bytes read, as they come, whatever comes of the fetch: the more of
-   * what was sent and what it undid to. A `data:` image counts as decoded.
+   * what was sent and what it undid to. A `data:` image, which comes with
+   * the clip rather than from a site, counts its bytes once it reads as one.
    */
   onRead?: (bytes: number) => void;
 };
@@ -351,8 +352,13 @@ function read(
       signal.removeEventListener('abort', aborted);
       end();
     };
+    // Destroyed at once, so no chunk already on its way is read uncounted.
     const stop = (reason: 'not-image' | 'too-large') =>
-      settle(() => resolve({ ok: false, reason }));
+      settle(() => {
+        body.destroy();
+        response.destroy();
+        resolve({ ok: false, reason });
+      });
     // What's read is the more of what was sent and what it undid to: a
     // body can undo to nothing, or to far more than was sent.
     const count = () => {
