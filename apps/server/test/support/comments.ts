@@ -91,9 +91,34 @@ const payloadAd = (
  * page's region as the server's tree puts it now. `basedOn` makes an edit
  * of `commentId`.
  */
-export async function sealComment(
+export async function sealComment(ctx: ClientContext, page: Page, options: SealOptions) {
+  return (await commentSealer(ctx, page))(options);
+}
+
+/**
+ * `sealComment` for many comments in the page's region as the server's
+ * tree puts it now, read once: for a test that sends them faster than an
+ * app would.
+ */
+export async function commentSealer(ctx: ClientContext, page: Page) {
+  const target = await writeTargetOf(ctx, page.spaceId, page.pageId);
+  return (options: SealOptions) => sealWith(ctx, page, target, options);
+}
+
+type SealOptions = {
+  audience: Audience;
+  text: string;
+  thread?: CommentId | null;
+  threadAuthor?: string | null;
+  commentId?: CommentId;
+  versionId?: MetadataRevisionId;
+  basedOn?: MetadataRevisionId | null;
+};
+
+function sealWith(
   ctx: ClientContext,
   page: Page,
+  { permissionVersion, keyTarget }: Awaited<ReturnType<typeof writeTargetOf>>,
   {
     audience,
     text,
@@ -102,17 +127,8 @@ export async function sealComment(
     commentId = newId(CommentId),
     versionId = newId(MetadataRevisionId),
     basedOn = null,
-  }: {
-    audience: Audience;
-    text: string;
-    thread?: CommentId | null;
-    threadAuthor?: string | null;
-    commentId?: CommentId;
-    versionId?: MetadataRevisionId;
-    basedOn?: MetadataRevisionId | null;
-  },
+  }: SealOptions,
 ) {
-  const { permissionVersion, keyTarget } = await writeTargetOf(ctx, page.spaceId, page.pageId);
   const contentKey = new Uint8Array(randomBytes(32));
   const author = ctx.identity.public;
   const bound = {

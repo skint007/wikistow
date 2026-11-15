@@ -51,7 +51,7 @@ import { humanActor, requireCaller, type Actor, type Caller } from './identities
 import { checkKeyMaterial } from './key-material.ts';
 import { isLiveVersion } from './live.ts';
 import { requirePage, requirePageAccess } from './pages.ts';
-import { charge } from './quota.ts';
+import { charge, queueWriter, type Writer } from './quota.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 
 /** A comment version and its key material, as a write sends it. */
@@ -187,10 +187,10 @@ async function storeVersion(
   tx: Database,
   commentId: string,
   { metadata, wrap, envelopes }: CommentCommit,
-  { accountId, storageBytes }: { accountId: string; storageBytes: number },
+  { writer, storageBytes }: { writer: Writer; storageBytes: number },
 ) {
   const versionId = metadata.record.metadataRevisionId;
-  await charge(tx, accountId, metadata.payload.ciphertext.length, storageBytes);
+  await charge(tx, writer, metadata.payload.ciphertext.length, storageBytes);
   const stored = await tx
     .insert(commentVersions)
     .values({ id: versionId, commentId, spaceId: metadata.record.spaceId, sealed: metadata })
@@ -240,6 +240,7 @@ export async function addComment(
   const { record } = input.metadata;
   await db.transaction(async (tx) => {
     const caller = await requireCaller(tx, input.actor);
+    const writer = await queueWriter(tx, caller.accountId);
     const access = await lockedAccess(tx, caller, input.pageId);
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });
@@ -303,7 +304,7 @@ export async function addComment(
       .returning({ id: comments.id });
     if (added.length === 0) throw new ContentError('duplicate', 'That comment ID is taken');
     await storeVersion(tx, input.commentId, input, {
-      accountId: caller.accountId,
+      writer,
       storageBytes: input.storageBytes,
     });
     if (input.thread !== null) {
@@ -350,6 +351,7 @@ export async function editComment(
   const { record } = input.metadata;
   await db.transaction(async (tx) => {
     const caller = await requireCaller(tx, input.actor);
+    const writer = await queueWriter(tx, caller.accountId);
     const row = await heldComment(tx, caller, input.commentId);
     const access = await lockedAccess(tx, caller, row.pageId);
     const share = await lockShare(tx, access.share);
@@ -390,7 +392,7 @@ export async function editComment(
     // Its wrap and envelopes go with it, by the cascade.
     await tx.delete(commentVersions).where(eq(commentVersions.id, current.id));
     await storeVersion(tx, row.id, input, {
-      accountId: caller.accountId,
+      writer,
       storageBytes: input.storageBytes,
     });
     await tx

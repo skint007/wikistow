@@ -62,7 +62,7 @@ import { placeAtEnd } from './order.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { requireCaller, type Actor } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
-import { charge, usedBytes } from './quota.ts';
+import { charge, queueWriter, usedBytes, type Writer } from './quota.ts';
 import { copyUploadAccess, sweepCopies } from './copies.ts';
 import { forgetMoves } from './moved.ts';
 import { endPublicationsFrom } from './publications.ts';
@@ -246,14 +246,15 @@ export async function storeRevision(
   tx: Database,
   commit: RevisionCommit,
   {
-    accountId,
+    writer,
     draftSeq,
     publishedSeq,
     restoredFrom,
     sourceRevisionId = null,
     storageBytes,
   }: {
-    accountId: string;
+    /** The author's account, queued (`queueWriter`) before the caller took any lock. */
+    writer: Writer;
     draftSeq: number | null;
     publishedSeq: number | null;
     restoredFrom: string | null;
@@ -263,11 +264,12 @@ export async function storeRevision(
   },
 ) {
   const { record } = commit.revision;
+  const { accountId } = writer;
   // The plaintext's limit, as the server can count it. Versions stored before stay.
   if (commit.revision.payload.ciphertext.length > pageRoutes.MAX_PAYLOAD_CIPHERTEXT)
     throw new ContentError('too-large', 'This version is larger than a page may hold');
   if (storageBytes !== null) {
-    await charge(tx, accountId, commit.revision.payload.ciphertext.length, storageBytes);
+    await charge(tx, writer, commit.revision.payload.ciphertext.length, storageBytes);
   }
   await tx.insert(revisions).values({
     id: record.revisionId,
@@ -336,6 +338,7 @@ export async function createPage(
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     const { identity } = caller;
+    const writer = await queueWriter(tx, caller.accountId);
     await lockSpace(tx, input.spaceId);
     const access = await accessTo(tx, caller, {
       spaceId: input.spaceId,
@@ -405,7 +408,7 @@ export async function createPage(
       .returning({ id: nodes.id });
     if (created.length === 0) throw new ContentError('duplicate', 'That page ID is taken');
     await storeRevision(tx, input, {
-      accountId: caller.accountId,
+      writer,
       storageBytes: input.storageBytes,
       draftSeq: 1,
       publishedSeq: null,
@@ -432,6 +435,7 @@ export async function saveDraft(
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     const { identity } = caller;
+    const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
     if (!canEdit(access)) throw new ContentError('not-found');
@@ -481,7 +485,7 @@ export async function saveDraft(
     });
     const draftSeq = heads.draftCount + 1;
     await storeRevision(tx, input, {
-      accountId: caller.accountId,
+      writer,
       storageBytes: input.storageBytes,
       draftSeq,
       publishedSeq: null,
@@ -518,6 +522,7 @@ export async function publish(
   return transactOnce(db, input.once, async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     const { identity } = caller;
+    const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
     // Publishing starts from the draft, so it needs edit access as well.
@@ -553,7 +558,7 @@ export async function publish(
     });
     const publishedSeq = heads.publishedCount + 1;
     await storeRevision(tx, input, {
-      accountId: caller.accountId,
+      writer,
       storageBytes: input.storageBytes,
       draftSeq: null,
       publishedSeq,
@@ -1177,6 +1182,7 @@ async function storeBlob(
   },
 ) {
   await db.transaction(async (tx) => {
+    const writer = await queueWriter(tx, accountId);
     // The page can't be deleted while this row goes in.
     await requirePage(tx, page.id, { lock: true });
     await lockBlob(tx, staged.hash);
@@ -1197,7 +1203,7 @@ async function storeBlob(
         .where(eq(blobs.hash, staged.hash));
       return;
     }
-    await charge(tx, accountId, staged.size, storageBytes);
+    await charge(tx, writer, staged.size, storageBytes);
     // File first: a failure after this leaves an unreferenced file for the
     // sweep, never a row without bytes.
     await staged.commit();

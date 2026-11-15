@@ -38,7 +38,7 @@ import {
 import { ContentError } from '../content/errors.ts';
 import { currentIdentity, humanActor, requireCaller, type Caller } from '../content/identities.ts';
 import { requirePage, requirePageAccess } from '../content/pages.ts';
-import { charge } from '../content/quota.ts';
+import { charge, queueWriter } from '../content/quota.ts';
 import { acceptCover, coverFiles, NO_COVER, PublicCover } from './cover.ts';
 import { endCopies, endLinkFor, endLinksAndCopies, recordEnded } from './endings.ts';
 import { escapeHtml } from './page.ts';
@@ -382,7 +382,9 @@ export async function uploadCopyFile(
   const { accountId, copyId } = input;
   const { pageId } = await uploadersCopy(db, accountId, copyId);
   await db.transaction(async (tx) => {
-    await lockPage(tx, pageId, await requireCaller(tx, humanActor(accountId)));
+    const caller = await requireCaller(tx, humanActor(accountId));
+    const writer = await queueWriter(tx, accountId);
+    await lockPage(tx, pageId, caller);
     await lockAccounts(tx, [accountId]);
     if ((await lockLinks(tx, [pageId], 'share')).length === 0) throw noLink();
     const [copy] = await tx
@@ -404,7 +406,7 @@ export async function uploadCopyFile(
     if (input.bytes.byteLength > file.size) {
       throw new ContentError('too-large', 'The file is larger than its staging said');
     }
-    await charge(tx, accountId, input.bytes.byteLength - file.stored, input.storageBytes);
+    await charge(tx, writer, input.bytes.byteLength - file.stored, input.storageBytes);
     await tx
       .update(publicFiles)
       .set({ bytes: input.bytes })

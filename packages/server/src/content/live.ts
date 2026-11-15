@@ -46,7 +46,7 @@ import { ContentError } from './errors.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
 import { requirePage, requirePageAccess } from './pages.ts';
-import { charge, chargeLive, lockQuota } from './quota.ts';
+import { charge, chargeLive, lockQuota, queueWriter, type Writer } from './quota.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 
 type LiveMessage = liveRoutes.LiveMessage;
@@ -150,24 +150,18 @@ function servedJoins(joins: readonly JoinRow[], now: Date): liveRoutes.Join[] {
 // --- Access ----------------------------------------------------------------
 
 /**
- * The classes of the two-key advisory locks that queue live requests, apart
- * from every one-key advisory lock (quota, items, vault and so on).
+ * The class of the two-key advisory lock that queues a session's requests,
+ * apart from every one-key advisory lock (quota, items, vault and so on)
+ * and the account's queue of writes (`queueWriter`), which comes before it.
  */
-const LIVE_ACCOUNT_LOCK_CLASS = 5011;
 const LIVE_SESSION_LOCK_CLASS = 5010;
 
-/**
- * Queue a person's live requests, before any of them holds a lock a change
- * of access waits on. Otherwise one person's requests, in several sessions,
- * each holding the space shared while it waits on their minute row or
- * quota, could overlap without end and hold off a removal from the space or
- * the end of a share. Only live requests take it, always first, so it never
- * waits in a ring.
- */
-const queueLive = (tx: Database, accountId: string) =>
-  tx.execute(
-    sql`select pg_advisory_xact_lock(${LIVE_ACCOUNT_LOCK_CLASS}::int, hashtext(${accountId}))`,
-  );
+type HeldSession = {
+  caller: Caller;
+  page: Awaited<ReturnType<typeof requirePage>>;
+  access: Awaited<ReturnType<typeof requirePageAccess>>;
+  session: SessionRow;
+};
 
 /**
  * The session `sessionId` and its page, for a person who can edit the page
@@ -177,14 +171,27 @@ const queueLive = (tx: Database, accountId: string) =>
  * moves the page's permission version takes too: the space's row shared, the page's row FOR SHARE, which waits for (or holds
  * up) a change of access, and the session's row FOR UPDATE, so its
  * positions are given one at a time. Access is checked once the page is
- * held, so it is the access that change leaves.
+ * held, so it is the access that change leaves. Its `writer` is the
+ * caller's account, queued (`queueWriter`) before any of those, to charge.
  */
 async function sessionFor(
   tx: Database,
   actor: Actor,
   sessionId: string,
+  options: { lock: true },
+): Promise<HeldSession & { writer: Writer }>;
+async function sessionFor(
+  tx: Database,
+  actor: Actor,
+  sessionId: string,
+  options: { lock: false },
+): Promise<HeldSession & { writer: null }>;
+async function sessionFor(
+  tx: Database,
+  actor: Actor,
+  sessionId: string,
   { lock }: { lock: boolean },
-) {
+): Promise<HeldSession & { writer: Writer | null }> {
   const caller = await requireCaller(tx, actor);
   if (caller.personId !== null) throw new ContentError('not-found');
   const [found] = await tx
@@ -192,6 +199,7 @@ async function sessionFor(
     .from(liveSessions)
     .where(eq(liveSessions.id, sessionId));
   if (!found) throw new ContentError('not-found');
+  let writer: Writer | null = null;
   // Checked before any lock too, so someone who can't edit holds none on the way to not-found.
   if (lock && !canEdit(await requirePageAccess(tx, caller, await requirePage(tx, found.pageId)))) {
     throw new ContentError('not-found');
@@ -201,8 +209,9 @@ async function sessionFor(
     // the space and the page: the rest queue here, holding nothing a change
     // of access waits on. Otherwise requests queued on the session's row or
     // their sender's charges, each holding the page FOR SHARE, could overlap
-    // without end and hold off a removal while its member floods.
-    await queueLive(tx, caller.accountId);
+    // without end and hold off a removal while its member floods. The
+    // person's other charged writes queue with them (`queueWriter`).
+    writer = await queueWriter(tx, caller.accountId);
     await tx.execute(
       sql`select pg_advisory_xact_lock(${LIVE_SESSION_LOCK_CLASS}::int, hashtext(${sessionId}))`,
     );
@@ -214,7 +223,7 @@ async function sessionFor(
   const query = tx.select().from(liveSessions).where(eq(liveSessions.id, sessionId));
   const [session] = lock ? await query.for('update') : await query;
   if (!session || session.pageId !== page.id) throw new ContentError('not-found');
-  return { caller, page, access, session };
+  return { caller, page, access, session, writer };
 }
 
 /** The page's caller who can edit it now, or `not-found`, an agent included. */
@@ -874,7 +883,7 @@ export async function startLive(db: Database, input: StartLive) {
   return db.transaction(async (tx) => {
     const caller = await requireCaller(tx, input.actor);
     if (caller.personId !== null) throw new ContentError('not-found');
-    await queueLive(tx, caller.accountId);
+    const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
     if (!canEdit(access)) throw new ContentError('not-found');
@@ -973,7 +982,7 @@ export async function startLive(db: Database, input: StartLive) {
       size + LIVE_MESSAGE_BYTES + payload.ciphertext.length,
       input.storedBytesPerMinute,
     );
-    await charge(tx, caller.accountId, stored, input.storageBytes);
+    await charge(tx, writer, stored, input.storageBytes);
     // Two starts at once with one ID: the second finds it taken.
     const taken2 = await tx
       .insert(liveSessionIds)
@@ -1126,7 +1135,7 @@ export async function joinLive(
   },
 ): Promise<Joined> {
   return db.transaction(async (tx) => {
-    const { caller, page, session } = await sessionFor(tx, input.actor, input.sessionId, {
+    const { caller, page, session, writer } = await sessionFor(tx, input.actor, input.sessionId, {
       lock: true,
     });
     const heads = await headsOf(tx, page.id);
@@ -1192,7 +1201,7 @@ export async function joinLive(
         );
     } else {
       requireRoomForJoin(joins, present, caller.identity.id);
-      await chargeLive(tx, caller.accountId, LIVE_JOIN_BYTES, input.storageBytes);
+      await chargeLive(tx, writer, LIVE_JOIN_BYTES, input.storageBytes);
       await tx.insert(liveJoins).values({
         sessionId: session.id,
         identityId: caller.identity.id,
@@ -1276,7 +1285,7 @@ export async function streamClosed(
  */
 async function joinFor(
   tx: Database,
-  { caller, session }: { caller: Caller; session: SessionRow },
+  { caller, session, writer }: { caller: Caller; session: SessionRow; writer: Writer },
   {
     joinId,
     parent,
@@ -1327,7 +1336,7 @@ async function joinFor(
     throw new ContentError('busy', 'That join has two further joins already');
   }
   requireRoomForJoin(joins, present, caller.identity.id);
-  await chargeLive(tx, caller.accountId, LIVE_JOIN_BYTES, storageBytes);
+  await chargeLive(tx, writer, LIVE_JOIN_BYTES, storageBytes);
   const ordinal = session.joinsMade + 1;
   const [made] = await tx
     .insert(liveJoins)
@@ -1351,7 +1360,7 @@ async function joinFor(
 /** A catch-up join of the caller's in an ended session, which every other join has left. */
 async function catchUpJoin(
   tx: Database,
-  { caller, session }: { caller: Caller; session: SessionRow },
+  { caller, session, writer }: { caller: Caller; session: SessionRow; writer: Writer },
   joinId: string,
   now: Date,
   storageBytes: number,
@@ -1373,7 +1382,7 @@ async function catchUpJoin(
     throw new ContentError('not-found');
   }
   requireRoomForJoin(joins, present, caller.identity.id);
-  await chargeLive(tx, caller.accountId, LIVE_JOIN_BYTES, storageBytes);
+  await chargeLive(tx, writer, LIVE_JOIN_BYTES, storageBytes);
   const ordinal = session.joinsMade + 1;
   const [made] = await tx
     .insert(liveJoins)
@@ -1622,7 +1631,7 @@ export async function sendLive(db: Database, input: SendLive) {
       );
       await chargeLive(
         tx,
-        caller.accountId,
+        ctx.writer,
         sizes.reduce((total, size) => total + storedSize(size), 0),
         input.storageBytes,
       );
@@ -1990,7 +1999,7 @@ export async function postSnapshot(db: Database, input: PostSnapshot) {
       size + LIVE_MESSAGE_BYTES,
       input.storedBytesPerMinute,
     );
-    await chargeLive(tx, caller.accountId, storedSize(size), input.storageBytes);
+    await chargeLive(tx, ctx.writer, storedSize(size), input.storageBytes);
     const stored = await storeMessage(tx, session, join, caller, {
       message: input.message,
       covers: input.covers,

@@ -15,6 +15,41 @@ import {
 import { ContentError } from './errors.ts';
 
 /**
+ * The class of the two-key advisory lock that queues an account's writes
+ * (`queueWriter`), apart from every one-key advisory lock (quota, items,
+ * vault and so on).
+ */
+const WRITER_LOCK_CLASS = 5011;
+
+declare const queued: unique symbol;
+
+/** An account whose writes this transaction queued behind (`queueWriter`). */
+export type Writer = { readonly accountId: string; readonly [queued]: true };
+
+/**
+ * Queue a write that charges `accountId`'s storage, or a live request of
+ * theirs, behind the account's others, before it holds anything a change
+ * of access waits on. Each such write holds the space and its page shared
+ * while it waits on the account's quota; without this queue, one person's
+ * writes on several pages at once overlap without end, and a removal from
+ * the space or the end of a share, which waits for no shared holder to
+ * remain, waits as long as they keep writing (#439). Queued, only one of
+ * them holds anything at a time, and the rest wait holding nothing.
+ *
+ * Taken first in its transaction, before any row lock or any advisory lock
+ * that waits, so it never waits in a ring: a transaction that holds it
+ * waits only on what transactions without it hold. A charge takes the
+ * `Writer` this answers, so none charges unqueued. Taken again in one
+ * transaction, it holds as before.
+ */
+export async function queueWriter(tx: Database, accountId: string): Promise<Writer> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(${WRITER_LOCK_CLASS}::int, hashtext(${accountId}))`,
+  );
+  return { accountId } as Writer;
+}
+
+/**
  * Serializes one account's writes that count toward its storage, so two at
  * once can't both fit under the quota. Taken again in one transaction, it
  * holds as before.
@@ -113,7 +148,7 @@ const besidesLive = new Map<string, { bytes: number; at: number }>();
  */
 export async function chargeLive(
   tx: Database,
-  accountId: string,
+  { accountId }: Writer,
   bytes: number,
   storageBytes: number,
 ) {
@@ -134,7 +169,12 @@ export async function chargeLive(
 }
 
 /** Refuse a write of `bytes` that would take the account over its storage. */
-export async function charge(tx: Database, accountId: string, bytes: number, storageBytes: number) {
+export async function charge(
+  tx: Database,
+  { accountId }: Writer,
+  bytes: number,
+  storageBytes: number,
+) {
   await lockQuota(tx, accountId);
   if ((await usedBytes(tx, accountId)) + bytes > storageBytes) {
     throw new ContentError('storage-full', 'Your storage is full');
