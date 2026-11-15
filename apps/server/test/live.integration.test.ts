@@ -132,6 +132,38 @@ async function readLines(response: Response, count: number) {
 const sessionRow = async (sessionId: string) =>
   (await t.db.select().from(schema.liveSessions).where(eq(schema.liveSessions.id, sessionId)))[0];
 
+/** How long a flood runs at most, long past any fair wait for a change made during it. */
+const FLOOD_MS = 10_000;
+
+/**
+ * Start `flood`'s loops, each sending while `going()` says so, then make
+ * `change` and answer whether it went through while the flood still ran.
+ * The flood stops once the change is done, or after `FLOOD_MS`, so a
+ * change held off for as long as a flood runs goes through only after
+ * that. A limit on how long the change took, instead, failed on a busy
+ * runner, where a fair wait can take longer (#579).
+ */
+async function throughFlood(
+  flood: (going: () => boolean) => Promise<unknown>[],
+  change: () => Promise<unknown>,
+) {
+  let flooding = true;
+  const loops = flood(() => flooding);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const stop = setTimeout(() => (flooding = false), FLOOD_MS);
+    try {
+      await change();
+      return flooding;
+    } finally {
+      clearTimeout(stop);
+    }
+  } finally {
+    flooding = false;
+    await Promise.all(loops);
+  }
+}
+
 /** Every join of the session left, long enough ago for the sweep. */
 const everyoneLeft = (sessionId: string, ago = '2 minutes') =>
   t.db.execute(sql`
@@ -813,26 +845,21 @@ describe('ending', () => {
     // A full batch stored once, then sent again and again: answered as before, costing nothing.
     const batch = Array.from({ length: liveRoutes.MAX_MESSAGES }, () => me.message('update'));
     await me.send(batch);
-    let flooding = true;
-    const flood = async () => {
-      while (flooding) {
-        await send(editor, session, me.joinId, batch).catch(() => {});
-      }
+    const flood = async (going: () => boolean) => {
+      while (going()) await send(editor, session, me.joinId, batch).catch(() => {});
     };
-    const floods = Array.from({ length: 4 }, flood);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const began = Date.now();
-    await sharing.removeMember(owner.ctx, {
-      spaceId: lib.spaceId,
-      shareId,
-      identityId: editor.vault.identity.public.id,
-    });
-    const took = Date.now() - began;
-    flooding = false;
-    await Promise.all(floods);
+    const through = await throughFlood(
+      (going) => Array.from({ length: 4 }, () => flood(going)),
+      () =>
+        sharing.removeMember(owner.ctx, {
+          spaceId: lib.spaceId,
+          shareId,
+          identityId: editor.vault.identity.public.id,
+        }),
+    );
+    expect(through).toBe(true);
     expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
-    expect(took).toBeLessThan(2000);
-  });
+  }, 30_000);
 
   it.each(['remove from space', 'end share'] as const)(
     'lets a change that holds the space through while one person floods sessions on four pages (%s)',
@@ -866,30 +893,22 @@ describe('ending', () => {
               spaceId: lib.spaceId,
               identityId: editor.vault.identity.public.id,
             });
-      let flooding = true;
-      const loops = floods.map(async ({ session, batch }) => {
-        while (flooding) await send(editor, session, session.joinId, batch).catch(() => {});
-      });
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      const began = Date.now();
-      const applied =
-        change === 'end share'
-          ? ending.endShare(owner.ctx, {
-              preview: plan as Awaited<ReturnType<typeof ending.previewEnding>>,
-            })
-          : groupOperations.applyGroupChange(
-              owner.ctx,
-              plan as Awaited<ReturnType<typeof groupOperations.planRemovalEverywhere>>,
-            );
-      const done = await Promise.race([
-        applied.then(() => Date.now() - began),
-        new Promise<null>((resolve) => setTimeout(resolve, 5000, null)),
-      ]);
-      flooding = false;
-      await Promise.all(loops);
-      await applied;
-      expect(done).not.toBeNull();
-      expect(done).toBeLessThan(2000);
+      const through = await throughFlood(
+        (going) =>
+          floods.map(async ({ session, batch }) => {
+            while (going()) await send(editor, session, session.joinId, batch).catch(() => {});
+          }),
+        () =>
+          change === 'end share'
+            ? ending.endShare(owner.ctx, {
+                preview: plan as Awaited<ReturnType<typeof ending.previewEnding>>,
+              })
+            : groupOperations.applyGroupChange(
+                owner.ctx,
+                plan as Awaited<ReturnType<typeof groupOperations.planRemovalEverywhere>>,
+              ),
+      );
+      expect(through).toBe(true);
       for (const { session } of floods) {
         expect(await sessionRow(session.sessionId)).toMatchObject({ endedReason: 'access' });
       }
