@@ -425,6 +425,20 @@ test('the beta is used when it alone is installed, and an app too new says to up
   expect(await got('beta', 'hello')).toMatchObject([{ browser: 'chromium', extension: '0.1.0' }]);
 });
 
+test('a ready beta that takes the clip wins over a stable app too old for the extension', async () => {
+  const { worker, got } = await launch({
+    stable: { ...ready, protocols: { min: 0, max: 0 } },
+    beta: ready,
+  });
+  const { popup } = await popupFor(worker, await serve());
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await expect(popup.getByText('This WikiStow is too old for the extension.')).toBeHidden();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await got('beta', 'clip')).toHaveLength(1);
+  expect(await got('stable', 'clip')).toEqual([]);
+});
+
 test('an app’s refusal shows in the popup and on the button', async () => {
   const { worker } = await launch({
     stable: {
