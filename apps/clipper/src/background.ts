@@ -6,7 +6,7 @@
 // injects answers as the injection's result; the one message it takes is
 // the area overlay's (area.ts), from the tab it was injected in, naming
 // the nonce it was given there.
-import { api } from './api.ts';
+import { api, browserName } from './api.ts';
 import type { Captured } from './capture.ts';
 import { base64, cropPng, dataBytes, isAreaMessage, type Area, type ViewSize } from './shot.ts';
 import { ask, converse, find, HostGone, TimedOut, type Found } from './host.ts';
@@ -38,6 +38,7 @@ import {
   speaks,
   type Clip,
   type Folder,
+  type HostKey,
   type Saved,
   type TextMode,
 } from './protocol.ts';
@@ -46,6 +47,10 @@ import {
 const WAIT_MS = 10 * 60_000;
 /** How long, at most, between answers while a clip is sent, the app opening included (60 s). */
 const SEND_MS = 2 * 60_000;
+/** How long the helper waits for an app it opens to listen (clip-host's `appWait`). */
+const START_MS = 60_000;
+/** How long a capture other than a link waits for the tab's page to load. */
+const LOAD_MS = 30_000;
 /** How long the toolbar button shows its check after a save. */
 const CHECK_MS = 4_000;
 /** How long the person has to drag out an area, as the overlay waits. */
@@ -53,9 +58,13 @@ const CHOOSE_MS = 5 * 60_000;
 
 /** The app found last, which searches and shows go to. */
 let found: Found | null = null;
+/** When `open` was sent, and to which app, until the app is heard from, or didn't open. */
+let openSent: { host: HostKey; at: number } | null = null;
 /** How the last clip went, as `storage.session` keeps it too. */
 let current: ClipView | null = null;
 let sending = false;
+/** The app the clip being sent goes to, once found. */
+let sendingTo: HostKey | null = null;
 const popups = new Set<chrome.runtime.Port>();
 /** The folder the last clip went to, once read: known without waiting, for Firefox's `openPopup`. */
 let lastFolder: Folder | null | undefined;
@@ -86,9 +95,32 @@ function viewOf(at: Found | null): View {
   return { app: status.app, offline: status.offline ?? false, host: at.host };
 }
 
+/**
+ * Take `at` as how the app is now. A helper started after `open` was sent
+ * can't tell that the app is on its way, and answers `closed` until it
+ * listens: for as long as the helper that opened it waits, that's
+ * `starting`. A clip waiting in the app waits for what it does now: to
+ * start, or to be unlocked.
+ */
+function learn(at: Found | null): Found | null {
+  if (at && openSent?.host === at.host) {
+    if (at.status.app === 'closed' && Date.now() - openSent.at < START_MS) {
+      at = { host: at.host, status: { type: 'status', app: 'starting' } };
+    } else if (at.status.app !== 'starting') {
+      openSent = null;
+    }
+  }
+  found = at;
+  if (at && at.host === sendingTo && current?.phase === 'waiting') {
+    const { app } = at.status;
+    const waits = app === 'locked' ? 'unlock' : app === 'starting' ? 'starting' : null;
+    if (waits && waits !== current.waits) setClip({ phase: 'waiting', waits });
+  }
+  return at;
+}
+
 async function status(): Promise<View> {
-  found = await find(await pin());
-  return viewOf(found);
+  return viewOf(learn(await find(await pin())));
 }
 
 /** Open the app, or bring it forward, saying how it is as that changes, until it's ready. */
@@ -98,6 +130,7 @@ async function open(signal: AbortSignal): Promise<Calls['open']['result']> {
   const { host } = found;
   const message = envelope({ type: 'open' });
   let failed: string | null = null;
+  openSent = { host, at: Date.now() };
   try {
     await converse(
       HOSTS[host],
@@ -105,12 +138,12 @@ async function open(signal: AbortSignal): Promise<Calls['open']['result']> {
       (answer) => {
         if (answer.id !== message.id) return false;
         if (answer.type === 'error') {
+          openSent = null;
           failed = answer.message ?? 'WikiStow didn’t open.';
           return true;
         }
         if (answer.type !== 'status') return false;
-        found = { host, status: answer };
-        push({ push: 'view', view: viewOf(found) });
+        push({ push: 'view', view: viewOf(learn({ host, status: answer })) });
         return answer.app === 'ready';
       },
       { ms: SEND_MS, signal },
@@ -134,31 +167,72 @@ async function folders(query: string): Promise<Calls['folders']['result']> {
   }
 }
 
-/** The tab's address and title, and its selection, or null where no script may run, as on the browser's own pages. */
+/**
+ * The tab's address and title, and its selection, or null where no script
+ * may run, as on the browser's own pages. The selection is what capture
+ * takes (`selectedText` in capture.ts): Chromium's `toString` gives the
+ * text selected in a text box, though no range of the page is selected.
+ * It runs at once, not once the page has loaded, as a slow page may take a
+ * while to. The title is the page's own where a script runs: a tab's is its
+ * address until the page's title has come.
+ */
 async function probe(tabId: number): Promise<Calls['probe']['result']> {
   const tab = await api.tabs.get(tabId);
   let selection: string | null;
+  let title = tab.title ?? '';
   try {
     const [ran] = await api.scripting.executeScript({
       target: { tabId },
-      func: () => getSelection()?.toString() ?? '',
+      injectImmediately: true,
+      func: () => {
+        const chosen = getSelection();
+        return {
+          selection: chosen && !chosen.isCollapsed ? chosen.toString() : '',
+          title: document.title,
+        };
+      },
     });
-    selection = typeof ran?.result === 'string' ? ran.result : '';
+    const got = ran?.result as { selection?: unknown; title?: unknown } | undefined;
+    selection = typeof got?.selection === 'string' ? got.selection : '';
+    title = typeof got?.title === 'string' ? got.title : '';
   } catch {
     selection = null;
   }
-  return { url: tab.url ?? '', title: tab.title ?? '', selection };
+  return { url: tab.url ?? '', title, selection };
 }
 
+/** A page that hasn't loaded in `LOAD_MS`, as one that never finishes doesn't. */
+class StillLoading extends Error {}
+
+/**
+ * Capture the tab in `mode`, once its page has loaded, waiting `LOAD_MS`
+ * at most; a link, which needs only its address and selection, at once.
+ */
 async function capture(tabId: number, mode: TextMode): Promise<Captured> {
-  await api.scripting.executeScript({ target: { tabId }, files: ['capture.js'] });
-  const [ran] = await api.scripting.executeScript({
-    target: { tabId },
-    func: (mode: TextMode) => globalThis.wikistowCapture!(mode),
-    args: [mode],
+  const injectImmediately = mode === 'link';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const loading = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new StillLoading('The page is still loading')), LOAD_MS);
   });
-  if (!ran?.result) throw new Error('Nothing captured');
-  return ran.result as Captured;
+  try {
+    await Promise.race([
+      api.scripting.executeScript({ target: { tabId }, injectImmediately, files: ['capture.js'] }),
+      loading,
+    ]);
+    const [ran] = await Promise.race([
+      api.scripting.executeScript({
+        target: { tabId },
+        injectImmediately,
+        func: (mode: TextMode) => globalThis.wikistowCapture!(mode),
+        args: [mode],
+      }),
+      loading,
+    ]);
+    if (!ran?.result) throw new Error('Nothing captured');
+    return ran.result as Captured;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function show(spaceId: string, pageId: string): Promise<Calls['show']['result']> {
@@ -173,6 +247,7 @@ async function show(spaceId: string, pageId: string): Promise<Calls['show']['res
 }
 
 let unbadge: ReturnType<typeof setTimeout> | undefined;
+/** Show `text` on the toolbar button: a check for a while, `!` until the popup opens. */
 function badge(text: '' | '✓' | '!') {
   clearTimeout(unbadge);
   void api.action.setBadgeText({ text });
@@ -181,6 +256,15 @@ function badge(text: '' | '✓' | '!') {
   }
   if (text === '✓')
     unbadge = setTimeout(() => void api.action.setBadgeText({ text: '' }), CHECK_MS);
+}
+
+/**
+ * Show `!` for a while, for a quick clip that wasn't sent as one is still
+ * on its way, then what the button showed for that one.
+ */
+function flashBusy() {
+  badge('!');
+  unbadge = setTimeout(() => badge(current?.phase === 'failed' ? '!' : ''), CHECK_MS);
 }
 
 function clearClip() {
@@ -344,7 +428,8 @@ const NOTHING: Captured = { url: '', title: '', html: '', text: '', byline: null
  * here once the person has dragged it out (`part`).
  */
 async function send(tabId: number, form: Form, part: { area: Area; view: ViewSize } | null = null) {
-  if (sending) return fail('busy', 'A clip is still on its way to WikiStow.');
+  // The clip on its way stays the one shown, which the popup waits on.
+  if (sending) return flashBusy();
   if (form.mode === 'area' && !part) return choose(tabId, form);
   sending = true;
   setClip({ phase: 'sending' });
@@ -364,10 +449,16 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
     } else {
       try {
         captured = await capture(tabId, form.mode);
-      } catch {
-        // A link needs no script: the browser's own pages can still be linked.
+      } catch (error) {
+        // A link needs no script: the browser's own pages, or one too busy
+        // to answer, can still be linked.
         if (form.mode !== 'link') {
-          return fail('capture', 'WikiStow can’t clip this page. Try Link.');
+          return fail(
+            'capture',
+            error instanceof StillLoading
+              ? 'This page is still loading. Try again once it has, or try Link.'
+              : 'WikiStow can’t clip this page. Try Link.',
+          );
         }
         captured = NOTHING;
       }
@@ -398,13 +489,16 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
     if (!fits(message)) return fail('too-long', TOO_LONG);
 
     const at = await find(await pin());
-    found = at;
-    push({ push: 'view', view: viewOf(at) });
+    sendingTo = at?.host ?? null;
+    push({ push: 'view', view: viewOf(learn(at)) });
     if (!at) return fail('missing', 'Clipping needs the WikiStow desktop app on this computer.');
     if (!speaks(at.status)) return fail('version', 'Update WikiStow or the extension to clip.');
     if (at.status.app === 'signed-out') return fail('signed-out', 'Sign in to WikiStow first.');
     const opening = at.status.app === 'closed' ? envelope({ type: 'open' }) : null;
-    if (opening) setClip({ phase: 'waiting', waits: 'starting' });
+    if (opening) {
+      openSent = { host: at.host, at: Date.now() };
+      setClip({ phase: 'waiting', waits: 'starting' });
+    }
 
     let accepted = false;
     try {
@@ -414,8 +508,9 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
         (answer, conversation) => {
           if (opening && answer.id === opening.id) {
             if (answer.type === 'status') {
-              found = { host: at.host, status: answer };
-              push({ push: 'view', view: viewOf(found) });
+              push({ push: 'view', view: viewOf(learn({ host: at.host, status: answer })) });
+            } else if (answer.type === 'error') {
+              openSent = null;
             }
             return false;
           }
@@ -436,6 +531,7 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
               return true;
             case 'status':
               // The helper answered for a closed app: it didn't open in time.
+              openSent = null;
               fail('closed', 'WikiStow didn’t open. Open it, then try again.');
               return true;
             default:
@@ -445,7 +541,10 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
         { ms: SEND_MS },
       );
     } catch (error) {
-      if (error instanceof TimedOut && accepted) return setClip({ phase: 'still-waiting' });
+      if (error instanceof TimedOut && accepted) {
+        const waits = current?.phase === 'waiting' ? current.waits : null;
+        return setClip({ phase: 'still-waiting', waits });
+      }
       if (error instanceof HostGone && !error.answered) {
         return fail('missing', 'Clipping needs the WikiStow desktop app on this computer.');
       }
@@ -455,6 +554,7 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
     fail('failed', 'WikiStow couldn’t save the clip.');
   } finally {
     sending = false;
+    sendingTo = null;
   }
 }
 
@@ -509,7 +609,9 @@ api.runtime.onConnect.addListener((port) => {
     );
   });
   void (async () => {
-    current ??= (await session()).clip ?? null;
+    // Read first: a clip started meanwhile, as the shortcut can as the popup opens, stands.
+    const kept = (await session()).clip ?? null;
+    current ??= kept;
     // An overlay that went with its page, or gave up, leaves nothing to wait for.
     if (current?.phase === 'choosing') {
       const was = await choosing();
@@ -525,23 +627,33 @@ api.runtime.onConnect.addListener((port) => {
 });
 
 /**
- * Send without the popup, from the context menu or the shortcut, to the
- * folder the last clip went to. Before there is one, open the popup:
- * Firefox opens it only while handling the person's click or key, so it's
- * asked at once when no folder is known yet.
+ * Firefox opens the popup only while it handles the person's click or key,
+ * before anything is awaited. Chrome opens it after a wait too.
  */
-async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'selection' | 'either') {
-  if (lastFolder === null) return void api.action.openPopup().catch(() => {});
+const OPENS_POPUP_AT_ONCE = browserName() === 'firefox';
+
+/**
+ * Send without the popup, from the context menu or the shortcut, to the
+ * folder the last clip went to. Before there is one, open the popup. On
+ * Firefox it's asked at once when the folder isn't known yet: when there's
+ * none, or when the background has just woken for this and not yet read it
+ * from `storage.session`. With one read then, the clip goes too, and the
+ * popup shows it going.
+ */
+async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'either') {
+  const opened =
+    lastFolder === null || (lastFolder === undefined && OPENS_POPUP_AT_ONCE)
+      ? api.action.openPopup()
+      : null;
+  opened?.catch(() => {});
+  const noFolder = () =>
+    fail('no-folder', 'Choose a folder here first. Then the menu and the shortcut send to it.');
+  if (lastFolder === null) return opened!.catch(noFolder);
   const tabId = tab?.id ?? (await api.tabs.query({ active: true, currentWindow: true }))[0]?.id;
   lastFolder ??= (await session()).lastFolder ?? null;
-  if (!lastFolder) {
-    await api.action.openPopup().catch(() => {
-      fail('no-folder', 'Choose a folder here first. Then the menu and the shortcut send to it.');
-    });
-    return;
-  }
+  if (!lastFolder) return (opened ?? api.action.openPopup()).catch(noFolder);
   if (tabId === undefined) return;
-  let chosen: TextMode = mode === 'selection' ? 'selection' : 'link';
+  let chosen: TextMode = 'link';
   if (mode === 'either') chosen = (await probe(tabId)).selection?.trim() ? 'selection' : 'link';
   await send(tabId, { mode: chosen, title: '', note: '', tags: [], folder: lastFolder });
 }
@@ -550,7 +662,9 @@ const MENU = { link: 'send-link', selection: 'send-selection' } as const;
 
 function menuClicked(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) {
   if (info.menuItemId === MENU.link) return quick(tab, 'link');
-  if (info.menuItemId === MENU.selection) return quick(tab, 'selection');
+  // The browser offers it for text selected in a text box too, which
+  // isn't a selection of the page to capture: then the link goes.
+  if (info.menuItemId === MENU.selection) return quick(tab, 'either');
 }
 
 function commanded(command: string, tab?: chrome.tabs.Tab) {
@@ -576,10 +690,9 @@ api.runtime.onInstalled.addListener(() => {
 });
 menus?.onClicked.addListener((info, tab) => void menuClicked(info, tab));
 // Firefox wakes its background to show the context menu, before the click,
-// so the last folder is read by then, and a click with none can open the
-// popup at once, as Firefox asks. Chrome has no `onShown`, and opens the
-// popup after a wait too. A shortcut has no such warning: pressed while
-// Firefox's background sleeps, with no folder yet, it shows `!` instead.
+// so the last folder is read by then, and a click sends without the popup.
+// A shortcut has no such warning: pressed while Firefox's background
+// sleeps, it opens the popup, as `quick` says. Chrome has no `onShown`.
 menus?.onShown?.addListener(() => void readLastFolder());
 commands?.onCommand.addListener((command, tab) => void commanded(command, tab));
 
