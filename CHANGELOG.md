@@ -4,6 +4,27 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.27.0-beta.2 - 2026-11-16
+
+### Highlights
+
+#### Fixes
+
+- Browser clipping works in Firefox on Ubuntu, which installs it as a snap.
+- The web clipper’s send shortcut is now Alt+Shift+Y, since Firefox on Windows opens its History menu on Alt+Shift+S.
+- Removing WikiStow with Homebrew no longer asks for an administrator password.
+
+### Changes
+
+#### Desktop
+
+- The desktop app writes Firefox's host manifest when only the Ubuntu snap's profile folder, `~/snap/firefox/common/.mozilla`, exists: the snap never makes `~/.mozilla`, but its portal reads `~/.mozilla/native-messaging-hosts`. ADR 0017 records what the hand checks found on Ubuntu 24.04 and 26.04. (#626)
+- The web clipper extension, not yet in the stores: the send shortcut is Alt+Shift+Y, since Firefox on Windows takes Alt+Shift+S for its History menu. (#628)
+
+#### Releases and packaging
+
+- The Homebrew cask deletes the web clipper's manifests as the person, without `sudo`, so `brew uninstall --cask wikistow` asks for no password and works without a terminal. (#629)
+
 ## 0.27.0-beta.1 - 2026-11-16
 
 ### Highlights
