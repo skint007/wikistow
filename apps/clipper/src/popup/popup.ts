@@ -404,6 +404,8 @@ async function start() {
 /** Fill in the form for the tab, and what was typed for it, save what the person changed meanwhile. */
 function probeCame(next: Probe, kept: Draft | undefined) {
   probed = next;
+  // A clip already sent from the form leaves it as it was sent.
+  if (saving) return render();
   const draft = kept?.url === next.url ? kept : null;
   const fill = (input: HTMLInputElement | HTMLTextAreaElement, value: string) => {
     if (!touched.has(input)) input.value = value;

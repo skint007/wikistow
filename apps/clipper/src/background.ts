@@ -49,6 +49,8 @@ const WAIT_MS = 10 * 60_000;
 const SEND_MS = 2 * 60_000;
 /** How long the helper waits for an app it opens to listen (clip-host's `appWait`). */
 const START_MS = 60_000;
+/** How long a capture other than a link waits for the tab's page to load. */
+const LOAD_MS = 30_000;
 /** How long the toolbar button shows its check after a save. */
 const CHECK_MS = 4_000;
 /** How long the person has to drag out an area, as the overlay waits. */
@@ -61,6 +63,8 @@ let openSent: { host: HostKey; at: number } | null = null;
 /** How the last clip went, as `storage.session` keeps it too. */
 let current: ClipView | null = null;
 let sending = false;
+/** The app the clip being sent goes to, once found. */
+let sendingTo: HostKey | null = null;
 const popups = new Set<chrome.runtime.Port>();
 /** The folder the last clip went to, once read: known without waiting, for Firefox's `openPopup`. */
 let lastFolder: Folder | null | undefined;
@@ -107,7 +111,7 @@ function learn(at: Found | null): Found | null {
     }
   }
   found = at;
-  if (sending && current?.phase === 'waiting' && at) {
+  if (at && at.host === sendingTo && current?.phase === 'waiting') {
     const { app } = at.status;
     const waits = app === 'locked' ? 'unlock' : app === 'starting' ? 'starting' : null;
     if (waits && waits !== current.waits) setClip({ phase: 'waiting', waits });
@@ -169,46 +173,66 @@ async function folders(query: string): Promise<Calls['folders']['result']> {
  * takes (`selectedText` in capture.ts): Chromium's `toString` gives the
  * text selected in a text box, though no range of the page is selected.
  * It runs at once, not once the page has loaded, as a slow page may take a
- * while to.
+ * while to. The title is the page's own where a script runs: a tab's is its
+ * address until the page's title has come.
  */
 async function probe(tabId: number): Promise<Calls['probe']['result']> {
   const tab = await api.tabs.get(tabId);
   let selection: string | null;
+  let title = tab.title ?? '';
   try {
     const [ran] = await api.scripting.executeScript({
       target: { tabId },
       injectImmediately: true,
       func: () => {
         const chosen = getSelection();
-        return chosen && !chosen.isCollapsed ? chosen.toString() : '';
+        return {
+          selection: chosen && !chosen.isCollapsed ? chosen.toString() : '',
+          title: document.title,
+        };
       },
     });
-    selection = typeof ran?.result === 'string' ? ran.result : '';
+    const got = ran?.result as { selection?: unknown; title?: unknown } | undefined;
+    selection = typeof got?.selection === 'string' ? got.selection : '';
+    title = typeof got?.title === 'string' ? got.title : '';
   } catch {
     selection = null;
   }
-  return { url: tab.url ?? '', title: tab.title ?? '', selection };
+  return { url: tab.url ?? '', title, selection };
 }
 
+/** A page that hasn't loaded in `LOAD_MS`, as one that never finishes doesn't. */
+class StillLoading extends Error {}
+
 /**
- * Capture the tab in `mode`, once its page has loaded; a link, which needs
- * only its address and selection, at once.
+ * Capture the tab in `mode`, once its page has loaded, waiting `LOAD_MS`
+ * at most; a link, which needs only its address and selection, at once.
  */
 async function capture(tabId: number, mode: TextMode): Promise<Captured> {
   const injectImmediately = mode === 'link';
-  await api.scripting.executeScript({
-    target: { tabId },
-    injectImmediately,
-    files: ['capture.js'],
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const loading = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new StillLoading('The page is still loading')), LOAD_MS);
   });
-  const [ran] = await api.scripting.executeScript({
-    target: { tabId },
-    injectImmediately,
-    func: (mode: TextMode) => globalThis.wikistowCapture!(mode),
-    args: [mode],
-  });
-  if (!ran?.result) throw new Error('Nothing captured');
-  return ran.result as Captured;
+  try {
+    await Promise.race([
+      api.scripting.executeScript({ target: { tabId }, injectImmediately, files: ['capture.js'] }),
+      loading,
+    ]);
+    const [ran] = await Promise.race([
+      api.scripting.executeScript({
+        target: { tabId },
+        injectImmediately,
+        func: (mode: TextMode) => globalThis.wikistowCapture!(mode),
+        args: [mode],
+      }),
+      loading,
+    ]);
+    if (!ran?.result) throw new Error('Nothing captured');
+    return ran.result as Captured;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function show(spaceId: string, pageId: string): Promise<Calls['show']['result']> {
@@ -425,7 +449,10 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
     } else {
       try {
         captured = await capture(tabId, form.mode);
-      } catch {
+      } catch (error) {
+        if (error instanceof StillLoading) {
+          return fail('capture', 'This page is still loading. Try again once it has, or try Link.');
+        }
         // A link needs no script: the browser's own pages can still be linked.
         if (form.mode !== 'link') {
           return fail('capture', 'WikiStow can’t clip this page. Try Link.');
@@ -459,6 +486,7 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
     if (!fits(message)) return fail('too-long', TOO_LONG);
 
     const at = await find(await pin());
+    sendingTo = at?.host ?? null;
     push({ push: 'view', view: viewOf(learn(at)) });
     if (!at) return fail('missing', 'Clipping needs the WikiStow desktop app on this computer.');
     if (!speaks(at.status)) return fail('version', 'Update WikiStow or the extension to clip.');
@@ -523,6 +551,7 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
     fail('failed', 'WikiStow couldn’t save the clip.');
   } finally {
     sending = false;
+    sendingTo = null;
   }
 }
 
