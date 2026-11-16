@@ -13,7 +13,7 @@ import {
   type Worker,
 } from '@playwright/test';
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -80,12 +80,15 @@ const SAVED = {
 
 let context: BrowserContext | null = null;
 let site: Server | null = null;
+/** The answers for `/slow`, a page still loading until the test ends them. */
+let slow: ServerResponse[] = [];
 test.afterEach(async () => {
   await context?.close();
   site?.closeAllConnections();
   site?.close();
   context = null;
   site = null;
+  slow = [];
 });
 
 /** The site to clip from, on this computer. */
@@ -96,6 +99,12 @@ async function serve() {
       return response.end(PNG);
     }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    if (request.url === '/slow') {
+      slow.push(response);
+      return response.write(
+        `<!doctype html><html><head><title>Slow page</title></head><body><p>${WORDS.repeat(20)}</p>`,
+      );
+    }
     response.end(request.url === '/shot' ? SHOT : request.url === '/form' ? FORM : ARTICLE);
   });
   await new Promise<void>((resolve) => site!.listen(0, '127.0.0.1', resolve));
@@ -361,6 +370,30 @@ test('text selected in a text box isn’t offered as the selection, and the shor
     { mode: 'link', text: '' },
     { mode: 'link', text: '', url: `${origin}/form` },
   ]);
+});
+
+test('the popup works while the tab’s page is still loading', async () => {
+  const { worker, got } = await launch({ stable: ready });
+  const origin = await serve();
+  const page = await context!.newPage();
+  await page.goto(`${origin}/slow`, { waitUntil: 'commit' });
+  await expect.poll(() => page.title()).toBe('Slow page');
+  const tabId = await worker.evaluate(
+    async (url) => (await chrome.tabs.query({})).find((tab) => tab.url === url)?.id,
+    `${origin}/slow`,
+  );
+  const popup = await reopen(tabId!);
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await expect(popup.getByRole('radio', { name: 'Article' })).toBeChecked();
+  await expect(popup.getByLabel('Title')).toHaveValue('Slow page');
+  await popup.getByRole('radio', { name: 'Link' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await got('stable', 'clip')).toMatchObject([
+    { mode: 'link', url: `${origin}/slow`, title: 'Slow page' },
+  ]);
+  expect(await page.evaluate(() => document.readyState)).toBe('loading');
+  for (const response of slow) response.end('</body></html>');
 });
 
 test('a closed app opens from the popup, and a locked one gets the clip once unlocked', async () => {

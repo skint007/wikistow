@@ -139,6 +139,8 @@ async function folders(query: string): Promise<Calls['folders']['result']> {
  * may run, as on the browser's own pages. The selection is what capture
  * takes (`selectedText` in capture.ts): Chromium's `toString` gives the
  * text selected in a text box, though no range of the page is selected.
+ * It runs at once, not once the page has loaded, as a slow page may take a
+ * while to.
  */
 async function probe(tabId: number): Promise<Calls['probe']['result']> {
   const tab = await api.tabs.get(tabId);
@@ -146,6 +148,7 @@ async function probe(tabId: number): Promise<Calls['probe']['result']> {
   try {
     const [ran] = await api.scripting.executeScript({
       target: { tabId },
+      injectImmediately: true,
       func: () => {
         const chosen = getSelection();
         return chosen && !chosen.isCollapsed ? chosen.toString() : '';
@@ -158,10 +161,20 @@ async function probe(tabId: number): Promise<Calls['probe']['result']> {
   return { url: tab.url ?? '', title: tab.title ?? '', selection };
 }
 
+/**
+ * Capture the tab in `mode`, once its page has loaded; a link, which needs
+ * only its address and selection, at once.
+ */
 async function capture(tabId: number, mode: TextMode): Promise<Captured> {
-  await api.scripting.executeScript({ target: { tabId }, files: ['capture.js'] });
+  const injectImmediately = mode === 'link';
+  await api.scripting.executeScript({
+    target: { tabId },
+    injectImmediately,
+    files: ['capture.js'],
+  });
   const [ran] = await api.scripting.executeScript({
     target: { tabId },
+    injectImmediately,
     func: (mode: TextMode) => globalThis.wikistowCapture!(mode),
     args: [mode],
   });
