@@ -34,8 +34,17 @@ export function chromeId(key: string): string {
     .replace(/[0-9a-f]/g, (digit) => String.fromCharCode(97 + Number.parseInt(digit, 16)));
 }
 
+/** CLIPPER_FIREFOX_ID, or the placeholder; refused unless it's an add-on ID as Firefox takes one, an email-like name or a GUID. */
+export function firefoxId(env: Record<string, string | undefined>): string {
+  const id = env['CLIPPER_FIREFOX_ID'] || FIREFOX_PLACEHOLDER;
+  if (!/^(?:[\w.+-]+@[\w.-]+|\{[0-9a-fA-F-]{36}\})$/.test(id)) {
+    throw new Error(`CLIPPER_FIREFOX_ID isn't an add-on ID: ${JSON.stringify(id)}`);
+  }
+  return id;
+}
+
 export function builds(version: string, env: Record<string, string | undefined>): Build[] {
-  const firefoxId = env['CLIPPER_FIREFOX_ID'] || FIREFOX_PLACEHOLDER;
+  const firefox = firefoxId(env);
   // The dashboard shows the key with PEM's lines; the manifest takes its base64 alone.
   const chromeKey = (env['CLIPPER_CHROME_KEY'] ?? '')
     .replace(/-+(BEGIN|END) PUBLIC KEY-+/g, '')
@@ -45,7 +54,7 @@ export function builds(version: string, env: Record<string, string | undefined>)
     {
       name: 'firefox',
       target: 'firefox',
-      manifest: manifest('firefox', { version, firefoxId }),
+      manifest: manifest('firefox', { version, firefoxId: firefox }),
       zip: true,
     },
     {

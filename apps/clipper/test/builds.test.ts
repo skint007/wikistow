@@ -37,6 +37,12 @@ describe('the builds', () => {
     expect(chromeId(TEST_KEY)).toBe(TEST_ID);
   });
 
+  test('a Firefox ID that isn’t an add-on ID is refused', () => {
+    for (const bad of ['a b@c.test', "a'@b.test", 'plain']) {
+      expect(() => builds('1.2.3', { CLIPPER_FIREFOX_ID: bad })).toThrow("isn't an add-on ID");
+    }
+  });
+
   test('a key that isn’t a public key is refused', () => {
     expect(() => builds('1.2.3', { CLIPPER_CHROME_KEY: 'bm90IGEga2V5' })).toThrow();
   });

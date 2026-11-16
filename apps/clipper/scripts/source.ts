@@ -14,7 +14,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FIREFOX_PLACEHOLDER } from './builds.ts';
+import { firefoxId as idFrom } from './builds.ts';
 import { files, writeZip } from './zip.ts';
 
 const clipper = fileURLToPath(new URL('..', import.meta.url));
@@ -54,7 +54,7 @@ function buildCommands(firefoxId: string) {
   return [
     'pnpm install --frozen-lockfile',
     './node_modules/.bin/vp -C apps/clipper pack',
-    `CLIPPER_FIREFOX_ID=${firefoxId} node apps/clipper/scripts/assemble.ts`,
+    `CLIPPER_FIREFOX_ID='${firefoxId}' node apps/clipper/scripts/assemble.ts`,
   ];
 }
 
@@ -102,7 +102,7 @@ The add-on's files are then in \`apps/clipper/dist/firefox\`, byte for byte the 
 const { version, devDependencies } = JSON.parse(
   await readFile(join(clipper, 'package.json'), 'utf8'),
 ) as { version: string; devDependencies: Record<string, string> };
-const firefoxId = process.env['CLIPPER_FIREFOX_ID'] || FIREFOX_PLACEHOLDER;
+const firefoxId = idFrom(process.env);
 const root = JSON.parse(await readFile(join(workspace, 'package.json'), 'utf8')) as {
   packageManager: string;
 };

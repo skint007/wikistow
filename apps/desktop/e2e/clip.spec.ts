@@ -317,7 +317,7 @@ test('an extension reaches the app through the helper', async ({
   await desktop.window.getByRole('link', { name: 'Settings' }).first().click();
   const row = desktop.window.getByRole('heading', { name: 'Browser clipping' });
   await expect(row).toHaveAccessibleDescription(
-    'The WikiStow extension in Chromium can save pages here as drafts.',
+    'The WikiStow extension in Chromium and Firefox can save pages here as drafts.',
   );
   // This session's clips, newest first, each a link to its draft.
   await expect(
