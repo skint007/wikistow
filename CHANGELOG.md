@@ -4,16 +4,36 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.27.0-beta.1 - 2026-11-16
+
+### Highlights
+
+#### Fixes
+
+- Browser clipping no longer says WikiStow is starting while a diagram or a plugin loads on the page you have open.
+
+#### Maintenance
+
+- The desktop app is ready for the web clipper from the Chrome Web Store and Mozilla Add-ons, which aren't listed yet.
+
 ### Changes
 
 #### Desktop
 
 - The desktop app trusts the web clipper's Firefox add-on, `web-clipper@wikistow.skint007.github.io`, so Firefox can start its helper once the add-on is on Mozilla Add-ons. (#619)
+- The desktop app trusts the web clipper from the Chrome Web Store, `chrome-extension://gldgjbchfcmlbbmjbgmamconolliokpj/`, for Chrome, Edge and Brave. CI's builds carry `chrome-keyed`, an unpacked copy with the store's ID, for checks by hand. (#623)
+- The app tells the web clipper it is starting only while its own page loads, not while a plugin's or a diagram's frame does, so a clip no longer waits, or asks where to go, at such a moment. (#618)
+- The web clipper extension, not yet in the stores: with **Whichever is open**, a ready app that speaks the extension's protocol wins over an older one; text selected in a text box isn't offered as **Selection**; the popup shows at once on a page still loading, offering **Link** until the page answers; a quick send while a clip waits only flashes `!`; in Firefox, Alt+Shift+S opens the popup when the background has forgotten the folder; the popup keeps saying **Opening WikiStow…** while the app starts, and a waiting clip's wording follows the app's state. (#621)
 
 #### Releases and packaging
 
 - Each release carries the web clipper's source zip for Mozilla Add-ons, which CI checks builds the Firefox add-on byte for byte. `CLIPPER_CHROME_KEY` builds a Chrome copy with the store's ID, for checks by hand. The store listings' text and pictures are in `docs/web-clipper-store-listing.md`. (#619)
 - A stable release that raises the web clipper's version sends it to the Chrome Web Store and submits it to Mozilla Add-ons, once the `stores` environment holds their keys; until then it warns and sends nothing. (#620)
+
+#### Development
+
+- The project board holds where work stands, including what waits on Scott: `node scripts/board.ts` files, starts, asks and drops cards, and `board check` finds what's out of step. (#605, #611)
+- ADR 0017 records the store decisions and how the Firefox shortcut acts, and ADR 0015 and the protocol accept that a live fold may bring back text the session deleted (#542). (#616, #617, #622)
 
 ## 0.26.0 - 2026-11-15
 
