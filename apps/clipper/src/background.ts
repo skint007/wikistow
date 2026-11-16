@@ -450,12 +450,15 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
       try {
         captured = await capture(tabId, form.mode);
       } catch (error) {
-        if (error instanceof StillLoading) {
-          return fail('capture', 'This page is still loading. Try again once it has, or try Link.');
-        }
-        // A link needs no script: the browser's own pages can still be linked.
+        // A link needs no script: the browser's own pages, or one too busy
+        // to answer, can still be linked.
         if (form.mode !== 'link') {
-          return fail('capture', 'WikiStow can’t clip this page. Try Link.');
+          return fail(
+            'capture',
+            error instanceof StillLoading
+              ? 'This page is still loading. Try again once it has, or try Link.'
+              : 'WikiStow can’t clip this page. Try Link.',
+          );
         }
         captured = NOTHING;
       }
@@ -606,7 +609,9 @@ api.runtime.onConnect.addListener((port) => {
     );
   });
   void (async () => {
-    current ??= (await session()).clip ?? null;
+    // Read first: a clip started meanwhile, as the shortcut can as the popup opens, stands.
+    const kept = (await session()).clip ?? null;
+    current ??= kept;
     // An overlay that went with its page, or gave up, leaves nothing to wait for.
     if (current?.phase === 'choosing') {
       const was = await choosing();
