@@ -26,14 +26,21 @@ cask "wikistow" do
 
   # The web clipper's host manifests, which the app writes at each launch
   # for the browsers it finds (docs/desktop.md). They name the app's helper,
-  # so they go with it; they aren't the person's data.
-  uninstall delete: [
-    "~/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/io.github.skint007.wikistow.json",
-    "~/Library/Application Support/Chromium/NativeMessagingHosts/io.github.skint007.wikistow.json",
-    "~/Library/Application Support/Google/Chrome/NativeMessagingHosts/io.github.skint007.wikistow.json",
-    "~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/io.github.skint007.wikistow.json",
-    "~/Library/Application Support/Mozilla/NativeMessagingHosts/io.github.skint007.wikistow.json",
-  ]
+  # so they go with it; they aren't the person's data. Deleted in Ruby, as
+  # the person: `uninstall delete:` always runs `sudo rm`, which asks for an
+  # admin password even for files in the home folder, and fails without a
+  # terminal.
+  uninstall_postflight do
+    [
+      "BraveSoftware/Brave-Browser/NativeMessagingHosts",
+      "Chromium/NativeMessagingHosts",
+      "Google/Chrome/NativeMessagingHosts",
+      "Microsoft Edge/NativeMessagingHosts",
+      "Mozilla/NativeMessagingHosts",
+    ].each do |folder|
+      FileUtils.rm_f File.expand_path("~/Library/Application Support/#{folder}/io.github.skint007.wikistow.json")
+    end
+  end
 
   zap trash: [
     "~/Library/Application Support/WikiStow",
