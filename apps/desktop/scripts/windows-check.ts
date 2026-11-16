@@ -36,8 +36,8 @@ const shortcut = join(
 const LINKS = 'HKCU\\Software\\Classes\\wikistow\\shell\\open\\command';
 const UNINSTALL = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WikiStow';
 const helper = join(folder, 'wikistow-clip-host.exe');
-// No extension is published yet, so the app's launch adds one, which only
-// Firefox's manifest names.
+// The app's launch adds a Firefox ID of its own, which Firefox's manifest
+// names beside the published one.
 const EXTENSION = 'clip-check@wikistow.invalid';
 const FIREFOX_HOST = 'HKCU\\Software\\Mozilla\\NativeMessagingHosts\\io.github.skint007.wikistow';
 const manifests = join(env('APPDATA'), 'WikiStow Desktop', 'native-messaging');

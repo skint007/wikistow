@@ -150,8 +150,12 @@ test('an extension reaches the app through the helper', async ({
     type: 'stdio',
     allowed_origins: [ORIGIN],
   });
-  // No Firefox extension is published, or added for this launch.
-  expect(existsSync(firefoxManifest)).toBe(false);
+  // Firefox's names only the published extension, as none is added for it.
+  expect(JSON.parse(await readFile(firefoxManifest, 'utf8'))).toMatchObject({
+    name: HOST,
+    path: HELPER,
+    allowed_extensions: ['web-clipper@wikistow.skint007.github.io'],
+  });
   expect((await stat(hostFile)).mode & 0o777).toBe(0o600);
 
   browser = await chromium.launchPersistentContext(join(config, 'chromium'), {

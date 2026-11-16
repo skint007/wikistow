@@ -114,7 +114,7 @@ test('the Mac app answers its clipper’s helper', async () => {
   test.skip(!MAC_APP || !process.env['CI'], 'on CI’s macOS job, which has no data to keep');
   const helper = `${MAC_APP}/Contents/MacOS/wikistow-clip-host`;
   // As Firefox starts it: the manifest's path, then the extension's ID,
-  // which this launch adds, as no extension is published yet.
+  // one this launch adds beside the published one.
   const id = 'clip-check@wikistow.invalid';
   const firefox = ['manifest.json', id];
   const app = await _electron.launch({
