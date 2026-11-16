@@ -148,7 +148,8 @@ test('an extension reaches the app through the helper', async ({
     description: 'WikiStow web clipper',
     path: HELPER,
     type: 'stdio',
-    allowed_origins: [ORIGIN],
+    // The published extension's, then the one this launch adds.
+    allowed_origins: ['chrome-extension://gldgjbchfcmlbbmjbgmamconolliokpj/', ORIGIN],
   });
   // Firefox's names only the published extension, as none is added for it.
   // The app writes it after Chromium's.

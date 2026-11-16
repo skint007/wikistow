@@ -136,6 +136,9 @@ jobs:
           # Firefox's add-on ID for the extension (ADR 0017, step 7). Unset,
           # its builds name a placeholder no app trusts.
           CLIPPER_FIREFOX_ID: ${{ vars.CLIPPER_FIREFOX_ID }}
+          # The Chrome Web Store's public key, for dist/chrome-keyed: an
+          # unpacked copy with the store's ID, for checks by hand. Never zipped.
+          CLIPPER_CHROME_KEY: ${{ vars.CLIPPER_CHROME_KEY }}
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then export WIKISTOW_RELEASE="${GITHUB_REF_NAME#v}"; fi
           cp packages/ui/src/routeTree.gen.ts "$RUNNER_TEMP/routeTree.committed.ts"

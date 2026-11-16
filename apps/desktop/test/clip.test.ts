@@ -321,8 +321,11 @@ describe('host manifests', () => {
     });
   });
 
-  it('name the published extensions: Firefox’s ID, and Chrome’s once its store gives it', () => {
+  it('name the published extensions: Firefox’s ID and Chrome’s', () => {
     expect(PUBLISHED_EXTENSIONS.firefox).toEqual(['web-clipper@wikistow.skint007.github.io']);
+    expect(PUBLISHED_EXTENSIONS.chromium).toEqual([
+      'chrome-extension://gldgjbchfcmlbbmjbgmamconolliokpj/',
+    ]);
     // Each is an exact origin or ID, as a launch's extension must be.
     const none = { chromium: [], firefox: [] };
     for (const id of [...PUBLISHED_EXTENSIONS.chromium, ...PUBLISHED_EXTENSIONS.firefox]) {
@@ -544,7 +547,10 @@ describe.runIf(process.platform === 'linux')('browser clipping', () => {
       recent: [],
     });
     expect(JSON.parse(await readFile(hostFile, 'utf8')).socket).toBe(socket);
-    expect(JSON.parse(await readFile(manifest, 'utf8')).allowed_origins).toEqual([CALLER]);
+    expect(JSON.parse(await readFile(manifest, 'utf8')).allowed_origins).toEqual([
+      ...PUBLISHED_EXTENSIONS.chromium,
+      CALLER,
+    ]);
     const written = JSON.parse(await readFile(hostFile, 'utf8')) as { token: string };
     const client = await helper(socket);
     await prove(client, Buffer.from(written.token, 'base64'));

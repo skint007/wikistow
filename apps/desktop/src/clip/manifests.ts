@@ -21,14 +21,13 @@ export const HOST_NAMES = {
  * The published extensions (ADR 0017, step 7). Firefox's ID was chosen in
  * the ADR and is claimed by the first upload to Mozilla Add-ons, which
  * comes before any release that names it: an ID nobody holds belongs to
- * whoever uploads it first. The Chrome Web Store gives Chrome's ID at the
- * first upload; it goes in `chromium` as `chrome-extension://<id>/`. Until
- * then no Chromium browser gets a manifest unless a launch adds an
- * extension (`--clip-extension`). Edge and Brave install from the Chrome
- * Web Store too.
+ * whoever uploads it first. The Chrome Web Store gave Chrome's ID at the
+ * first upload, a draft, on 2026-11-16; its public key, `CLIPPER_CHROME_KEY`,
+ * gives an unpacked build the same ID. Edge and Brave install from the
+ * Chrome Web Store too.
  */
 export const PUBLISHED_EXTENSIONS: Allowed = {
-  chromium: [],
+  chromium: ['chrome-extension://gldgjbchfcmlbbmjbgmamconolliokpj/'],
   firefox: ['web-clipper@wikistow.skint007.github.io'],
 };
 
