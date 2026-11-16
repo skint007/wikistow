@@ -193,7 +193,17 @@ Every desktop package carries `wikistow-clip-host`, the program the browser star
 
 ### The browser extension
 
-The web clipper's extension is `apps/clipper` ([its README](../apps/clipper/README.md), [privacy](web-clipper-privacy.md)). CI's `build` job builds it for Chrome and Firefox, and its tests' build, into `apps/clipper/dist`, and each release carries both zips. It has versions of its own, in `apps/clipper/package.json`, which `scripts/version.ts` leaves alone: the stores take numbers only, and update it apart from the app, so raise it when the extension changes, never as a beta. The Firefox build's add-on ID comes from the repository variable `CLIPPER_FIREFOX_ID` (**Settings → Secrets and variables → Actions → Variables**); unset, it names a placeholder no app trusts. Nothing sends the zips to the Chrome Web Store or Mozilla Add-ons yet: that waits on the stores' accounts (ADR 0017, step 7).
+The web clipper's extension is `apps/clipper` ([its README](../apps/clipper/README.md), [privacy](web-clipper-privacy.md), [store listings](web-clipper-store-listing.md)). CI's `build` job builds it for Chrome and Firefox, and its tests' build, into `apps/clipper/dist`, with the source zip Mozilla Add-ons takes beside the Firefox build. Each release carries the three zips:
+
+| File | What |
+| --- | --- |
+| `wikistow-clipper-<version>-chrome.zip` | What the Chrome Web Store takes |
+| `wikistow-clipper-<version>-firefox.zip` | What Mozilla Add-ons takes |
+| `wikistow-clipper-<version>-source.zip` | The Firefox build's source, for Mozilla's reviewers: the clipper, the workspace's root files and lockfile, and a README that says how to build it |
+
+CI's `clipper` job unpacks the source zip in a folder of its own, runs its README's commands, and checks that they give `dist/firefox` byte for byte, as Mozilla's reviewers compare it (`apps/clipper/scripts/check-source.ts`).
+
+The extension has versions of its own, in `apps/clipper/package.json`, which `scripts/version.ts` leaves alone: the stores take numbers only, and update it apart from the app, so raise it when the extension changes, never as a beta. The Firefox build's add-on ID comes from the repository variable `CLIPPER_FIREFOX_ID` (**Settings → Secrets and variables → Actions → Variables**), `web-clipper@wikistow.skint007.github.io`; unset, it names a placeholder no app trusts. Nothing sends the zips to the Chrome Web Store or Mozilla Add-ons yet (ADR 0017, step 7).
 
 ## The CLI downloads
 

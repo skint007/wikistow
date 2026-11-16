@@ -133,8 +133,8 @@ jobs:
           key: meaning-${{ hashFiles('packages/ui/src/meaning/model.ts', 'pnpm-lock.yaml') }}
           restore-keys: meaning-
       - env:
-          # Firefox's add-on ID for the extension, once Mozilla Add-ons holds
-          # it (ADR 0017, step 7). Unset, its builds name a placeholder.
+          # Firefox's add-on ID for the extension (ADR 0017, step 7). Unset,
+          # its builds name a placeholder no app trusts.
           CLIPPER_FIREFOX_ID: ${{ vars.CLIPPER_FIREFOX_ID }}
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then export WIKISTOW_RELEASE="${GITHUB_REF_NAME#v}"; fi
@@ -144,9 +144,11 @@ jobs:
           ./node_modules/.bin/vp -C apps/web build
           ./node_modules/.bin/vp -C apps/desktop pack
           # The browser extension: its Chrome and Firefox builds, zipped as
-          # the stores take them, and its tests' build (apps/clipper).
+          # the stores take them, its tests' build, and the source zip
+          # Mozilla Add-ons takes with the Firefox one (apps/clipper).
           ./node_modules/.bin/vp -C apps/clipper pack
           node apps/clipper/scripts/assemble.ts
+          node apps/clipper/scripts/source.ts
           # What the desktop release ships: the bundles and pages in one app.asar,
           # and the helper beside it.
           node apps/desktop/scripts/asar.ts
@@ -195,8 +197,8 @@ jobs:
       - run: go test -count=1 -timeout 3m $([ "$RUNNER_OS" = Linux ] && echo -race) ./...
 
   # The browser extension (apps/clipper): Mozilla's linter on its Firefox
-  # build, as Mozilla Add-ons runs it, and its tests in Chromium against a
-  # fake native host. The desktop tests clip with it into the real app.
+  # build, as Mozilla Add-ons runs it, the source zip rebuilt, and its tests
+  # in Chromium against a fake native host. The desktop tests clip with it into the real app.
   clipper:
     needs: build
     runs-on: ubuntu-24.04
@@ -211,6 +213,10 @@ jobs:
           name: build
           path: apps
       - run: ./node_modules/.bin/web-ext lint --source-dir dist/firefox --self-hosted
+        working-directory: apps/clipper
+      # As Mozilla's reviewers do: the source zip, unpacked on its own and
+      # built as its README says, gives the Firefox build byte for byte.
+      - run: node scripts/check-source.ts
         working-directory: apps/clipper
       - run: ./node_modules/.bin/playwright test
         working-directory: apps/clipper
