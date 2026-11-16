@@ -606,7 +606,7 @@ const OPENS_POPUP_AT_ONCE = browserName() === 'firefox';
  * from `storage.session`. With one read then, the clip goes too, and the
  * popup shows it going.
  */
-async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'selection' | 'either') {
+async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'either') {
   const opened =
     lastFolder === null || (lastFolder === undefined && OPENS_POPUP_AT_ONCE)
       ? api.action.openPopup()
@@ -619,7 +619,7 @@ async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'selection
   lastFolder ??= (await session()).lastFolder ?? null;
   if (!lastFolder) return (opened ?? api.action.openPopup()).catch(noFolder);
   if (tabId === undefined) return;
-  let chosen: TextMode = mode === 'selection' ? 'selection' : 'link';
+  let chosen: TextMode = 'link';
   if (mode === 'either') chosen = (await probe(tabId)).selection?.trim() ? 'selection' : 'link';
   await send(tabId, { mode: chosen, title: '', note: '', tags: [], folder: lastFolder });
 }
@@ -628,7 +628,9 @@ const MENU = { link: 'send-link', selection: 'send-selection' } as const;
 
 function menuClicked(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) {
   if (info.menuItemId === MENU.link) return quick(tab, 'link');
-  if (info.menuItemId === MENU.selection) return quick(tab, 'selection');
+  // The browser offers it for text selected in a text box too, which
+  // isn't a selection of the page to capture: then the link goes.
+  if (info.menuItemId === MENU.selection) return quick(tab, 'either');
 }
 
 function commanded(command: string, tab?: chrome.tabs.Tab) {

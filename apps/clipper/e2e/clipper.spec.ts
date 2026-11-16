@@ -360,16 +360,23 @@ test('text selected in a text box isn’t offered as the selection, and the shor
   await popup.getByRole('radio', { name: 'Link' }).check();
   await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
   await expect(popup.getByText('Saved to Personal', { exact: true })).toBeVisible();
-  // Alt+Shift+S sends the selection, or else the link.
-  await worker.evaluate(
-    async (tabId) => globalThis.wikistowClipper!.commanded('send', await chrome.tabs.get(tabId)),
-    tabId,
-  );
+  // Alt+Shift+S sends the selection, or else the link, and so does the
+  // menu's Send selection, which the browser offers for a text box too.
+  await worker.evaluate(async (tabId) => {
+    const tab = await chrome.tabs.get(tabId);
+    await globalThis.wikistowClipper!.commanded('send', tab);
+    await globalThis.wikistowClipper!.menuClicked(
+      { menuItemId: 'send-selection', editable: true, pageUrl: '' },
+      tab,
+    );
+  }, tabId);
   const clips = await got('stable', 'clip');
   expect(clips).toMatchObject([
     { mode: 'link', text: '' },
     { mode: 'link', text: '', url: `${origin}/form` },
+    { mode: 'link', text: '', url: `${origin}/form` },
   ]);
+  expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('✓');
 });
 
 test('the popup works while the tab’s page is still loading', async () => {
