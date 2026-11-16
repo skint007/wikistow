@@ -379,6 +379,22 @@ describe('host manifests', () => {
     expect(existsSync(firefox)).toBe(false);
   });
 
+  it("are written for Ubuntu's Firefox snap, whose portal reads ~/.mozilla", async () => {
+    const home = await newFolder();
+    const targets = manifestTargets({
+      ...places('linux'),
+      home,
+      configHome: join(home, '.config'),
+    });
+    // The snap makes only its own profile folder, never ~/.mozilla.
+    await mkdir(join(home, 'snap', 'firefox', 'common', '.mozilla'), { recursive: true });
+    const registry: Registry = { set: async () => {}, remove: async () => {} };
+    const allowed = { chromium: [], firefox: ['web-clipper@wikistow.skint007.github.io'] };
+    const name = 'io.github.skint007.wikistow';
+    expect(await syncManifests(targets, '/helper', allowed, registry, name)).toEqual(['firefox']);
+    expect(existsSync(join(home, '.mozilla', 'native-messaging-hosts', `${name}.json`))).toBe(true);
+  });
+
   it('on Windows name one file per family from every key, and delete the keys when off', async () => {
     const userData = await newFolder();
     const calls: string[] = [];
