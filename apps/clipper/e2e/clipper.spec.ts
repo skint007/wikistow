@@ -61,6 +61,10 @@ const SHOT = `<!doctype html><html><head><title>Boxes</title></head>
 <div style="height: 2000px"></div>
 </body></html>`;
 
+// A page with a text box, whose text the person may select.
+const FORM = `<!doctype html><html><head><title>A form</title></head>
+<body><p>Write to us.</p><textarea id="box">Some typed words</textarea></body></html>`;
+
 type Folder = { spaceId: string; folderId: string | null; path: string };
 const PERSONAL: Folder = { spaceId: 'space1', folderId: null, path: 'Personal' };
 const RECIPES: Folder = { spaceId: 'space1', folderId: 'folder1', path: 'Personal / Recipes' };
@@ -92,7 +96,7 @@ async function serve() {
       return response.end(PNG);
     }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(request.url === '/shot' ? SHOT : ARTICLE);
+    response.end(request.url === '/shot' ? SHOT : request.url === '/form' ? FORM : ARTICLE);
   });
   await new Promise<void>((resolve) => site!.listen(0, '127.0.0.1', resolve));
   return `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
@@ -323,6 +327,40 @@ test('a selection keeps what the page shows, and the whole page drops what it hi
   ]) {
     expect(whole).not.toContain(hidden);
   }
+});
+
+test('text selected in a text box isn’t offered as the selection, and the shortcut sends the link', async () => {
+  const { worker, got } = await launch({
+    stable: { ...ready, clip: [{ ...SAVED, path: 'Personal' }] },
+  });
+  const origin = await serve();
+  const { popup, tabId } = await popupFor(
+    worker,
+    origin,
+    (page) =>
+      page.evaluate(() => {
+        const box = document.getElementById('box') as HTMLTextAreaElement;
+        box.focus();
+        box.setSelectionRange(0, 4);
+      }),
+    '/form',
+  );
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await expect(popup.getByRole('radio', { name: 'Selection' })).toBeDisabled();
+  await expect(popup.getByRole('radio', { name: 'Article' })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Link' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal', { exact: true })).toBeVisible();
+  // Alt+Shift+S sends the selection, or else the link.
+  await worker.evaluate(
+    async (tabId) => globalThis.wikistowClipper!.commanded('send', await chrome.tabs.get(tabId)),
+    tabId,
+  );
+  const clips = await got('stable', 'clip');
+  expect(clips).toMatchObject([
+    { mode: 'link', text: '' },
+    { mode: 'link', text: '', url: `${origin}/form` },
+  ]);
 });
 
 test('a closed app opens from the popup, and a locked one gets the clip once unlocked', async () => {

@@ -134,14 +134,22 @@ async function folders(query: string): Promise<Calls['folders']['result']> {
   }
 }
 
-/** The tab's address and title, and its selection, or null where no script may run, as on the browser's own pages. */
+/**
+ * The tab's address and title, and its selection, or null where no script
+ * may run, as on the browser's own pages. The selection is what capture
+ * takes (`selectedText` in capture.ts): Chromium's `toString` gives the
+ * text selected in a text box, though no range of the page is selected.
+ */
 async function probe(tabId: number): Promise<Calls['probe']['result']> {
   const tab = await api.tabs.get(tabId);
   let selection: string | null;
   try {
     const [ran] = await api.scripting.executeScript({
       target: { tabId },
-      func: () => getSelection()?.toString() ?? '',
+      func: () => {
+        const chosen = getSelection();
+        return chosen && !chosen.isCollapsed ? chosen.toString() : '';
+      },
     });
     selection = typeof ran?.result === 'string' ? ran.result : '';
   } catch {
