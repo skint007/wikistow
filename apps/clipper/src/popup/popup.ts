@@ -228,7 +228,12 @@ function renderClip() {
           : 'Switch to WikiStow to unlock. The clip saves once it’s unlocked.';
       break;
     case 'still-waiting':
-      resultText.textContent = 'Still waiting in WikiStow. It saves the clip once it’s unlocked.';
+      resultText.textContent =
+        clip.waits === 'starting'
+          ? 'Still waiting in WikiStow. It saves the clip once it’s open.'
+          : clip.waits === 'unlock'
+            ? 'Still waiting in WikiStow. It saves the clip once it’s unlocked.'
+            : 'Still waiting in WikiStow, which is saving the clip.';
       break;
     case 'saved': {
       const { saved } = clip;

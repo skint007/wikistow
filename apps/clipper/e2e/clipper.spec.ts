@@ -453,6 +453,32 @@ test('while the app starts, the popup says so, though a new helper says it’s c
   expect(await got('stable', 'open')).toHaveLength(1);
 });
 
+test('a clip waiting for the app to open says to unlock it once it loads locked', async () => {
+  const { worker, set, release } = await launch({ stable: ready });
+  const origin = await serve();
+  const { popup } = await popupFor(worker, origin);
+  await popup.getByLabel('Find a folder').fill('rec');
+  await popup.getByRole('radio', { name: 'Personal / Recipes' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+
+  await set('stable', {
+    app: 'closed',
+    open: ['starting', { hold: 'loaded' }, 'locked'],
+    clip: [{ hold: 'unlocked' }, SAVED],
+  });
+  await popup.reload();
+  await expect(popup.getByText('WikiStow is closed.')).toBeVisible();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Opening WikiStow… The clip saves once it’s open.')).toBeVisible();
+  await release('loaded');
+  await expect(
+    popup.getByText('Switch to WikiStow to unlock. The clip saves once it’s unlocked.'),
+  ).toBeVisible();
+  await release('unlocked');
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+});
+
 test('the context menu sends to the last folder, opening a closed app first', async () => {
   const { worker, set, got } = await launch({ stable: ready });
   const origin = await serve();

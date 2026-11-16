@@ -70,16 +70,19 @@ async function answer(message: { v: number; id: string; type: string; [key: stri
     case 'hello':
       return status(app);
     case 'open': {
+      // As the app answers `open` from then on, it answers what comes next meanwhile.
       opened = true;
-      for (const step of scenario.open ?? ['ready']) {
-        if (typeof step === 'object') {
-          while (!held(step.hold)) await sleep(50);
-          continue;
+      void (async () => {
+        for (const step of scenario.open ?? ['ready']) {
+          if (typeof step === 'object') {
+            while (!held(step.hold)) await sleep(50);
+            continue;
+          }
+          status(step);
+          writeFileSync(scenarioFile, JSON.stringify({ ...read(), app: step }));
+          await sleep(50);
         }
-        status(step);
-        writeFileSync(scenarioFile, JSON.stringify({ ...read(), app: step }));
-        await sleep(50);
-      }
+      })();
       return;
     }
     case 'folders': {

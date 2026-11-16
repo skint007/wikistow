@@ -95,7 +95,8 @@ function viewOf(at: Found | null): View {
  * Take `at` as how the app is now. A helper started after `open` was sent
  * can't tell that the app is on its way, and answers `closed` until it
  * listens: for as long as the helper that opened it waits, that's
- * `starting`.
+ * `starting`. A clip waiting in the app waits for what it does now: to
+ * start, or to be unlocked.
  */
 function learn(at: Found | null): Found | null {
   if (at && openSent?.host === at.host) {
@@ -106,6 +107,11 @@ function learn(at: Found | null): Found | null {
     }
   }
   found = at;
+  if (sending && current?.phase === 'waiting' && at) {
+    const { app } = at.status;
+    const waits = app === 'locked' ? 'unlock' : app === 'starting' ? 'starting' : null;
+    if (waits && waits !== current.waits) setClip({ phase: 'waiting', waits });
+  }
   return at;
 }
 
@@ -504,7 +510,10 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
         { ms: SEND_MS },
       );
     } catch (error) {
-      if (error instanceof TimedOut && accepted) return setClip({ phase: 'still-waiting' });
+      if (error instanceof TimedOut && accepted) {
+        const waits = current?.phase === 'waiting' ? current.waits : null;
+        return setClip({ phase: 'still-waiting', waits });
+      }
       if (error instanceof HostGone && !error.answered) {
         return fail('missing', 'Clipping needs the WikiStow desktop app on this computer.');
       }
