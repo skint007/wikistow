@@ -76,10 +76,12 @@ jobs:
           before=$( [ -z "$previous" ] || git show "$previous:apps/clipper/package.json" 2>/dev/null | jq -r .version || true)
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             echo "A beta: the clipper $version goes to no store."
+          elif [ -z "$before" ]; then
+            echo "${previous:-No earlier release} had no clipper: its first version goes to the stores by hand."
           elif [ "$version" = "$before" ]; then
             echo "The clipper is $version, as in $previous: nothing goes to the stores."
           else
-            echo "The clipper is $version, and ${previous:-no earlier release} had ${before:-none}: it goes to the stores."
+            echo "The clipper is $version, and $previous had $before: it goes to the stores."
             echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
       # The .deb and .rpm bundle this Electron, so it must be its major's
@@ -276,6 +278,7 @@ jobs:
     needs: [verify, github-release]
     if: needs.verify.outputs.latest == 'true' && needs.verify.outputs.clipper != ''
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     environment: stores
     permissions:
       contents: read
@@ -324,6 +327,7 @@ jobs:
     needs: [verify, github-release]
     if: needs.verify.outputs.latest == 'true' && needs.verify.outputs.clipper != ''
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     environment: stores
     permissions:
       contents: read
@@ -365,7 +369,8 @@ jobs:
             -p "wikistow-clipper-$VERSION-firefox.zip" -p "wikistow-clipper-$VERSION-source.zip" -p SHA256SUMS
           cd "$RUNNER_TEMP/clipper"
           grep -E "^[0-9a-f]{64}  wikistow-clipper-$VERSION-(firefox|source)\.zip$" SHA256SUMS > checked
-          [ "$(wc -l < checked)" = 2 ] && sha256sum -c checked
+          [ "$(wc -l < checked)" = 2 ] || { echo "::error::SHA256SUMS lacks the Firefox or source zip"; exit 1; }
+          sha256sum -c checked
           unzip -q "wikistow-clipper-$VERSION-firefox.zip" -d firefox
           [ "$(jq -r .browser_specific_settings.gecko.id firefox/manifest.json)" = web-clipper@wikistow.skint007.github.io ]
           [ "$(jq -r .version firefox/manifest.json)" = "$VERSION" ]

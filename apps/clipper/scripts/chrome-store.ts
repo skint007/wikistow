@@ -68,7 +68,9 @@ export type Store = {
 
 /** Uploads `zip`, checks the store read `version` from it, and submits it for review. */
 export async function send(store: Store, zip: Uint8Array, version: string) {
-  const call = store.fetch ?? fetch;
+  // Each call within two minutes, so a stalled one can't hold the release.
+  const call: Fetch = (url, init) =>
+    (store.fetch ?? fetch)(url, { ...init, signal: AbortSignal.timeout(120_000) });
   const pause = store.pause ?? 5000;
   const token = await json(
     await call(TOKEN_URL, {
@@ -93,7 +95,9 @@ export async function send(store: Store, zip: Uint8Array, version: string) {
     'Uploading',
   );
   let state = uploaded.uploadState;
-  // Set only when the upload answered with it done.
+  let last = uploaded;
+  // Set only when the upload answered with it done; a slower one is
+  // checked by the review, which shows the version.
   const crxVersion = uploaded.crxVersion;
   // A large package is read after the upload answers: ask until it's done,
   // for at most five minutes.
@@ -105,9 +109,10 @@ export async function send(store: Store, zip: Uint8Array, version: string) {
       'Asking how the upload went',
     );
     state = status.lastAsyncUploadState;
+    last = status;
   }
   if (state !== 'SUCCEEDED') {
-    throw new Error(`Uploading: the store says ${state ?? 'nothing'}: ${JSON.stringify(uploaded)}`);
+    throw new Error(`Uploading: the store says ${state ?? 'nothing'}: ${JSON.stringify(last)}`);
   }
   if (crxVersion !== undefined && crxVersion !== version) {
     throw new Error(`Uploading: the store read version ${crxVersion}, not ${version}`);
