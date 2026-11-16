@@ -4,7 +4,8 @@
 # the desktop app and the CLI from the same build as a GitHub Release, with
 # the notes from its CHANGELOG.md entry, then to the AUR, the Homebrew tap
 # and the apt and dnf repositories. The browser extension's builds, and its
-# source for Mozilla Add-ons, go in the GitHub Release too, but to no store yet.
+# source for Mozilla Add-ons, go in the GitHub Release too, and to the Chrome
+# Web Store and Mozilla Add-ons when a stable release changes its version.
 name: Release
 
 on:
@@ -25,6 +26,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       latest: ${{ steps.branch.outputs.latest }}
       beta: ${{ steps.branch.outputs.beta }}
+      clipper: ${{ steps.clipper.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,6 +66,24 @@ jobs:
           fi
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
           echo "beta=$beta" >> "$GITHUB_OUTPUT"
+      # The browser extension's version, when this stable release changes
+      # it since the stable release before: the stores take stable versions
+      # alone, and each version once (docs/releasing.md#the-browser-extension).
+      - id: clipper
+        run: |
+          version=$(jq -r .version apps/clipper/package.json)
+          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' "$GITHUB_SHA^" 2>/dev/null || true)
+          before=$( [ -z "$previous" ] || git show "$previous:apps/clipper/package.json" 2>/dev/null | jq -r .version || true)
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "A beta: the clipper $version goes to no store."
+          elif [ -z "$before" ]; then
+            echo "${previous:-No earlier release} had no clipper: its first version goes to the stores by hand."
+          elif [ "$version" = "$before" ]; then
+            echo "The clipper is $version, as in $previous: nothing goes to the stores."
+          else
+            echo "The clipper is $version, and $previous had $before: it goes to the stores."
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
       # The .deb and .rpm bundle this Electron, so it must be its major's
       # newest patch, with every security fix released so far.
       - run: |
@@ -140,8 +160,8 @@ jobs:
             --mtime="@$(git log -1 --format=%ct)" -cf - "$name" | gzip -n > "$name.tar.gz"
       # The browser extension's Chrome and Firefox builds, with its own
       # version (apps/clipper), and the source Mozilla Add-ons takes with
-      # the Firefox one, which CI checked builds the same files. Nothing
-      # sends them to the stores yet (ADR 0017, step 7).
+      # the Firefox one, which CI checked builds the same files. The store
+      # jobs below send them from here.
       - run: |
           cp apps/clipper/dist/wikistow-clipper-*-chrome.zip apps/clipper/dist/wikistow-clipper-*-firefox.zip \
             apps/clipper/dist/wikistow-clipper-*-source.zip release/
@@ -248,3 +268,119 @@ jobs:
       contents: read
       pages: write
       id-token: write
+
+  # The browser extension's new version to the Chrome Web Store, for the
+  # newest stable release when it changes the extension's version: uploaded
+  # and submitted for review, published once approved. In the `stores`
+  # environment; without its keys it warns and sends nothing, so a release
+  # never fails for them (docs/releasing.md#the-browser-extension).
+  chrome-web-store:
+    needs: [verify, github-release]
+    if: needs.verify.outputs.latest == 'true' && needs.verify.outputs.clipper != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: stores
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.verify.outputs.clipper }}
+    steps:
+      - id: keys
+        env:
+          CHROME_SERVICE_ACCOUNT_KEY: ${{ secrets.CHROME_SERVICE_ACCOUNT_KEY }}
+          CHROME_PUBLISHER_ID: ${{ vars.CHROME_PUBLISHER_ID }}
+          CHROME_ITEM_ID: ${{ vars.CHROME_ITEM_ID }}
+        run: |
+          if [ -z "$CHROME_SERVICE_ACCOUNT_KEY" ] || [ -z "$CHROME_PUBLISHER_ID" ] || [ -z "$CHROME_ITEM_ID" ]; then
+            echo "::warning::The clipper $VERSION wasn't sent to the Chrome Web Store: the stores environment needs CHROME_SERVICE_ACCOUNT_KEY, CHROME_PUBLISHER_ID and CHROME_ITEM_ID (docs/releasing.md#the-browser-extension). Upload it by hand from the GitHub Release."
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+      - if: steps.keys.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.keys.outputs.ready == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      # The zip the GitHub Release published, checked against its SHA256SUMS.
+      - if: steps.keys.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D "$RUNNER_TEMP/clipper" \
+            -p "wikistow-clipper-$VERSION-chrome.zip" -p SHA256SUMS
+          cd "$RUNNER_TEMP/clipper"
+          grep -E "^[0-9a-f]{64}  wikistow-clipper-$VERSION-chrome\.zip$" SHA256SUMS | sha256sum -c -
+      - if: steps.keys.outputs.ready == 'true'
+        env:
+          CHROME_SERVICE_ACCOUNT_KEY: ${{ secrets.CHROME_SERVICE_ACCOUNT_KEY }}
+          CHROME_PUBLISHER_ID: ${{ vars.CHROME_PUBLISHER_ID }}
+          CHROME_ITEM_ID: ${{ vars.CHROME_ITEM_ID }}
+        run: node apps/clipper/scripts/chrome-store.ts "$RUNNER_TEMP/clipper/wikistow-clipper-$VERSION-chrome.zip" "$VERSION"
+
+  # The same version to Mozilla Add-ons, as a listed version with its
+  # source, for Mozilla's review; it's signed and offered once it passes.
+  # In the `stores` environment too, and as forgiving without its keys.
+  mozilla-add-ons:
+    needs: [verify, github-release]
+    if: needs.verify.outputs.latest == 'true' && needs.verify.outputs.clipper != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: stores
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.verify.outputs.clipper }}
+    steps:
+      - id: keys
+        env:
+          AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+        run: |
+          if [ -z "$AMO_API_KEY" ] || [ -z "$AMO_API_SECRET" ]; then
+            echo "::warning::The clipper $VERSION wasn't submitted to Mozilla Add-ons: the stores environment needs AMO_API_KEY and AMO_API_SECRET (docs/releasing.md#the-browser-extension). Upload it by hand from the GitHub Release, with its source zip."
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+      - if: steps.keys.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.keys.outputs.ready == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      # web-ext as the lockfile pins it, and nothing but the clipper's tools.
+      - if: steps.keys.outputs.ready == 'true'
+        run: |
+          npm install -g "$(node -p "require('./package.json').packageManager")"
+          pnpm install --frozen-lockfile --filter @wikistow/clipper
+      # The zips the GitHub Release published, checked against its
+      # SHA256SUMS. web-ext takes the add-on unpacked, so it's unzipped; it
+      # must name the published ID, or Mozilla Add-ons would make another
+      # add-on of it, and this version.
+      - if: steps.keys.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D "$RUNNER_TEMP/clipper" \
+            -p "wikistow-clipper-$VERSION-firefox.zip" -p "wikistow-clipper-$VERSION-source.zip" -p SHA256SUMS
+          cd "$RUNNER_TEMP/clipper"
+          grep -E "^[0-9a-f]{64}  wikistow-clipper-$VERSION-(firefox|source)\.zip$" SHA256SUMS > checked
+          [ "$(wc -l < checked)" = 2 ] || { echo "::error::SHA256SUMS lacks the Firefox or source zip"; exit 1; }
+          sha256sum -c checked
+          unzip -q "wikistow-clipper-$VERSION-firefox.zip" -d firefox
+          [ "$(jq -r .browser_specific_settings.gecko.id firefox/manifest.json)" = web-clipper@wikistow.skint007.github.io ]
+          [ "$(jq -r .version firefox/manifest.json)" = "$VERSION" ]
+      # Submitted without waiting for the review, which can take a day.
+      - if: steps.keys.outputs.ready == 'true'
+        working-directory: apps/clipper
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+        run: |
+          ./node_modules/.bin/web-ext sign --channel listed --approval-timeout 0 \
+            --source-dir "$RUNNER_TEMP/clipper/firefox" --artifacts-dir "$RUNNER_TEMP/signed" \
+            --upload-source-code "$RUNNER_TEMP/clipper/wikistow-clipper-$VERSION-source.zip"

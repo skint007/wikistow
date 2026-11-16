@@ -50,4 +50,4 @@ Load `dist/chrome-test` unpacked in Chrome or Chromium, or `dist/firefox` as a t
 
 ## Versions
 
-The extension has versions of its own, in this `package.json`, apart from WikiStow's: the stores take numbers only, and update it apart from the app. Raise it when the extension changes. Each WikiStow release carries the three zips; the listings' text is in [the store listing](../../docs/web-clipper-store-listing.md).
+The extension has versions of its own, in this `package.json`, apart from WikiStow's: the stores take numbers only, and update it apart from the app. Raise it when the extension changes. Each WikiStow release carries the three zips, and a stable release that raises it sends it to both stores ([releasing](../../docs/releasing.md#to-the-stores)); the listings' text is in [the store listing](../../docs/web-clipper-store-listing.md).

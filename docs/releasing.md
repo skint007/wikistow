@@ -34,7 +34,7 @@ A push to `main` or a release tag also runs four more jobs, which pull requests 
 
 After a push to `main` passes, the `image` job publishes the server image from the same build as `ghcr.io/skint007/wikistow:sha-<commit>`, with the commit's first 8 characters. Each commit gets its own tag, and the tag never moves. The `main` tag moves to the newest of these builds, for a test server that follows `main`. It waits for the packages too, so a release whose packages fail publishes nothing.
 
-Only that job can write packages, and only that job and the release's `github-release` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains. Only the release's `homebrew` job, or a run of the Homebrew workflow by hand, can use the tap's deploy key, which can push only to the tap. Only the release's `packages` job, or a run of the package repositories workflow by hand, can use the packages' signing key, and only its `deploy` job can publish the site on GitHub Pages.
+Only that job can write packages, and only that job and the release's `github-release` job can write to the repository. The Electron patch check can only read the repository and open issues. Only the release's `aur` job, or a run of the AUR workflow by hand, can use the AUR key, which can push to every AUR package its account maintains. Only the release's `homebrew` job, or a run of the Homebrew workflow by hand, can use the tap's deploy key, which can push only to the tap. Only the release's `packages` job, or a run of the package repositories workflow by hand, can use the packages' signing key, and only its `deploy` job can publish the site on GitHub Pages. Only the release's `chrome-web-store` and `mozilla-add-ons` jobs can use the stores' keys. The Chrome key can update any item of the publisher, and Mozilla's any add-on of the account, so they are as precious as the accounts' passwords.
 
 ## Versions
 
@@ -90,6 +90,7 @@ The desktop app's two AUR packages install side by side: the beta goes under nam
    2. `ci` runs every CI job on the tagged commit, including the desktop packages. With the release's build, `image` publishes `ghcr.io/skint007/wikistow:0.3.0`, `:0.3` for a stable release, `:latest` for a stable release from `main`, and `:beta` for any release from `main`.
    3. `github-release` publishes a GitHub Release named after the version, with the notes made from its changelog entry. It holds the [desktop downloads](#the-desktop-downloads), the [CLI downloads](#the-cli-downloads) and their `SHA256SUMS`.
    4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)), `homebrew` the cask to the Homebrew tap ([below](#the-homebrew-cask)), and `packages` the `.deb` and `.rpm` to the apt and dnf repositories ([below](#the-apt-and-dnf-repositories)). For any release from `main`, `aur-beta` publishes `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`.
+   5. For a stable release from `main` that changes the browser extension's version, `chrome-web-store` and `mozilla-add-ons` send it to the stores ([below](#to-the-stores)).
 
 If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If the tag's day isn't the entry's, change the date through a pull request and tag its merge. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 
@@ -203,7 +204,38 @@ The web clipper's extension is `apps/clipper` ([its README](../apps/clipper/READ
 
 CI's `clipper` job unpacks the source zip in a folder of its own, runs its README's commands, and checks that they give `dist/firefox` byte for byte, as Mozilla's reviewers compare it (`apps/clipper/scripts/check-source.ts`).
 
-The extension has versions of its own, in `apps/clipper/package.json`, which `scripts/version.ts` leaves alone: the stores take numbers only, and update it apart from the app, so raise it when the extension changes, never as a beta. The Firefox build's add-on ID comes from the repository variable `CLIPPER_FIREFOX_ID` (**Settings → Secrets and variables → Actions → Variables**), `web-clipper@wikistow.skint007.github.io`; unset, it names a placeholder no app trusts. Nothing sends the zips to the Chrome Web Store or Mozilla Add-ons yet (ADR 0017, step 7).
+The extension has versions of its own, in `apps/clipper/package.json`, which `scripts/version.ts` leaves alone: the stores take numbers only, and update it apart from the app, so raise it when the extension changes, never as a beta. The Firefox build's add-on ID comes from the repository variable `CLIPPER_FIREFOX_ID` (**Settings → Secrets and variables → Actions → Variables**), `web-clipper@wikistow.skint007.github.io`; unset, it names a placeholder no app trusts.
+
+#### To the stores
+
+The first version of the extension goes to each store by hand, which makes its listing and fixes Chrome's ID ([the store listing](web-clipper-store-listing.md)). After that, the release sends each new version itself, from the files in the GitHub Release, checked against its `SHA256SUMS`. It does so only for the newest stable release from `main`, never a beta, and only when `apps/clipper/package.json`'s version changed since the stable release before it, which must have had the extension (`verify` works that out, from the tags). The stores take each version once.
+
+- `chrome-web-store` uploads `wikistow-clipper-<version>-chrome.zip` to the item through the Chrome Web Store API v2, as a service account, waits for the store to read it, checks the version it read when the store says at once, and submits it for review (`apps/clipper/scripts/chrome-store.ts`). The store publishes it once it's approved.
+- `mozilla-add-ons` submits `wikistow-clipper-<version>-firefox.zip` to Mozilla Add-ons as a listed version, with `wikistow-clipper-<version>-source.zip` as its source, through `web-ext sign` from the lockfile. It first checks the build names the published ID, `web-clipper@wikistow.skint007.github.io`, so a release built without `CLIPPER_FIREFOX_ID` can't make a second add-on. It doesn't wait for Mozilla's review, which signs the version and offers it as an update once it passes.
+
+Both run in the `stores` environment. Without a store's keys there, its job warns, sends nothing and passes, so the release never fails for it: upload that version by hand from the GitHub Release. A job that fails once it has its keys, such as when a store refuses the version, fails the run; fix the cause and use **Re-run failed jobs**, or upload by hand. A store that already has the version refuses it again: if Mozilla Add-ons took the version but not its source, attach the source zip on that version's page in its dashboard instead. The Chrome Web Store refuses a new version while the one before is still in review; wait for that review, or cancel it in the dashboard, then re-run.
+
+The keys, set once after the first version is in each store:
+
+1. **Chrome Web Store** ([service accounts](https://developer.chrome.com/docs/webstore/service-accounts)):
+   1. In the [Google Cloud console](https://console.cloud.google.com/), make a project, such as `wikistow-clipper`, and under **APIs & Services → Library**, enable the **Chrome Web Store API**.
+   2. Under **IAM & Admin → Service accounts**, make a service account, such as `clipper-uploads`. It needs no roles. Under its **Keys**, add a JSON key, which downloads once.
+   3. In the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole), under **Account**, add the service account's email (`…@….iam.gserviceaccount.com`). A publisher can have only one.
+   4. Note the publisher ID, under **Publisher → Settings**, and the item's ID, the extension's 32-letter ID.
+2. **Mozilla Add-ons:** at [Manage API Keys](https://addons.mozilla.org/developers/addon/api/key/), generate credentials: a JWT issuer, such as `user:12345:67`, and a JWT secret.
+3. **Settings → Environments → `stores`**, limited to the `v*` tags, so nothing but a release sees what it holds ([repository settings](#repository-settings)). Give it:
+
+   | Name | Kind | Value |
+   | --- | --- | --- |
+   | `CHROME_SERVICE_ACCOUNT_KEY` | Secret | The service account's JSON key, the whole file |
+   | `CHROME_PUBLISHER_ID` | Variable | The publisher ID |
+   | `CHROME_ITEM_ID` | Variable | The extension's ID in the Chrome Web Store |
+   | `AMO_API_KEY` | Secret | The JWT issuer |
+   | `AMO_API_SECRET` | Secret | The JWT secret |
+
+   Upload the secrets so they never show on screen: `gh secret set CHROME_SERVICE_ACCOUNT_KEY --env stores < <key file>`, then delete the file; `gh secret set AMO_API_SECRET --env stores`, which asks for it. The Chrome service account can update every item the publisher has, and Mozilla's credentials act as the account for every add-on it owns, but neither reaches WikiStow's code or releases. If one leaks, revoke it in its store and make another.
+
+To stop the uploads, delete a store's keys from the environment.
 
 ## The CLI downloads
 
@@ -346,7 +378,7 @@ docker image inspect ghcr.io/skint007/wikistow:0.3.0 \
 
 ## Repository settings
 
-The workflows use the token GitHub gives each run, the AUR key, the tap's key and the packages' signing key. Set up the public repository once, as an administrator:
+The workflows use the token GitHub gives each run, the AUR key, the tap's key, the packages' signing key and the stores' keys. Set up the public repository once, as an administrator:
 
 1. **Settings → Actions → General.** Keep the default workflow permissions at **Read repository contents and packages permissions**. The workflows ask for more only in the jobs that publish. Require approval before fork pull requests from outside contributors run workflows.
 2. **Settings → Rules → Rulesets**, for `main`: require a pull request, require the status check **CI passed** from GitHub Actions, and block force pushes and deletion.
@@ -372,6 +404,7 @@ The workflows use the token GitHub gives each run, the AUR key, the tap's key an
    gpg --armor --export-secret-keys | gh secret set PACKAGES_SIGNING_KEY --env packages
    rm -rf "$GNUPGHOME"
    ```
+9. **Settings → Environments → `stores`**, limited to the `v*` tags, with the Chrome Web Store's and Mozilla Add-ons' keys, once the extension's first version is in each store ([to the stores](#to-the-stores)). A release makes the environment, empty, if it's missing.
 
 ## Moving from the private repository
 

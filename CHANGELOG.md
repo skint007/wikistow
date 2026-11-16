@@ -13,6 +13,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Releases and packaging
 
 - Each release carries the web clipper's source zip for Mozilla Add-ons, which CI checks builds the Firefox add-on byte for byte. `CLIPPER_CHROME_KEY` builds a Chrome copy with the store's ID, for checks by hand. The store listings' text and pictures are in `docs/web-clipper-store-listing.md`. (#619)
+- A stable release that raises the web clipper's version sends it to the Chrome Web Store and submits it to Mozilla Add-ons, once the `stores` environment holds their keys; until then it warns and sends nothing. (#620)
 
 ## 0.26.0 - 2026-11-15
 
