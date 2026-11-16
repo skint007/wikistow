@@ -38,6 +38,7 @@ import {
   speaks,
   type Clip,
   type Folder,
+  type HostKey,
   type Saved,
   type TextMode,
 } from './protocol.ts';
@@ -46,6 +47,8 @@ import {
 const WAIT_MS = 10 * 60_000;
 /** How long, at most, between answers while a clip is sent, the app opening included (60 s). */
 const SEND_MS = 2 * 60_000;
+/** How long the helper waits for an app it opens to listen (clip-host's `appWait`). */
+const START_MS = 60_000;
 /** How long the toolbar button shows its check after a save. */
 const CHECK_MS = 4_000;
 /** How long the person has to drag out an area, as the overlay waits. */
@@ -53,6 +56,8 @@ const CHOOSE_MS = 5 * 60_000;
 
 /** The app found last, which searches and shows go to. */
 let found: Found | null = null;
+/** When `open` was sent, and to which app, until the app is heard from, or didn't open. */
+let openSent: { host: HostKey; at: number } | null = null;
 /** How the last clip went, as `storage.session` keeps it too. */
 let current: ClipView | null = null;
 let sending = false;
@@ -86,9 +91,26 @@ function viewOf(at: Found | null): View {
   return { app: status.app, offline: status.offline ?? false, host: at.host };
 }
 
+/**
+ * Take `at` as how the app is now. A helper started after `open` was sent
+ * can't tell that the app is on its way, and answers `closed` until it
+ * listens: for as long as the helper that opened it waits, that's
+ * `starting`.
+ */
+function learn(at: Found | null): Found | null {
+  if (at && openSent?.host === at.host) {
+    if (at.status.app === 'closed' && Date.now() - openSent.at < START_MS) {
+      at = { host: at.host, status: { type: 'status', app: 'starting' } };
+    } else if (at.status.app !== 'starting') {
+      openSent = null;
+    }
+  }
+  found = at;
+  return at;
+}
+
 async function status(): Promise<View> {
-  found = await find(await pin());
-  return viewOf(found);
+  return viewOf(learn(await find(await pin())));
 }
 
 /** Open the app, or bring it forward, saying how it is as that changes, until it's ready. */
@@ -98,6 +120,7 @@ async function open(signal: AbortSignal): Promise<Calls['open']['result']> {
   const { host } = found;
   const message = envelope({ type: 'open' });
   let failed: string | null = null;
+  openSent = { host, at: Date.now() };
   try {
     await converse(
       HOSTS[host],
@@ -105,12 +128,12 @@ async function open(signal: AbortSignal): Promise<Calls['open']['result']> {
       (answer) => {
         if (answer.id !== message.id) return false;
         if (answer.type === 'error') {
+          openSent = null;
           failed = answer.message ?? 'WikiStow didn’t open.';
           return true;
         }
         if (answer.type !== 'status') return false;
-        found = { host, status: answer };
-        push({ push: 'view', view: viewOf(found) });
+        push({ push: 'view', view: viewOf(learn({ host, status: answer })) });
         return answer.app === 'ready';
       },
       { ms: SEND_MS, signal },
@@ -430,13 +453,15 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
     if (!fits(message)) return fail('too-long', TOO_LONG);
 
     const at = await find(await pin());
-    found = at;
-    push({ push: 'view', view: viewOf(at) });
+    push({ push: 'view', view: viewOf(learn(at)) });
     if (!at) return fail('missing', 'Clipping needs the WikiStow desktop app on this computer.');
     if (!speaks(at.status)) return fail('version', 'Update WikiStow or the extension to clip.');
     if (at.status.app === 'signed-out') return fail('signed-out', 'Sign in to WikiStow first.');
     const opening = at.status.app === 'closed' ? envelope({ type: 'open' }) : null;
-    if (opening) setClip({ phase: 'waiting', waits: 'starting' });
+    if (opening) {
+      openSent = { host: at.host, at: Date.now() };
+      setClip({ phase: 'waiting', waits: 'starting' });
+    }
 
     let accepted = false;
     try {
@@ -446,8 +471,9 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
         (answer, conversation) => {
           if (opening && answer.id === opening.id) {
             if (answer.type === 'status') {
-              found = { host: at.host, status: answer };
-              push({ push: 'view', view: viewOf(found) });
+              push({ push: 'view', view: viewOf(learn({ host: at.host, status: answer })) });
+            } else if (answer.type === 'error') {
+              openSent = null;
             }
             return false;
           }
@@ -468,6 +494,7 @@ async function send(tabId: number, form: Form, part: { area: Area; view: ViewSiz
               return true;
             case 'status':
               // The helper answered for a closed app: it didn't open in time.
+              openSent = null;
               fail('closed', 'WikiStow didn’t open. Open it, then try again.');
               return true;
             default:

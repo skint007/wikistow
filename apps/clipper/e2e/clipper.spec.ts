@@ -429,6 +429,30 @@ test('a closed app opens from the popup, and a locked one gets the clip once unl
   await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
 });
 
+test('while the app starts, the popup says so, though a new helper says it’s closed', async () => {
+  const { worker, set, got } = await launch({
+    stable: { ...ready, app: 'closed', open: ['starting', { hold: 'listening' }, 'locked'] },
+  });
+  const origin = await serve();
+  const { popup, tabId } = await popupFor(worker, origin);
+  await expect(popup.getByText('WikiStow is closed.')).toBeVisible();
+  await popup.getByRole('button', { name: 'Open WikiStow' }).click();
+  await expect(popup.getByText('Opening WikiStow…')).toBeVisible();
+  // The popup asks again every 2 s; each new helper answers `closed`.
+  await expect.poll(async () => (await got('stable', 'hello')).length).toBeGreaterThan(2);
+  await expect(popup.getByText('Opening WikiStow…')).toBeVisible();
+  await expect(popup.getByText('WikiStow is closed.')).toBeHidden();
+  // Opened again, while it still starts.
+  await popup.close();
+  const again = await reopen(tabId);
+  await expect(again.getByText('Opening WikiStow…')).toBeVisible();
+  await expect(again.getByText('WikiStow is closed.')).toBeHidden();
+  // Once it listens, the next look finds it locked.
+  await set('stable', { app: 'locked' });
+  await expect(again.getByText('Unlock WikiStow to choose a folder.')).toBeVisible();
+  expect(await got('stable', 'open')).toHaveLength(1);
+});
+
 test('the context menu sends to the last folder, opening a closed app first', async () => {
   const { worker, set, got } = await launch({ stable: ready });
   const origin = await serve();

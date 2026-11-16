@@ -20,8 +20,12 @@ export type Scenario = {
   app: AppState;
   offline?: boolean;
   protocols?: { min: number; max: number };
-  /** The states `open` passes through, the last kept. */
-  open?: AppState[];
+  /**
+   * The states `open` passes through, the last kept; `hold` waits for a file
+   * the test writes. While it's `starting`, only the helper that sent `open`
+   * reaches the app: another answers `closed`, as the real one does.
+   */
+  open?: (AppState | { hold: string })[];
   recent?: Folder[];
   folders?: Folder[];
   /** The answers to a clip, after `accepted`; `hold` waits for a file the test writes. */
@@ -41,10 +45,14 @@ function send(message: object) {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const held = (file: string) => existsSync(join(dir, file));
+/** Whether this helper sent `open`, so it reaches an app that's starting. */
+let opened = false;
 
 async function answer(message: { v: number; id: string; type: string; [key: string]: unknown }) {
   appendFileSync(join(dir, `${name}.log`), `${JSON.stringify(message)}\n`);
   const scenario = read();
+  const app = !opened && scenario.app === 'starting' ? 'closed' : scenario.app;
   const reply = (body: object) => send({ v: 1, id: message.id, ...body });
   const status = (app: AppState) =>
     reply(
@@ -60,11 +68,16 @@ async function answer(message: { v: number; id: string; type: string; [key: stri
     );
   switch (message.type) {
     case 'hello':
-      return status(scenario.app);
+      return status(app);
     case 'open': {
-      for (const app of scenario.open ?? ['ready']) {
-        status(app);
-        writeFileSync(scenarioFile, JSON.stringify({ ...read(), app }));
+      opened = true;
+      for (const step of scenario.open ?? ['ready']) {
+        if (typeof step === 'object') {
+          while (!held(step.hold)) await sleep(50);
+          continue;
+        }
+        status(step);
+        writeFileSync(scenarioFile, JSON.stringify({ ...read(), app: step }));
         await sleep(50);
       }
       return;
@@ -77,12 +90,12 @@ async function answer(message: { v: number; id: string; type: string; [key: stri
       return reply({ type: 'folders', recent: scenario.recent ?? [], matches });
     }
     case 'clip': {
-      if (scenario.app === 'closed') return status('closed');
-      const waits = scenario.app === 'ready' ? null : 'unlock';
+      if (app === 'closed') return status('closed');
+      const waits = app === 'ready' ? null : app === 'starting' ? 'starting' : 'unlock';
       reply({ type: 'accepted', waits });
       for (const step of scenario.clip ?? []) {
         if ('hold' in step) {
-          while (!existsSync(join(dir, step.hold))) await sleep(50);
+          while (!held(step.hold)) await sleep(50);
           continue;
         }
         reply(step);
@@ -95,14 +108,14 @@ async function answer(message: { v: number; id: string; type: string; [key: stri
 }
 
 // The browser's framing: a 32-bit length in the computer's byte order, then JSON.
-let held = Buffer.alloc(0);
+let buffered = Buffer.alloc(0);
 let queue = Promise.resolve();
 process.stdin.on('data', (chunk: Buffer) => {
-  held = Buffer.concat([held, chunk]);
-  while (held.length >= 4 && held.length >= 4 + held.readUInt32LE(0)) {
-    const size = held.readUInt32LE(0);
-    const message = JSON.parse(held.subarray(4, 4 + size).toString('utf8'));
-    held = held.subarray(4 + size);
+  buffered = Buffer.concat([buffered, chunk]);
+  while (buffered.length >= 4 && buffered.length >= 4 + buffered.readUInt32LE(0)) {
+    const size = buffered.readUInt32LE(0);
+    const message = JSON.parse(buffered.subarray(4, 4 + size).toString('utf8'));
+    buffered = buffered.subarray(4 + size);
     queue = queue.then(() => answer(message));
   }
 });
