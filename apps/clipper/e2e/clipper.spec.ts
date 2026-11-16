@@ -13,7 +13,7 @@ import {
   type Worker,
 } from '@playwright/test';
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -61,6 +61,10 @@ const SHOT = `<!doctype html><html><head><title>Boxes</title></head>
 <div style="height: 2000px"></div>
 </body></html>`;
 
+// A page with a text box, whose text the person may select.
+const FORM = `<!doctype html><html><head><title>A form</title></head>
+<body><p>Write to us.</p><textarea id="box">Some typed words</textarea></body></html>`;
+
 type Folder = { spaceId: string; folderId: string | null; path: string };
 const PERSONAL: Folder = { spaceId: 'space1', folderId: null, path: 'Personal' };
 const RECIPES: Folder = { spaceId: 'space1', folderId: 'folder1', path: 'Personal / Recipes' };
@@ -76,12 +80,15 @@ const SAVED = {
 
 let context: BrowserContext | null = null;
 let site: Server | null = null;
+/** The answers for `/slow`, a page still loading until the test ends them. */
+let slow: ServerResponse[] = [];
 test.afterEach(async () => {
   await context?.close();
   site?.closeAllConnections();
   site?.close();
   context = null;
   site = null;
+  slow = [];
 });
 
 /** The site to clip from, on this computer. */
@@ -92,7 +99,13 @@ async function serve() {
       return response.end(PNG);
     }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(request.url === '/shot' ? SHOT : ARTICLE);
+    if (request.url === '/slow') {
+      slow.push(response);
+      return response.write(
+        `<!doctype html><html><head><title>Slow page</title></head><body><p>${WORDS.repeat(20)}</p>`,
+      );
+    }
+    response.end(request.url === '/shot' ? SHOT : request.url === '/form' ? FORM : ARTICLE);
   });
   await new Promise<void>((resolve) => site!.listen(0, '127.0.0.1', resolve));
   return `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
@@ -325,6 +338,73 @@ test('a selection keeps what the page shows, and the whole page drops what it hi
   }
 });
 
+test('text selected in a text box isn’t offered as the selection, and the shortcut sends the link', async () => {
+  const { worker, got } = await launch({
+    stable: { ...ready, clip: [{ ...SAVED, path: 'Personal' }] },
+  });
+  const origin = await serve();
+  const { popup, tabId } = await popupFor(
+    worker,
+    origin,
+    (page) =>
+      page.evaluate(() => {
+        const box = document.getElementById('box') as HTMLTextAreaElement;
+        box.focus();
+        box.setSelectionRange(0, 4);
+      }),
+    '/form',
+  );
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await expect(popup.getByRole('radio', { name: 'Selection' })).toBeDisabled();
+  await expect(popup.getByRole('radio', { name: 'Article' })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Link' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal', { exact: true })).toBeVisible();
+  // Alt+Shift+S sends the selection, or else the link, and so does the
+  // menu's Send selection, which the browser offers for a text box too.
+  await worker.evaluate(async (tabId) => {
+    const tab = await chrome.tabs.get(tabId);
+    await globalThis.wikistowClipper!.commanded('send', tab);
+    await globalThis.wikistowClipper!.menuClicked(
+      { menuItemId: 'send-selection', editable: true, pageUrl: '' },
+      tab,
+    );
+  }, tabId);
+  const clips = await got('stable', 'clip');
+  expect(clips).toMatchObject([
+    { mode: 'link', text: '' },
+    { mode: 'link', text: '', url: `${origin}/form` },
+    { mode: 'link', text: '', url: `${origin}/form` },
+  ]);
+  expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('✓');
+});
+
+test('the popup works while the tab’s page is still loading', async () => {
+  const { worker, got } = await launch({ stable: ready });
+  const origin = await serve();
+  const page = await context!.newPage();
+  await page.goto(`${origin}/slow`, { waitUntil: 'commit' });
+  await expect.poll(() => page.title()).toBe('Slow page');
+  const tabId = await worker.evaluate(
+    async (url) => (await chrome.tabs.query({})).find((tab) => tab.url === url)?.id,
+    `${origin}/slow`,
+  );
+  const popup = await reopen(tabId!);
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await expect(popup.getByRole('radio', { name: 'Article' })).toBeChecked();
+  await expect(popup.getByLabel('Title')).toHaveValue('Slow page');
+  if (SCREENSHOTS)
+    await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-loading-page.png') });
+  await popup.getByRole('radio', { name: 'Link' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await got('stable', 'clip')).toMatchObject([
+    { mode: 'link', url: `${origin}/slow`, title: 'Slow page' },
+  ]);
+  expect(await page.evaluate(() => document.readyState)).toBe('loading');
+  for (const response of slow) response.end('</body></html>');
+});
+
 test('a closed app opens from the popup, and a locked one gets the clip once unlocked', async () => {
   const { worker, set, release, got } = await launch({
     stable: {
@@ -354,6 +434,60 @@ test('a closed app opens from the popup, and a locked one gets the clip once unl
     popup.getByText('Switch to WikiStow to unlock. The clip saves once it’s unlocked.'),
   ).toBeVisible();
   await expect(popup.getByText('Switch to WikiStow to unlock.', { exact: true })).toBeVisible();
+  await release('unlocked');
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+});
+
+test('while the app starts, the popup says so, though a new helper says it’s closed', async () => {
+  const { worker, set, got } = await launch({
+    stable: { ...ready, app: 'closed', open: ['starting', { hold: 'listening' }, 'locked'] },
+  });
+  const origin = await serve();
+  const { popup, tabId } = await popupFor(worker, origin);
+  await expect(popup.getByText('WikiStow is closed.')).toBeVisible();
+  await popup.getByRole('button', { name: 'Open WikiStow' }).click();
+  await expect(popup.getByText('Opening WikiStow…')).toBeVisible();
+  // The popup asks again every 2 s; each new helper answers `closed`.
+  await expect.poll(async () => (await got('stable', 'hello')).length).toBeGreaterThan(2);
+  await expect(popup.getByText('Opening WikiStow…')).toBeVisible();
+  await expect(popup.getByText('WikiStow is closed.')).toBeHidden();
+  if (SCREENSHOTS)
+    await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-starting.png') });
+  // Opened again, while it still starts.
+  await popup.close();
+  const again = await reopen(tabId);
+  await expect(again.getByText('Opening WikiStow…')).toBeVisible();
+  await expect(again.getByText('WikiStow is closed.')).toBeHidden();
+  // Once it listens, the next look finds it locked.
+  await set('stable', { app: 'locked' });
+  await expect(again.getByText('Unlock WikiStow to choose a folder.')).toBeVisible();
+  expect(await got('stable', 'open')).toHaveLength(1);
+});
+
+test('a clip waiting for the app to open says to unlock it once it loads locked', async () => {
+  const { worker, set, release } = await launch({ stable: ready });
+  const origin = await serve();
+  const { popup } = await popupFor(worker, origin);
+  await popup.getByLabel('Find a folder').fill('rec');
+  await popup.getByRole('radio', { name: 'Personal / Recipes' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+
+  await set('stable', {
+    app: 'closed',
+    open: ['starting', { hold: 'loaded' }, 'locked'],
+    clip: [{ hold: 'unlocked' }, SAVED],
+  });
+  await popup.reload();
+  await expect(popup.getByText('WikiStow is closed.')).toBeVisible();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Opening WikiStow… The clip saves once it’s open.')).toBeVisible();
+  await release('loaded');
+  await expect(
+    popup.getByText('Switch to WikiStow to unlock. The clip saves once it’s unlocked.'),
+  ).toBeVisible();
+  if (SCREENSHOTS)
+    await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-waiting-unlock.png') });
   await release('unlocked');
   await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
 });
@@ -399,6 +533,41 @@ test('the context menu sends to the last folder, opening a closed app first', as
   expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('✓');
 });
 
+test('a quick send while a clip waits leaves the waiting one shown', async () => {
+  const { worker, set, release, got } = await launch({ stable: ready });
+  const origin = await serve();
+  const { popup, tabId } = await popupFor(worker, origin);
+  await popup.getByLabel('Find a folder').fill('rec');
+  await popup.getByRole('radio', { name: 'Personal / Recipes' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+
+  await set('stable', { app: 'locked', clip: [{ hold: 'unlocked' }, SAVED] });
+  await popup.reload();
+  await expect(popup.getByText('Switch to WikiStow to unlock.', { exact: true })).toBeVisible();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  const waiting = popup.getByText(
+    'Switch to WikiStow to unlock. The clip saves once it’s unlocked.',
+  );
+  await expect(waiting).toBeVisible();
+  await worker.evaluate(
+    async (tabId) =>
+      globalThis.wikistowClipper!.menuClicked(
+        { menuItemId: 'send-link', editable: false, pageUrl: '' },
+        await chrome.tabs.get(tabId),
+      ),
+    tabId,
+  );
+  // The button says that one wasn't sent, for a moment; the popup still shows the one waiting.
+  expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('!');
+  await expect(waiting).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Save to WikiStow' })).toBeDisabled();
+  await expect.poll(() => worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  await release('unlocked');
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await got('stable', 'clip')).toHaveLength(2);
+});
+
 test('signed out, nothing is sent, and what was typed stays for the session', async () => {
   const { worker } = await launch({ stable: { ...ready, app: 'signed-out' } });
   const origin = await serve();
@@ -423,6 +592,20 @@ test('the beta is used when it alone is installed, and an app too new says to up
     popup.getByText('This WikiStow is newer than the extension. Update the extension to clip.'),
   ).toBeVisible();
   expect(await got('beta', 'hello')).toMatchObject([{ browser: 'chromium', extension: '0.1.0' }]);
+});
+
+test('a ready beta that takes the clip wins over a stable app too old for the extension', async () => {
+  const { worker, got } = await launch({
+    stable: { ...ready, protocols: { min: 0, max: 0 } },
+    beta: ready,
+  });
+  const { popup } = await popupFor(worker, await serve());
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await expect(popup.getByText('This WikiStow is too old for the extension.')).toBeHidden();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await got('beta', 'clip')).toHaveLength(1);
+  expect(await got('stable', 'clip')).toEqual([]);
 });
 
 test('an app’s refusal shows in the popup and on the button', async () => {

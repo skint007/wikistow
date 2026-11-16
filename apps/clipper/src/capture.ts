@@ -154,6 +154,16 @@ function rangeHtml(range: Range): string {
   return holder.innerHTML;
 }
 
+/**
+ * The page's selection as text: none when it's collapsed, as it is for
+ * text selected in a text box, whose text Chromium's `toString` still gives.
+ * The background's `probe` asks the same.
+ */
+function selectedText(): string {
+  const chosen = getSelection();
+  return chosen && !chosen.isCollapsed ? chosen.toString() : '';
+}
+
 function selection(): Pick<Captured, 'html' | 'text'> {
   const chosen = getSelection();
   if (!chosen || chosen.isCollapsed) return { html: '', text: '' };
@@ -190,7 +200,7 @@ function capture(mode: TextMode): Captured {
   const page = { url: location.href, title: document.title, byline: null, siteName: null };
   switch (mode) {
     case 'link':
-      return { ...page, html: '', text: getSelection()?.toString() ?? '' };
+      return { ...page, html: '', text: selectedText() };
     case 'selection':
       return { ...page, ...selection() };
     case 'article':

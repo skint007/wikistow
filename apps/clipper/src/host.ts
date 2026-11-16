@@ -7,6 +7,7 @@ import { api, browserName } from './api.ts';
 import {
   envelope,
   HOSTS,
+  speaks,
   type Answer,
   type HostKey,
   type Request,
@@ -154,13 +155,19 @@ async function hello(host: HostKey): Promise<Found | null> {
 
 /**
  * Find the app (ADR 0017, decision 1): the stable app's host, then the
- * beta's, using the first whose app is ready, or else the first installed.
- * `pin` asks only one.
+ * beta's, using the first whose app is ready and takes this extension's
+ * protocol, then the first ready, or else the first installed. So a stable
+ * app too old for the extension doesn't win over a ready beta. `pin` asks
+ * only one.
  */
 export async function find(pin: HostKey | 'auto'): Promise<Found | null> {
   const hosts: HostKey[] = pin === 'auto' ? ['stable', 'beta'] : [pin];
   const found = await Promise.all(hosts.map(hello));
+  const ready = found.filter((one) => one?.status.app === 'ready');
   return (
-    found.find((one) => one?.status.app === 'ready') ?? found.find((one) => one !== null) ?? null
+    ready.find((one) => speaks(one!.status)) ??
+    ready[0] ??
+    found.find((one) => one !== null) ??
+    null
   );
 }

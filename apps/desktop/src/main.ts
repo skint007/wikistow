@@ -39,7 +39,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { APP_ORIGIN, appFile } from './app-files.ts';
-import { desktopClipping } from './clip/clipping.ts';
+import { clipSession, desktopClipping } from './clip/clipping.ts';
 import { contextMenu } from './context-menu.ts';
 import { APP_NAMES, desktopApp, windowIcon } from './install.ts';
 import { cookieChange, forward } from './forward.ts';
@@ -204,12 +204,7 @@ const clipping = desktopClipping({
   version: app.getVersion(),
   argv: process.argv,
   // Signed out is known before the window loads: the session is read first.
-  session: () =>
-    !(server && cookie)
-      ? 'signed-out'
-      : !window || window.webContents.isLoading()
-        ? 'starting'
-        : 'signed-in',
+  session: () => clipSession(Boolean(server && cookie), window?.webContents ?? null),
   show: () => bringForward(),
   userAgent: app.userAgentFallback,
 });

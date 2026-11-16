@@ -56,6 +56,20 @@ export type ClippingOptions = {
 
 const Setting = z.object({ on: z.boolean() });
 
+/**
+ * What main knows of the app's state: signed out without a session,
+ * starting until the window's page has loaded, and signed in after. Only
+ * the main frame counts: a plugin's or a diagram's frame loading later
+ * doesn't make the app start again.
+ */
+export function clipSession(
+  signedIn: boolean,
+  contents: { isLoadingMainFrame(): boolean } | null,
+): ReturnType<ClippingOptions['session']> {
+  if (!signedIn) return 'signed-out';
+  return !contents || contents.isLoadingMainFrame() ? 'starting' : 'signed-in';
+}
+
 /** The helper this copy ships, and whether it's an installed package's. */
 export function clipHelper(
   options: Pick<ClippingOptions, 'platform' | 'arch' | 'appPath' | 'execPath'>,

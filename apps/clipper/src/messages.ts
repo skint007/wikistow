@@ -27,7 +27,8 @@ export type ClipView =
   | { phase: 'choosing' }
   | { phase: 'sending' }
   | { phase: 'waiting'; waits: 'starting' | 'unlock' }
-  | { phase: 'still-waiting' }
+  /** What it waited for when the extension stopped waiting, if anything. */
+  | { phase: 'still-waiting'; waits: 'starting' | 'unlock' | null }
   | { phase: 'saved'; saved: Saved }
   | { phase: 'failed'; code: Failure; message: string };
 

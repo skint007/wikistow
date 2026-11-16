@@ -99,6 +99,8 @@ const mode = (): FormMode =>
   (modes.find((input) => input.checked)?.value as FormMode | undefined) ?? 'link';
 /** The modes with a note: a link's, or a screenshot's caption. */
 const noted = (chosen: FormMode) => chosen === 'link' || chosen === 'visible' || chosen === 'area';
+/** What the person changed before the tab's probe came back, which it then leaves as they are. */
+const touched = new Set<HTMLElement | 'mode'>();
 /** Whether this popup sent a clip, which it closes for, to let the person choose an area. */
 let saving = false;
 const samePlace = (a: Folder, b: Folder) => a.spaceId === b.spaceId && a.folderId === b.folderId;
@@ -226,7 +228,12 @@ function renderClip() {
           : 'Switch to WikiStow to unlock. The clip saves once it’s unlocked.';
       break;
     case 'still-waiting':
-      resultText.textContent = 'Still waiting in WikiStow. It saves the clip once it’s unlocked.';
+      resultText.textContent =
+        clip.waits === 'starting'
+          ? 'Still waiting in WikiStow. It saves the clip once it’s open.'
+          : clip.waits === 'unlock'
+            ? 'Still waiting in WikiStow. It saves the clip once it’s unlocked.'
+            : 'Still waiting in WikiStow, which is saving the clip.';
       break;
     case 'saved': {
       const { saved } = clip;
@@ -334,9 +341,15 @@ search.addEventListener('input', () => {
   searchTimer = setTimeout(() => void findFolders(search.value), 200);
 });
 
-for (const input of [titleInput, noteInput, tagsInput]) input.addEventListener('input', keepDraft);
+for (const input of [titleInput, noteInput, tagsInput]) {
+  input.addEventListener('input', () => {
+    touched.add(input);
+    keepDraft();
+  });
+}
 for (const input of modes) {
   input.addEventListener('change', () => {
+    touched.add('mode');
     keepDraft();
     renderForm();
   });
@@ -380,17 +393,35 @@ async function start() {
   ]);
   for (const input of hosts) input.checked = input.value === (local.host ?? 'auto');
   chosen = kept.lastFolder ?? null;
-  if (tabId !== undefined) probed = await call('probe', { tabId });
-  const draft = kept.draft?.url === probed.url ? kept.draft : null;
-  titleInput.value = draft?.title ?? probed.title;
-  noteInput.value = draft?.note ?? '';
-  tagsInput.value = draft?.tags ?? '';
-  const first: FormMode =
-    draft?.mode ??
-    (probed.selection?.trim() ? 'selection' : probed.selection === null ? 'link' : 'article');
-  for (const input of modes) input.checked = input.value === first;
+  // Link until the tab's probe comes back, which a page still loading may
+  // hold up: the app's state comes meanwhile, and a link can be sent.
+  for (const input of modes) input.checked = input.value === 'link';
   render();
-  showView(await call('status', {}));
+  void call('status', {}).then(showView);
+  if (tabId !== undefined) probeCame(await call('probe', { tabId }), kept.draft);
+}
+
+/** Fill in the form for the tab, and what was typed for it, save what the person changed meanwhile. */
+function probeCame(next: Probe, kept: Draft | undefined) {
+  probed = next;
+  // A clip already sent from the form leaves it as it was sent.
+  if (saving) return render();
+  const draft = kept?.url === next.url ? kept : null;
+  const fill = (input: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+    if (!touched.has(input)) input.value = value;
+  };
+  fill(titleInput, draft?.title ?? next.title);
+  fill(noteInput, draft?.note ?? '');
+  fill(tagsInput, draft?.tags ?? '');
+  if (!touched.has('mode')) {
+    const first: FormMode =
+      draft?.mode ??
+      (next.selection?.trim() ? 'selection' : next.selection === null ? 'link' : 'article');
+    for (const input of modes) input.checked = input.value === first;
+  }
+  // What the person typed before it came, kept now that the page is known.
+  if (touched.size > 0) keepDraft();
+  render();
 }
 
 void start();
