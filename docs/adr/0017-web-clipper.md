@@ -328,3 +328,12 @@ Scott accepted every recommendation below on 2026-11-13: the helper in Go; the s
 6. **HTML becomes Markdown in the app, through the paste path, not Turndown in the extension?** Recommended: yes (decision 5). One converter, written in the editor's own style and fixed with the app, not waiting on store reviews.
 7. **Folders by search, at most 50 per answer, only while unlocked?** Recommended: yes (decision 6). A large wiki's tree never has to fit 1 MB, and few names cross.
 8. **Whose developer accounts, and the Firefox ID `web-clipper@wikistow.skint007.github.io`?** The Chrome Web Store account and fee, and the Mozilla Add-ons account, are yours to open. The Firefox ID can't change once listed.
+
+## Decided (2026-11-15)
+
+Scott opened the Chrome Web Store and Mozilla Add-ons developer accounts on 2026-11-15, and chose the following for step 7:
+
+1. **Non-trader.** The Chrome Web Store publisher is declared a non-trader under the EEA consumer protection laws: WikiStow is a personal project, with no sales. It can change in the dashboard if that stops being true.
+2. **Public on both stores.** The clipper is listed, so anyone can find it, and each store updates it.
+3. **The first version by hand, updates from CI.** Step 7 builds the store zips and drafts the listing text. Scott uploads the first version and fills in each dashboard's listing and privacy forms, which fixes the Chrome Web Store ID. After that, the release job uploads new versions with store API keys kept as GitHub secrets in an environment, as the AUR and Homebrew keys are.
+4. **A support address of Scott's** is the listings' public contact. Step 7 gets it from him; the repository doesn't name it.
