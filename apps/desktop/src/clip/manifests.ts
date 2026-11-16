@@ -88,10 +88,16 @@ export function manifestTargets(places: ManifestPlaces): ManifestTarget[] {
       chromium('brave', join(configHome, 'BraveSoftware', 'Brave-Browser')),
       // Newer profiles are in ~/.config/mozilla, but Firefox still reads
       // ~/.mozilla/native-messaging-hosts, which the app makes, as Bitwarden does.
+      // Ubuntu's snap keeps its profile in ~/snap/firefox/common/.mozilla and
+      // never makes ~/.mozilla, but its portal reads manifests from there too.
       {
         browser: 'firefox',
         family: 'firefox',
-        profiles: [join(home, '.mozilla'), join(configHome, 'mozilla')],
+        profiles: [
+          join(home, '.mozilla'),
+          join(configHome, 'mozilla'),
+          join(home, 'snap', 'firefox', 'common', '.mozilla'),
+        ],
         file: join(home, '.mozilla', 'native-messaging-hosts', file),
         registryKey: null,
       },
