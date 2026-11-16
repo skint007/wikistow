@@ -123,7 +123,7 @@ At [the Developer Hub](https://addons.mozilla.org/developers/addon/submit/distri
 
 | Field | Value |
 | --- | --- |
-| Compatible platforms | Firefox only. Firefox for Android can't clip, having no native messaging, and is out of scope (ADR 0017, decision 9) |
+| Compatible platforms | Firefox only: untick **Firefox for Android**, which the manifest's `gecko_android` key may tick. Firefox for Android can't clip, having no native messaging, and is out of scope (ADR 0017, decision 9) |
 | Source code | **Yes**: upload `wikistow-clipper-<version>-source.zip`. Its README says how to build it, with Node 26 and pnpm rather than the reviewers' Node 24 and npm ([source code submission](https://extensionworkshop.com/documentation/publish/source-code-submission/)) |
 | Name | WikiStow Web Clipper |
 | Add-on URL | `https://addons.mozilla.org/firefox/addon/wikistow-web-clipper/` |

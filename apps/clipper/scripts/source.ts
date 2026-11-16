@@ -10,6 +10,7 @@
 // workspace that has only some of the lockfile's projects, and the build
 // reads nothing else. scripts/check-source.ts builds it and compares.
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +39,13 @@ const SKIP = ['dist', 'node_modules', 'test-results', 'playwright-report'];
  */
 async function clipperFiles() {
   const git = spawnSync('git', ['ls-files', '-z', '--', '.'], { cwd: clipper, encoding: 'utf8' });
-  if (git.status === 0 && git.stdout) return git.stdout.split('\0').filter(Boolean).sort();
+  if (git.status === 0 && git.stdout) {
+    // Not one deleted here and not yet committed.
+    return git.stdout
+      .split('\0')
+      .filter((path) => path && existsSync(join(clipper, path)))
+      .sort();
+  }
   return files(clipper, SKIP);
 }
 
