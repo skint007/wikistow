@@ -393,6 +393,8 @@ test('the popup works while the tab’s page is still loading', async () => {
   await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
   await expect(popup.getByRole('radio', { name: 'Article' })).toBeChecked();
   await expect(popup.getByLabel('Title')).toHaveValue('Slow page');
+  if (SCREENSHOTS)
+    await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-loading-page.png') });
   await popup.getByRole('radio', { name: 'Link' }).check();
   await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
   await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
@@ -449,6 +451,8 @@ test('while the app starts, the popup says so, though a new helper says it’s c
   await expect.poll(async () => (await got('stable', 'hello')).length).toBeGreaterThan(2);
   await expect(popup.getByText('Opening WikiStow…')).toBeVisible();
   await expect(popup.getByText('WikiStow is closed.')).toBeHidden();
+  if (SCREENSHOTS)
+    await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-starting.png') });
   // Opened again, while it still starts.
   await popup.close();
   const again = await reopen(tabId);
@@ -482,6 +486,8 @@ test('a clip waiting for the app to open says to unlock it once it loads locked'
   await expect(
     popup.getByText('Switch to WikiStow to unlock. The clip saves once it’s unlocked.'),
   ).toBeVisible();
+  if (SCREENSHOTS)
+    await popup.locator('main').screenshot({ path: join(SCREENSHOTS, 'popup-waiting-unlock.png') });
   await release('unlocked');
   await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
 });
