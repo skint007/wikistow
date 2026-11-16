@@ -54,7 +54,9 @@ export function manifest(target: Target, options: ManifestOptions) {
         description: 'Open the clipper',
       },
       send: {
-        suggested_key: { default: 'Alt+Shift+S' },
+        // Not S: on Windows, Firefox's menu bar takes Alt+Shift+S for
+        // History, as it takes F, E, V, B, T and H for its other menus.
+        suggested_key: { default: 'Alt+Shift+Y' },
         description: 'Send the selection, or else the link, to WikiStow',
       },
     },

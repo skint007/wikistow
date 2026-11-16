@@ -360,7 +360,7 @@ test('text selected in a text box isn’t offered as the selection, and the shor
   await popup.getByRole('radio', { name: 'Link' }).check();
   await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
   await expect(popup.getByText('Saved to Personal', { exact: true })).toBeVisible();
-  // Alt+Shift+S sends the selection, or else the link, and so does the
+  // Alt+Shift+Y sends the selection, or else the link, and so does the
   // menu's Send selection, which the browser offers for a text box too.
   await worker.evaluate(async (tabId) => {
     const tab = await chrome.tabs.get(tabId);
