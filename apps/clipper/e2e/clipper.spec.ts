@@ -470,6 +470,41 @@ test('the context menu sends to the last folder, opening a closed app first', as
   expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('✓');
 });
 
+test('a quick send while a clip waits leaves the waiting one shown', async () => {
+  const { worker, set, release, got } = await launch({ stable: ready });
+  const origin = await serve();
+  const { popup, tabId } = await popupFor(worker, origin);
+  await popup.getByLabel('Find a folder').fill('rec');
+  await popup.getByRole('radio', { name: 'Personal / Recipes' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+
+  await set('stable', { app: 'locked', clip: [{ hold: 'unlocked' }, SAVED] });
+  await popup.reload();
+  await expect(popup.getByText('Switch to WikiStow to unlock.', { exact: true })).toBeVisible();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  const waiting = popup.getByText(
+    'Switch to WikiStow to unlock. The clip saves once it’s unlocked.',
+  );
+  await expect(waiting).toBeVisible();
+  await worker.evaluate(
+    async (tabId) =>
+      globalThis.wikistowClipper!.menuClicked(
+        { menuItemId: 'send-link', editable: false, pageUrl: '' },
+        await chrome.tabs.get(tabId),
+      ),
+    tabId,
+  );
+  // The button says that one wasn't sent, for a moment; the popup still shows the one waiting.
+  expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('!');
+  await expect(waiting).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Save to WikiStow' })).toBeDisabled();
+  await expect.poll(() => worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('');
+  await release('unlocked');
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  expect(await got('stable', 'clip')).toHaveLength(2);
+});
+
 test('signed out, nothing is sent, and what was typed stays for the session', async () => {
   const { worker } = await launch({ stable: { ...ready, app: 'signed-out' } });
   const origin = await serve();

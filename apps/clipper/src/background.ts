@@ -194,6 +194,7 @@ async function show(spaceId: string, pageId: string): Promise<Calls['show']['res
 }
 
 let unbadge: ReturnType<typeof setTimeout> | undefined;
+/** Show `text` on the toolbar button: a check for a while, `!` until the popup opens. */
 function badge(text: '' | '✓' | '!') {
   clearTimeout(unbadge);
   void api.action.setBadgeText({ text });
@@ -202,6 +203,15 @@ function badge(text: '' | '✓' | '!') {
   }
   if (text === '✓')
     unbadge = setTimeout(() => void api.action.setBadgeText({ text: '' }), CHECK_MS);
+}
+
+/**
+ * Show `!` for a while, for a quick clip that wasn't sent as one is still
+ * on its way, then what the button showed for that one.
+ */
+function flashBusy() {
+  badge('!');
+  unbadge = setTimeout(() => badge(current?.phase === 'failed' ? '!' : ''), CHECK_MS);
 }
 
 function clearClip() {
@@ -365,7 +375,8 @@ const NOTHING: Captured = { url: '', title: '', html: '', text: '', byline: null
  * here once the person has dragged it out (`part`).
  */
 async function send(tabId: number, form: Form, part: { area: Area; view: ViewSize } | null = null) {
-  if (sending) return fail('busy', 'A clip is still on its way to WikiStow.');
+  // The clip on its way stays the one shown, which the popup waits on.
+  if (sending) return flashBusy();
   if (form.mode === 'area' && !part) return choose(tabId, form);
   sending = true;
   setClip({ phase: 'sending' });
