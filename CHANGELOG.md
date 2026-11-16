@@ -4,6 +4,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Desktop
+
+- The desktop app trusts the web clipper's Firefox add-on, `web-clipper@wikistow.skint007.github.io`, so Firefox can start its helper once the add-on is on Mozilla Add-ons. (#619)
+
+#### Releases and packaging
+
+- Each release carries the web clipper's source zip for Mozilla Add-ons, which CI checks builds the Firefox add-on byte for byte. `CLIPPER_CHROME_KEY` builds a Chrome copy with the store's ID, for checks by hand. The store listings' text and pictures are in `docs/web-clipper-store-listing.md`. (#619)
+
 ## 0.26.0 - 2026-11-15
 
 ### Highlights
