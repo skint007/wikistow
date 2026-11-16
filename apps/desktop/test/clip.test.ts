@@ -5,7 +5,7 @@ import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { clipHelper, desktopClipping } from '../src/clip/clipping.ts';
+import { clipHelper, clipSession, desktopClipping } from '../src/clip/clipping.ts';
 import { clipListener, privateFolder } from '../src/clip/listener.ts';
 import {
   manifestTargets,
@@ -395,6 +395,29 @@ describe('host manifests', () => {
       'remove BraveSoftware',
       'remove Mozilla',
     ]);
+  });
+});
+
+describe('the session main tells the clipper', () => {
+  const contents = (main: boolean, any: boolean) => ({
+    isLoadingMainFrame: () => main,
+    isLoading: () => any,
+  });
+
+  it('is signed out without a session, loaded or not', () => {
+    expect(clipSession(false, null)).toBe('signed-out');
+    expect(clipSession(false, contents(false, false))).toBe('signed-out');
+  });
+
+  it('is starting until the page itself has loaded', () => {
+    expect(clipSession(true, null)).toBe('starting');
+    expect(clipSession(true, contents(true, true))).toBe('starting');
+  });
+
+  it('stays signed in while only another frame loads', () => {
+    // A plugin's or a diagram's frame loading after the page (#446).
+    expect(clipSession(true, contents(false, true))).toBe('signed-in');
+    expect(clipSession(true, contents(false, false))).toBe('signed-in');
   });
 });
 
