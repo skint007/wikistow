@@ -6,7 +6,7 @@
 // injects answers as the injection's result; the one message it takes is
 // the area overlay's (area.ts), from the tab it was injected in, naming
 // the nonce it was given there.
-import { api } from './api.ts';
+import { api, browserName } from './api.ts';
 import type { Captured } from './capture.ts';
 import { base64, cropPng, dataBytes, isAreaMessage, type Area, type ViewSize } from './shot.ts';
 import { ask, converse, find, HostGone, TimedOut, type Found } from './host.ts';
@@ -557,21 +557,31 @@ api.runtime.onConnect.addListener((port) => {
 });
 
 /**
+ * Firefox opens the popup only while it handles the person's click or key,
+ * before anything is awaited. Chrome opens it after a wait too.
+ */
+const OPENS_POPUP_AT_ONCE = browserName() === 'firefox';
+
+/**
  * Send without the popup, from the context menu or the shortcut, to the
- * folder the last clip went to. Before there is one, open the popup:
- * Firefox opens it only while handling the person's click or key, so it's
- * asked at once when no folder is known yet.
+ * folder the last clip went to. Before there is one, open the popup. On
+ * Firefox it's asked at once when the folder isn't known yet: when there's
+ * none, or when the background has just woken for this and not yet read it
+ * from `storage.session`. With one read then, the clip goes too, and the
+ * popup shows it going.
  */
 async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'selection' | 'either') {
-  if (lastFolder === null) return void api.action.openPopup().catch(() => {});
+  const opened =
+    lastFolder === null || (lastFolder === undefined && OPENS_POPUP_AT_ONCE)
+      ? api.action.openPopup()
+      : null;
+  opened?.catch(() => {});
+  const noFolder = () =>
+    fail('no-folder', 'Choose a folder here first. Then the menu and the shortcut send to it.');
+  if (lastFolder === null) return opened!.catch(noFolder);
   const tabId = tab?.id ?? (await api.tabs.query({ active: true, currentWindow: true }))[0]?.id;
   lastFolder ??= (await session()).lastFolder ?? null;
-  if (!lastFolder) {
-    await api.action.openPopup().catch(() => {
-      fail('no-folder', 'Choose a folder here first. Then the menu and the shortcut send to it.');
-    });
-    return;
-  }
+  if (!lastFolder) return (opened ?? api.action.openPopup()).catch(noFolder);
   if (tabId === undefined) return;
   let chosen: TextMode = mode === 'selection' ? 'selection' : 'link';
   if (mode === 'either') chosen = (await probe(tabId)).selection?.trim() ? 'selection' : 'link';
@@ -608,10 +618,9 @@ api.runtime.onInstalled.addListener(() => {
 });
 menus?.onClicked.addListener((info, tab) => void menuClicked(info, tab));
 // Firefox wakes its background to show the context menu, before the click,
-// so the last folder is read by then, and a click with none can open the
-// popup at once, as Firefox asks. Chrome has no `onShown`, and opens the
-// popup after a wait too. A shortcut has no such warning: pressed while
-// Firefox's background sleeps, with no folder yet, it shows `!` instead.
+// so the last folder is read by then, and a click sends without the popup.
+// A shortcut has no such warning: pressed while Firefox's background
+// sleeps, it opens the popup, as `quick` says. Chrome has no `onShown`.
 menus?.onShown?.addListener(() => void readLastFolder());
 commands?.onCommand.addListener((command, tab) => void commanded(command, tab));
 
