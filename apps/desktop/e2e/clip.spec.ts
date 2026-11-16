@@ -151,6 +151,8 @@ test('an extension reaches the app through the helper', async ({
     allowed_origins: [ORIGIN],
   });
   // Firefox's names only the published extension, as none is added for it.
+  // The app writes it after Chromium's.
+  await expect.poll(() => existsSync(firefoxManifest)).toBe(true);
   expect(JSON.parse(await readFile(firefoxManifest, 'utf8'))).toMatchObject({
     name: HOST,
     path: HELPER,
