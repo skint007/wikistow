@@ -150,8 +150,14 @@ test('an extension reaches the app through the helper', async ({
     type: 'stdio',
     allowed_origins: [ORIGIN],
   });
-  // No Firefox extension is published, or added for this launch.
-  expect(existsSync(firefoxManifest)).toBe(false);
+  // Firefox's names only the published extension, as none is added for it.
+  // The app writes it after Chromium's.
+  await expect.poll(() => existsSync(firefoxManifest)).toBe(true);
+  expect(JSON.parse(await readFile(firefoxManifest, 'utf8'))).toMatchObject({
+    name: HOST,
+    path: HELPER,
+    allowed_extensions: ['web-clipper@wikistow.skint007.github.io'],
+  });
   expect((await stat(hostFile)).mode & 0o777).toBe(0o600);
 
   browser = await chromium.launchPersistentContext(join(config, 'chromium'), {
@@ -313,7 +319,7 @@ test('an extension reaches the app through the helper', async ({
   await desktop.window.getByRole('link', { name: 'Settings' }).first().click();
   const row = desktop.window.getByRole('heading', { name: 'Browser clipping' });
   await expect(row).toHaveAccessibleDescription(
-    'The WikiStow extension in Chromium can save pages here as drafts.',
+    'The WikiStow extension in Chromium and Firefox can save pages here as drafts.',
   );
   // This session's clips, newest first, each a link to its draft.
   await expect(

@@ -10,6 +10,7 @@ import { clipListener, privateFolder } from '../src/clip/listener.ts';
 import {
   manifestTargets,
   manifestText,
+  PUBLISHED_EXTENSIONS,
   syncManifests,
   withExtension,
   type Registry,
@@ -318,6 +319,15 @@ describe('host manifests', () => {
     expect(JSON.parse(manifestText('firefox', 'h', '/p', allowed))).toMatchObject({
       allowed_extensions: ['web-clipper@wikistow.skint007.github.io'],
     });
+  });
+
+  it('name the published extensions: Firefox’s ID, and Chrome’s once its store gives it', () => {
+    expect(PUBLISHED_EXTENSIONS.firefox).toEqual(['web-clipper@wikistow.skint007.github.io']);
+    // Each is an exact origin or ID, as a launch's extension must be.
+    const none = { chromium: [], firefox: [] };
+    for (const id of [...PUBLISHED_EXTENSIONS.chromium, ...PUBLISHED_EXTENSIONS.firefox]) {
+      expect(withExtension(none, id), id).not.toEqual(none);
+    }
   });
 
   it('take an extension for the launch only if it is an origin or an ID', () => {
