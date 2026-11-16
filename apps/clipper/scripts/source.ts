@@ -9,6 +9,7 @@
 // and the root's files go in, not the rest of WikiStow: pnpm installs a
 // workspace that has only some of the lockfile's projects, and the build
 // reads nothing else. scripts/check-source.ts builds it and compares.
+import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +30,17 @@ const ROOT = [
 ];
 /** What the clipper's folder holds that isn't its source. */
 const SKIP = ['dist', 'node_modules', 'test-results', 'playwright-report'];
+
+/**
+ * The clipper's files: those git tracks, so nothing a person has lying
+ * in the folder goes in a public upload, or, where there's no git, as in
+ * CI's container and its clean checkout, every file but those in SKIP.
+ */
+async function clipperFiles() {
+  const git = spawnSync('git', ['ls-files', '-z', '--', '.'], { cwd: clipper, encoding: 'utf8' });
+  if (git.status === 0 && git.stdout) return git.stdout.split('\0').filter(Boolean).sort();
+  return files(clipper, SKIP);
+}
 
 /** The commands that build it, from the source's root, which scripts/check-source.ts runs from the README. */
 function buildCommands(firefoxId: string) {
@@ -89,7 +101,7 @@ const root = JSON.parse(await readFile(join(workspace, 'package.json'), 'utf8'))
 };
 const pnpm = root.packageManager.replace(/^pnpm@/, '');
 const node = (await readFile(join(workspace, '.node-version'), 'utf8')).trim();
-const paths = [...ROOT, ...(await files(clipper, SKIP)).map((path) => `apps/clipper/${path}`)];
+const paths = [...ROOT, ...(await clipperFiles()).map((path) => `apps/clipper/${path}`)];
 const zip = join(clipper, 'dist', `wikistow-clipper-${version}-source.zip`);
 await writeZip(zip, workspace, paths, {
   'README.md': new TextEncoder().encode(
