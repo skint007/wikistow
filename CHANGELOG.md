@@ -4,6 +4,42 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.27.0 - 2026-11-17
+
+### Highlights
+
+#### Fixes
+
+- Browser clipping no longer says WikiStow is starting while a diagram or a plugin loads on the page you have open.
+- Browser clipping works in Firefox on Ubuntu, which installs it as a snap.
+- Removing WikiStow with Homebrew no longer asks for an administrator password.
+
+#### Maintenance
+
+- The desktop app is ready for the web clipper from the Chrome Web Store and Mozilla Add-ons, which aren't listed yet.
+
+### Changes
+
+#### Desktop
+
+- The desktop app trusts the web clipper's Firefox add-on, `web-clipper@wikistow.skint007.github.io`, so Firefox can start its helper once the add-on is on Mozilla Add-ons. (#619)
+- The desktop app trusts the web clipper from the Chrome Web Store, `chrome-extension://gldgjbchfcmlbbmjbgmamconolliokpj/`, for Chrome, Edge and Brave. CI's builds carry `chrome-keyed`, an unpacked copy with the store's ID, for checks by hand. (#623)
+- The app tells the web clipper it is starting only while its own page loads, not while a plugin's or a diagram's frame does, so a clip no longer waits, or asks where to go, at such a moment. (#618)
+- The desktop app writes Firefox's host manifest when only the Ubuntu snap's profile folder, `~/snap/firefox/common/.mozilla`, exists: the snap never makes `~/.mozilla`, but its portal reads `~/.mozilla/native-messaging-hosts`. ADR 0017 records what the hand checks found on Ubuntu 24.04 and 26.04. (#626)
+- The web clipper extension, not yet in the stores: with **Whichever is open**, a ready app that speaks the extension's protocol wins over an older one; text selected in a text box isn't offered as **Selection**; the popup shows at once on a page still loading, offering **Link** until the page answers; a quick send while a clip waits only flashes `!`; in Firefox, the send shortcut opens the popup when the background has forgotten the folder; the popup keeps saying **Opening WikiStow…** while the app starts, and a waiting clip's wording follows the app's state. (#621)
+- The web clipper extension's send shortcut is Alt+Shift+Y, since Firefox on Windows takes Alt+Shift+S for its History menu. (#628)
+
+#### Releases and packaging
+
+- Each release carries the web clipper's source zip for Mozilla Add-ons, which CI checks builds the Firefox add-on byte for byte. `CLIPPER_CHROME_KEY` builds a Chrome copy with the store's ID, for checks by hand. The store listings' text and pictures are in `docs/web-clipper-store-listing.md`. (#619)
+- A stable release that raises the web clipper's version sends it to the Chrome Web Store and submits it to Mozilla Add-ons, once the `stores` environment holds their keys; until then it warns and sends nothing. (#620)
+- The Homebrew cask deletes the web clipper's manifests as the person, without `sudo`, so `brew uninstall --cask wikistow` asks for no password and works without a terminal. It does this with an uninstall step, as Homebrew 7 asks, instead of the deprecated Ruby hook. (#629, #632)
+
+#### Development
+
+- The project board holds where work stands, including what waits on Scott: `node scripts/board.ts` files, starts, asks and drops cards, and `board check` finds what's out of step. (#605, #611)
+- ADR 0017 records the store decisions and how the Firefox shortcut acts, and ADR 0015 and the protocol accept that a live fold may bring back text the session deleted (#542). (#616, #617, #622)
+
 ## 0.27.0-beta.2 - 2026-11-16
 
 ### Highlights
