@@ -26,24 +26,24 @@ cask "wikistow" do
 
   # The web clipper's host manifests, which the app writes at each launch
   # for the browsers it finds (docs/desktop.md). They name the app's helper,
-  # so they go with it; they aren't the person's data. Deleted in Ruby, as
+  # so they go with it; they aren't the person's data. Removed by a step, as
   # the person: `uninstall delete:` always runs `sudo rm`, which asks for an
   # admin password even for files in the home folder, and fails without a
-  # terminal.
-  uninstall_postflight do
-    [
-      "BraveSoftware/Brave-Browser/NativeMessagingHosts",
-      "Chromium/NativeMessagingHosts",
-      "Google/Chrome/NativeMessagingHosts",
-      "Microsoft Edge/NativeMessagingHosts",
-      "Mozilla/NativeMessagingHosts",
-    ].each do |folder|
-      FileUtils.rm_f File.expand_path("~/Library/Application Support/#{folder}/io.github.skint007.wikistow.json")
-    end
+  # terminal. Homebrew 6.0.16 deprecated the Ruby `uninstall_postflight`.
+  # The steps run in a sandbox whose HOME is a temporary folder, so they
+  # name the real one with `base: :home` rather than `~`.
+  uninstall_postflight_steps do
+    remove [
+      "Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/io.github.skint007.wikistow.json",
+      "Library/Application Support/Chromium/NativeMessagingHosts/io.github.skint007.wikistow.json",
+      "Library/Application Support/Google/Chrome/NativeMessagingHosts/io.github.skint007.wikistow.json",
+      "Library/Application Support/Microsoft Edge/NativeMessagingHosts/io.github.skint007.wikistow.json",
+      "Library/Application Support/Mozilla/NativeMessagingHosts/io.github.skint007.wikistow.json",
+    ], base: :home
   end
 
   zap trash: [
-    "~/Library/Application Support/WikiStow",
+    "Library/Application Support/WikiStow",
     "~/Library/Preferences/io.github.skint007.wikistow.plist",
     "~/Library/Saved Application State/io.github.skint007.wikistow.savedState",
   ]
