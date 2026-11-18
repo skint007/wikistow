@@ -97,6 +97,7 @@ export type PageQuery = {
   /**
    * Conditions joined by commas, all of which must hold: `tried = true, servings >= 2`.
    * `saved` (or Dataview's `file.mtime`) is when the version was saved, `PageRow.updated`, compared as a date: `saved > 2026-01-01`.
+   * `=` and `!=` take a date to the precision it is written with: `saved = 2026-11-13` is any time that day, `saved = 2026-11-13T09:30Z` any in that minute.
    * `updated` is a property like any other.
    */
   where?: string | undefined;

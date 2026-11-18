@@ -45,6 +45,7 @@ import {
   parsePageQuery,
   QUERY_LANGUAGE,
   runPageQuery,
+  type PageQuery,
   type QueryPage,
   type QueryRow,
 } from '../query.ts';
@@ -58,6 +59,7 @@ import {
 } from '../reader/body-html.ts';
 import { readBody } from '../reader/reading.ts';
 import {
+  fetchRevisions,
   loadPage,
   openPublications,
   openRevisionOf,
@@ -459,6 +461,37 @@ function queryBlocks(body: string): string[] {
   return sources;
 }
 
+/** Whether `query` reads when each version was saved (`saved`), in a condition, a column or its sort. */
+const readsSaved = ({ where, show, sort }: PageQuery) =>
+  where.some(({ name }) => isSavedTime(name)) ||
+  show.some(isSavedTime) ||
+  (!!sort && sort.by !== 'title' && isSavedTime(sort.by.name));
+
+/**
+ * When the server took the copied version, asked of it again (`fresh`)
+ * (#458): the time this device holds for it may be its own clock, for one
+ * it just published (`cacheWritten`), or none, for one kept before times
+ * were. (Other rows still take the time held for them where there is one, #646.) That one stands in when the server can't
+ * be asked, or its answer doesn't open, so a table that may not even list
+ * the page never stops its copy going up.
+ */
+async function copiedTime(ctx: ClientContext, page: PageRef, revisionId: RevisionId) {
+  const wanted = { ...page, revisionId, audience: 'published' as const };
+  const held = ctx.revisions.get(wanted)?.createdAt ?? null;
+  try {
+    const fetched = await fetchRevisions(
+      ctx,
+      page.spaceId,
+      new Map([[revisionId, { pageId: page.pageId, audience: wanted.audience }]]),
+      { fresh: true },
+    );
+    return fetched.get(revisionId)?.().createdAt ?? held;
+  } catch (error) {
+    if (error instanceof ApiError || error instanceof CryptoError) return held;
+    throw error;
+  }
+}
+
 /**
  * Each query block of the copied version as its public copy writes it
  * (ADR 0006, decision 9): the table as it stands now, run over the
@@ -507,10 +540,11 @@ async function queryTables(
   const seen = (ids: readonly string[]) => root === undefined || ids[0] === root;
   const pages: (QueryPage & { pageId: PageId })[] = [];
   const own = readProperties(splitFrontmatter(payload.markdown).frontmatter);
-  // The copied version's time as this device holds it: this device's clock
-  // for one it just published, or the server's.
-  const ownTime =
-    ctx.revisions.get({ ...page, revisionId, audience: 'published' })?.createdAt ?? null;
+  // The copied version's time, as the server took it, only where a table reads it.
+  const read = new Map(blocks.map((source) => [source, parsePageQuery(source)]));
+  const ownTime = [...read.values()].some((query) => query.ok && readsSaved(query.query))
+    ? await copiedTime(ctx, page, revisionId)
+    : null;
   for (const summary of [summaries.get(page.pageId), ...others]) {
     if (!summary) continue;
     const version =
@@ -554,8 +588,8 @@ async function queryTables(
   const written = new Map<string, string[] | undefined>();
   for (const source of blocks) {
     if (written.has(source)) continue;
-    const read = parsePageQuery(source);
-    const result = read.ok ? runPageQuery(read.query, { pages, folders: shown }) : null;
+    const query = read.get(source);
+    const result = query?.ok ? runPageQuery(query.query, { pages, folders: shown }) : null;
     written.set(source, result?.ok ? queryTableMarkdown(result, linked) : undefined);
   }
   return {

@@ -27,10 +27,15 @@ import { hasTag } from './search.ts';
 /** The language a query block's fence is labelled with. */
 export const QUERY_LANGUAGE = 'wikistow-query';
 
-/** A value written in a condition: a number, a date, true or false, or text. */
+/**
+ * A value written in a condition: a number, a date, true or false, or text.
+ * A date is the moment it starts (`dateMoment`), and how many milliseconds
+ * the precision it is written with spans (`dateSpan`): a day alone the
+ * whole day, a time without seconds the whole minute.
+ */
 export type QueryLiteral =
   | { kind: 'number'; value: number }
-  | { kind: 'date'; value: number }
+  | { kind: 'date'; value: number; span: number }
   | { kind: 'boolean'; value: boolean }
   | { kind: 'text'; value: string };
 
@@ -257,9 +262,30 @@ const DATE =
  * isn't a date as property types read them.
  */
 export function dateMoment(text: string): number | null {
-  const [, year, month, day, hour = '0', minute = '0', second = '0', fraction = '', zone] =
-    DATE.exec(text) ?? [];
+  return dateSpan(text)?.value ?? null;
+}
+
+const DAY = 86_400_000;
+
+/**
+ * A date as `dateMoment` reads it, and how long the precision it is written
+ * with spans, in milliseconds, for `=` and `!=` (#459): a day alone the
+ * whole day, a time without seconds the whole minute, with seconds the
+ * whole second, and with a fraction of one as many digits as it has, to
+ * the millisecond. A time with no zone is read as UTC, so a day is always
+ * 24 hours. Null as for `dateMoment`.
+ */
+export function dateSpan(text: string): { value: number; span: number } | null {
+  const [, year, month, day, hour, minute = '0', second, fraction, zone] = DATE.exec(text) ?? [];
   if (year === undefined) return null;
+  const span =
+    hour === undefined
+      ? DAY
+      : second === undefined
+        ? 60_000
+        : fraction === undefined
+          ? 1000
+          : 10 ** (3 - Math.min(fraction.length, 3));
   const date = new Date(0);
   // Not `Date.UTC`, which reads years up to 99 as 1900 and on.
   date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
@@ -268,17 +294,17 @@ export function dateMoment(text: string): number | null {
   if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return null;
   // To the millisecond, as times saved a moment apart sort apart.
   date.setUTCHours(
-    Number(hour),
+    Number(hour ?? 0),
     Number(minute),
-    Number(second),
-    Number(fraction.padEnd(3, '0').slice(0, 3)),
+    Number(second ?? 0),
+    Number((fraction ?? '').padEnd(3, '0').slice(0, 3)),
   );
   let moment = date.getTime();
   if (zone !== undefined && zone !== 'Z') {
     const [, sign, hours, minutes = '0'] = /^([+-])(\d{2}):?(\d{2})?$/.exec(zone) ?? [];
     moment -= (Number(hours) * 60 + Number(minutes)) * (sign === '-' ? -1 : 1) * 60_000;
   }
-  return Number.isNaN(moment) ? null : moment;
+  return Number.isNaN(moment) ? null : { value: moment, span };
 }
 
 function readLiteral(text: string): QueryLiteral | null {
@@ -291,8 +317,8 @@ function readLiteral(text: string): QueryLiteral | null {
   const lower = text.toLowerCase();
   if (lower === 'true' || lower === 'false') return { kind: 'boolean', value: lower === 'true' };
   if (NUMBER.test(text)) return { kind: 'number', value: Number(text) };
-  const date = dateMoment(text);
-  if (date !== null) return { kind: 'date', value: date };
+  const date = dateSpan(text);
+  if (date !== null) return { kind: 'date', ...date };
   return { kind: 'text', value: text };
 }
 
@@ -423,17 +449,29 @@ type Comparable = QueryLiteral;
 function comparable(value: string | number | boolean, type: PropertyData['type']): Comparable {
   if (typeof value === 'number') return { kind: 'number', value };
   if (typeof value === 'boolean') return { kind: 'boolean', value };
-  const date = type === 'date' || type === 'list' ? dateMoment(value) : null;
-  return date === null ? { kind: 'text', value } : { kind: 'date', value: date };
+  const date = type === 'date' || type === 'list' ? dateSpan(value) : null;
+  return date === null ? { kind: 'text', value } : { kind: 'date', ...date };
 }
 
 const textOf = (value: Comparable) =>
   value.kind === 'date' ? '' : String(value.value).toLocaleLowerCase('en');
 
-/** Whether `value` equals `literal`: as numbers, dates or true and false alike, or as text whatever its case. */
+/**
+ * Whether `value` equals `literal`: as numbers or true and false alike, as
+ * text whatever its case, or as a date for a moment within the precision
+ * the literal is written with (`dateSpan`), so `2026-11-13` holds for any
+ * time that day, and `2026-11-13T09:30Z` for any in that minute.
+ */
 function equal(value: Comparable, literal: QueryLiteral): boolean {
   if (literal.kind === 'text') {
     return value.kind !== 'date' && textOf(value) === literal.value.toLocaleLowerCase('en');
+  }
+  if (literal.kind === 'date') {
+    return (
+      value.kind === 'date' &&
+      value.value >= literal.value &&
+      value.value < literal.value + literal.span
+    );
   }
   return value.kind === literal.kind && value.value === literal.value;
 }
@@ -468,9 +506,10 @@ function scalars(property: Readonly<PropertyData>): Comparable[] {
 
 /**
  * Whether `page`'s values (`valueOf`) meet `condition`. `=` and `has` hold for a value
- * equal to it, or a list holding one; `!=` where `=` doesn't, a missing
+ * equal to it (`equal`), or a list holding one; `!=` where `=` doesn't, a missing
  * value included. `<`, `<=`, `>` and `>=` compare a number or a date with
- * one of the same kind, never text or a list.
+ * one of the same kind, never text or a list, a date by the moment it
+ * starts.
  */
 function holds(page: QueryPage, condition: QueryCondition): boolean {
   const property = valueOf(page, condition.name);
