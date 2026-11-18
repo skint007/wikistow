@@ -11,6 +11,7 @@ import {
   WorkerMessage,
   type BlockSpec,
   type HostMessage,
+  type InlineSpec,
   type Method,
   type OutputResult,
   type ScriptEvent,
@@ -64,6 +65,8 @@ export type ScriptRegistry = {
     spec: BlockSpec,
     calculate: (page: PageRef, values: Record<string, FieldValue>) => Promise<Outputs>,
   ): Disposer;
+  /** A span it declares: one field the app draws, bound to a property. */
+  inline(spec: InlineSpec): Disposer;
   listen<E extends ScriptEvent['event']>(
     event: E,
     run: (event: EventOf<E>) => Promise<void>,
@@ -130,6 +133,8 @@ export class ScriptWorker {
   #commands = new Map<string, Disposer>();
   /** Kept as it starts again, which registers the same blocks: their forms stay. */
   #blocks = new Map<string, { spec: BlockSpec; dispose: Disposer }>();
+  /** Its spans, kept as its blocks are. */
+  #spans = new Map<string, { spec: InlineSpec; dispose: Disposer }>();
   #calculating: Promise<unknown> = Promise.resolve();
   /** Its activation finished; until then `#started` waits, settled as it does or the worker ends. */
   #ready = false;
@@ -392,6 +397,19 @@ export class ScriptWorker {
         this.#blocks.get(message.block)?.dispose();
         this.#blocks.delete(message.block);
         return;
+      case 'inline': {
+        const spec = message.inline;
+        const kept = this.#spans.get(spec.type);
+        // The same span as it starts again: its fields stay, and what is entered in them.
+        if (kept && JSON.stringify(kept.spec) === JSON.stringify(spec)) return;
+        kept?.dispose();
+        this.#spans.set(spec.type, { spec, dispose: this.#registry.inline(spec) });
+        return;
+      }
+      case 'uninline':
+        this.#spans.get(message.inline)?.dispose();
+        this.#spans.delete(message.inline);
+        return;
       case 'listen':
         if (message.on && !this.#listening.has(message.event)) {
           const dispose = this.#registry.listen(message.event, (event) => this.#deliver(event));
@@ -468,7 +486,7 @@ export class ScriptWorker {
       reject(error);
     }
     this.#invocations.clear();
-    // Its commands and handlers go until it registers them again; its blocks stay.
+    // Its commands and handlers go until it registers them again; its blocks and spans stay.
     for (const dispose of [...this.#listening.values(), ...this.#commands.values()]) dispose();
     this.#listening.clear();
     this.#commands.clear();

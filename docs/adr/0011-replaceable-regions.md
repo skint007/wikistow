@@ -111,11 +111,13 @@ As built (#316): `search.results` is replaceable. It is the list under the searc
 
 ### 7. Claimed inline code
 
-A plugin can claim inline code written `` `plugin:<id>/<type> <text>` ``, as it claims a fence `plugin:<id>/<block>`. The manifest's `inline` lists the types it claims. Where the plugin runs, the reader and the visual editor draw the span with the plugin's view (`{ text, page, setText }`). Everywhere else (other devices, the CLI, `/p/` pages, export, search) it is the inline code it is.
+A plugin can claim inline code written `` `plugin:<id>/<type> <text>` ``, as it claims a fence `plugin:<id>/<block>`. The manifest's `inline` lists the types it claims. Where the plugin runs, the reader and the visual editor draw the span with the plugin's view (`{ text, page, setText, properties, setProperty }`). Everywhere else (other devices, the CLI, `/p/` pages, export, search) it is the inline code it is.
 
 The page's text never changes for being claimed. The visual editor keeps the span as an atom holding its exact source and writes it back as it was. So the plugin's code never runs in the reader's worker or the editor's serializer, and a page can't be rewritten by a plugin's mistake.
 
 New Markdown syntax of a plugin's own, such as `==highlight==`, stays out. It would need the plugin's code in the reader's worker and in the visual editor's schema and serializer. Every device without the plugin would show it as stray characters. A serializer that lost a character would rewrite the page for everyone who edits it.
+
+**As changed by #402 (2026-11-13 and 2026-11-18):** a span reads and sets the page's properties as a plugin block does (`properties`, `setProperty`, under the same rules: the person's own edit in the visual editor, and while reading only for an editor who can publish, while the draft has no changes, published as one labelled version with the page's other changes, as [ADR 0008](0008-reader-change-labels.md) describes). While reading it changes properties only: `setText` stays null there, as changing the body is wider than a property and history would need a label of its own for it. A script can claim spans too, with `host.inline.register({ type, field })`: one of its block fields, which the app draws in the line of text bound to a property, so a widget inside a sentence, as with Meta Bind, needs no app code. The span's text names the property, or, with no text, the field's own `property` does. The manifest's `inline` claims a script's types as it claims app code's. A released app refuses a script that declares one, as it refuses any message it doesn't know, so nothing is drawn wrongly. The page's text still never changes for being claimed.
 
 **As changed by #401 (2026-11-12):** a plugin can also claim a bare fence language, such as `dataview`, so the blocks an imported vault already has are drawn without editing them. This is not syntax of its own: a fence is Markdown every device reads, the page's text never changes for being claimed, and without the plugin the block is code, as before. The manifest's `fences` gives each language one of the plugin's `blocks` (`{ "dataview": "query" }`), drawn by the view its app code registers for that block, so the approval dialog names the languages before any code runs, and the library lists such a version only to apps that read `manifest=4`. A language is a lowercase letter, then lowercase letters, digits, `_`, `+` and `-`, and not one the app draws itself (`wikistow-query`, `mermaid`, `math`). Only app plugins claim one, and a script's form is never drawn for one: such a fence holds whatever its author wrote, on any page the person opens and whatever the plugin's page access, which app code already reads as the app does, but a sandboxed script must not be handed. Two running plugins claiming one language are settled as two replacing one region are (decision 6): the first in Settings' order that draws the block draws it, and Settings → Plugins lists each claimed language with the plugin drawing it, **Show as code**, and **Use _plugin_** for each other plugin claiming it. The choice is kept in `ownParts` as `fence:<language>`, beside the regions, so it needs no new field, and an app older than it ignores it. Unlike `plugin:<id>/<type>`, a claimed language names no plugin, so without one the block has no note naming a missing plugin: it is just code.
 
@@ -157,6 +159,15 @@ Scott approved every recommendation:
 5. `host.app`: `location`, `navigate`, `spaces.list` and `renderMarkdown`, and events from the router.
 6. With two replacements, the first in Settings order wins. The choice to use the app's own part is kept as on/off is. A failed replacement falls back.
 7. Claimed inline code, and no plugin syntax of its own.
+
+## Decided while building it
+
+Choices made without Scott while building #402, not his decisions:
+
+- **A script's span is bound by its text.** `` `plugin:<id>/done reviewed` `` binds the toggle to `reviewed`; with no text, the field's own `property` is used. So one declared widget, a toggle, serves every property, as Meta Bind's `INPUT[toggle:reviewed]` does. Text that isn't a property name, or no text where the field names none, shows the span's text in red, with why for screen readers, rather than the code.
+- **Its control's name.** The field's `label`, or the property the text names, since a generic toggle's label says nothing of what it sets.
+- **No new manifest level.** A script's spans use the manifest's `inline`, which apps have read since `manifest=2`, so the library still lists such a version to released apps, which then refuse the script's `inline` message. The library can't tell a script's span from app code's by the manifest.
+- **An unknown message says to update.** This app's refusal of a kind of message it doesn't know, or of a span's field it can't draw, says it may need a newer WikiStow, as part 1 did for block fields.
 
 ## Implementation, in pull requests
 

@@ -225,6 +225,15 @@ export const BlockSpec = z
   );
 export type BlockSpec = z.infer<typeof BlockSpec>;
 
+/**
+ * A claimed span a script declares (#402): one field, which the app draws
+ * bound to the property the span's text names, else to the field's own.
+ * An app older than it refuses the message, as it does any type it
+ * doesn't know.
+ */
+export const InlineSpec = z.strictObject({ type: BlockType, field: BlockField });
+export type InlineSpec = z.infer<typeof InlineSpec>;
+
 /** An output's answer, or why there is none. */
 export const OutputResult = z.union([
   z.strictObject({ value: Value }),
@@ -245,6 +254,8 @@ export const WorkerMessage = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('unregister'), command: Id }),
   z.strictObject({ type: z.literal('block'), block: BlockSpec }),
   z.strictObject({ type: z.literal('unblock'), block: BlockType }),
+  z.strictObject({ type: z.literal('inline'), inline: InlineSpec }),
+  z.strictObject({ type: z.literal('uninline'), inline: BlockType }),
   z.strictObject({ type: z.literal('listen'), event: EventName, on: z.boolean() }),
   z.strictObject({
     type: z.literal('call'),
