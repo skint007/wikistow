@@ -4,12 +4,18 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.28.0-beta.1 - 2026-11-18
+
 ### Highlights
 
 #### Features
 
 - A plugin’s script blocks can show a toggle, a menu of choices, a date picker or a slider, each able to set one of the page’s properties.
 - Plugins can put a widget inside a sentence: a toggle, a menu, a slider or a date in a line of text that shows and sets one of the page’s properties, in the editor and while reading.
+
+#### Fixes
+
+- In a query table, a date copied from a cell into `where` now matches its row, a day alone matches the whole day, and `<=` takes in all of the day written.
 
 ### Changes
 
