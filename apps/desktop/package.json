@@ -17,7 +17,7 @@
     "@types/node": "^26.0.0",
     "@wikistow/contracts": "workspace:*",
     "@wikistow/plugin-sdk": "workspace:*",
-    "electron": "44.11.3",
+    "electron": "44.11.4",
     "resedit": "^3.1.0",
     "zod": "^4.6.5"
   },
