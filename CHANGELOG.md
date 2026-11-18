@@ -4,6 +4,21 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.27.3-beta.1 - 2026-11-18
+
+### Highlights
+
+#### Fixes
+
+- Search no longer shows a change waiting on this device after you discard it, and keeps showing what you typed into one while it waits.
+- **By meaning** no longer lists pages found for an earlier query when a search fails.
+- A draft’s **By meaning** snippet starts at the top of the page while its earlier version stands in, rather than mid-word.
+- Search by meaning keeps the vectors it made before you lock the vault or close the tab, and no longer keeps vectors made from text typed offline as the version’s own.
+
+#### Optimizations
+
+- Opening the command palette no longer starts the search-by-meaning model, and typing no longer scans every page’s vectors again at each key.
+
 ### Changes
 
 #### App
