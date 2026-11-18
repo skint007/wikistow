@@ -4,9 +4,9 @@ import {
   type Command,
   type Disposer,
   type DraftResult,
+  type FieldValue,
   type FolderEntry,
   type FolderRef,
-  type OutputValue,
   type PageHandle,
   type PageQueryResult,
   type PageRef,
@@ -220,17 +220,36 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
  */
 export function declaredField(declared: BlockField): BlockField {
   const { label, property } = declared;
-  const fields: BlockField =
-    declared.type === 'number'
-      ? {
+  const fields: BlockField = (() => {
+    switch (declared.type) {
+      case 'number':
+        return {
           type: 'number',
           label,
           default: declared.default,
           min: declared.min,
           max: declared.max,
+          // Unset unless it's a slider, so a plain number field reaches an app older than them.
+          slider: declared.slider || undefined,
+          step: declared.step,
           property,
-        }
-      : { type: 'text', label, default: declared.default, property };
+        };
+      case 'boolean':
+        return { type: 'boolean', label, default: declared.default, property };
+      case 'choice':
+        return {
+          type: 'choice',
+          label,
+          options: declared.options.map(({ value, label }) => ({ value, label })),
+          default: declared.default,
+          property,
+        };
+      case 'date':
+        return { type: 'date', label, default: declared.default, property };
+      default:
+        return { type: 'text', label, default: declared.default, property };
+    }
+  })();
   return Object.fromEntries(
     Object.entries(fields).filter(([, value]) => value !== undefined),
   ) as BlockField;
@@ -247,11 +266,11 @@ class Waiting {}
  */
 async function calculate(
   block: ScriptBlock<Record<string, BlockField>>,
-  values: Record<string, OutputValue>,
+  values: Record<string, FieldValue>,
   page: PageRef,
 ): Promise<Record<string, OutputResult>> {
   const results = new Map<string, OutputResult>();
-  const read: Record<string, OutputValue> = {};
+  const read: Record<string, FieldValue> = {};
   for (const [id, { label }] of Object.entries(block.fields)) {
     Object.defineProperty(read, id, {
       enumerable: true,

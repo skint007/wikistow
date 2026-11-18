@@ -591,7 +591,8 @@ function lockOf(node: Node, yaml: string, item = false): string | null {
 const DATE =
   /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?: ?(?:Z|[+-]\d{2}(?::?\d{2})?))?)?$/;
 
-function isDate(text: string): boolean {
+/** Whether `text` is a date as a property reads one: `YYYY-MM-DD`, on the calendar, or with a time. */
+export function isPropertyDate(text: string): boolean {
   const [, year, month, day, hour = '0', minute = '0', second = '0'] = DATE.exec(text) ?? [];
   if (year === undefined) return false;
   const date = new Date(0);
@@ -612,7 +613,7 @@ function typeOf(value: PropertyValue): PropertyType {
   if (typeof value === 'number') return 'number';
   if (typeof value === 'boolean') return 'boolean';
   if (typeof value !== 'string') return 'text';
-  if (isDate(value)) return 'date';
+  if (isPropertyDate(value)) return 'date';
   if (isUrl(value)) return 'url';
   return propertyWikilink(value) ? 'wikilink' : 'text';
 }

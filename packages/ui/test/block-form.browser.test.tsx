@@ -1,10 +1,16 @@
 import { readProperties } from '@wikistow/client';
-import { PluginError, type BlockProps, type PropertyValue } from '@wikistow/plugin-sdk';
+import {
+  PluginError,
+  type BlockField,
+  type BlockProps,
+  type PropertyValue,
+} from '@wikistow/plugin-sdk';
 import type { BlockSpec } from '@wikistow/plugin-sdk/protocol';
 import { act } from 'react';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { boundValue, formView, LIST_NOTE, readFields } from '../src/plugins/block-form.tsx';
+import { formView, LIST_NOTE, readFields } from '../src/plugins/block-form.tsx';
+import { boundSet, boundValue, checkField } from '../src/plugins/field-control.tsx';
 import { blockProperties } from '../src/plugins/block-properties.ts';
 import { updateInPlace } from '../src/plugins/in-place.ts';
 
@@ -319,5 +325,272 @@ describe('a text field bound to a property', () => {
       ['rating', 5],
       ['rating', 'five'],
     ]);
+  });
+});
+
+// Fields of the kinds after number and text (#402): a toggle, a choice, a
+// date and a slider, each bound to a property or written to its line.
+const KINDS: BlockSpec = {
+  type: 'task',
+  fields: {
+    done: { type: 'boolean', label: 'Done', property: 'done' },
+    status: {
+      type: 'choice',
+      label: 'Status',
+      options: [
+        { value: 'todo', label: 'To do' },
+        { value: 'doing', label: 'Doing' },
+        { value: 'done', label: 'Done' },
+      ],
+      default: 'todo',
+      property: 'status',
+    },
+    due: { type: 'date', label: 'Due', property: 'due' },
+    level: { type: 'number', label: 'Level', min: 0, max: 10, slider: true, property: 'level' },
+    flag: { type: 'boolean', label: 'Flag' },
+    size: {
+      type: 'choice',
+      label: 'Size',
+      options: [
+        { value: 's', label: 'Small' },
+        { value: 'l', label: 'Large' },
+      ],
+    },
+    when: { type: 'date', label: 'When', default: '2026-01-02' },
+    amount: { type: 'number', label: 'Amount', min: 0, max: 100, step: 5, slider: true },
+  },
+  outputs: { seen: { label: 'Seen' } },
+};
+
+/** The kinds' form drawn with `props`; what it set and wrote, and the values last calculated. */
+async function drawKinds(props: Partial<BlockProps>) {
+  const sources: string[] = [];
+  const set: [string, PropertyValue][] = [];
+  const calculated: Record<string, unknown>[] = [];
+  const element = document.createElement('div');
+  document.body.append(element);
+  await act(async () => {
+    const undo = formView(KINDS, async (_page, values) => {
+      calculated.push(values);
+      return { seen: { value: Object.keys(values).length } };
+    })(element, {
+      source: 'flag: false\nsize: s\namount: 20',
+      page: { spaceId: 's', pageId: 'p' },
+      setSource: (source) => sources.push(source),
+      properties: read('---\ndone: false\nstatus: doing\ndue: 2026-11-18T09:30\nlevel: 3\n---\n'),
+      setProperty: (key, value) => void set.push([key, value]),
+      ...props,
+    });
+    if (undo) undos.push(undo);
+  });
+  const field = <E extends HTMLElement>(label: string, selector: string) => {
+    const found = [...element.querySelectorAll('label')]
+      .find((each) => each.textContent?.startsWith(label))
+      ?.querySelector<E>(selector);
+    if (!found) throw new Error(`No field ${label}`);
+    return found;
+  };
+  const toggle = (label: string) => field<HTMLButtonElement>(label, '[role="switch"]');
+  const date = (label: string) => field<HTMLInputElement>(label, 'input[type="date"]');
+  const slider = (label: string) => field<HTMLInputElement>(label, 'input[type="range"]');
+  const choose = async (label: string, option: string) => {
+    await act(async () => {
+      field(label, '[data-slot="picker"]').dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true }),
+      );
+    });
+    await act(async () => {
+      [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+        .find((each) => each.textContent === option)
+        ?.click();
+    });
+  };
+  return { element, field, toggle, date, slider, choose, sources, set, calculated };
+}
+
+describe('form fields of other kinds', () => {
+  it('read their values from the page and the fence, and hand them to the calculation typed', async () => {
+    const form = await drawKinds({});
+    expect(form.toggle('Done').getAttribute('aria-checked')).toBe('false');
+    expect(form.field('Status', '[data-slot="picker"]').textContent).toBe('Doing');
+    // A date with a time shows its day.
+    expect(form.date('Due').value).toBe('2026-11-18');
+    expect(form.slider('Level').value).toBe('3');
+    expect(form.slider('Amount').step).toBe('5');
+    await expect
+      .poll(() => form.calculated.at(-1))
+      .toEqual({
+        done: false,
+        status: 'doing',
+        due: '2026-11-18',
+        level: 3,
+        flag: false,
+        size: 's',
+        when: '2026-01-02',
+        amount: 20,
+      });
+    expect(form.set).toEqual([]);
+    expect(form.sources).toEqual([]);
+  });
+
+  it('set a bound property as a toggle or choice is picked: true or false, and text', async () => {
+    const form = await drawKinds({});
+    await userEvent.click(form.toggle('Done'));
+    expect(form.set).toEqual([['done', true]]);
+    await form.choose('Status', 'Done');
+    expect(form.set).toEqual([
+      ['done', true],
+      ['status', 'done'],
+    ]);
+    expect(form.sources).toEqual([]);
+  });
+
+  it('write an unbound field’s line as it changes', async () => {
+    const form = await drawKinds({});
+    await userEvent.click(form.toggle('Flag'));
+    expect(form.sources.at(-1)).toBe('flag: true\nsize: s\namount: 20');
+    await form.choose('Size', 'Large');
+    expect(form.sources.at(-1)).toBe('flag: true\nsize: l\namount: 20');
+    await userEvent.fill(form.date('When'), '2026-03-04');
+    expect(form.sources.at(-1)).toBe('flag: true\nsize: l\namount: 20\nwhen: 2026-03-04');
+    form.slider('Amount').focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(form.sources.at(-1)).toBe('flag: true\nsize: l\namount: 25\nwhen: 2026-03-04');
+    expect(form.set).toEqual([]);
+  });
+
+  it('set a bound date on blur, keeping its time, and a slider as it’s let go', async () => {
+    const form = await drawKinds({});
+    await userEvent.fill(form.date('Due'), '2026-12-01');
+    expect(form.set).toEqual([]);
+    await act(async () => form.date('Due').blur());
+    expect(form.set).toEqual([['due', '2026-12-01T09:30']]);
+    form.slider('Level').focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(form.set).toEqual([
+      ['due', '2026-12-01T09:30'],
+      ['level', 4],
+    ]);
+    // Let go again where it is, nothing more is set.
+    await act(async () => form.slider('Level').blur());
+    expect(form.set).toHaveLength(2);
+  });
+
+  it('keep a bound date’s time when its input is emptied on the way to another day', async () => {
+    const form = await drawKinds({});
+    await userEvent.clear(form.date('Due'));
+    await userEvent.fill(form.date('Due'), '2026-11-19');
+    await act(async () => form.date('Due').blur());
+    expect(form.set).toEqual([['due', '2026-11-19T09:30']]);
+  });
+
+  it('take no time back once the page’s date is emptied elsewhere', async () => {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const set: [string, PropertyValue][] = [];
+    const spec: BlockSpec = {
+      type: 'due',
+      fields: { due: { type: 'date', label: 'Due', property: 'due' } },
+      outputs: {},
+    };
+    const props = (properties: ReturnType<typeof read>): BlockProps => ({
+      source: '',
+      page: { spaceId: 's', pageId: 'p' },
+      setSource: null,
+      properties,
+      setProperty: (key, value) => void set.push([key, value]),
+    });
+    await act(async () => {
+      const undo = formView(spec, async () => ({}))(
+        element,
+        props(read('---\ndue: 2026-11-18T09:30\n---\n')),
+      );
+      if (undo) undos.push(undo);
+    });
+    const input = () => element.querySelector<HTMLInputElement>('input[type="date"]')!;
+    await userEvent.clear(input());
+    await userEvent.fill(input(), '2026-11-19');
+    await act(async () => input().blur());
+    await act(async () => updateInPlace(element, props(read('---\ndue:\n---\n'))));
+    await userEvent.fill(input(), '2026-12-01');
+    await act(async () => input().blur());
+    expect(set).toEqual([
+      ['due', '2026-11-19T09:30'],
+      ['due', '2026-12-01'],
+    ]);
+  });
+
+  it('keep a number or boolean a choice replaces one, and set text otherwise', () => {
+    const rating: BlockField = {
+      type: 'choice',
+      label: 'Rating',
+      options: [{ value: '5', label: 'Five' }],
+      property: 'rating',
+    };
+    expect(boundSet(rating, '5', '5', 4)).toBe(5);
+    expect(boundSet(rating, '5', '5', 'four')).toBe('5');
+    expect(boundSet(rating, '5', '5', undefined)).toBe('5');
+    const yes: BlockField = { ...rating, options: [{ value: 'true', label: 'Yes' }] };
+    expect(boundSet(yes, 'true', 'true', false)).toBe(true);
+    // Not where it would read back as another option.
+    const signed: BlockField = { ...rating, options: [{ value: '+2', label: 'Plus two' }] };
+    expect(boundSet(signed, '+2', '+2', 1)).toBe('+2');
+  });
+
+  it('show a slider’s value between its steps as invalid', () => {
+    expect(readFields(KINDS, 'amount: 22').amount).toEqual({
+      text: '22',
+      value: null,
+      problem: 'In steps of 5 from 0',
+    });
+    const tenths: BlockField = {
+      type: 'number',
+      label: 'T',
+      min: 0,
+      max: 1,
+      step: 0.1,
+      slider: true,
+    };
+    expect(checkField(tenths, '0.3')).toEqual({ value: 0.3, problem: null });
+    const fine: BlockField = { ...tenths, min: 1_000_000, max: 1_000_001, step: 0.01 };
+    expect(checkField(fine, '1000000.02')).toEqual({ value: 1000000.02, problem: null });
+  });
+
+  it('set a bound date’s day where the page has none', async () => {
+    const form = await drawKinds({ properties: read(null) });
+    expect(form.date('Due').value).toBe('');
+    expect(form.element.textContent).toContain('Enter a date');
+    await userEvent.fill(form.date('Due'), '2026-12-01');
+    await act(async () => form.date('Due').blur());
+    expect(form.set).toEqual([['due', '2026-12-01']]);
+  });
+
+  it('show a value that isn’t one they take as invalid', () => {
+    const read = readFields(
+      KINDS,
+      'flag: yes\nsize: medium\nwhen: soon\namount: 200',
+      blockProperties([]),
+    );
+    expect(read.flag).toEqual({ text: 'yes', value: null, problem: 'Not true or false' });
+    expect(read.size).toEqual({ text: 'medium', value: null, problem: 'Not one of its choices' });
+    expect(read.when).toEqual({ text: 'soon', value: null, problem: 'Not a date' });
+    expect(read.amount).toEqual({ text: '200', value: null, problem: 'At most 100' });
+    // Nothing written: a toggle is off, a choice takes its default.
+    expect(read.done).toEqual({ text: '', value: false, problem: null });
+    expect(read.status).toEqual({ text: 'todo', value: 'todo', problem: null });
+    expect(readFields(KINDS, 'flag: TRUE').flag).toEqual({
+      text: 'TRUE',
+      value: true,
+      problem: null,
+    });
+    expect(readFields(KINDS, 'when: 2026-02-30').when?.problem).toBe('Not a date');
+  });
+
+  it('only show a list they’re bound to', async () => {
+    const form = await drawKinds({ properties: read('---\ndone: [a, b]\n---\n') });
+    const shown = form.field<HTMLInputElement>('Done', 'input');
+    expect(shown.value).toBe('a, b');
+    expect(shown.readOnly).toBe(true);
+    expect(form.element.textContent).toContain(LIST_NOTE);
   });
 });

@@ -2,6 +2,7 @@ import {
   PluginError,
   type BlockField,
   type BlockProps,
+  type FieldValue,
   type OutputValue,
   type PageRef,
   type View,
@@ -10,11 +11,9 @@ import type { BlockSpec, OutputResult } from '@wikistow/plugin-sdk/protocol';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { drawnByApp, updatedBy } from './in-place';
 import { createRoot } from 'react-dom/client';
-import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import type { PropertyValue } from '@wikistow/plugin-sdk';
-import { typedValue } from '../page/property-model';
 import { propertyNamed, type BlockProperties } from './block-properties';
+import { boundSet, checkField, FieldControl, type Checked } from './field-control';
 
 /*
  * A block a script fills in (#260): the host draws its fields from the
@@ -26,12 +25,14 @@ import { propertyNamed, type BlockProperties } from './block-properties';
  * A field bound to a property (`property`, #212) shows the page's value
  * instead, where it has one, and sets it, never its line, once a valid
  * value is committed: on blur or Enter, so a half-typed number is never
- * saved. Where the page can't change, it stays here too.
+ * saved; a toggle or choice as it's picked, and a slider as it's let go.
+ * Where the page can't change, it stays here too. Each field is drawn by
+ * `FieldControl`, which says how its kind reads and sets values.
  */
 
 export type Calculate = (
   page: PageRef,
-  values: Record<string, OutputValue>,
+  values: Record<string, FieldValue>,
 ) => Promise<Record<string, OutputResult>>;
 
 const LINE = /^\s*([A-Za-z][A-Za-z0-9_]*)\s*:(.*)$/;
@@ -56,41 +57,8 @@ function withField(source: string, id: string, text: string): string {
   return lines.join('\n');
 }
 
-type Checked = { value: OutputValue; problem: null } | { value: null; problem: string };
-
-function check(field: BlockField, text: string): Checked {
-  if (field.type === 'text') return { value: text.trim(), problem: null };
-  // As the fence is read again: its values are trimmed.
-  if (text.trim() === '') return { value: null, problem: 'Enter a number' };
-  const value = Number(text.trim());
-  if (!Number.isFinite(value)) return { value: null, problem: 'Not a number' };
-  if (field.min !== undefined && value < field.min)
-    return { value: null, problem: `At least ${field.min}` };
-  if (field.max !== undefined && value > field.max)
-    return { value: null, problem: `At most ${field.max}` };
-  return { value, problem: null };
-}
-
 /** A field as the form reads it from a fence: its text, and its value or what's wrong with it. */
 export type ReadField = { text: string } & Checked;
-
-/**
- * What a text field bound to a property sets for `text`: in the type of
- * the value it replaces when the text reads as one, as the Properties rows
- * type it (`typedValue`): a number for a number, `true` or `false` for
- * either, so `rating: 4` stays a number; for an empty value (`note:`),
- * whatever the text reads as, nothing staying empty, and so for a key the
- * page hasn't, as the rows type a key they add; else the text. Emptied, the
- * field sets an empty value (`note:`), unless the value was empty text (`""`).
- */
-export function boundValue(text: string, was: PropertyValue | undefined): PropertyValue {
-  // Emptied, it's an empty value, as in the rows, unless it was empty text.
-  if (text === '') return was === '' ? '' : null;
-  if (typeof was === 'number' || was === null || was === undefined)
-    return typedValue(text, was ?? null);
-  if (typeof was === 'boolean' && /^(?:true|false)$/.test(text)) return text === 'true';
-  return text;
-}
 
 /** What a field bound to a list shows under it: it can't stand for one, so it only shows it. */
 export const LIST_NOTE = 'A list: change it in the page’s properties';
@@ -130,7 +98,7 @@ export function readFields(
         bound?.text ??
         written.get(field) ??
         (declared.default === undefined ? '' : String(declared.default));
-      return [field, { text, ...check(declared, text) }];
+      return [field, { text, ...checkField(declared, text) }];
     }),
   );
 }
@@ -144,9 +112,9 @@ type Results = { outputs: Record<string, OutputResult> } | { error: string };
  * Calculate the latest values, one calculation at a time: values entered
  * while one runs replace each other, and only the last is calculated next.
  */
-function useCalculation(calculate: Calculate, page: PageRef, values: Record<string, OutputValue>) {
+function useCalculation(calculate: Calculate, page: PageRef, values: Record<string, FieldValue>) {
   const [results, setResults] = useState<Results | null>(null);
-  const queue = useRef<{ busy: boolean; next: Record<string, OutputValue> | null }>({
+  const queue = useRef<{ busy: boolean; next: Record<string, FieldValue> | null }>({
     busy: false,
     next: null,
   });
@@ -257,7 +225,7 @@ function BlockForm({
           field,
           lists.has(field)
             ? { value: null, problem: LIST_NOTE }
-            : check(declared, texts[field] ?? ''),
+            : checkField(declared, texts[field] ?? ''),
         ]),
       ),
     [spec, texts, lists],
@@ -283,13 +251,15 @@ function BlockForm({
     setSource(written.current);
   };
 
-  /** A bound field's valid value, set on the page as it's committed. */
-  const commit = (field: string) => {
-    const key = spec.fields[field]?.property;
-    const { value } = checked[field] ?? { value: null };
-    if (key === undefined || !setProperty || value === null || !typed.current.has(field)) return;
+  /** A bound field's valid value in `text`, set on the page as it's committed. */
+  const commit = (field: string, text = texts[field] ?? '') => {
+    const declared = spec.fields[field];
+    const key = declared?.property;
+    if (!declared || key === undefined || !setProperty || list(field)) return;
+    const { value } = checkField(declared, text);
+    if (value === null || !typed.current.has(field)) return;
     const was = onPage.current[field];
-    const set = spec.fields[field]?.type === 'text' ? boundValue(String(value), was) : value;
+    const set = boundSet(declared, text, value, was);
     if (was !== undefined && JSON.stringify(was) === JSON.stringify(set)) {
       typed.current.delete(field);
       return;
@@ -311,18 +281,14 @@ function BlockForm({
         return (
           <label key={field} className="grid w-36 gap-1 text-sm text-muted-foreground">
             {declared.label}
-            <Input
-              inputMode={declared.type === 'number' ? 'decimal' : 'text'}
-              value={texts[field] ?? ''}
+            <FieldControl
+              field={declared}
+              text={texts[field] ?? ''}
+              invalid={problem !== null}
               readOnly={list(field)}
-              aria-invalid={problem !== null && !list(field)}
-              aria-describedby={problem ? `${id}-${field}` : undefined}
-              onChange={(event) => change(field, event.target.value)}
-              onBlur={() => commit(field)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') commit(field);
-              }}
-              className="h-8 bg-background text-foreground"
+              describedBy={problem ? `${id}-${field}` : undefined}
+              onChange={(text) => change(field, text)}
+              onCommit={(text) => commit(field, text)}
             />
             {problem && (
               <span
