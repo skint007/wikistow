@@ -714,6 +714,11 @@ describe('a public page holding a query table (ADR 0006, decision 9)', () => {
       const at = row?.at.toISOString() ?? '';
       return `${at.slice(0, 10)} ${at.slice(11, 16)} UTC`;
     };
+    // First's row takes the time this device holds for it: the server's, once
+    // opened from it, so a minute turning between the two clocks can't split them.
+    await pages.openRevisions(owner.ctx, first.ref, 'published', [first.revisionId], {
+      fresh: true,
+    });
     const wanted = { ...notes.ref, revisionId: notes.revisionId, audience: 'published' } as const;
     // This device's clock ten minutes slow, which would sort it before First,
     // and then no time for it, as for a version kept before times were.

@@ -468,10 +468,10 @@ const readsSaved = ({ where, show, sort }: PageQuery) =>
   (!!sort && sort.by !== 'title' && isSavedTime(sort.by.name));
 
 /**
- * When the server took the copied version, asked of it again (`fresh`) as
- * the other rows' times are (#458): the time this device holds for it may
- * be its own clock, for one it just published (`cacheWritten`), or none,
- * for one kept before times were. That one stands in when the server can't
+ * When the server took the copied version, asked of it again (`fresh`)
+ * (#458): the time this device holds for it may be its own clock, for one
+ * it just published (`cacheWritten`), or none, for one kept before times
+ * were. (Other rows still take the time held for them where there is one, #646.) That one stands in when the server can't
  * be asked, or its answer doesn't open, so a table that may not even list
  * the page never stops its copy going up.
  */
