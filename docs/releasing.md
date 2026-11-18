@@ -210,32 +210,52 @@ The extension has versions of its own, in `apps/clipper/package.json`, which `sc
 
 The first version of the extension goes to each store by hand, which makes its listing and fixes Chrome's ID ([the store listing](web-clipper-store-listing.md)). After that, the release sends each new version itself, from the files in the GitHub Release, checked against its `SHA256SUMS`. It does so only for the newest stable release from `main`, never a beta, and only when `apps/clipper/package.json`'s version changed since the stable release before it, which must have had the extension (`verify` works that out, from the tags). The stores take each version once.
 
-- `chrome-web-store` uploads `wikistow-clipper-<version>-chrome.zip` to the item through the Chrome Web Store API v2, as a service account, waits for the store to read it, checks the version it read when the store says at once, and submits it for review (`apps/clipper/scripts/chrome-store.ts`). The store publishes it once it's approved.
+- `chrome-web-store` uploads `wikistow-clipper-<version>-chrome.zip` to the item through the Chrome Web Store API v2, as a service account it signs in as through workload identity federation, with no key, waits for the store to read it, checks the version it read when the store says at once, and submits it for review (`apps/clipper/scripts/chrome-store.ts`). The store publishes it once it's approved.
 - `mozilla-add-ons` submits `wikistow-clipper-<version>-firefox.zip` to Mozilla Add-ons as a listed version, with `wikistow-clipper-<version>-source.zip` as its source, through `web-ext sign` from the lockfile. It first checks the build names the published ID, `web-clipper@wikistow.skint007.github.io`, so a release built without `CLIPPER_FIREFOX_ID` can't make a second add-on. It doesn't wait for Mozilla's review, which signs the version and offers it as an update once it passes.
 
 Both run in the `stores` environment. Without a store's keys there, its job warns, sends nothing and passes, so the release never fails for it: upload that version by hand from the GitHub Release. A job that fails once it has its keys, such as when a store refuses the version, fails the run; fix the cause and use **Re-run failed jobs**, or upload by hand. A store that already has the version refuses it again: if Mozilla Add-ons took the version but not its source, attach the source zip on that version's page in its dashboard instead. The Chrome Web Store refuses a new version while the one before is still in review; wait for that review, or cancel it in the dashboard, then re-run.
 
 The keys, set once after the first version is in each store:
 
-1. **Chrome Web Store** ([service accounts](https://developer.chrome.com/docs/webstore/service-accounts)):
-   1. In the [Google Cloud console](https://console.cloud.google.com/), make a project, such as `wikistow-clipper`, and under **APIs & Services → Library**, enable the **Chrome Web Store API**.
-   2. Under **IAM & Admin → Service accounts**, make a service account, such as `clipper-uploads`. It needs no roles. Under its **Keys**, add a JSON key, which downloads once.
-   3. In the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole), under **Account**, add the service account's email (`…@….iam.gserviceaccount.com`). A publisher can have only one.
-   4. Note the publisher ID, under **Publisher → Settings**, and the item's ID, the extension's 32-letter ID.
+1. **Chrome Web Store** ([service accounts](https://developer.chrome.com/docs/webstore/service-accounts)). The job signs in as a service account with no key: Google trades the job's GitHub token for an hour's token for the account ([workload identity federation](https://github.com/google-github-actions/auth#workload-identity-federation-through-a-service-account)). New Google Cloud organizations forbid service account keys anyway.
+   1. In the [Google Cloud console](https://console.cloud.google.com/), make a project, and under **APIs & Services → Library**, enable the **Chrome Web Store API**.
+   2. Under **IAM & Admin → Service accounts**, make a service account, such as `wikistow-release`. It needs no roles and no key.
+   3. In Cloud Shell, let this repository's jobs in `stores` act as it. `1419777112` is the repository's ID (`gh api repos/skint007/wikistow --jq .id`), which a renamed or re-made repository of the same name wouldn't have:
+
+      ```sh
+      PROJECT=<project ID>
+      SA=wikistow-release@$PROJECT.iam.gserviceaccount.com
+      NUMBER=$(gcloud projects describe $PROJECT --format='value(projectNumber)')
+      gcloud services enable iamcredentials.googleapis.com sts.googleapis.com --project=$PROJECT
+      gcloud iam workload-identity-pools create github --project=$PROJECT --location=global --display-name="GitHub Actions"
+      gcloud iam workload-identity-pools providers create-oidc wikistow --project=$PROJECT --location=global \
+        --workload-identity-pool=github --display-name="WikiStow releases" \
+        --issuer-uri=https://token.actions.githubusercontent.com \
+        --attribute-mapping="google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.environment=assertion.environment" \
+        --attribute-condition="assertion.repository_id == '1419777112' && assertion.environment == 'stores'"
+      gcloud iam service-accounts add-iam-policy-binding $SA --project=$PROJECT --role=roles/iam.workloadIdentityUser \
+        --member="principalSet://iam.googleapis.com/projects/$NUMBER/locations/global/workloadIdentityPools/github/attribute.repository_id/1419777112"
+      echo projects/$NUMBER/locations/global/workloadIdentityPools/github/providers/wikistow
+      ```
+
+      The last line prints the provider's name.
+   4. In the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole), under **Account**, add the service account's email (`…@….iam.gserviceaccount.com`). A publisher can have only one.
+   5. Note the publisher ID, under **Publisher → Settings**, and the item's ID, the extension's 32-letter ID.
 2. **Mozilla Add-ons:** at [Manage API Keys](https://addons.mozilla.org/developers/addon/api/key/), generate credentials: a JWT issuer, such as `user:12345:67`, and a JWT secret.
 3. **Settings → Environments → `stores`**, limited to the `v*` tags, so nothing but a release sees what it holds ([repository settings](#repository-settings)). Give it:
 
    | Name | Kind | Value |
    | --- | --- | --- |
-   | `CHROME_SERVICE_ACCOUNT_KEY` | Secret | The service account's JSON key, the whole file |
+   | `CHROME_WORKLOAD_IDENTITY_PROVIDER` | Variable | The provider's name, `projects/<number>/locations/global/workloadIdentityPools/github/providers/wikistow` |
+   | `CHROME_SERVICE_ACCOUNT` | Variable | The service account's email |
    | `CHROME_PUBLISHER_ID` | Variable | The publisher ID |
    | `CHROME_ITEM_ID` | Variable | The extension's ID in the Chrome Web Store |
    | `AMO_API_KEY` | Secret | The JWT issuer |
    | `AMO_API_SECRET` | Secret | The JWT secret |
 
-   Upload the secrets so they never show on screen: `gh secret set CHROME_SERVICE_ACCOUNT_KEY --env stores < <key file>`, then delete the file; `gh secret set AMO_API_SECRET --env stores`, which asks for it. The Chrome service account can update every item the publisher has, and Mozilla's credentials act as the account for every add-on it owns, but neither reaches WikiStow's code or releases. If one leaks, revoke it in its store and make another.
+   Upload the secrets so they never show on screen: `gh secret set AMO_API_SECRET --env stores`, which asks for it. The Chrome service account can update every item the publisher has, and Mozilla's credentials act as the account for every add-on it owns, but neither reaches WikiStow's code or releases. Only a job in `stores`, which runs for `v*` tags, can act as the Chrome service account. If Mozilla's leak, revoke them and make others.
 
-To stop the uploads, delete a store's keys from the environment.
+To stop the uploads, delete a store's keys or variables from the environment.
 
 ## The CLI downloads
 
