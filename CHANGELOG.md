@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- With a plugin drawing search's results, the search box names only the lists it shows, **By meaning** below the plugin's view among them, for screen readers. (#471)
+- With a plugin drawing search's results, the search box names only the lists it shows, **By meaning** below the plugin's view among them, for screen readers. (#643)
 
 ## 0.27.2 - 2026-11-18
 
