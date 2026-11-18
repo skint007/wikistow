@@ -138,7 +138,8 @@ export function FieldControl({
   onCommit: (text: string) => void;
 }) {
   // A date's time, kept while its input is emptied on the way to another
-  // day, as clearing a segment empties it: the next day takes it back.
+  // day, as clearing a segment empties it: the next day takes it back. Only
+  // the next: emptied another way, such as in Properties, it has none.
   const time = useRef('');
   const common = {
     'aria-label': label,
@@ -157,8 +158,10 @@ export function FieldControl({
       onChange={(event) => {
         const next = event.target.value;
         if (kind !== 'date') return onChange(next);
-        if (text.trim() !== '') time.current = timeOf(text);
-        onChange(next === '' ? '' : `${next}${time.current}`);
+        // Its own time while it shows a day; else the one it had as it was emptied, once.
+        const kept = text.trim() === '' ? time.current : timeOf(text);
+        time.current = next === '' ? kept : '';
+        onChange(next === '' ? '' : `${next}${kept}`);
       }}
       onBlur={() => onCommit(text)}
       onKeyDown={(event) => {

@@ -113,13 +113,13 @@ const Day = z
     return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(day);
   }, 'A day on the calendar');
 
-/** A choice's option value: what its fence line or property holds, so one line, trimmed. */
+/** A choice's option value: what its fence line or property holds, so one line, trimmed, of no control characters. */
 const OptionValue = z
   .string()
   .min(1)
   .max(100)
   .refine(
-    (value) => value === value.trim() && !/[\r\n\u2028\u2029]/.test(value),
+    (value) => value === value.trim() && !/[\p{Cc}\u2028\u2029]/u.test(value),
     'One line, unspaced',
   );
 
@@ -182,8 +182,8 @@ export const BlockField = FieldKinds.superRefine((field, context) => {
  * allowing for the rounding of decimal steps.
  */
 export function onStep(value: number, min: number, step: number): boolean {
-  const steps = (value - min) / step;
-  return Math.abs(steps - Math.round(steps)) < 1e-6;
+  const nearest = min + Math.round((value - min) / step) * step;
+  return Math.abs(value - nearest) <= 1e-12 * Math.max(1, Math.abs(value), Math.abs(min), step);
 }
 
 /** What is wrong with a field beyond its keys' own checks, if anything. */

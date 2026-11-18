@@ -770,7 +770,10 @@ export type FieldValues<Fields extends Record<string, BlockField>> = {
         ? Value
         : Fields[Id] extends TextField | DateField
           ? string
-          : FieldValue;
+          : // A field of several kinds: a boolean only if one of them is a toggle.
+            [Extract<Fields[Id], BooleanField>] extends [never]
+            ? OutputValue
+            : FieldValue;
 };
 
 /**

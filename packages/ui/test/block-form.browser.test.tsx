@@ -484,6 +484,42 @@ describe('form fields of other kinds', () => {
     expect(form.set).toEqual([['due', '2026-11-19T09:30']]);
   });
 
+  it('take no time back once the page’s date is emptied elsewhere', async () => {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const set: [string, PropertyValue][] = [];
+    const spec: BlockSpec = {
+      type: 'due',
+      fields: { due: { type: 'date', label: 'Due', property: 'due' } },
+      outputs: {},
+    };
+    const props = (properties: ReturnType<typeof read>): BlockProps => ({
+      source: '',
+      page: { spaceId: 's', pageId: 'p' },
+      setSource: null,
+      properties,
+      setProperty: (key, value) => void set.push([key, value]),
+    });
+    await act(async () => {
+      const undo = formView(spec, async () => ({}))(
+        element,
+        props(read('---\ndue: 2026-11-18T09:30\n---\n')),
+      );
+      if (undo) undos.push(undo);
+    });
+    const input = () => element.querySelector<HTMLInputElement>('input[type="date"]')!;
+    await userEvent.clear(input());
+    await userEvent.fill(input(), '2026-11-19');
+    await act(async () => input().blur());
+    await act(async () => updateInPlace(element, props(read('---\ndue:\n---\n'))));
+    await userEvent.fill(input(), '2026-12-01');
+    await act(async () => input().blur());
+    expect(set).toEqual([
+      ['due', '2026-11-19T09:30'],
+      ['due', '2026-12-01'],
+    ]);
+  });
+
   it('keep a number or boolean a choice replaces one, and set text otherwise', () => {
     const rating: BlockField = {
       type: 'choice',

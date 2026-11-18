@@ -1,5 +1,11 @@
 import { BlockField as FieldCheck, WorkerMessage } from '@wikistow/plugin-sdk/protocol';
-import type { BlockField, CalculateValues } from '@wikistow/plugin-sdk';
+import type {
+  BlockField,
+  CalculateValues,
+  FieldValues,
+  NumberField,
+  TextField,
+} from '@wikistow/plugin-sdk';
 import { declaredField } from '@wikistow/plugin-sdk/src/script.ts';
 import { z } from 'zod';
 import { describe, expect, it } from 'vite-plus/test';
@@ -107,6 +113,10 @@ describe('fields of the kinds after number and text (#402)', () => {
     expect(ok({ type: 'date', label: 'D', default: '2026-11-18' })).toBe(true);
     expect(ok({ type: 'boolean', label: 'B', default: 'yes' })).toBe(false);
     expect(ok({ type: 'choice', label: 'C', options: [option('a\u2028b')] })).toBe(false);
+    expect(ok({ type: 'choice', label: 'C', options: [option('a\u0000b')] })).toBe(false);
+    expect(
+      ok({ type: 'number', label: 'N', slider: true, min: 0, max: 1e7, step: 2e6, default: 1 }),
+    ).toBe(false);
     expect(ok({ type: 'number', label: 'N', slider: true, min: 0, max: 0.5 })).toBe(false);
     expect(ok({ type: 'number', label: 'N', slider: true, min: 0, max: 0.5, step: 0.1 })).toBe(
       true,
@@ -166,4 +176,8 @@ type Reads<F extends Record<string, BlockField>> = CalculateValues<F>[string];
 // @ts-expect-error A block without a toggle reads no booleans.
 const numbersOnly: Reads<{ n: { type: 'number'; label: 'N' } }> = true;
 const withToggle: Reads<{ b: { type: 'boolean'; label: 'B' } }> = true;
-void [numbersOnly, withToggle];
+// A field of either of two kinds, neither a toggle, isn't one either.
+type Either = { v: NumberField | TextField };
+// @ts-expect-error
+const eitherKind: FieldValues<Either>['v'] = true;
+void [numbersOnly, withToggle, eitherKind];
