@@ -12,7 +12,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Releases and packaging
 
-- The release signs in to the Chrome Web Store through workload identity federation, with no service account key to keep. (#PR)
+- The release signs in to the Chrome Web Store through workload identity federation, with no service account key to keep. (#635)
 
 ## 0.27.0 - 2026-11-17
 
