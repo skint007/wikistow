@@ -43,7 +43,7 @@ vi.mock('../src/meaning/embedder', async (actual) => {
 });
 
 const { searchIndexKey } = await import('../src/data/queries');
-const { startMeaningIndex } = await import('../src/meaning/background');
+const { LOCK_FLUSH_AT_MOST_MS, startMeaningIndex } = await import('../src/meaning/background');
 const { vaultStore } = await import('../src/vault/store');
 const { MEANING_MODEL } = await import('../src/meaning/model');
 
@@ -136,5 +136,53 @@ describe('the queue in the app', () => {
     await vi.advanceTimersByTimeAsync(KEEP_MS + 1_000);
     expect(kept.writes).toEqual([]);
     started.stop();
+  });
+
+  it('keeps what it made before a lock this person asks for, while the keys still work', async () => {
+    const { ctx, queryClient } = session();
+    const started = startMeaningIndex(queryClient, ctx);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(started.indexer.status()).toEqual({ pages: 1, total: 1 });
+    expect(kept.writes).toEqual([]);
+    const locking = vaultStore.requestLock(() => false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await locking).toBe(true);
+    expect(kept.writes).toHaveLength(1);
+    const opened = openMeaningIndex(ctx, kept.writes[0]!, MEANING_MODEL.files.model.sha256);
+    expect([...opened!.keys()]).toEqual(['beach-1']);
+    started.stop();
+  });
+
+  it('a write that hangs holds a lock up for a few seconds at most', async () => {
+    const { ctx, queryClient } = session();
+    const started = startMeaningIndex(queryClient, ctx);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const flush = vi.spyOn(started.indexer, 'flush').mockReturnValue(new Promise(() => {}));
+    let locked = false;
+    void vaultStore.requestLock(() => false).then((done) => (locked = done));
+    await vi.advanceTimersByTimeAsync(LOCK_FLUSH_AT_MOST_MS - 1);
+    expect(flush).toHaveBeenCalled();
+    expect(locked).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(locked).toBe(true);
+    started.stop();
+  });
+
+  it('keeps what it made as the page is left, and nothing once stopped', async () => {
+    const page = new EventTarget();
+    vi.stubGlobal('window', page);
+    const { ctx, queryClient } = session();
+    const started = startMeaningIndex(queryClient, ctx);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(kept.writes).toEqual([]);
+    page.dispatchEvent(new Event('pagehide'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(kept.writes).toHaveLength(1);
+    // Stopped, as for a phone's layout: nothing is written first, or after.
+    started.stop();
+    page.dispatchEvent(new Event('pagehide'));
+    await vaultStore.requestLock(() => false);
+    await vi.advanceTimersByTimeAsync(KEEP_MS + 1_000);
+    expect(kept.writes).toHaveLength(1);
   });
 });
