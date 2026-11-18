@@ -214,7 +214,7 @@ export function FieldControl({
       const max = field.max ?? 100;
       const { value } = checkField(field, text);
       return (
-        <span className="flex h-8 items-center gap-2">
+        <span className="flex h-8 min-w-0 items-center gap-2">
           <input
             {...common}
             type="range"
@@ -227,7 +227,8 @@ export function FieldControl({
             onPointerUp={(event) => onCommit(event.currentTarget.value)}
             onKeyUp={(event) => onCommit(event.currentTarget.value)}
             onBlur={(event) => onCommit(event.currentTarget.value)}
-            className="min-w-0 flex-1 accent-primary"
+            // No width of its own, which would hold its column open past the label's.
+            className="w-0 min-w-0 flex-1 accent-primary"
           />
           <span className="min-w-6 text-right text-foreground tabular-nums">{text}</span>
         </span>
