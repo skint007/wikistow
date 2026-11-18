@@ -33,6 +33,7 @@ import {
   parsePropertyReference,
   propertyLabel,
   propertyText,
+  queryDateText,
   readProperties,
   splitFrontmatter,
   type PropertyData,
@@ -414,8 +415,9 @@ function audienceOf(loaded: LoadedTree, page: PageRef) {
  * cell is `[[Title]]` where `linked` says it may link, else its title. A
  * value is written as the rows show it, a date as written, a list
  * comma-separated; a missing one leaves its cell empty. When a page was
- * saved (`saved`) is written as the moment in UTC, `2026-11-13 09:30 UTC`,
- * as a copy's reader may be anywhere.
+ * saved (`saved`) is written as the moment in UTC, `2026-11-13 09:30 +00:00`,
+ * as a copy's reader may be anywhere. Either is as a query reads it back,
+ * so a cell copied into `where` matches its row (#649).
  */
 export function queryTableMarkdown<P extends { title: string }>(
   { columns, rows }: { columns: readonly string[]; rows: readonly QueryRow<P>[] },
@@ -432,7 +434,7 @@ export function queryTableMarkdown<P extends { title: string }>(
           value
             ? markdownLiteral(
                 isSavedTime(columns[i] ?? '') && typeof value.value === 'string'
-                  ? savedText(value.value)
+                  ? queryDateText(value.value, { timeZone: 'UTC' })
                   : propertyText(value, { dates: 'as-written' }),
               )
             : '',
@@ -441,12 +443,6 @@ export function queryTableMarkdown<P extends { title: string }>(
     ),
   ];
 }
-
-/** `2026-11-13T09:30Z`, a saved time as a query's column gives it, as `2026-11-13 09:30 UTC`. */
-const savedText = (column: string) =>
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(column)
-    ? `${column.slice(0, 10)} ${column.slice(11, 16)} UTC`
-    : column;
 
 /** A query block's text, as a public copy writes it: its table's lines, or undefined to leave it as written. */
 export type QueryTables = (source: string) => string[] | undefined;

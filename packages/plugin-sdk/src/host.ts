@@ -98,6 +98,8 @@ export type PageQuery = {
    * Conditions joined by commas, all of which must hold: `tried = true, servings >= 2`.
    * `saved` (or Dataview's `file.mtime`) is when the version was saved, `PageRow.updated`, compared as a date: `saved > 2026-01-01`.
    * `=` and `!=` take a date to the precision it is written with: `saved = 2026-11-13` is any time that day, `saved = 2026-11-13T09:30Z` any in that minute.
+   * `<` and `>=` compare with the start of that day or minute, `<=` and `>` with its end: `saved <= 2026-11-13` includes all of that day, and `saved > 2026-11-13` starts the next.
+   * A date written without a zone is UTC: `saved = 2026-11-13 20:30 +11:00` for a time in another zone.
    * `updated` is a property like any other.
    */
   where?: string | undefined;

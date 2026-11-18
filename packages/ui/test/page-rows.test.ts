@@ -203,8 +203,11 @@ describe('a query', () => {
     expect(titles({ sort: 'saved desc' })).toEqual(['Tomato soup', 'Garlic bread', 'Lemon tart']);
     expect(titles({ sort: 'file.mtime desc' })).toEqual(titles({ sort: 'saved desc' }));
     expect(titles({ sort: 'File.mtime' })).toEqual(['Garlic bread', 'Tomato soup', 'Lemon tart']);
-    expect(titles({ where: 'file.mtime > 2026-11-14' })).toEqual(['Tomato soup']);
+    expect(titles({ where: 'file.mtime > 2026-11-13' })).toEqual(['Tomato soup']);
     expect(titles({ where: 'saved < 2026-11-14' })).toEqual(['Garlic bread']);
+    // <= and > compare with the end of the day written, as a block's do (#649).
+    expect(titles({ where: 'file.mtime > 2026-11-14' })).toEqual([]);
+    expect(titles({ where: 'saved <= 2026-11-14' })).toEqual(['Garlic bread', 'Tomato soup']);
     // A property named updated is like any other: none has one.
     expect(titles({ where: 'updated < 2026-11-14' })).toEqual([]);
     // = holds for the whole minute, or day, it is written to, as a block's does (#459).

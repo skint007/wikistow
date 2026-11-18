@@ -1,7 +1,7 @@
 import {
   FolderId,
   PageId,
-  propertyText,
+  queryDateText,
   RevisionId,
   searchOperations,
   SpaceId,
@@ -174,8 +174,8 @@ describe('a query table in the reader', () => {
     await expect.poll(() => cells(container).length).toBe(3);
     expect(cells(container)).toEqual([
       ['Page', 'Servings', 'Last made', 'Evil'],
-      ['Garlic bread', '4', 'Oct 12, 2026', '<img src=x onerror=alert(1)>'],
-      ['Tomato soup', '6', 'Sep 1, 2026', ''],
+      ['Garlic bread', '4', '2026-10-12', '<img src=x onerror=alert(1)>'],
+      ['Tomato soup', '6', '2026-09-01', ''],
     ]);
     expect(container.querySelector('.query-table a[href="/s/s-home/p/p-soup"]')?.textContent).toBe(
       'Tomato soup',
@@ -210,7 +210,7 @@ describe('a query table in the reader', () => {
       ]);
   });
 
-  it('shows when each page was saved in the viewer’s zone, beside a property named updated (#427)', async () => {
+  it('shows when each page was saved in the viewer’s zone with its offset, beside a property named updated (#427, #649)', async () => {
     const index = new searchOperations.PageIndex();
     for (const [id, title, updated, properties] of [
       [
@@ -238,13 +238,15 @@ describe('a query table in the reader', () => {
     const source = '```wikistow-query\nshow: saved, updated\nsort: saved desc\n```\n';
     const container = await read(source, client(index));
     await expect.poll(() => cells(container).length).toBe(4);
-    const shown = (iso: string) => propertyText({ type: 'date', value: `${iso.slice(0, 16)}Z` });
+    const shown = (iso: string) => queryDateText(`${iso.slice(0, 16)}Z`);
     expect(cells(container)).toEqual([
       ['Page', 'Saved', 'Updated'],
       ['Bread', shown('2026-11-14T08:05'), ''],
       ['Apple', shown('2026-11-13T09:30'), 'by hand'],
       ['Cake', '', ''],
     ]);
+    // As a query reads it back: `where: saved = 2026-11-14 19:05 +11:00`.
+    expect(cells(container)[1]?.[1]).toMatch(/^2026-11-1[45] \d{2}:\d{2} [+-]\d{2}:\d{2}$/);
     expect(container.querySelector('.query-table figcaption')?.textContent).toBe('3 pages.');
   });
 

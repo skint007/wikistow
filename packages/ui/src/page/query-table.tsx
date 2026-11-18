@@ -135,7 +135,9 @@ export function QueryTable({
                   </Link>
                 </td>
                 {values.map((value, i) => (
-                  <td key={i}>{value && <PropertyValueView property={value} scope={links} />}</td>
+                  <td key={i}>
+                    {value && <PropertyValueView property={value} scope={links} queryDates />}
+                  </td>
                 ))}
               </tr>
             ))}

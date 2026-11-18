@@ -4,6 +4,7 @@ import {
   SpaceId,
   parseWikilink,
   propertyText,
+  queryDateText,
   type LinkablePage,
   type MovedPage,
   type Property,
@@ -237,16 +238,20 @@ const EMPTY = <span className="text-muted-foreground">Empty</span>;
  * checkbox, a date in the reader's locale, a web address as a link, a page
  * link as a chip (`WikilinkChip`), a number or text as it reads. With
  * `tagSearch`, each tag opens its search (`TagPill`), one alone a pill too.
+ * With `queryDates`, a date as a query reads it back (`queryDateText`).
  */
 export function PropertyValueView({
   property: { key, type, value },
   scope,
   tagSearch = false,
+  queryDates = false,
 }: {
   property: PropertyData;
   scope: LinkScope;
   /** The value is the page's tags (`tagProperties`), and each links to its search. */
   tagSearch?: boolean;
+  /** A query table's cell: a date shows as `where` takes it, its zone's offset with a time in one (#649). */
+  queryDates?: boolean;
 }) {
   if (Array.isArray(value)) {
     if (value.length === 0) return EMPTY;
@@ -288,7 +293,11 @@ export function PropertyValueView({
         </span>
       );
     case 'date':
-      return <time dateTime={String(value)}>{formatPropertyDate(String(value))}</time>;
+      return (
+        <time dateTime={String(value)}>
+          {(queryDates ? queryDateText : formatPropertyDate)(String(value))}
+        </time>
+      );
     case 'url':
       return (
         <a
