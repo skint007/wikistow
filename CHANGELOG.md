@@ -4,6 +4,14 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.27.1 - 2026-11-18
+
+### Highlights
+
+#### Maintenance
+
+- This release sends the web clipper extension to the Chrome Web Store and Mozilla Add-ons. It appears in each store once that store approves it.
+
 ### Changes
 
 #### Desktop
