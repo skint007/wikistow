@@ -390,7 +390,9 @@ jobs:
           unzip -q "wikistow-clipper-$VERSION-firefox.zip" -d firefox
           [ "$(jq -r .browser_specific_settings.gecko.id firefox/manifest.json)" = web-clipper@wikistow.skint007.github.io ]
           [ "$(jq -r .version firefox/manifest.json)" = "$VERSION" ]
-      # Submitted without waiting for the review, which can take a day.
+      # Submitted without waiting for the review, which can take a day. A
+      # listed version needs a license, MIT as the repository's, from
+      # amo-metadata.json.
       - if: steps.keys.outputs.ready == 'true'
         working-directory: apps/clipper
         env:
@@ -399,4 +401,5 @@ jobs:
         run: |
           ./node_modules/.bin/web-ext sign --channel listed --approval-timeout 0 \
             --source-dir "$RUNNER_TEMP/clipper/firefox" --artifacts-dir "$RUNNER_TEMP/signed" \
-            --upload-source-code "$RUNNER_TEMP/clipper/wikistow-clipper-$VERSION-source.zip"
+            --upload-source-code "$RUNNER_TEMP/clipper/wikistow-clipper-$VERSION-source.zip" \
+            --amo-metadata amo-metadata.json

@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Releases and packaging
+
+- The release gives Mozilla Add-ons the web clipper's license, MIT, which a listed version needs. (#638)
+
 ## 0.27.1 - 2026-11-18
 
 ### Highlights
