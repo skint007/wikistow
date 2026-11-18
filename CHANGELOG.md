@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Query tables: `=` and `!=` take a date to the precision it is written with, so `where: saved = 2026-11-13T09:30Z` matches the time a **saved** cell shows, and a day alone the whole day, for date properties too. A public copy's table takes the copied page's own time from the server rather than this device's clock. The `vault-tables` example has tests of its own. (#647)
+
 ## 0.27.3-beta.1 - 2026-11-18
 
 ### Highlights
