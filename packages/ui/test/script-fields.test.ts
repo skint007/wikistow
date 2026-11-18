@@ -117,6 +117,12 @@ describe('fields of the kinds after number and text (#402)', () => {
     expect(
       ok({ type: 'number', label: 'N', slider: true, min: 0, max: 1, step: 0.1, default: 0.3 }),
     ).toBe(true);
+    expect(ok({ type: 'number', label: 'N', slider: true, min: 0.1, max: 0.3, step: 0.2 })).toBe(
+      true,
+    );
+    expect(
+      ok({ type: 'number', label: 'N', slider: true, min: 0, max: 10, step: 5, default: 15 }),
+    ).toBe(false);
   });
 
   it('are refused by a released app, naming the field, and by this one say it may need a newer app', () => {

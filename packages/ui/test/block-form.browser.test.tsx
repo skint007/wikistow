@@ -496,6 +496,9 @@ describe('form fields of other kinds', () => {
     expect(boundSet(rating, '5', '5', undefined)).toBe('5');
     const yes: BlockField = { ...rating, options: [{ value: 'true', label: 'Yes' }] };
     expect(boundSet(yes, 'true', 'true', false)).toBe(true);
+    // Not where it would read back as another option.
+    const signed: BlockField = { ...rating, options: [{ value: '+2', label: 'Plus two' }] };
+    expect(boundSet(signed, '+2', '+2', 1)).toBe('+2');
   });
 
   it('show a slider’s value between its steps as invalid', () => {
@@ -513,6 +516,8 @@ describe('form fields of other kinds', () => {
       slider: true,
     };
     expect(checkField(tenths, '0.3')).toEqual({ value: 0.3, problem: null });
+    const fine: BlockField = { ...tenths, min: 1_000_000, max: 1_000_001, step: 0.01 };
+    expect(checkField(fine, '1000000.02')).toEqual({ value: 1000000.02, problem: null });
   });
 
   it('set a bound date’s day where the page has none', async () => {

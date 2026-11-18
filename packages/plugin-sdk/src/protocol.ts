@@ -183,7 +183,7 @@ export const BlockField = FieldKinds.superRefine((field, context) => {
  */
 export function onStep(value: number, min: number, step: number): boolean {
   const steps = (value - min) / step;
-  return Math.abs(steps - Math.round(steps)) < 1e-9;
+  return Math.abs(steps - Math.round(steps)) < 1e-6;
 }
 
 /** What is wrong with a field beyond its keys' own checks, if anything. */
@@ -194,8 +194,10 @@ function fieldProblem(field: FieldKinds): string | null {
     if (slider) {
       if (min === undefined || max === undefined || min >= max)
         return 'A slider needs a min below its max';
-      if ((step ?? 1) > max - min) return 'A slider’s step must fit between its min and max';
-      if (field.default !== undefined && !onStep(field.default, min, step ?? 1))
+      if ((max - min) / (step ?? 1) < 1 - 1e-6)
+        return 'A slider’s step must fit between its min and max';
+      const start = field.default;
+      if (start !== undefined && (start < min || start > max || !onStep(start, min, step ?? 1)))
         return 'A slider’s default must be one of its steps';
     }
   }

@@ -96,9 +96,10 @@ export function boundSet(
       return text.trim();
     case 'choice':
       // Text, but a number or boolean stays one, so `rating: 4` becomes 5, not '5'.
-      return typeof was === 'number' || typeof was === 'boolean'
-        ? boundValue(text.trim(), was)
-        : value;
+      if (typeof was !== 'number' && typeof was !== 'boolean') return value;
+      // Only where it reads back as the same option: `+2` stays text.
+      const typed = boundValue(String(value), was);
+      return String(typed) === value ? typed : value;
     default:
       return value;
   }
