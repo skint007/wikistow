@@ -24,7 +24,7 @@ describe('reading a Dataview block', () => {
       sort: 'file.mtime desc',
     });
     expect(read('LIST\nWHERE file.mtime > date(2026-11-14)').query).toEqual({
-      where: 'file.mtime > 2026-11-14',
+      where: 'file.mtime > 2026-11-14T00:00:00.000Z',
     });
     expect(
       read(
@@ -32,7 +32,7 @@ describe('reading a Dataview block', () => {
       ).query,
     ).toEqual({
       from: 'Recipes',
-      where: 'file.mtime >= 2026-01-01, tried = true',
+      where: 'file.mtime >= 2026-01-01T00:00:00.000Z, tried = true',
       sort: 'file.mtime asc',
       limit: 5,
     });
@@ -68,7 +68,7 @@ describe('reading a Dataview block', () => {
     expect(read('TABLE saved').columns).toEqual([{ name: 'saved', heading: 'saved' }]);
     // Other names with saved in them are properties like any other.
     expect(read('LIST\nWHERE saved_on > date(2026-01-01)\nSORT last saved').query).toEqual({
-      where: 'saved_on > 2026-01-01',
+      where: 'saved_on > 2026-01-01T00:00:00.000Z',
       sort: 'last saved asc',
     });
   });
