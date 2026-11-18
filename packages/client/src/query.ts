@@ -31,7 +31,8 @@ export const QUERY_LANGUAGE = 'wikistow-query';
  * A value written in a condition: a number, a date, true or false, or text.
  * A date is the moment it starts (`dateMoment`), and how many milliseconds
  * the precision it is written with spans (`dateSpan`): a day alone the
- * whole day, a time without seconds the whole minute.
+ * whole day, a time without seconds the whole minute. `=` and `!=` take
+ * that whole window, `<` and `>=` its start, `<=` and `>` its end.
  */
 export type QueryLiteral =
   | { kind: 'number'; value: number }
@@ -269,7 +270,8 @@ const DAY = 86_400_000;
 
 /**
  * A date as `dateMoment` reads it, and how long the precision it is written
- * with spans, in milliseconds, for `=` and `!=` (#459): a day alone the
+ * with spans, in milliseconds, for `=` and `!=` (#459) and for `<=` and
+ * `>`, which compare with its end (#649): a day alone the
  * whole day, a time without seconds the whole minute, with seconds the
  * whole second, and with a fraction of one as many digits as it has, to
  * the millisecond. A time with no zone is read as UTC, so a day is always
@@ -403,7 +405,9 @@ function valueOf(page: QueryPage, name: string): Readonly<PropertyData> | undefi
 
 /**
  * When `page`'s version was saved, as its column shows it: a date with its
- * time to the minute, in UTC, which the reader's app shows in their own zone.
+ * time to the minute, in UTC, which the reader's app shows in their own
+ * zone with its offset (`queryDateText`), and a public copy in UTC, either
+ * as a query reads it back (#649).
  */
 function savedColumn(page: QueryPage): Readonly<PropertyData> | undefined {
   const saved = page.updated ? Date.parse(page.updated) : NaN;
@@ -476,20 +480,30 @@ function equal(value: Comparable, literal: QueryLiteral): boolean {
   return value.kind === literal.kind && value.value === literal.value;
 }
 
+/**
+ * Whether `value` is before or after `literal` as `operator` asks: as
+ * numbers, or as a moment against the window a date is written with
+ * (`dateSpan`, #649). `<` and `>=` compare with its start, and `<=` and `>`
+ * with its end, so `<= 2026-11-13` holds for any time that day, and
+ * `> 2026-11-13` from the next day on, as `<=` is `<` or `=`.
+ */
 function ordered(value: Comparable, literal: QueryLiteral, operator: QueryOperator): boolean {
   if (literal.kind !== value.kind || (literal.kind !== 'number' && literal.kind !== 'date')) {
     return false;
   }
-  const [a, b] = [value.value as number, literal.value];
+  const a = value.value as number;
+  const start = literal.value;
+  // A date's first moment after its window, which `<=` stops before and `>` starts at.
+  const end = literal.kind === 'date' ? start + literal.span : null;
   switch (operator) {
     case '<':
-      return a < b;
+      return a < start;
     case '<=':
-      return a <= b;
+      return end === null ? a <= start : a < end;
     case '>':
-      return a > b;
+      return end === null ? a > start : a >= end;
     default:
-      return a >= b;
+      return a >= start;
   }
 }
 
@@ -508,8 +522,8 @@ function scalars(property: Readonly<PropertyData>): Comparable[] {
  * Whether `page`'s values (`valueOf`) meet `condition`. `=` and `has` hold for a value
  * equal to it (`equal`), or a list holding one; `!=` where `=` doesn't, a missing
  * value included. `<`, `<=`, `>` and `>=` compare a number or a date with
- * one of the same kind, never text or a list, a date by the moment it
- * starts.
+ * one of the same kind (`ordered`), never text or a list, a date with the
+ * window it is written with.
  */
 function holds(page: QueryPage, condition: QueryCondition): boolean {
   const property = valueOf(page, condition.name);

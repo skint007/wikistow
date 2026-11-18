@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test';
-import { formatPropertyDate, propertyText, wikilinkText } from '../src/index.ts';
+import { formatPropertyDate, propertyText, queryDateText, wikilinkText } from '../src/index.ts';
 
 const US = { locale: 'en-US', timeZone: 'America/New_York' };
 
@@ -28,6 +28,39 @@ describe('a property value as text', () => {
     );
     expect(formatPropertyDate('2026-10-12T01:00Z', { timeZone: 'Nowhere/Else' })).toBe(
       '2026-10-12T01:00Z',
+    );
+  });
+
+  it('writes a date as a query reads it back, a moment with its zone’s offset then (#649)', () => {
+    const sydney = { timeZone: 'Australia/Sydney' };
+    // A day, and a time with no zone, as written: a query reads both as UTC.
+    expect(queryDateText('2026-10-12', sydney)).toBe('2026-10-12');
+    expect(queryDateText('2026-10-12T18:30', sydney)).toBe('2026-10-12 18:30');
+    expect(queryDateText('2026-10-12 18:30:15.5', sydney)).toBe('2026-10-12 18:30:15');
+    // A moment where the reader is, with that zone's offset at that moment.
+    expect(queryDateText('2026-11-13T09:30Z', sydney)).toBe('2026-11-13 20:30 +11:00');
+    expect(queryDateText('2026-06-13T09:30Z', sydney)).toBe('2026-06-13 19:30 +10:00');
+    expect(queryDateText('2026-10-12T18:30:15+02:00', US)).toBe('2026-10-12 12:30:15 -04:00');
+    expect(queryDateText('2026-10-12T18:30 -0130', { timeZone: 'Asia/Kathmandu' })).toBe(
+      '2026-10-13 01:45 +05:45',
+    );
+    expect(queryDateText('2026-10-12T18:30Z', { timeZone: 'America/St_Johns' })).toBe(
+      '2026-10-12 16:00 -02:30',
+    );
+    expect(queryDateText('2026-10-12T18:30Z', { timeZone: 'UTC' })).toBe('2026-10-12 18:30 +00:00');
+    expect(queryDateText('0042-01-02T00:00Z', { timeZone: 'UTC' })).toBe('0042-01-02 00:00 +00:00');
+  });
+
+  it('gives back as it is what a query doesn’t read as a date, or can’t be shown where the reader is', () => {
+    expect(queryDateText('soon', US)).toBe('soon');
+    expect(queryDateText('2026-02-30', US)).toBe('2026-02-30');
+    expect(queryDateText('2026-10-12T24:00', US)).toBe('2026-10-12T24:00');
+    expect(queryDateText('2026-10-12T01:00Z', { timeZone: 'Nowhere/Else' })).toBe(
+      '2026-10-12T01:00Z',
+    );
+    // A year a query doesn't read.
+    expect(queryDateText('9999-12-31T23:00Z', { timeZone: 'Asia/Tokyo' })).toBe(
+      '9999-12-31T23:00Z',
     );
   });
 

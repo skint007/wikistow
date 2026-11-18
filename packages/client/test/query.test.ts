@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vite-plus/test';
 import {
   parsePageQuery,
   publicLinkOperations,
+  queryDateText,
   runPageQuery,
   type PageQuery,
   type PropertyData,
@@ -486,10 +487,122 @@ describe('when each page was saved (#427)', () => {
     ]);
   });
 
-  it('leaves <, <=, > and >= comparing with the moment the date starts', () => {
-    expect(titles('where: saved > 2026-11-13T09:30Z', timed)).toEqual(['Apple']);
-    expect(titles('where: saved <= 2026-11-13T09:30Z', timed)).toEqual(['Bread', 'Eggs']);
-    expect(titles('where: saved <= 2026-11-13', timed)).toEqual(['Bread', 'Eggs']);
+  it('has <= and > compare with the end of the written window, < and >= with its start (#649)', () => {
+    expect(titles('where: saved > 2026-11-13T09:30Z', timed)).toEqual([]);
+    expect(titles('where: saved <= 2026-11-13T09:30Z', timed)).toEqual(['Apple', 'Bread', 'Eggs']);
+    expect(titles('where: saved <= 2026-11-13', timed)).toEqual(['Apple', 'Bread', 'Eggs']);
+    expect(titles('where: saved > 2026-11-12', timed)).toEqual(['Apple']);
+    expect(titles('where: saved < 2026-11-13', timed)).toEqual(['Bread', 'Eggs']);
+    expect(titles('where: saved >= 2026-11-13T09:30Z', timed)).toEqual(['Apple']);
+  });
+
+  // Each precision a date is written with, and the window it spans: a page
+  // saved just before it, at its start, at its last millisecond, and at the
+  // first after it.
+  const WINDOWS: [written: string, start: number, span: number][] = [
+    ['2026-11-13', Date.UTC(2026, 10, 13), 86_400_000],
+    ['2026-11-13T09:30', Date.UTC(2026, 10, 13, 9, 30), 60_000],
+    ['2026-11-13T19:30+10:00', Date.UTC(2026, 10, 13, 9, 30), 60_000],
+    ['2026-11-13 09:30:41Z', Date.UTC(2026, 10, 13, 9, 30, 41), 1000],
+    ['2026-11-13T09:30:41.1Z', Date.UTC(2026, 10, 13, 9, 30, 41, 100), 100],
+    ['2026-11-13T09:30:41.12Z', Date.UTC(2026, 10, 13, 9, 30, 41, 120), 10],
+    ['2026-11-13T09:30:41.123Z', Date.UTC(2026, 10, 13, 9, 30, 41, 123), 1],
+  ];
+  const EXPECTED = {
+    '<': ['Before'],
+    '<=': ['Before', 'First', 'Last'],
+    '=': ['First', 'Last'],
+    '!=': ['Before', 'After'],
+    '>=': ['First', 'Last', 'After'],
+    '>': ['After'],
+  };
+
+  it.each(WINDOWS)(
+    'compares with %s by each operator, saved and a date property alike',
+    (written, start, span) => {
+      const at = (title: string, moment: number) => {
+        const iso = new Date(moment).toISOString();
+        return {
+          ...page(title, title, [{ key: 'due', type: 'date' as const, value: iso }]),
+          updated: iso,
+        };
+      };
+      const edges = [
+        at('Before', start - 1),
+        at('First', start),
+        at('Last', start + span - 1),
+        at('After', start + span),
+      ];
+      for (const [operator, expected] of Object.entries(EXPECTED)) {
+        expect(titles(`where: saved ${operator} ${written}`, edges), operator).toEqual(expected);
+        expect(titles(`where: due ${operator} ${written}`, edges), operator).toEqual(expected);
+      }
+    },
+  );
+
+  it('has a day as a property compare as its start, <= and > a written day by its end', () => {
+    const days = [
+      page('a', 'Twelfth', [{ key: 'due', type: 'date', value: '2026-11-12' }]),
+      page('b', 'Thirteenth', [{ key: 'due', type: 'date', value: '2026-11-13' }]),
+      page('c', 'Fourteenth', [{ key: 'due', type: 'date', value: '2026-11-14' }]),
+    ];
+    expect(titles('where: due <= 2026-11-13', days)).toEqual(['Twelfth', 'Thirteenth']);
+    expect(titles('where: due > 2026-11-13', days)).toEqual(['Fourteenth']);
+    expect(titles('where: due < 2026-11-13', days)).toEqual(['Twelfth']);
+    expect(titles('where: due >= 2026-11-13', days)).toEqual(['Thirteenth', 'Fourteenth']);
+    // A time that day is after the moment it starts.
+    expect(titles('where: due > 2026-11-12T23:59', days)).toEqual(['Thirteenth', 'Fourteenth']);
+    expect(titles('where: due <= 2026-11-13T00:00', days)).toEqual(['Twelfth', 'Thirteenth']);
+  });
+
+  it('reads a cell’s text back in where as the same row, in any zone (#649)', () => {
+    const rows: Page[] = [
+      {
+        ...page('a', 'Zoned', [{ key: 'due', type: 'date', value: '2026-11-13T09:30:15+02:00' }]),
+        updated: '2026-11-13T09:30:41.123Z',
+      },
+      {
+        ...page('b', 'Floating', [{ key: 'due', type: 'date', value: '2026-11-13T23:45' }]),
+        updated: '2026-03-29T00:59:59.999Z',
+      },
+      {
+        ...page('c', 'A day', [{ key: 'due', type: 'date', value: '2026-11-14' }]),
+        updated: '2026-11-13T23:59:00.000Z',
+      },
+    ];
+    const zones = [
+      'UTC',
+      'Australia/Sydney',
+      'America/St_Johns',
+      'Asia/Kathmandu',
+      'Europe/London',
+    ];
+    for (const timeZone of zones) {
+      const result = run('show: saved, due\nsort: title', rows);
+      if (!result.ok) throw new Error(result.error);
+      for (const { page: row, values } of result.rows) {
+        for (const [i, name] of ['saved', 'due'].entries()) {
+          const value = values[i];
+          if (typeof value?.value !== 'string') throw new Error(`${row.title} has no ${name}`);
+          const cell = queryDateText(value.value, { timeZone });
+          const where = (operator: string) => titles(`where: ${name} ${operator} ${cell}`, rows);
+          expect(where('='), `${name} = ${cell} in ${timeZone}`).toEqual([row.title]);
+          expect(where('<='), `${name} <= ${cell}`).toContain(row.title);
+          expect(where('>='), `${name} >= ${cell}`).toContain(row.title);
+          expect(where('>'), `${name} > ${cell}`).not.toContain(row.title);
+          expect(where('<'), `${name} < ${cell}`).not.toContain(row.title);
+        }
+      }
+    }
+  });
+
+  it('reads a public copy’s saved cell back in where as the same row', () => {
+    const result = run('show: saved\nsort: title\nlimit: 2', timed);
+    if (!result.ok) throw new Error(result.error);
+    for (const { page: row, values } of result.rows) {
+      const cell = queryDateText(String(values[0]?.value), { timeZone: 'UTC' });
+      expect(titles(`where: saved = ${cell}`, timed)).toEqual([row.title]);
+    }
   });
 
   it('shows as a date with its time to the minute, in UTC, or nothing when not known', () => {
@@ -529,8 +642,8 @@ describe('when each page was saved (#427)', () => {
     if (!result.ok) throw new Error(result.error);
     const table = publicLinkOperations.queryTableMarkdown(result, () => false);
     expect(table.slice(2)).toEqual([
-      '| &#65;ppl&#101; | &#50;026\\-11\\-13 09\\:30 UT&#67; |',
-      '| &#66;rea&#100; | &#50;026\\-01\\-02 00\\:00 UT&#67; |',
+      '| &#65;ppl&#101; | &#50;026\\-11\\-13 09\\:30 \\+00\\:0&#48; |',
+      '| &#66;rea&#100; | &#50;026\\-01\\-02 00\\:00 \\+00\\:0&#48; |',
       '| &#67;ak&#101; |  |',
     ]);
   });

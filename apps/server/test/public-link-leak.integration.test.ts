@@ -678,7 +678,7 @@ describe('a public page holding a query table (ADR 0006, decision 9)', () => {
         .innerJoin(schema.revisions, eq(schema.revisions.id, schema.pageHeads.publishedHead))
         .where(eq(schema.pageHeads.pageId, pageId));
       const at = row?.at.toISOString() ?? '';
-      return `${at.slice(0, 10)} ${at.slice(11, 16)} UTC`;
+      return `${at.slice(0, 10)} ${at.slice(11, 16)} +00:00`;
     };
     const html = await (await visit(`/p/${id}`)).text();
     const rows = [...html.matchAll(/<tr>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>/g)].map(
@@ -690,7 +690,7 @@ describe('a public page holding a query table (ADR 0006, decision 9)', () => {
       ['Second', await savedAt(second.pageId)],
       ['First', await savedAt(first.pageId)],
     ]);
-    expect(rows[0]?.[1]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/);
+    expect(rows[0]?.[1]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} \+00:00$/);
   });
 
   it('writes the copied page’s own time as the server took it, not as this device holds it (#458)', async () => {
@@ -712,7 +712,7 @@ describe('a public page holding a query table (ADR 0006, decision 9)', () => {
         .from(schema.revisions)
         .where(eq(schema.revisions.id, revisionId));
       const at = row?.at.toISOString() ?? '';
-      return `${at.slice(0, 10)} ${at.slice(11, 16)} UTC`;
+      return `${at.slice(0, 10)} ${at.slice(11, 16)} +00:00`;
     };
     // First's row takes the time this device holds for it: the server's, once
     // opened from it, so a minute turning between the two clocks can't split them.

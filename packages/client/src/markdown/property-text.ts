@@ -51,6 +51,72 @@ export function formatPropertyDate(
   }
 }
 
+const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+
+/**
+ * `timeZone`'s offset from UTC at `moment`, in minutes, or null where the
+ * runtime doesn't know the zone, or its offset then isn't whole minutes
+ * (a zone's local mean time before standard time).
+ */
+function offsetAt(moment: number, timeZone: string | undefined): number | null {
+  try {
+    const name = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' })
+      .formatToParts(moment)
+      .find((part) => part.type === 'timeZoneName')?.value;
+    if (name === 'GMT') return 0;
+    const [, sign, hours, minutes] = /^GMT([+-])(\d{2}):(\d{2})$/.exec(name ?? '') ?? [];
+    if (sign === undefined) return null;
+    return (Number(hours) * 60 + Number(minutes)) * (sign === '-' ? -1 : 1);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A date property's text as a query table's cell shows it, written so that
+ * a query reads it back as the same day or moment (#649): copied into
+ * `where: due = …`, it matches its row. A day alone, and a time with no
+ * zone, which a query reads as UTC, as written (`2026-10-12`,
+ * `2026-10-12 18:30`). A time with a zone is that moment in `timeZone`
+ * (the runtime's where not given), with the offset that zone has then:
+ * `2026-10-13 04:30 +10:00`. Either is to the minute, or the second where
+ * written with seconds. Text a query doesn't read as a date, or a moment
+ * that can't be shown so, comes back as it is.
+ */
+export function queryDateText(
+  text: string,
+  { timeZone }: { timeZone?: string | undefined } = {},
+): string {
+  const [, year, month, day, hour, minute, second, zone] = DATE.exec(text) ?? [];
+  if (year === undefined) return text;
+  const date = new Date(0);
+  date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  // A day the calendar hasn't, or a time the clock hasn't, a query reads as text.
+  if (date.getUTCMonth() !== Number(month) - 1 || date.getUTCDate() !== Number(day)) return text;
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return text;
+  const written = `${year}-${month}-${day}`;
+  if (hour === undefined) return written;
+  const seconds = (at: number) => (second === undefined ? '' : `:${pad(at)}`);
+  if (zone === undefined) return `${written} ${hour}:${minute}${seconds(Number(second))}`;
+  date.setUTCHours(Number(hour), Number(minute), Number(second ?? 0));
+  if (zone !== 'Z') {
+    const [, sign, hours, minutes = '0'] = /^([+-])(\d{2}):?(\d{2})?$/.exec(zone) ?? [];
+    const offset = (Number(hours) * 60 + Number(minutes)) * (sign === '-' ? -1 : 1);
+    date.setTime(date.getTime() - offset * 60_000);
+  }
+  const offset = offsetAt(date.getTime(), timeZone);
+  if (offset === null) return text;
+  const there = new Date(date.getTime() + offset * 60_000);
+  const shownYear = there.getUTCFullYear();
+  if (shownYear < 0 || shownYear > 9999) return text;
+  const away = Math.abs(offset);
+  return (
+    `${pad(shownYear, 4)}-${pad(there.getUTCMonth() + 1)}-${pad(there.getUTCDate())} ` +
+    `${pad(there.getUTCHours())}:${pad(there.getUTCMinutes())}${seconds(there.getUTCSeconds())} ` +
+    `${offset < 0 ? '-' : '+'}${pad(Math.floor(away / 60))}:${pad(away % 60)}`
+  );
+}
+
 /** A key in sentence case, as written otherwise: `cook_time` reads "Cook time". */
 export function propertyLabel(key: string): string {
   const words = key.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
