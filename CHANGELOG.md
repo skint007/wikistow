@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Desktop
 
-- The web clipper extension 0.1.1, the first for the stores: its Firefox build no longer names Firefox for Android, which can't clip, so Mozilla Add-ons offers it for desktop Firefox only. (#PR)
+- The web clipper extension 0.1.1, the first for the stores: its Firefox build no longer names Firefox for Android, which can't clip, so Mozilla Add-ons offers it for desktop Firefox only. (#634)
 
 ## 0.27.0 - 2026-11-17
 
