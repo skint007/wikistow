@@ -77,11 +77,16 @@ function queriedName(field: string): string | null {
   return name !== null && name.toLowerCase().replace(/[_\s-]+/g, ' ') === 'saved' ? null : name;
 }
 
-/** A value as wikistow-query writes it: a quoted text, a number, true or false, or a date. */
+/**
+ * A value as wikistow-query writes it: a quoted text, a number, true or
+ * false, or a date. Dataview's `date(2026-11-14)` is one moment, the day's
+ * start, so it is written to the millisecond: a day alone would be the
+ * whole day to wikistow-query, and `> date(…)` would start the next day.
+ */
 function valueOf(written: string): string | null {
   const value = written.trim();
   const date = /^date\((\d{4}-\d{2}-\d{2})\)$/i.exec(value);
-  if (date?.[1]) return date[1];
+  if (date?.[1]) return `${date[1]}T00:00:00.000Z`;
   if (/^"[^"]*"$/.test(value)) return value;
   if (/^-?\d+(?:\.\d+)?$/.test(value) || /^(?:true|false)$/i.test(value)) return value;
   return null;
