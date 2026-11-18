@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Search by meaning: a draft shown at unlock waits out its 30 s pause before it's embedded, vectors made from text typed offline are never kept as the version's own, and what the queue made since its last write is kept before a lock and as the page is left. (#640)
+
 ## 0.27.2 - 2026-11-18
 
 ### Highlights
