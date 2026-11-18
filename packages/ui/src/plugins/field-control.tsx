@@ -1,8 +1,10 @@
 import { isPropertyDate } from '@wikistow/client';
 import type { BlockField, FieldValue, PropertyValue } from '@wikistow/plugin-sdk';
+import { onStep } from '@wikistow/plugin-sdk/protocol';
 import { Input } from '@/components/ui/input';
 import { Picker } from '@/components/ui/picker';
 import { Switch } from '@/components/ui/switch';
+import { useRef } from 'react';
 import { typedValue } from '../page/property-model';
 
 /*
@@ -47,6 +49,10 @@ export function checkField(field: BlockField, text: string): Checked {
         return { value: null, problem: `At least ${field.min}` };
       if (field.max !== undefined && value > field.max)
         return { value: null, problem: `At most ${field.max}` };
+      // Between two steps, a slider's thumb would rest on another value than the one used.
+      const step = field.step ?? 1;
+      if (field.slider && !onStep(value, field.min ?? 0, step))
+        return { value: null, problem: `In steps of ${step} from ${field.min ?? 0}` };
       return { value, problem: null };
     }
   }
@@ -73,7 +79,8 @@ export function boundValue(text: string, was: PropertyValue | undefined): Proper
 /**
  * What a field bound to a property sets, for its valid `value` read from
  * `text`, in place of `was`: a number field's number, a toggle's `true` or
- * `false`, a choice's value as text, a date's text (with the time it kept,
+ * `false`, a choice's value as text (a number or boolean where it replaces one),
+ * a date's text (with the time it kept,
  * if it had one), and a text field's text typed as `boundValue` types it.
  */
 export function boundSet(
@@ -87,6 +94,11 @@ export function boundSet(
       return boundValue(String(value), was);
     case 'date':
       return text.trim();
+    case 'choice':
+      // Text, but a number or boolean stays one, so `rating: 4` becomes 5, not '5'.
+      return typeof was === 'number' || typeof was === 'boolean'
+        ? boundValue(text.trim(), was)
+        : value;
     default:
       return value;
   }
@@ -124,6 +136,9 @@ export function FieldControl({
   onChange: (text: string) => void;
   onCommit: (text: string) => void;
 }) {
+  // A date's time, kept while its input is emptied on the way to another
+  // day, as clearing a segment empties it: the next day takes it back.
+  const time = useRef('');
   const common = {
     'aria-label': label,
     'aria-invalid': invalid && !readOnly,
@@ -140,7 +155,9 @@ export function FieldControl({
       readOnly={readOnly}
       onChange={(event) => {
         const next = event.target.value;
-        onChange(kind === 'date' && next !== '' ? `${next}${timeOf(text)}` : next);
+        if (kind !== 'date') return onChange(next);
+        if (text.trim() !== '') time.current = timeOf(text);
+        onChange(next === '' ? '' : `${next}${time.current}`);
       }}
       onBlur={() => onCommit(text)}
       onKeyDown={(event) => {

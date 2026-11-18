@@ -1,4 +1,5 @@
-import { BlockField, WorkerMessage } from '@wikistow/plugin-sdk/protocol';
+import { BlockField as FieldCheck, WorkerMessage } from '@wikistow/plugin-sdk/protocol';
+import type { BlockField, CalculateValues } from '@wikistow/plugin-sdk';
 import { declaredField } from '@wikistow/plugin-sdk/src/script.ts';
 import { z } from 'zod';
 import { describe, expect, it } from 'vite-plus/test';
@@ -9,7 +10,7 @@ import { refusal } from '../src/plugins/script-refusal.ts';
 // strictly, still takes a field that doesn't use it.
 
 /** The field checks of an app from before fields could name a property. */
-const [numberField, textField] = BlockField.options;
+const [numberField, textField] = FieldCheck.options;
 const older = [
   numberField.omit({ property: true, slider: true, step: true }),
   textField.omit({ property: true }),
@@ -45,7 +46,7 @@ describe('a field a script declares', () => {
     const extra = { type: 'number', label: 'Servings', property: 'servings', colour: 'red' };
     const field = declaredField(extra as Parameters<typeof declaredField>[0]);
     expect(field).toEqual({ type: 'number', label: 'Servings', property: 'servings' });
-    expect(BlockField.safeParse(field).success).toBe(true);
+    expect(FieldCheck.safeParse(field).success).toBe(true);
   });
 });
 
@@ -85,11 +86,11 @@ describe('fields of the kinds after number and text (#402)', () => {
       step: 0.5,
     });
     expect(slider).toEqual({ type: 'number', label: 'N', min: 0, max: 5, slider: true, step: 0.5 });
-    expect(BlockField.safeParse(slider).success).toBe(true);
+    expect(FieldCheck.safeParse(slider).success).toBe(true);
   });
 
   it('are checked as the host takes them', () => {
-    const ok = (field: unknown) => BlockField.safeParse(field).success;
+    const ok = (field: unknown) => FieldCheck.safeParse(field).success;
     expect(ok({ type: 'number', label: 'N', step: 1 })).toBe(false);
     expect(ok({ type: 'number', label: 'N', slider: true, min: 0 })).toBe(false);
     expect(ok({ type: 'number', label: 'N', slider: true, min: 5, max: 5 })).toBe(false);
@@ -105,6 +106,17 @@ describe('fields of the kinds after number and text (#402)', () => {
     expect(ok({ type: 'date', label: 'D', default: '2026-11-18T09:30' })).toBe(false);
     expect(ok({ type: 'date', label: 'D', default: '2026-11-18' })).toBe(true);
     expect(ok({ type: 'boolean', label: 'B', default: 'yes' })).toBe(false);
+    expect(ok({ type: 'choice', label: 'C', options: [option('a\u2028b')] })).toBe(false);
+    expect(ok({ type: 'number', label: 'N', slider: true, min: 0, max: 0.5 })).toBe(false);
+    expect(ok({ type: 'number', label: 'N', slider: true, min: 0, max: 0.5, step: 0.1 })).toBe(
+      true,
+    );
+    expect(
+      ok({ type: 'number', label: 'N', slider: true, min: 0, max: 10, step: 5, default: 4 }),
+    ).toBe(false);
+    expect(
+      ok({ type: 'number', label: 'N', slider: true, min: 0, max: 1, step: 0.1, default: 0.3 }),
+    ).toBe(true);
   });
 
   it('are refused by a released app, naming the field, and by this one say it may need a newer app', () => {
@@ -142,3 +154,10 @@ describe('fields of the kinds after number and text (#402)', () => {
     );
   });
 });
+
+// Outputs read beside the fields: booleans among them only where a field is one.
+type Reads<F extends Record<string, BlockField>> = CalculateValues<F>[string];
+// @ts-expect-error A block without a toggle reads no booleans.
+const numbersOnly: Reads<{ n: { type: 'number'; label: 'N' } }> = true;
+const withToggle: Reads<{ b: { type: 'boolean'; label: 'B' } }> = true;
+void [numbersOnly, withToggle];

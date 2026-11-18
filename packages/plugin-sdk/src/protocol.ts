@@ -118,7 +118,10 @@ const OptionValue = z
   .string()
   .min(1)
   .max(100)
-  .refine((value) => value === value.trim() && !/[\r\n]/.test(value), 'One line, unspaced');
+  .refine(
+    (value) => value === value.trim() && !/[\r\n\u2028\u2029]/.test(value),
+    'One line, unspaced',
+  );
 
 /**
  * A field a block declares, as the host draws it. Each kind after `text`,
@@ -174,13 +177,27 @@ export const BlockField = FieldKinds.superRefine((field, context) => {
   if (problem) context.addIssue({ code: 'custom', message: problem });
 });
 
+/**
+ * Whether `value` is one a slider from `min` moving by `step` rests on,
+ * allowing for the rounding of decimal steps.
+ */
+export function onStep(value: number, min: number, step: number): boolean {
+  const steps = (value - min) / step;
+  return Math.abs(steps - Math.round(steps)) < 1e-9;
+}
+
 /** What is wrong with a field beyond its keys' own checks, if anything. */
 function fieldProblem(field: FieldKinds): string | null {
   if (field.type === 'number') {
     const { min, max, slider, step } = field;
     if (step !== undefined && !slider) return 'Only a slider has a step';
-    if (slider && (min === undefined || max === undefined || min >= max))
-      return 'A slider needs a min below its max';
+    if (slider) {
+      if (min === undefined || max === undefined || min >= max)
+        return 'A slider needs a min below its max';
+      if ((step ?? 1) > max - min) return 'A slider’s step must fit between its min and max';
+      if (field.default !== undefined && !onStep(field.default, min, step ?? 1))
+        return 'A slider’s default must be one of its steps';
+    }
   }
   if (field.type === 'choice') {
     const values = field.options.map(({ value }) => value);

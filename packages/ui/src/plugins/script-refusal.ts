@@ -15,7 +15,7 @@ export function refusal(
   const [top, part, field, key] = issue.path;
   const unknown =
     (issue.code === 'invalid_union' && key === 'type' && issue.path.length === 4) ||
-    (issue.code === 'unrecognized_keys' && issue.path.length === 3);
+    (issue.code === 'unrecognized_keys' && issue.path.length >= 3);
   if (top === 'block' && part === 'fields' && typeof field === 'string' && unknown) {
     const block = (data as { block?: { type?: unknown } }).block?.type;
     const named = typeof block === 'string' ? `block “${block}”` : 'a block';

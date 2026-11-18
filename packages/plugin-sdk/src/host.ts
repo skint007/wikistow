@@ -664,8 +664,9 @@ export function inlineSpan(pluginId: string, type: string, text: string): string
 /**
  * A number, entered as text: a value outside `min`–`max`, or not a number,
  * is shown as invalid. With `slider`, it is drawn as a slider from `min` to
- * `max`, which it then needs, moving by `step` (1 if not given), with its
- * value beside it. An app older than `slider` and `step` refuses a field
+ * `max`, which it then needs, moving by `step` (1 if not given, and no
+ * more than `max` − `min`), with its value beside it: a value between its
+ * steps is shown as invalid, and a `default` must be one of them. An app older than `slider` and `step` refuses a field
  * with either.
  */
 export type NumberField = {
@@ -779,7 +780,13 @@ export type FieldValues<Fields extends Record<string, BlockField>> = {
  * show that they do.
  */
 export type CalculateValues<Fields extends Record<string, BlockField>> = FieldValues<Fields> &
-  Readonly<Record<string, FieldValue>>;
+  // Booleans among them only where a field is one, so other blocks' outputs read as before.
+  Readonly<
+    Record<
+      string,
+      [Extract<Fields[keyof Fields], BooleanField>] extends [never] ? OutputValue : FieldValue
+    >
+  >;
 
 export type BlockOutput<Fields extends Record<string, BlockField>> = {
   label: string;

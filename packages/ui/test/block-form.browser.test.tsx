@@ -1,11 +1,16 @@
 import { readProperties } from '@wikistow/client';
-import { PluginError, type BlockProps, type PropertyValue } from '@wikistow/plugin-sdk';
+import {
+  PluginError,
+  type BlockField,
+  type BlockProps,
+  type PropertyValue,
+} from '@wikistow/plugin-sdk';
 import type { BlockSpec } from '@wikistow/plugin-sdk/protocol';
 import { act } from 'react';
 import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { formView, LIST_NOTE, readFields } from '../src/plugins/block-form.tsx';
-import { boundValue } from '../src/plugins/field-control.tsx';
+import { boundSet, boundValue, checkField } from '../src/plugins/field-control.tsx';
 import { blockProperties } from '../src/plugins/block-properties.ts';
 import { updateInPlace } from '../src/plugins/in-place.ts';
 
@@ -469,6 +474,45 @@ describe('form fields of other kinds', () => {
     // Let go again where it is, nothing more is set.
     await act(async () => form.slider('Level').blur());
     expect(form.set).toHaveLength(2);
+  });
+
+  it('keep a bound date’s time when its input is emptied on the way to another day', async () => {
+    const form = await drawKinds({});
+    await userEvent.clear(form.date('Due'));
+    await userEvent.fill(form.date('Due'), '2026-11-19');
+    await act(async () => form.date('Due').blur());
+    expect(form.set).toEqual([['due', '2026-11-19T09:30']]);
+  });
+
+  it('keep a number or boolean a choice replaces one, and set text otherwise', () => {
+    const rating: BlockField = {
+      type: 'choice',
+      label: 'Rating',
+      options: [{ value: '5', label: 'Five' }],
+      property: 'rating',
+    };
+    expect(boundSet(rating, '5', '5', 4)).toBe(5);
+    expect(boundSet(rating, '5', '5', 'four')).toBe('5');
+    expect(boundSet(rating, '5', '5', undefined)).toBe('5');
+    const yes: BlockField = { ...rating, options: [{ value: 'true', label: 'Yes' }] };
+    expect(boundSet(yes, 'true', 'true', false)).toBe(true);
+  });
+
+  it('show a slider’s value between its steps as invalid', () => {
+    expect(readFields(KINDS, 'amount: 22').amount).toEqual({
+      text: '22',
+      value: null,
+      problem: 'In steps of 5 from 0',
+    });
+    const tenths: BlockField = {
+      type: 'number',
+      label: 'T',
+      min: 0,
+      max: 1,
+      step: 0.1,
+      slider: true,
+    };
+    expect(checkField(tenths, '0.3')).toEqual({ value: 0.3, problem: null });
   });
 
   it('set a bound date’s day where the page has none', async () => {
