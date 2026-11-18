@@ -42,6 +42,10 @@ describe('the store manifests', () => {
         },
       },
     });
+    // Not offered for Firefox for Android, which can't clip.
+    expect(manifest('firefox', { version: '1.0.0' })).not.toHaveProperty(
+      'browser_specific_settings.gecko_android',
+    );
     expect(manifest('chrome', { version: '1.0.0' })).toMatchObject({
       background: { service_worker: 'background.js' },
     });

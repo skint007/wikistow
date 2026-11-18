@@ -12,6 +12,7 @@ import {
   type Page,
   type Worker,
 } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -25,6 +26,10 @@ import { TEST_ID } from './test-key.ts';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const EXTENSION = join(ROOT, 'dist', 'chrome-test');
 const FAKE_HOST = join(ROOT, 'e2e', 'fake-host.ts');
+/** The extension's version, which it tells the app. */
+const VERSION = (
+  JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string }
+).version;
 const SCREENSHOTS = process.env['SCREENSHOTS'];
 
 // A 1×1 PNG, for the pages' images.
@@ -591,7 +596,7 @@ test('the beta is used when it alone is installed, and an app too new says to up
   await expect(
     popup.getByText('This WikiStow is newer than the extension. Update the extension to clip.'),
   ).toBeVisible();
-  expect(await got('beta', 'hello')).toMatchObject([{ browser: 'chromium', extension: '0.1.0' }]);
+  expect(await got('beta', 'hello')).toMatchObject([{ browser: 'chromium', extension: VERSION }]);
 });
 
 test('a ready beta that takes the clip wins over a stable app too old for the extension', async () => {

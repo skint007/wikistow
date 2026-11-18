@@ -77,9 +77,10 @@ export function manifest(target: Target, options: ManifestOptions) {
               // as transmission (Mozilla's built-in data consent).
               data_collection_permissions: { required: ['websiteContent', 'browsingActivity'] },
             },
-            // Firefox for Android can't clip, having no native messaging,
-            // and only says so; its first version with data consent.
-            gecko_android: { strict_min_version: '142.0' },
+            // No `gecko_android`: Firefox for Android can't clip, having no
+            // native messaging, and Mozilla Add-ons lists an add-on that
+            // names it for Android, with no way to untick it (ADR 0017,
+            // decision 9).
           },
         }),
   };

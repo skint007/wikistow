@@ -123,7 +123,7 @@ At [the Developer Hub](https://addons.mozilla.org/developers/addon/submit/distri
 
 | Field | Value |
 | --- | --- |
-| Compatible platforms | Firefox only: untick **Firefox for Android**, which the manifest's `gecko_android` key may tick. Firefox for Android can't clip, having no native messaging, and is out of scope (ADR 0017, decision 9) |
+| Compatible platforms | Firefox only. From 0.1.1 the manifest names no `gecko_android`, so Mozilla Add-ons doesn't offer it for Firefox for Android, which can't clip, having no native messaging, and is out of scope (ADR 0017, decision 9). The unlisted 0.1.0 named it, which ticks **Firefox for Android** and locks the box |
 | Source code | **Yes**: upload `wikistow-clipper-<version>-source.zip`. Its README says how to build it, with Node 26 and pnpm rather than the reviewers' Node 24 and npm ([source code submission](https://extensionworkshop.com/documentation/publish/source-code-submission/)) |
 | Name | WikiStow Web Clipper |
 | Add-on URL | `https://addons.mozilla.org/firefox/addon/wikistow-web-clipper/` |
@@ -136,7 +136,7 @@ At [the Developer Hub](https://addons.mozilla.org/developers/addon/submit/distri
 | Homepage | https://github.com/skint007/wikistow |
 | Licence | MIT |
 | Privacy policy | Yes, as it sends data outside the browser. Paste the text of `docs/web-clipper-privacy.md`, with its link above |
-| Screenshots | The four above. 1280 by 800 is the largest Mozilla shows, at 1.6 to 1 ([an appealing listing](https://extensionworkshop.com/documentation/develop/create-an-appealing-listing/)) |
+| Screenshots | The four above. 1280 by 800 is the largest Mozilla shows, at 1.6 to 1 ([an appealing listing](https://extensionworkshop.com/documentation/develop/create-an-appealing-listing/)). They go in the **Edit Product Page**'s media section, which isn't there while the add-on has only unlisted versions (seen 2026-11-18): add them once the first listed version is in |
 | Icon | From the manifest |
 
 The manifest already declares Firefox's [data consent](https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/), `websiteContent` and `browsingActivity` as required, which Firefox shows at install.
