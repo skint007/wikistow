@@ -546,8 +546,8 @@ export type SavedVersion = {
    * (`IndexedEntry.updated`); null or left out if unknown. A save still
    * waiting on this device names its base as the version (`revisionId` is
    * `basedOn`), and keeps the time the index holds for that. Its text goes
-   * in over what the index holds of its base (`WaitingText`), until the
-   * space is listed again.
+   * in over what the index holds of its base (`WaitingText`). A listing of
+   * its space takes it as it waits then instead (`updateIndex`).
    */
   updated?: string | null;
 };
@@ -569,6 +569,11 @@ export type SavedVersion = {
  * else's version came between, or access changed, its space is listed.
  * A save, given as it is written, needs nothing from the server. Links are
  * kept with `readLinks`, as `indexSpaces` keeps them.
+ *
+ * A space listed takes, over each version it finds, the change waiting on
+ * this device typed over it, as it waits now (`waitingOver`), rather than
+ * the saves noted for it: a save into the queue isn't lost for being noted
+ * with its space's listing, or as that alone.
  */
 export async function updateIndex(
   ctx: ClientContext,
@@ -632,6 +637,7 @@ export async function updateIndex(
         );
       },
     });
+    pages.push(...(await waitingOver(ctx, index, pages, { live, readLinks })));
   }
   for (const [key, saved] of saves) {
     const held = index.page(saved.spaceId, saved.pageId);
@@ -660,6 +666,49 @@ export async function updateIndex(
   }
   live();
   return index.with(pages, { spaces: all ? 'all' : ids });
+}
+
+/**
+ * The changes waiting on this device (`OfflineQueue.drafts`) for pages
+ * `listed` found at the version each was typed over, as typed
+ * (`WaitingText`), each at that version's time. So a listing takes what
+ * waits now, whatever saves were noted, or noted only as its space: a change
+ * discarded meanwhile isn't there, and one over a version someone else's
+ * replaced gives way to that. Later in `listed`, each stands in for the page
+ * listed (`PageIndex.with`).
+ */
+async function waitingOver(
+  ctx: ClientContext,
+  index: PageIndex,
+  listed: readonly (readonly [SearchPage, (IndexedText | WaitingText | VersionTime)?])[],
+  { live, readLinks }: { live: () => void; readLinks: ReadWikilinks | undefined },
+): Promise<[SearchPage, WaitingText][]> {
+  const drafts = (await ctx.keptContent?.queue.drafts().catch(() => null)) ?? [];
+  live();
+  if (drafts.length === 0) return [];
+  const found = new Map(listed.map((page) => [pageKey(page[0].spaceId, page[0].pageId), page]));
+  const waiting: [SearchPage, WaitingText][] = [];
+  for (const draft of drafts) {
+    const page = found.get(pageKey(draft.spaceId, draft.pageId));
+    if (!page || page[0].revisionId !== draft.basedOn) continue;
+    const [doc, given] = page;
+    // As in `readPages`: locking stops the links' reads.
+    live();
+    waiting.push([
+      // As a save is labelled: what was typed is no reader's.
+      { ...doc, draft: true },
+      {
+        ...(await contentOfPayload(draft.payload, readLinks)),
+        // The version's time as listed, or as held when reused.
+        updated: given
+          ? (given.updated ?? null)
+          : (index.page(doc.spaceId, doc.pageId)?.updated ?? null),
+        waiting: true,
+      },
+    ]);
+  }
+  live();
+  return waiting;
 }
 
 /**

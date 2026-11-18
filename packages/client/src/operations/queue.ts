@@ -314,12 +314,15 @@ export const droppedOnDelete = (entry: QueueEntry): boolean =>
  * about to be sent under its ID (`recorded`), which every session with the
  * page counts as its own, one that landed (`landed`), which they take
  * as their base, and a rename or delete that landed (`sent`), after which
- * what reads the space, its search and the trash, reads it again.
+ * what reads the space, its search and the trash, reads it again. A page's
+ * change the person discarded (`discarded`, after `changed`) is gone with
+ * what was typed in it, so what read that, such as search, reads the space again.
  */
 export type QueueEvent =
   | { kind: 'saved'; entry: QueuedPage }
   | { kind: 'changed'; spaceId: SpaceId; id: PageId | FolderId | SpaceId }
   | { kind: 'sent'; spaceId: SpaceId }
+  | { kind: 'discarded'; spaceId: SpaceId; pageId: PageId }
   | { kind: 'recorded'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId }
   | { kind: 'landed'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId };
 
@@ -1113,7 +1116,11 @@ export class OfflineQueue {
       if (entry) await this.#remove(entry);
       return entry;
     });
-    if (entry) this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: key.id });
+    if (!entry) return;
+    this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: key.id });
+    if (entry.kind === 'page') {
+      this.#emit({ kind: 'discarded', spaceId: entry.spaceId, pageId: entry.id });
+    }
   }
 
   /** Send a stopped change again at the next `send`, as for a page restored from the trash. */

@@ -1,7 +1,11 @@
 import {
   closeSession,
+  memoryKeptStore,
   moveOperations as moves,
+  newPayload,
+  openSession,
   pageOperations as pages,
+  type queueOperations,
   searchOperations as search,
   sharingOperations as sharing,
   spaceOperations,
@@ -440,6 +444,103 @@ describe('a search index', () => {
     });
     expect(found(late, 'mysavedsecret')).toEqual([]);
     expect(late.size).toBe(0);
+  });
+
+  it('takes a change waiting on this device over the version a listing finds, until it is discarded (#453)', async () => {
+    const person = await personWithVault(t);
+    const ctx = await openSession(person.api, person.vault, { content: memoryKeptStore() });
+    const queue = ctx.keptContent?.queue;
+    if (!queue) throw new Error('The session keeps nothing');
+    const told: queueOperations.QueueEvent[] = [];
+    queue.subscribe((event) => told.push(event));
+    const spaceId = await spaceOperations.createSpace(ctx, { name: 'Notes' });
+    const pageId = await pages.createPage(ctx, {
+      spaceId,
+      parentId: null,
+      title: 'Plan',
+      markdown: 'serverwords',
+    });
+    const page = { spaceId, pageId };
+    const index = await search.indexSpaces(ctx);
+    const { heads } = await pages.loadPage(ctx, pageId);
+    if (!heads.draftHead) throw new Error('No draft');
+    const basedOn = heads.draftHead;
+    const typed = (markdown: string) => newPayload({ title: 'Plan', markdown });
+    // Typed over the draft into this device's queue, as when its entry stopped.
+    const version = await queue.saveDraft({
+      page,
+      basedOn,
+      region: null,
+      payload: typed('typedzebra words'),
+      seen: null,
+    });
+    // The save gathered with a listing of its space, as `OfflineQueue.drafts` gives it.
+    const saved = await queue.drafts();
+    const gathered = await search.updateIndex(ctx, index, { spaces: [spaceId], saved });
+    expect(found(gathered, 'typedzebra')).toEqual([pageId]);
+    expect(found(gathered, 'serverwords')).toEqual([]);
+    expect(gathered.waiting(spaceId, pageId)).toBe(true);
+    expect(gathered.page(spaceId, pageId)).toMatchObject({
+      revisionId: basedOn,
+      draft: true,
+      updated: index.page(spaceId, pageId)?.updated,
+    });
+    expect(search.keptPages(gathered).has(basedOn)).toBe(false);
+    // Its save noted as its space alone, as while nothing shows the index, or every space.
+    for (const spaces of [[spaceId], 'all'] as const) {
+      const listed = await search.updateIndex(ctx, index, { spaces });
+      expect(found(listed, 'typedzebra')).toEqual([pageId]);
+    }
+    // Listed again with nothing changed: the same index.
+    expect(await search.updateIndex(ctx, gathered, { spaces: [spaceId] })).toBe(gathered);
+    // Typed on: a listing takes what's waiting now.
+    await queue.saveDraft({
+      page,
+      basedOn,
+      region: null,
+      payload: typed('typedyak words'),
+      seen: version,
+    });
+    const on = await search.updateIndex(ctx, gathered, { spaces: [spaceId] });
+    expect(found(on, 'typedyak')).toEqual([pageId]);
+    expect(found(on, 'typedzebra')).toEqual([]);
+    // Discarded: told for its space, whose listing then finds the server's draft.
+    told.length = 0;
+    await queue.discard({ kind: 'page', id: pageId });
+    expect(told).toEqual([
+      { kind: 'changed', spaceId, id: pageId },
+      { kind: 'discarded', spaceId, pageId },
+    ]);
+    const discarded = await search.updateIndex(ctx, on, { spaces: [spaceId] });
+    expect(found(discarded, 'typedyak')).toEqual([]);
+    expect(found(discarded, 'serverwords')).toEqual([pageId]);
+    expect(discarded.waiting(spaceId, pageId)).toBe(false);
+    expect(held(discarded)).toEqual(held(await search.indexSpaces(ctx)));
+  });
+
+  it('gives way to another version than the one a change waiting on this device was typed over', async () => {
+    const person = await personWithVault(t);
+    const ctx = await openSession(person.api, person.vault, { content: memoryKeptStore() });
+    const queue = ctx.keptContent?.queue;
+    if (!queue) throw new Error('The session keeps nothing');
+    const spaceId = await spaceOperations.createSpace(ctx, { name: 'Notes' });
+    const pageId = await pages.createPage(ctx, { spaceId, parentId: null, title: 'Plan' });
+    const page = { spaceId, pageId };
+    const { heads } = await pages.loadPage(ctx, pageId);
+    if (!heads.draftHead) throw new Error('No draft');
+    await queue.saveDraft({
+      page,
+      basedOn: heads.draftHead,
+      region: null,
+      payload: newPayload({ title: 'Plan', markdown: 'typedzebra' }),
+      seen: null,
+    });
+    // Someone else's version came between: the change waits as a conflict.
+    await pages.editDraft(ctx, page, { markdown: 'theirwords' });
+    const index = await search.updateIndex(ctx, await search.indexSpaces(ctx), { spaces: 'all' });
+    expect(found(index, 'typedzebra')).toEqual([]);
+    expect(found(index, 'theirwords')).toEqual([pageId]);
+    expect(index.waiting(spaceId, pageId)).toBe(false);
   });
 
   it('is abandoned when the vault locks while it is built', async () => {

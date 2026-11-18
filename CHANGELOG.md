@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Search, query tables and plugin rows let go of a change waiting on the device once it's discarded, and keep what was typed into one while its space is listed again or the index is built online. (#PR)
+
 ## 0.27.2 - 2026-11-18
 
 ### Highlights

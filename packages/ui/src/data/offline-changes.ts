@@ -19,7 +19,7 @@ import { PLAIN } from '../vault/store';
 import { connection, useConnection } from './connection';
 import { contentChanged } from './content-changed';
 import { keepChanged, pageOpened } from './keeper';
-import { pageQuery, queueOf, trashQuery, treeQuery } from './queries';
+import { pageQuery, queueOf, searchIndexChanged, trashQuery, treeQuery } from './queries';
 
 // Changes made offline (ADR 0009, decision 7), as the app makes, follows and sends them.
 
@@ -84,6 +84,7 @@ const Told = z.discriminatedUnion('kind', [
     id: z.union([PageId, FolderId, SpaceId]),
   }),
   z.object({ kind: z.literal('sent'), spaceId: SpaceId }),
+  z.object({ kind: z.literal('discarded'), spaceId: SpaceId, pageId: PageId }),
   z.object({
     kind: z.enum(['recorded', 'landed']),
     spaceId: SpaceId,
@@ -108,7 +109,8 @@ function persist() {
   void navigator.storage?.persist?.().catch(() => {});
 }
 
-function follow(queryClient: QueryClient, ctx: ClientContext, event: Told) {
+/** What the app does as it hears of `event` in the queue, from this tab or another. */
+export function followQueue(queryClient: QueryClient, ctx: ClientContext, event: Told) {
   void queryClient.invalidateQueries({ queryKey: queueQuery(ctx).queryKey });
   if (event.kind === 'saved') return;
   if (event.kind === 'recorded') {
@@ -120,6 +122,13 @@ function follow(queryClient: QueryClient, ctx: ClientContext, event: Told) {
     void queryClient.invalidateQueries({
       queryKey: pageQuery(ctx, PageId.parse(event.id)).queryKey,
     });
+    return;
+  }
+  if (event.kind === 'discarded') {
+    // What was typed in it is gone: the index, which held it over the
+    // page's version (`WaitingText`), lists the space again. Its tree and
+    // the page load again for `changed`, told first.
+    searchIndexChanged(queryClient, { spaces: [event.spaceId] });
     return;
   }
   if (event.kind === 'sent') {
@@ -159,13 +168,13 @@ export function useOfflineChanges(ctx: ClientContext | null, confirmed: boolean)
     if (channel) {
       channel.onmessage = (message: MessageEvent<unknown>) => {
         const event = Told.safeParse(message.data);
-        if (event.success) follow(queryClient, ctx, event.data);
+        if (event.success) followQueue(queryClient, ctx, event.data);
       };
     }
     const stop = queue.subscribe((event) => {
       if (event.kind === 'changed' || event.kind === 'saved') persist();
       const sent = told(event);
-      follow(queryClient, ctx, sent);
+      followQueue(queryClient, ctx, sent);
       channel?.postMessage(sent);
     });
     return () => {

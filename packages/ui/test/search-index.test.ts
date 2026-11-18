@@ -168,12 +168,16 @@ function put(spaceId: SpaceId, id: string, revisionId: string) {
   return doc;
 }
 
-/** The index's own query, shown, for a session whose cache is at `revisions.generation`. */
-async function shownIndex() {
+/**
+ * The index's own query, shown, for a session whose cache is at
+ * `revisions.generation`, with `drafts` waiting in its queue.
+ */
+async function shownIndex(drafts: searchOperations.SavedVersion[] = []) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const revisions = { generation: 0 };
   // What sealing checks of a session: its cache, cleared at a lock or access change.
-  const ctx = { revisions } as unknown as ClientContext;
+  const keptContent = drafts.length > 0 ? { queue: { drafts: async () => drafts } } : undefined;
+  const ctx = { revisions, keptContent } as unknown as ClientContext;
   const options = searchIndexQuery(ctx, queryClient);
   const stop = new QueryObserver(queryClient, options).subscribe(() => {});
   await settled();
@@ -191,6 +195,19 @@ describe('the index’s query', () => {
     client.keepSearchIndex.mockReset().mockResolvedValue(undefined);
     put(home, 'soup', 'r1');
     put(work, 'notes', 'r2');
+  });
+
+  it('is built online with the drafts waiting on this device, as an update’s listing takes them (#453)', async () => {
+    const waiting = {
+      spaceId: home,
+      pageId: PageId.parse('soup'),
+      basedOn: RevisionId.parse('r1'),
+      revisionId: RevisionId.parse('r1'),
+      payload: { title: 'soup', markdown: 'typed words', extensions: {} },
+    };
+    const { stop } = await shownIndex([waiting]);
+    expect(client.updates).toEqual([{ spaces: [], saved: [waiting] }]);
+    stop();
   });
 
   it('puts back what a failed update took, and forgets it all when the vault locks', async () => {
