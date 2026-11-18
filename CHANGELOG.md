@@ -4,6 +4,18 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Features
+
+- A plugin’s script blocks can show a toggle, a menu of choices, a date picker or a slider, each able to set one of the page’s properties.
+
+### Changes
+
+#### App
+
+- Script blocks take `boolean`, `choice` and `date` fields, and number fields drawn as a slider (`slider`, `step`), bound to a property or written to their fence line. An app older than them refuses such a block, naming the field, and this app says a field kind it doesn't know may need a newer WikiStow. The calculator example has a `stay` block using all four. (#648)
+
 ## 0.27.3-beta.1 - 2026-11-18
 
 ### Highlights
