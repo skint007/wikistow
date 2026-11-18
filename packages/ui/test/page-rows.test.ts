@@ -207,6 +207,10 @@ describe('a query', () => {
     expect(titles({ where: 'saved < 2026-11-14' })).toEqual(['Garlic bread']);
     // A property named updated is like any other: none has one.
     expect(titles({ where: 'updated < 2026-11-14' })).toEqual([]);
+    // = holds for the whole minute, or day, it is written to, as a block's does (#459).
+    expect(titles({ where: 'file.mtime = 2026-11-13T09:30Z' })).toEqual(['Garlic bread']);
+    expect(titles({ where: 'saved = 2026-11-14' })).toEqual(['Tomato soup']);
+    expect(titles({ where: 'saved != 2026-11-14' })).toEqual(['Garlic bread', 'Lemon tart']);
   });
 
   it('finds a folder only among those the plugin can read', () => {

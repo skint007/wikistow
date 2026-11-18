@@ -59,8 +59,8 @@ describe('reading a query block', () => {
     expect(query.where.map(({ name, operator, value }) => [name, operator, value])).toEqual([
       ['status', '!=', { kind: 'text', value: 'in progress, still' }],
       ['rating', '<', { kind: 'number', value: 4.5 }],
-      ['made', '<=', { kind: 'date', value: Date.UTC(2026, 9, 12) }],
-      ['made', '>', { kind: 'date', value: Date.UTC(2026, 9, 12, 9, 30) }],
+      ['made', '<=', { kind: 'date', value: Date.UTC(2026, 9, 12), span: 86_400_000 }],
+      ['made', '>', { kind: 'date', value: Date.UTC(2026, 9, 12, 9, 30), span: 60_000 }],
       ['x', '>=', { kind: 'number', value: -2 }],
       ['tags', 'has', { kind: 'text', value: 'Bread' }],
       ['note', '=', { kind: 'text', value: 'plain words' }],
@@ -97,6 +97,7 @@ describe('reading a query block', () => {
     expect(parsed('where: due = 0050-01-02').where[0]?.value).toEqual({
       kind: 'date',
       value: early.getTime(),
+      span: 86_400_000,
     });
   });
 
@@ -286,6 +287,35 @@ describe('running a query', () => {
     expect(titles('where: tried = false')).toEqual(['Lemon tart']);
   });
 
+  it('has = on a date property match the precision the date is written with (#459)', () => {
+    const made: Page[] = [
+      page('a', 'At noon', [{ key: 'made', type: 'date', value: '2026-10-12T12:00:30Z' }]),
+      page('b', 'A day', [{ key: 'made', type: 'date', value: '2026-10-12' }]),
+      page('c', 'Listed', [
+        { key: 'made', type: 'list', value: ['2026-09-01', '2026-10-12T23:59'] },
+      ]),
+      page('d', 'Elsewhere', [{ key: 'made', type: 'date', value: '2026-10-13T01:00+02:00' }]),
+    ];
+    expect(titles('where: made = 2026-10-12', made)).toEqual([
+      'At noon',
+      'A day',
+      'Listed',
+      'Elsewhere',
+    ]);
+    expect(titles('where: made = 2026-10-12T12:00', made)).toEqual(['At noon']);
+    expect(titles('where: made = 2026-10-12T12:00:30', made)).toEqual(['At noon']);
+    expect(titles('where: made = 2026-10-12T12:00:31', made)).toEqual([]);
+    // A day as a property holds its start, not every time that day.
+    expect(titles('where: made = 2026-10-12T00:00', made)).toEqual(['A day']);
+    expect(titles('where: made has 2026-09-01', made)).toEqual(['Listed']);
+    expect(titles('where: made != 2026-10-12T23:59Z', made)).toEqual([
+      'At noon',
+      'A day',
+      'Elsewhere',
+    ]);
+    expect(titles('where: made = 2026-10-13', made)).toEqual([]);
+  });
+
   it('has a list hold a value, and != hold where = doesn’t, a missing value too', () => {
     expect(titles('where: tags has sides')).toEqual(['Garlic bread']);
     expect(titles('where: tags = SOUP')).toEqual(['Tomato soup']);
@@ -395,7 +425,11 @@ describe('when each page was saved (#427)', () => {
     });
     expect(parsed('show: saved, servings').show).toEqual(['saved', 'servings']);
     expect(parsed('where: saved > 2026-01-01').where).toEqual([
-      { name: 'saved', operator: '>', value: { kind: 'date', value: Date.UTC(2026, 0, 1) } },
+      {
+        name: 'saved',
+        operator: '>',
+        value: { kind: 'date', value: Date.UTC(2026, 0, 1), span: 86_400_000 },
+      },
     ]);
   });
 
@@ -417,6 +451,45 @@ describe('when each page was saved (#427)', () => {
     expect(titles('where: saved >= 2026-01-02', timed)).toEqual(['Apple', 'Bread', 'Eggs']);
     expect(titles('where: saved < 2026-07-01T00:00Z', timed)).toEqual(['Bread', 'Eggs']);
     expect(titles('where: saved != 2026-01-02', timed)).toEqual(['Apple', 'Cake', 'Dates', 'Eggs']);
+  });
+
+  it('has = and != match the precision the date is written with (#459)', () => {
+    // As its cell shows it, to the minute: the whole minute, then the whole day.
+    expect(titles('where: saved = 2026-11-13T09:30Z', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13T09:30', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13T09:31Z', timed)).toEqual([]);
+    expect(titles('where: saved = 2026-11-14', timed)).toEqual([]);
+    // Seconds, and a fraction of one, as far as written.
+    expect(titles('where: saved = 2026-11-13T09:30:41Z', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13T09:30:41.1Z', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13T09:30:41.12Z', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13T09:30:41.123Z', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13T09:30:41.124Z', timed)).toEqual([]);
+    expect(titles('where: saved = 2026-11-13T09:30:40Z', timed)).toEqual([]);
+    // The minute ends before the next starts; the day, at midnight UTC.
+    expect(titles('where: saved = 2026-06-30T23:59', timed)).toEqual(['Eggs']);
+    expect(titles('where: saved = 2026-06-30', timed)).toEqual(['Eggs']);
+    expect(titles('where: saved = 2026-07-01', timed)).toEqual([]);
+    expect(titles('where: saved = 2026-01-02', timed)).toEqual(['Bread']);
+    expect(titles('where: saved = 2026-01-01', timed)).toEqual([]);
+    // A zone moves the minute it names, not its length.
+    expect(titles('where: saved = 2026-11-13T19:30+10:00', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13T04:30-05', timed)).toEqual(['Apple']);
+    expect(titles('where: saved = 2026-11-13T19:30', timed)).toEqual([]);
+    // != where = doesn't, a time not known included.
+    expect(titles('where: saved != 2026-11-13T09:30Z', timed)).toEqual([
+      'Bread',
+      'Cake',
+      'Dates',
+      'Eggs',
+    ]);
+  });
+
+  it('leaves <, <=, > and >= comparing with the moment the date starts', () => {
+    expect(titles('where: saved > 2026-11-13T09:30Z', timed)).toEqual(['Apple']);
+    expect(titles('where: saved <= 2026-11-13T09:30Z', timed)).toEqual(['Bread', 'Eggs']);
+    expect(titles('where: saved <= 2026-11-13', timed)).toEqual(['Bread', 'Eggs']);
   });
 
   it('shows as a date with its time to the minute, in UTC, or nothing when not known', () => {

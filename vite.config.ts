@@ -41,7 +41,8 @@ export default defineConfig({
       {
         test: {
           name: 'unit',
-          include: ['{apps,packages}/*/test/**/*.test.ts'],
+          // The example plugins' own tests too, as vault-tables' (#473).
+          include: ['{apps,packages,examples/plugins}/*/test/**/*.test.ts'],
           exclude: ['packages/client/**', '**/*.integration.test.ts', '**/node_modules/**'],
           // The CLI's tests write its private files, each synced to disk,
           // which on a runner shared with other pipelines can take seconds.

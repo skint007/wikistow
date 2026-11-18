@@ -97,7 +97,7 @@ Tag pills in the rows link to that search. A desktop index kept from an older bu
 A fenced code block labelled `wikistow-query` lists pages:
 
 - `from`: a folder path in this space, or `#tag`. Left out, the whole space.
-- `where`: conditions joined by commas, all of which must hold, with `=`, `!=`, `<`, `<=`, `>`, `>=` and `has`. Numbers and dates compare as such, and text compares only for equality, whatever its case.
+- `where`: conditions joined by commas, all of which must hold, with `=`, `!=`, `<`, `<=`, `>`, `>=` and `has`. Numbers and dates compare as such, and text compares only for equality, whatever its case. (As changed by #459, decided 2026-11-18: `=` and `!=` match the precision a date is written with. A time without seconds matches that whole minute, and a day alone the whole day, for when a page was saved and date properties alike. `<`, `<=`, `>` and `>=` still compare with the moment it starts, and a date without a zone is still UTC.)
 - `show`: the columns.
 - `sort`: a key or `title`, then `asc` or `desc`.
 - `limit`: at most 500, 100 by default.
