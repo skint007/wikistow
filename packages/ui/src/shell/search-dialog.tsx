@@ -215,6 +215,16 @@ function SearchBody({
   );
   // After the word matches the app lists, or alone below a plugin's.
   const meaningFrom = ownShown ? results.length : 0;
+  // Which lists show: the app's own, unless a plugin draws in its place, and
+  // **By meaning** in one of its own below a plugin's view.
+  const ownListed = results.length > 0 || (!replaced && byMeaning.length > 0);
+  const meaningApart = replaced && byMeaning.length > 0;
+  // The box names only those, not a plugin's, which isn't a listbox of the app's.
+  const controls = commanding
+    ? commands.length > 0 && `${ids}-results`
+    : [ownShown && ownListed && `${ids}-results`, meaningApart && `${ids}-meaning`]
+        .filter(Boolean)
+        .join(' ');
   const meaningGroup = byMeaning.length > 0 && (
     <li role="group" aria-label="By meaning" className="grid gap-0.5">
       <span
@@ -230,7 +240,7 @@ function SearchBody({
   );
   const resultList = (
     <Own onShown={setOwnShown}>
-      {(results.length > 0 || (!replaced && meaningGroup)) && (
+      {ownListed && (
         <ul {...listProps} aria-label="Results">
           {results.map(rowOf)}
           {!replaced && meaningGroup}
@@ -273,7 +283,7 @@ function SearchBody({
           role="combobox"
           aria-label={commanding ? 'Run a command' : 'Search pages'}
           aria-expanded={count > 0}
-          aria-controls={replaced ? `${ids}-results ${ids}-meaning` : `${ids}-results`}
+          aria-controls={controls || undefined}
           aria-activedescendant={count > 0 ? optionId(active) : undefined}
           aria-autocomplete="list"
           ref={box}
@@ -351,7 +361,7 @@ function SearchBody({
               {resultList}
             </Replaceable>
           </div>
-          {meaningGroup && (
+          {meaningApart && (
             <ul
               {...listProps}
               id={`${ids}-meaning`}

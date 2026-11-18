@@ -44,7 +44,9 @@ import {
 import { isApple, SEARCH_HELP } from '../src/shell/search-model.ts';
 import { setReader } from '../src/meaning/running.ts';
 import { MEANING_PAUSE_MS, MeaningReader } from '../src/meaning/search.ts';
+import { PluginsContext } from '../src/plugins/runtime.ts';
 import { vaultStore } from '../src/vault/store.ts';
+import { noPages, testRuntime } from './plugin-runtime.ts';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -406,6 +408,9 @@ it('lists pages by meaning below the word matches, one list for the keys', async
   expect(asked).toEqual(['stock']);
   // Its label names the group, and isn't a row of its own.
   expect(group()?.getAttribute('aria-label')).toBe('By meaning');
+  expect(input().getAttribute('aria-controls')).toBe(
+    document.querySelector('[role="listbox"]')?.id,
+  );
   expect(status()).toBe('3 pages with these words · 1 more by meaning');
   // No word marked: its snippet is its passage's start.
   const row = group()?.querySelector('[role="option"]');
@@ -470,4 +475,84 @@ it('leaves the command palette and word search alone', async () => {
   await act(() => userEvent.fill(box(), 'stock'));
   await expect.poll(titles).toEqual(['Bean soup', 'Bread', 'Pea soup']);
   expect(status()).toBe('3 pages');
+});
+
+it('lists by meaning in a list of its own below a plugin’s results, for the keys alone', async () => {
+  meaningOn();
+  // A plugin that draws the word matches as its own list, not a listbox.
+  const { runtime } = await testRuntime(
+    [
+      {
+        id: 'results',
+        replaces: ['search.results'],
+        activate: (host) =>
+          void host.ui.replace?.('search.results', {
+            id: 'results',
+            view: (element, { results }) => {
+              const list = document.createElement('ol');
+              list.dataset.plugin = 'results';
+              list.append(
+                ...results.map(({ title }) =>
+                  Object.assign(document.createElement('li'), { textContent: title }),
+                ),
+              );
+              element.replaceChildren(list);
+            },
+          }),
+      },
+    ],
+    {
+      spaces: async () => [{ spaceId: SPACE, name: 'Home', icon: null }],
+      // It reads every page, so none of the results goes missing from its view.
+      pages: () => ({
+        ...noPages,
+        tree: async () =>
+          Object.keys(PAGES).map((title) => ({
+            kind: 'page' as const,
+            spaceId: SPACE,
+            pageId: title.toLowerCase().replace(/\W+/g, '-'),
+            title,
+            parentId: null,
+          })),
+      }),
+    },
+  );
+  await mount(
+    '',
+    <PluginsContext value={runtime}>
+      <SearchDialog ctx={ctx} open onOpenChange={() => {}} />
+    </PluginsContext>,
+  );
+  const drawn = () =>
+    [...document.querySelectorAll('[data-plugin="results"] li')].map((li) => li.textContent);
+  const listboxes = () => [...document.querySelectorAll('[role="listbox"]')];
+  await type('mint');
+  await expect.poll(drawn).toEqual(['Pea soup']);
+  await expect.poll(meaningTitles).toEqual(['Bean soup', 'Soup notes']);
+  // Only the app's list by meaning is a listbox, and the box names it alone.
+  expect(listboxes().map((list) => list.getAttribute('aria-label'))).toEqual(['More results']);
+  const [meaningList] = listboxes();
+  expect(input().getAttribute('aria-controls')).toBe(meaningList?.id);
+  expect(input().getAttribute('aria-expanded')).toBe('true');
+  // Its rows are numbered from the first, as the app's own list isn't shown.
+  const rowIds = () => [...document.querySelectorAll('[role="option"]')].map((option) => option.id);
+  const first = meaningList!.id.replace(/-meaning$/, '');
+  expect(rowIds()).toEqual([`${first}-0`, `${first}-1`]);
+  expect(active()).toBe('Bean soup');
+  expect(input().getAttribute('aria-activedescendant')).toBe(`${first}-0`);
+  // Up and Down move within it, stopping at each end.
+  await press('ArrowDown');
+  expect(active()).toBe('Soup notes');
+  expect(input().getAttribute('aria-activedescendant')).toBe(`${first}-1`);
+  await press('ArrowDown');
+  expect(active()).toBe('Soup notes');
+  await press('ArrowUp');
+  await press('ArrowUp');
+  expect(active()).toBe('Bean soup');
+  // Filters alone find nothing by meaning: no list of the app's, and none named.
+  await type('tag:soup');
+  await expect.poll(drawn).toEqual(['Bean soup', 'Pea soup']);
+  await expect.poll(listboxes).toEqual([]);
+  expect(input().hasAttribute('aria-controls')).toBe(false);
+  expect(input().getAttribute('aria-expanded')).toBe('false');
 });
