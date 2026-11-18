@@ -152,7 +152,14 @@ const stars = (value: unknown) => Math.min(5, Math.max(0, Math.round(Number(valu
 
 function Rating({ text, setText, properties, setProperty }: InlineProps) {
   const own = text.trim() === '';
-  const [rating, setRating] = useState(() => stars(own ? properties?.['rating'] : text));
+  // `Rating: 4` too, as `setProperty('rating', …)` finds it.
+  const [rating, setRating] = useState(() =>
+    stars(
+      own
+        ? Object.entries(properties ?? {}).find(([key]) => key.toLowerCase() === 'rating')?.[1]
+        : text,
+    ),
+  );
   const set = own
     ? setProperty && ((n: number) => setProperty('rating', n))
     : setText && ((n: number) => setText(String(n)));

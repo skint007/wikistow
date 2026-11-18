@@ -1,4 +1,18 @@
-import { readProperties, splitFrontmatter } from '@wikistow/client';
+import {
+  readProperties,
+  splitFrontmatter,
+  type ClientContext,
+  type PageId,
+  type SpaceId,
+} from '@wikistow/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router';
 import { PluginError, type InlineProps } from '@wikistow/plugin-sdk';
 import type { InlineSpec } from '@wikistow/plugin-sdk/protocol';
 import { act, createRef, useState, useSyncExternalStore } from 'react';
@@ -7,6 +21,7 @@ import { userEvent } from 'vite-plus/test/browser/context';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { PageProperties } from '../src/page/body-context.ts';
 import { PageEditor } from '../src/page/editor/page-editor.tsx';
+import { Markdown } from '../src/page/markdown.tsx';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
 import { ReadingChanges } from '../src/page/reading-changes.tsx';
 import { applyChanges, type ReadingChange } from '../src/page/reading-changes-model.ts';
@@ -320,6 +335,69 @@ describe('a script’s span in the reader', () => {
     await userEvent.click(done!);
     await expect.poll(() => done?.getAttribute('aria-checked')).toBe('true');
     expect(queued).toEqual([]);
+  });
+});
+
+describe('a span in the reader’s body', () => {
+  it('keeps its field, and focus, as the change it made shows', async () => {
+    const { runtime } = await scriptSpans();
+    const queued: ReadingChange[] = [];
+    function Reading() {
+      const [changes, setChanges] = useState<ReadingChange[]>([]);
+      const markdown = applyChanges(SCRIPTED, changes).markdown;
+      const [change] = useState(() => (made: ReadingChange) => {
+        queued.push(made);
+        setChanges((before) => [...before, made]);
+      });
+      return (
+        <PluginsContext value={runtime}>
+          <ReadingChanges value={{ markdown, rights: { allowed: true }, change }}>
+            <Markdown
+              source={markdown}
+              attachments={{
+                ctx: {} as ClientContext,
+                page: { spaceId: 's' as SpaceId, pageId: 'p' as PageId },
+                audience: 'published',
+                attachments: [],
+              }}
+              pages={[]}
+              links={new Map()}
+              editing={null}
+            />
+          </ReadingChanges>
+        </PluginsContext>
+      );
+    }
+    const rootRoute = createRootRoute({ component: Reading });
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([
+        createRoute({ getParentRoute: () => rootRoute, path: '/' }),
+      ]),
+      history: createMemoryHistory(),
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      ),
+    );
+    unmounts.push(() => {
+      act(() => root.unmount());
+      container.remove();
+    });
+    await expect.poll(() => container.querySelectorAll('.page-body [role=switch]').length).toBe(2);
+    const done = container.querySelector<HTMLElement>('.page-body [role=switch]');
+    await userEvent.click(done!);
+    await expect.poll(() => queued).toEqual([{ kind: 'property', key: 'done', value: true }]);
+    await act(async () => {});
+    // The same control, not one drawn afresh, still focused.
+    expect(container.querySelector('.page-body [role=switch]')).toBe(done);
+    expect(document.activeElement).toBe(done);
+    expect(done?.getAttribute('aria-checked')).toBe('true');
   });
 });
 

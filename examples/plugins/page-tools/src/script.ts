@@ -19,6 +19,8 @@ defineScript((host) => {
       type: 'choice',
       label: 'Status',
       property: 'status',
+      // Shown on a page without one, so a new page's menu isn't invalid; a visit never sets it.
+      default: 'todo',
       options: [
         { value: 'todo', label: 'To do' },
         { value: 'doing', label: 'Doing' },
