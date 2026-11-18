@@ -35,31 +35,36 @@ type Page = {
   draft?: boolean;
 };
 
+/** How the word index lists `page`. */
+const docOf = (page: Page): searchOperations.SearchPage => ({
+  spaceId: home,
+  pageId: PageId.parse(page.pageId),
+  revisionId: rev(page.revisionId),
+  parentId: null,
+  folderIds: [],
+  path: ['Home'],
+  draft: page.draft ?? false,
+  unpublished: false,
+});
+
+/** `page`'s text as the index reduces it. */
+const textOf = (page: Page) => ({
+  title: page.title,
+  text: page.text,
+  headings: [...page.text.matchAll(/^# /gm)].map(({ index }) => index),
+  updated: page.updated ?? '2026-11-13T10:00:00.000Z',
+});
+
 /** A word index holding `pages`, each as the index reduces it. */
 function wordIndex(pages: readonly Page[]): searchOperations.PageIndex {
   const index = new searchOperations.PageIndex();
-  for (const page of pages) {
-    index.addText(
-      {
-        spaceId: home,
-        pageId: PageId.parse(page.pageId),
-        revisionId: rev(page.revisionId),
-        parentId: null,
-        folderIds: [],
-        path: ['Home'],
-        draft: page.draft ?? false,
-        unpublished: false,
-      },
-      {
-        title: page.title,
-        text: page.text,
-        headings: [...page.text.matchAll(/^# /gm)].map(({ index }) => index),
-        updated: page.updated ?? '2026-11-13T10:00:00.000Z',
-      },
-    );
-  }
+  for (const page of pages) index.addText(docOf(page), textOf(page));
   return index;
 }
+
+/** `index` holding `typed` as a change waiting on this device over its version (`WaitingText`). */
+const typedOver = (index: searchOperations.PageIndex, typed: Page) =>
+  index.with([[docOf(typed), { ...textOf(typed), waiting: true as const }]]);
 
 const WORDS = ['beach', 'boiler', 'soup'] as const;
 
@@ -397,6 +402,107 @@ describe('MeaningIndexer', () => {
     expect(fake.embedded.at(-1)).toBe('Summer holiday\nA week at the beach, and soup 2.');
   });
 
+  it('a draft the first index shows without vectors, as at unlock, waits out its pause too', async () => {
+    const fake = fakeWork();
+    const draft = {
+      ...beach,
+      revisionId: 'beach-d1',
+      draft: true,
+      updated: '2026-11-14T10:00:00.000Z',
+    };
+    const indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([draft, boiler]));
+    await vi.advanceTimersByTimeAsync(DRAFT_PAUSE_MS - 1_000);
+    // The draft changed last, so would go first: the boiler goes instead.
+    expect(fake.embedded).toEqual(['The boiler\nThe boiler loses pressure every winter.']);
+    expect(indexer.status()).toEqual({ pages: 1, total: 2 });
+    // Its pause ends with no other page left to wake the queue.
+    await vi.advanceTimersByTimeAsync(1_000 + EMBED_MS + 10);
+    expect(fake.embedded.at(-1)).toBe('Summer holiday\nA week at the beach in Cornwall.');
+    expect(indexer.status()).toEqual({ pages: 2, total: 2 });
+  });
+
+  it('a draft whose vectors were kept, or that comes into view later, waits as it should', async () => {
+    const fake = fakeWork();
+    const draft = { ...beach, revisionId: 'beach-d1', draft: true };
+    let indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([draft]));
+    await settle();
+    expect(fake.embedded).toHaveLength(1);
+    indexer.stop();
+    // Unlocked again: the draft's vectors are kept, so nothing waits or is embedded.
+    indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([draft]));
+    await vi.advanceTimersByTimeAsync(EMBED_MS);
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+    // A draft first seen in a later index, as one a co-editor started, waits too.
+    const started = { ...boiler, revisionId: 'boiler-d1', draft: true };
+    indexer.indexChanged(wordIndex([draft, started]));
+    await vi.advanceTimersByTimeAsync(DRAFT_PAUSE_MS - 1_000);
+    expect(fake.embedded).toHaveLength(1);
+    await settle(1);
+    expect(fake.embedded.at(-1)).toBe('The boiler\nThe boiler loses pressure every winter.');
+  });
+
+  it('keeps no vectors made from text typed offline, which the version they’re kept for doesn’t hold', async () => {
+    const fake = fakeWork();
+    let indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    expect(fake.writes.at(-1)!.has(rev('beach-1'))).toBe(true);
+    // Typed offline over the version: a change waiting on this device, on its base.
+    const typed = { ...beach, text: 'Soup on the beach.' };
+    indexer.saved({
+      spaceId: home,
+      pageId: PageId.parse('beach'),
+      revisionId: rev('beach-1'),
+      basedOn: rev('beach-1'),
+    });
+    indexer.indexChanged(typedOver(wordIndex([beach, boiler]), typed));
+    await settle(2);
+    expect(fake.embedded.at(-1)).toBe('Summer holiday\nSoup on the beach.');
+    const soup = Float32Array.from([0, 0, 1, 0]);
+    expect(indexer.nearest(soup, 1)[0]).toMatchObject({ pageId: 'beach' });
+    expect(indexer.nearest(soup, 1)[0]!.score).toBeGreaterThan(0.5);
+    // Kept, the boiler's are, and the typed text's aren't, as the version's.
+    expect(fake.writes.at(-1)!.has(rev('boiler-1'))).toBe(true);
+    expect(fake.writes.at(-1)!.has(rev('beach-1'))).toBe(false);
+    indexer.stop();
+
+    // Restarted before the change is sent: the version shows its own text again.
+    const embedded = fake.embedded.length;
+    indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach, boiler]));
+    await settle();
+    expect(fake.embedded.slice(embedded)).toEqual([
+      'Summer holiday\nA week at the beach in Cornwall.',
+    ]);
+    expect(indexer.nearest(soup, 1)[0]?.score ?? 0).toBeLessThan(0.5);
+  });
+
+  it('after a restart, a change still typed over a version is embedded, not taken as the version’s', async () => {
+    const fake = fakeWork();
+    let indexer = new MeaningIndexer(fake.work);
+    indexer.indexChanged(wordIndex([beach]));
+    await settle();
+    indexer.stop();
+    // At the next unlock, the word index shows what was typed offline over the version kept.
+    indexer = new MeaningIndexer(fake.work);
+    const typed = { ...beach, text: 'Soup on the beach.' };
+    indexer.indexChanged(typedOver(wordIndex([beach]), typed));
+    // Until it is embedded, the version's own vectors stand in for the page.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(indexer.status()).toEqual({ pages: 1, total: 1 });
+    await settle();
+    expect(fake.embedded).toEqual([
+      'Summer holiday\nA week at the beach in Cornwall.',
+      'Summer holiday\nSoup on the beach.',
+    ]);
+    expect(indexer.nearest(Float32Array.from([0, 0, 1, 0]), 1)[0]!.score).toBeGreaterThan(0.5);
+    // Nor are the typed text's kept as the version's.
+    expect(fake.writes.at(-1)!.has(rev('beach-1'))).toBe(false);
+  });
+
   it('a save into the queue, on its base, embeds the page again once saves pause', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);
@@ -640,6 +746,22 @@ describe('MeaningIndexer', () => {
     expect(indexer.status()).toEqual({ pages: 1, total: 1 });
   });
 
+  it('once the index went, vectors made from typed text don’t stand for the version’s own', async () => {
+    const fake = fakeWork();
+    const indexer = new MeaningIndexer(fake.work);
+    const typed = { ...beach, text: 'Soup on the beach.' };
+    indexer.indexChanged(typedOver(wordIndex([beach]), typed));
+    await settle();
+    expect(fake.embedded).toEqual(['Summer holiday\nSoup on the beach.']);
+    // Built afresh as access changed, the index holds the version's own text again.
+    indexer.indexGone();
+    indexer.indexChanged(wordIndex([beach]));
+    await settle();
+    expect(fake.embedded.at(-1)).toBe('Summer holiday\nA week at the beach in Cornwall.');
+    expect(indexer.nearest(Float32Array.from([0, 0, 1, 0]), 1)[0]?.score ?? 0).toBeLessThan(0.5);
+    expect(fake.writes.at(-1)!.has(rev('beach-1'))).toBe(true);
+  });
+
   it('keeps the file once embedding pauses, and at least once a minute while it goes on', async () => {
     const fake = fakeWork();
     const indexer = new MeaningIndexer(fake.work);
@@ -812,6 +934,23 @@ describe('MeaningIndexer', () => {
     waiting.shift()!();
     await flushing;
     expect(fake.writes).toHaveLength(1);
+  });
+
+  it('a flush writes at once, without a moment free, as when the page is left', async () => {
+    const fake = fakeWork();
+    let free = true;
+    const indexer = new MeaningIndexer({
+      ...fake.work,
+      idle: () => (free ? Promise.resolve() : new Promise<void>(() => {})),
+    });
+    indexer.indexChanged(wordIndex([beach]));
+    await vi.advanceTimersByTimeAsync(EMBED_MS + 10);
+    expect(fake.embedded).toHaveLength(1);
+    // Leaving, the page has no moment free again.
+    free = false;
+    await indexer.flush();
+    expect(fake.writes).toHaveLength(1);
+    expect([...fake.writes[0]!.keys()]).toEqual([rev('beach-1')]);
   });
 
   it('flushes what it made before handing the queue to another tab', async () => {

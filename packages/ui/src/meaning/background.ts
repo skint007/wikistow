@@ -33,6 +33,13 @@ const idle = () =>
 const OPENING = [[PLAIN, 'revision'], [PLAIN, 'page'], searchIndexKey] as const;
 
 /**
+ * How long a lock waits for the vectors to be kept: some milliseconds for
+ * a thousand pages, so this only bounds a write that hangs, as the vectors
+ * can be made again and the lock can't be put off.
+ */
+export const LOCK_FLUSH_AT_MOST_MS = 3_000;
+
+/**
  * Start the queue for `ctx`: it opens the vectors kept, follows the word
  * index (building it if nothing has, as a query table does while shown)
  * and this person's draft saves, until stopped, as at a lock.
@@ -68,9 +75,27 @@ export function startMeaningIndex(queryClient: QueryClient, ctx: ClientContext) 
   });
   const shown = observer.getCurrentResult().data;
   if (shown) indexer.indexChanged(shown, { partial: builtFromKept(shown) });
+  // What was made since the last write is kept before a lock this person
+  // asks for, while the keys still work, and as the page is left, as far
+  // as there is time (#449). A lock without asking, and a stop
+  // for a phone's layout or the setting going off, write nothing.
+  const unguard = vaultStore.guardLock(async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      indexer.flush(),
+      new Promise<void>((resolve) => (timer = setTimeout(resolve, LOCK_FLUSH_AT_MOST_MS))),
+    ]);
+    clearTimeout(timer);
+    return true;
+  });
+  const leaving = () => void indexer.flush();
+  const view = typeof window === 'undefined' ? null : window;
+  view?.addEventListener('pagehide', leaving);
   return {
     indexer,
     stop() {
+      unguard();
+      view?.removeEventListener('pagehide', leaving);
       unfollow();
       unsaved();
       indexer.stop();

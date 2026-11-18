@@ -133,6 +133,12 @@ export class MeaningIndexer {
   readonly #madeFrom = new Map<RevisionId, { title: string; text: string }>();
   /** Versions whose text changed under the same revision ID, as a save into the queue does. */
   readonly #rewritten = new Set<RevisionId>();
+  /**
+   * Versions whose vectors were made from a change waiting on this device
+   * over them (`PageIndex.waiting`), not from their own text: in memory
+   * only, never kept as theirs.
+   */
+  readonly #fromWaiting = new Set<RevisionId>();
   /** For a page whose draft waits, the version whose vectors stand in for it. */
   readonly #held = new Map<string, RevisionId>();
   /** When this person last saved each page, and the versions they saved. */
@@ -150,6 +156,8 @@ export class MeaningIndexer {
   #index: searchOperations.PageIndex | null = null;
   /** Each page the word index holds, by key. */
   #shown = new Map<string, IndexedPage>();
+  /** The pages it holds as a change waiting on this device over their version (`PageIndex.waiting`). */
+  #waitingPages = new Set<string>();
   /** The pages left to embed, best first, from `#cursor` on. */
   #todo: string[] = [];
   #cursor = 0;
@@ -240,8 +248,14 @@ export class MeaningIndexer {
     const oldOf = (key: string) => before.get(key)?.doc.revisionId ?? lastVersions?.get(key);
     if (!partial) this.#lastVersions = null;
     const shown = new Map<string, IndexedPage>();
-    for (const page of index.pages()) shown.set(keyOf(page.doc.spaceId, page.doc.pageId), page);
+    const waiting = new Set<string>();
+    for (const page of index.pages()) {
+      const key = keyOf(page.doc.spaceId, page.doc.pageId);
+      shown.set(key, page);
+      if (index.waiting(page.doc.spaceId, page.doc.pageId)) waiting.add(key);
+    }
     this.#shown = shown;
+    this.#waitingPages = waiting;
     // A draft, this person's or one the index shows as a draft they can
     // edit (saved in another tab, say), waits until its versions pause, and
     // the version before stands in for the page until then; for any other
@@ -249,7 +263,18 @@ export class MeaningIndexer {
     const now = this.#clock.now();
     for (const [key, page] of shown) {
       const old = oldOf(key);
-      if (!old || old === page.doc.revisionId) continue;
+      if (old === page.doc.revisionId) continue;
+      if (!old) {
+        // First seen, as in the first index after unlock, and without
+        // vectors: a draft may still be being typed, by a co-editor or on
+        // another device, so it waits as one whose version changed does.
+        // Nothing stands in, as no version before is known.
+        if (page.doc.draft && !this.#done(page)) {
+          this.#savedAt.set(key, now);
+          this.#wakeIn(DRAFT_PAUSE_MS);
+        }
+        continue;
+      }
       this.#reuse(key, this.#kept.get(old));
       const draft = page.doc.draft || this.#ownVersions.has(page.doc.revisionId);
       if (page.doc.draft) {
@@ -297,6 +322,7 @@ export class MeaningIndexer {
     for (const [key, page] of this.#shown) versions.set(key, page.doc.revisionId);
     this.#lastVersions = versions;
     this.#shown = new Map();
+    this.#waitingPages = new Set();
     this.#todo = [];
     this.#cursor = 0;
     this.#setStatus(null);
@@ -387,14 +413,18 @@ export class MeaningIndexer {
     if (!this.#stopped) void this.#work.embedder.load?.().catch(() => {});
   }
 
-  /** Keep at once what waits to be kept, as before another tab takes the queue over. */
+  /**
+   * Keep at once what waits to be kept, without waiting for a moment free:
+   * before another tab takes the queue over, before a lock while the keys
+   * still work, and as the page is left.
+   */
   async flush(): Promise<void> {
     if (this.#stopped) return;
     if (this.#keeping) {
       const { now } = this.#keeping;
       this.#keeping.cancel();
       this.#keeping = null;
-      void this.#writeNow(now);
+      void this.#writeNow(now, true);
     }
     await this.#writing;
   }
@@ -412,10 +442,12 @@ export class MeaningIndexer {
     this.#kept.clear();
     this.#byHash.clear();
     this.#madeFrom.clear();
+    this.#fromWaiting.clear();
     this.#held.clear();
     this.#reusable.clear();
     this.#lastVersions = null;
     this.#shown = new Map();
+    this.#waitingPages = new Set();
     this.#todo = [];
     this.#index = null;
     this.#setStatus(null);
@@ -437,7 +469,15 @@ export class MeaningIndexer {
     const { revisionId } = page.doc;
     if (!this.#kept.has(revisionId) || this.#rewritten.has(revisionId)) return false;
     const made = this.#madeFrom.get(revisionId);
-    return !made || (made.title === page.title && made.text === page.text);
+    if (made) return made.title === page.title && made.text === page.text;
+    // Not known, as for vectors from the file, or once the index went: the
+    // file's were made from the version's own text, as no others are kept,
+    // so they are done only for it; ones made from a change typed over it
+    // are made again, from the text shown, their passages reused.
+    return (
+      !this.#fromWaiting.has(revisionId) &&
+      !this.#waitingPages.has(keyOf(page.doc.spaceId, page.doc.pageId))
+    );
   }
 
   /** How long until this person's saves of the page have paused for `DRAFT_PAUSE_MS`, or 0. */
@@ -472,6 +512,7 @@ export class MeaningIndexer {
       this.#kept.delete(revisionId);
       this.#madeFrom.delete(revisionId);
       this.#rewritten.delete(revisionId);
+      this.#fromWaiting.delete(revisionId);
       any = true;
     }
     if (any) {
@@ -652,6 +693,9 @@ export class MeaningIndexer {
     this.#store(revisionId, made);
     this.#madeFrom.set(revisionId, { title: page.title, text: page.text });
     this.#rewritten.delete(revisionId);
+    // Checked as `page` was given, still shown (`#given`): its text is the index's now.
+    if (this.#waitingPages.has(key)) this.#fromWaiting.add(revisionId);
+    else this.#fromWaiting.delete(revisionId);
     const held = this.#held.get(key);
     this.#held.delete(key);
     // The version that stood in goes, unless the index may lack pages.
@@ -710,9 +754,9 @@ export class MeaningIndexer {
   #writing: Promise<void> | null = null;
 
   /** Write now, after any write under way, so one never overtakes another. */
-  #writeNow(now: boolean): Promise<void> {
+  #writeNow(now: boolean, hurry = now): Promise<void> {
     const after = this.#writing ?? Promise.resolve();
-    const writing = after.then(() => this.#write(now)).catch(() => {});
+    const writing = after.then(() => this.#write(now, hurry)).catch(() => {});
     this.#writing = writing;
     void writing.then(() => {
       if (this.#writing === writing) this.#writing = null;
@@ -722,13 +766,14 @@ export class MeaningIndexer {
 
   /**
    * Seal and keep the vectors. Sealing takes some milliseconds a thousand
-   * pages, so in a moment free, unless `now`: a version let go of goes from
-   * the file before a lock can come and leave it there.
+   * pages, so in a moment free, unless `hurry`: as with `now`, where a
+   * version let go of goes from the file before a lock can come and leave
+   * it there, or for a flush.
    */
-  async #write(now: boolean) {
+  async #write(now: boolean, hurry: boolean) {
     await this.#opened;
     const file = await this.#work.file();
-    if (file && !this.#stopped && !now) await this.#work.idle();
+    if (file && !this.#stopped && !hurry) await this.#work.idle();
     // Stopped meanwhile, the keys may be gone: nothing is sealed with them.
     if (!file || this.#stopped) return;
     // Kept file unread: nothing written over it, this session.
@@ -738,6 +783,14 @@ export class MeaningIndexer {
       this.#deferred = now || this.#deferred === 'now' ? 'now' : 'later';
       return;
     }
-    await file.write(this.#work.seal(this.#kept));
+    await file.write(this.#work.seal(this.#ownKept()));
+  }
+
+  /** The vectors to keep: each version's, but those made from a change typed over it. */
+  #ownKept(): KeptMeaning {
+    if (this.#fromWaiting.size === 0) return this.#kept;
+    const own = new Map(this.#kept);
+    for (const revisionId of this.#fromWaiting) own.delete(revisionId);
+    return own;
   }
 }
