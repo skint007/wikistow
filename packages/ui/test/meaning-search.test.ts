@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 import { MeaningIndexer, type MeaningWork } from '../src/meaning/meaning-index';
 import {
   closeEnough,
+  cutFrom,
   MEANING_FLOOR,
   MEANING_GAP,
   MEANING_LIMIT,
@@ -133,6 +134,22 @@ describe('passageSnippet', () => {
   });
 });
 
+describe('cutFrom', () => {
+  it('says whether passages could be cut from a text: each, in order, starting a word', () => {
+    const text = '# Day 1\nWe walked to the bay.\nThen ate.';
+    expect(cutFrom(text, [{ start: 0 }, { start: 8 }, { start: 30 }])).toBe(true);
+    expect(cutFrom('', [{ start: 0 }])).toBe(true);
+    expect(cutFrom(text, [])).toBe(true);
+    // Mid-word, past the end, or out of order, as offsets into another text are.
+    expect(cutFrom(text, [{ start: 0 }, { start: 10 }])).toBe(false);
+    expect(cutFrom(text, [{ start: 0 }, { start: 60 }])).toBe(false);
+    expect(cutFrom(text, [{ start: 8 }, { start: 0 }])).toBe(false);
+    // At a space, not the word after it.
+    expect(cutFrom(text, [{ start: 10 }, { start: 10 }])).toBe(false);
+    expect(cutFrom('a  b', [{ start: 2 }])).toBe(false);
+  });
+});
+
 describe('MeaningReader', () => {
   it('reads the kept vectors when search opens, finding pages by their best passage', async () => {
     const { work, embedder, file } = readerWork();
@@ -151,6 +168,7 @@ describe('MeaningReader', () => {
     const hits = reader.nearest(index, query, 5);
     expect(hits.map((hit) => hit.pageId)).toEqual(['beach', 'boiler']);
     expect(hits[0]?.passage.start).toBe(21);
+    expect(hits[0]?.current).toBe(true);
     expect(hits[0]?.page.title).toBe('Summer holiday in Cornwall');
     expect(hits[0]?.score).toBeGreaterThan(0.99);
     // What `include` keeps, as filters and the word matches do.
@@ -208,6 +226,54 @@ describe('MeaningReader', () => {
     });
     await again.refresh();
     expect(again.status(index)).toEqual({ pages: 1, total: 1 });
+  });
+
+  it('opens the kept file again only once it has changed', async () => {
+    const { work, file, open } = readerWork();
+    let bytes = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    // Read afresh each time, as from IndexedDB or the desktop's disk.
+    file.mockImplementation(async () => ({
+      read: async () => Uint8Array.from(bytes),
+      write: async () => {},
+    }));
+    const reader = new MeaningReader(work);
+    const heard = vi.fn();
+    reader.subscribe(heard);
+    await reader.refresh();
+    const first = reader.snapshot();
+    await reader.refresh();
+    expect(file).toHaveBeenCalledTimes(2);
+    expect(open).toHaveBeenCalledOnce();
+    expect(heard).toHaveBeenCalledOnce();
+    expect(reader.snapshot()).toBe(first);
+    // Kept again by the queue: opened again.
+    bytes = [1, 2, 3, 4, 5, 6, 7, 8, 10];
+    await reader.refresh();
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(heard).toHaveBeenCalledTimes(2);
+    // As long, but not as one an aligned read compares four bytes at a time.
+    const shifted = new Uint8Array(new ArrayBuffer(12), 1, 9);
+    shifted.set([1, 2, 3, 4, 5, 6, 7, 8, 10]);
+    file.mockImplementation(async () => ({ read: async () => shifted, write: async () => {} }));
+    await reader.refresh();
+    expect(open).toHaveBeenCalledTimes(2);
+    // Gone, and back as it was: opened again.
+    file.mockImplementation(async () => ({ read: async () => null, write: async () => {} }));
+    await reader.refresh();
+    file.mockImplementation(async () => ({ read: async () => shifted, write: async () => {} }));
+    await reader.refresh();
+    expect(open).toHaveBeenCalledTimes(3);
+  });
+
+  it('says when a page’s kept passages weren’t cut from the text its word index shows', async () => {
+    const { work } = readerWork();
+    const reader = new MeaningReader(work);
+    await reader.refresh();
+    // Saved into this device's queue: the same revision ID, with another text.
+    const edited = { ...beach, text: 'A cottage, rented.\nSwimming all day.' };
+    const [hit] = reader.nearest(wordIndex([edited]), [1, 0, 0], 5);
+    expect(hit?.pageId).toBe('beach');
+    expect(hit?.current).toBe(false);
   });
 
   it('has no vectors where none are kept', async () => {

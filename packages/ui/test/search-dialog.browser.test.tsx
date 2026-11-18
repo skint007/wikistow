@@ -425,6 +425,16 @@ it('lists pages by meaning below the word matches, one list for the keys', async
   expect(active()).toBe('Soup notes');
 });
 
+it('starts a snippet at the page’s top while its passages are another text’s', async () => {
+  // Kept for the text before a save into this device's queue: its offset is mid-word now.
+  meaningOn({ ...VECTORS, 'soup-notes': [[6, [0.95, 0, 0.3]]] });
+  await mount();
+  await type('stock');
+  await expect.poll(meaningTitles).toEqual(['Soup notes']);
+  const row = group()?.querySelector('[role="option"]');
+  expect(row?.textContent).toContain('Soup without tags.');
+});
+
 it('lists by meaning alone where no words match, narrowed by filters', async () => {
   meaningOn();
   await mount();

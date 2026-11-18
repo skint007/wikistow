@@ -13,7 +13,7 @@ import {
   type Vector8,
 } from '@wikistow/client';
 import { KEEP_AT_MOST_MS, KEEP_MS, systemClock, type Clock } from '../data/index-tracker';
-import { ModelUnavailable } from './embedder';
+import { ModelUnavailable, RETRY_MS } from './embedder';
 
 // Search by meaning's background queue (ADR 0016, decision 4): the vectors
 // of each page the word index holds, made one passage at a time after the
@@ -37,8 +37,8 @@ export const REST_AT_MOST_MS = 5_000;
 /** How long the queue waits before looking again while a page opens or the word index updates. */
 export const BUSY_WAIT_MS = 250;
 
-/** How long the queue waits after the worker failed, before it tries again. */
-export const RETRY_MS = 60_000;
+/** How long the queue waits after the worker failed, before it tries again: as a model's load does. */
+export { RETRY_MS };
 
 /** How far the vectors have got: pages with vectors, of the pages the word index holds. */
 export type MeaningStatus = { pages: number; total: number };
@@ -82,9 +82,15 @@ export type MeaningWork = {
 export type MeaningHit = {
   spaceId: SpaceId;
   pageId: PageId;
-  /** The page as the word index holds it: its text is what `passage.start` is in. */
+  /** The page as the word index holds it. */
   page: IndexedPage;
   passage: MeaningPassage;
+  /**
+   * The passages were cut from `page`'s text, so `passage.start` is in it;
+   * not while another version's stand in, as for a draft waiting out its
+   * pause, nor once its text changed under the same revision ID.
+   */
+  current: boolean;
   score: number;
 };
 
@@ -361,7 +367,7 @@ export class MeaningIndexer {
    * The `limit` pages whose vectors are nearest `query`, best first, of
    * those the word index holds and `include` keeps (`nearestPages`): each
    * by its best passage, in the version it shows, or the one standing in
-   * for a draft.
+   * for a draft, which isn't `current`.
    */
   nearest(
     query: ArrayLike<number>,
@@ -392,6 +398,8 @@ export class MeaningIndexer {
         pageId: page.doc.pageId,
         page,
         passage: passages[passage]!,
+        // What stands for a version that is done is its own (`#standing`).
+        current: this.#done(page),
         score,
       };
     });

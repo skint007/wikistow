@@ -60,6 +60,26 @@ export function closeEnough<H extends { score: number }>(hits: readonly H[]): H[
     .slice(0, MEANING_LIMIT);
 }
 
+/**
+ * Whether `passages`, in order, could have been cut from `text`: each
+ * starts a word of it, or the page. Passages kept under a revision ID whose
+ * text has changed since, as a save into this device's queue changes it,
+ * nearly always fail this, unless the change came after the last of them
+ * (`meaningPassages` starts each at a word, but for a word longer than a
+ * passage, cut between characters: such a page fails it too).
+ */
+export function cutFrom(text: string, passages: readonly { start: number }[]): boolean {
+  let before = -1;
+  for (const { start } of passages) {
+    if (start <= before) return false;
+    if (start > 0 && !(/\s/.test(text.charAt(start - 1)) && /\S/.test(text.charAt(start)))) {
+      return false;
+    }
+    before = start;
+  }
+  return true;
+}
+
 /** The start of the passage at `start` in a page's text, on one line, cut at a word. */
 export function passageSnippet(text: string, start: number): string {
   const rest = text
@@ -94,7 +114,7 @@ export type MeaningSource = {
   subscribe(listener: () => void): () => void;
   /** A value that changes whenever `subscribe` calls. */
   snapshot(): unknown;
-  /** Start the worker and its model, and read what is kept, as search opens. */
+  /** Start the worker and its model, and read what is kept, as a search for pages starts. */
   prepare(): void;
 };
 
@@ -136,17 +156,19 @@ export type ReaderWork = {
 /**
  * The vectors the queue kept, read for a tab whose search has no queue, as
  * one tab of a browser runs it (`oneTabAtATime`): a tab without it has no
- * vectors of its own. It reads the kept file each time search opens
- * (`prepare`), as the queue keeps it at least once a minute while it
- * embeds, and embeds queries with a worker of its own, which stops a
- * minute after the last. A page counts by the vectors of the version the
- * word index shows: until the queue keeps them, a page changed since is
- * found by its words alone. Stopped, as at a lock, the vectors and the
- * worker go.
+ * vectors of its own. It reads the kept file each time a search for pages
+ * starts (`prepare`), as the queue keeps it at least once a minute while it
+ * embeds, opening it again only if it changed, and embeds queries with a
+ * worker of its own, which stops a minute after the last. A page counts by
+ * the vectors of the version the word index shows: until the queue keeps
+ * them, a page changed since is found by its words alone. Stopped, as at a
+ * lock, the vectors and the worker go.
  */
 export class MeaningReader implements MeaningSource {
   readonly #work: ReaderWork;
   #kept: KeptMeaning | null = null;
+  /** What `#kept` was opened from, so a file unchanged isn't opened again. */
+  #openedFrom: Uint8Array | null = null;
   #reading: Promise<void> | null = null;
   #stopped = false;
   readonly #listeners = new Set<() => void>();
@@ -169,12 +191,19 @@ export class MeaningReader implements MeaningSource {
       const file = await this.#work.file();
       const sealed = file && (await file.read());
       if (this.#stopped) return;
-      if (!sealed) return this.#set(new Map());
+      if (!sealed) {
+        this.#openedFrom = null;
+        return this.#set(new Map());
+      }
+      // The same file as before: what was opened stands.
+      if (this.#openedFrom && sameBytes(this.#openedFrom, sealed)) return;
       // Opening takes some milliseconds a thousand pages: in a moment free.
       await this.#work.idle();
       if (this.#stopped) return;
       const kept = this.#work.open(sealed);
-      if (!this.#stopped) this.#set(kept ?? new Map());
+      if (this.#stopped) return;
+      this.#openedFrom = sealed;
+      this.#set(kept ?? new Map());
     } catch {
       // Unread, or locked meanwhile: what was read before stands.
     }
@@ -228,6 +257,8 @@ export class MeaningReader implements MeaningSource {
         pageId: page.doc.pageId,
         page,
         passage: passages[passage]!,
+        // The kept file doesn't say what text a version's vectors were made from.
+        current: cutFrom(page.text, passages),
         score,
       };
     });
@@ -257,8 +288,22 @@ export class MeaningReader implements MeaningSource {
     if (this.#stopped) return;
     this.#stopped = true;
     this.#work.embedder.stop();
+    this.#openedFrom = null;
     this.#set(new Map());
   }
+}
+
+/** `a` and `b` hold the same bytes. */
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a === b) return true;
+  if (a.byteLength !== b.byteLength) return false;
+  // Four bytes at a time where both are aligned for it, as a file read is.
+  const words = a.byteOffset % 4 === 0 && b.byteOffset % 4 === 0 ? a.byteLength >>> 2 : 0;
+  const wa = new Uint32Array(a.buffer, a.byteOffset, words);
+  const wb = new Uint32Array(b.buffer, b.byteOffset, words);
+  for (let i = 0; i < words; i++) if (wa[i] !== wb[i]) return false;
+  for (let i = words * 4; i < a.byteLength; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /**
@@ -285,11 +330,13 @@ const keyOf = ({ spaceId, pageId }: { spaceId: string; pageId: string }) => `${s
 
 /**
  * Search `index` by meaning for `query` (ADR 0016, decision 6), or null
- * while search by meaning isn't on here. The query's words are embedded
- * once typing pauses (`MEANING_PAUSE_MS`), in the worker, so typing never
- * waits on it; until a new vector comes, the last stands. Its filters
- * narrow the pages as they narrow word matches, and pages already
- * `listed`, as `spaceId/pageId`, are left out.
+ * while search by meaning isn't on here. The worker and its model start
+ * once the query searches pages, so not for commands. The query's words
+ * are embedded once typing pauses (`MEANING_PAUSE_MS`), in the worker, so
+ * typing never waits on it; until a new vector comes, the last stands,
+ * unless the new one fails. Its filters narrow the pages as they narrow
+ * word matches, and pages already `listed`, as `spaceId/pageId`, are left
+ * out.
  */
 export function useMeaningSearch(
   index: searchOperations.PageIndex | undefined,
@@ -299,7 +346,10 @@ export function useMeaningSearch(
   const source = useMeaningSource();
   const text = meaningText(query);
   const [asked, setAsked] = useState<{ source: MeaningSource; vector: Float32Array } | null>(null);
-  useEffect(() => source?.prepare(), [source]);
+  const searches = query.trim() !== '';
+  useEffect(() => {
+    if (searches) source?.prepare();
+  }, [source, searches]);
   useEffect(() => {
     if (!source || text === null) {
       setAsked(null);
@@ -311,8 +361,10 @@ export function useMeaningSearch(
         (vector) => {
           if (current) setAsked({ source, vector });
         },
-        // The model couldn't load, or stopped: words alone, this time.
-        () => {},
+        // The model couldn't load, or stopped: words alone, with no other query's vector standing.
+        () => {
+          if (current) setAsked(null);
+        },
       );
     }, MEANING_PAUSE_MS);
     return () => {
@@ -326,19 +378,35 @@ export function useMeaningSearch(
   );
   const snapshot = useSyncExternalStore(follow, () => source?.snapshot() ?? null);
   const vector = text !== null && asked?.source === source ? asked.vector : null;
-  const listedKey = listed.join('\n');
-  // Words typed change no filter: the pages aren't scanned again for them.
   const filtersKey = JSON.stringify(parseSearch(query).filters);
-  const hits = useMemo(() => {
-    if (!source || !index || !vector) return [];
+  // The pages are scanned once for each vector, set of filters and change
+  // to the vectors, not for the word matches, which change at almost every
+  // key: the scan has room for those, and leaves them out after.
+  const scan = useMemo(() => {
+    if (!source || !index || !vector) return null;
     const filters = JSON.parse(filtersKey) as SearchFilter[];
-    const shown = new Set(listedKey.split('\n'));
     const include: Include = (entry) =>
-      !shown.has(keyOf(entry)) &&
       filters.every((filter) => matchesFilter(entry.properties, filter));
-    return closeEnough(source.nearest(index, vector, MEANING_LIMIT, include));
+    let found: MeaningHit[] = [];
+    let room = 0;
+    return (wanted: number) => {
+      // A scan's first pages are a shorter one's: scanned again only for
+      // more than it had room for, if it found as many as that.
+      if (wanted > room && found.length === room) {
+        room = Math.max(wanted, room * 2);
+        found = source.nearest(index, vector, room, include);
+      }
+      return found;
+    };
     // `snapshot` changes as the vectors do.
-  }, [source, index, vector, filtersKey, listedKey, snapshot]);
+  }, [source, index, vector, filtersKey, snapshot]);
+  const listedKey = listed.join('\n');
+  const hits = useMemo(() => {
+    if (!scan) return [];
+    const shown = new Set(listedKey === '' ? [] : listedKey.split('\n'));
+    const found = scan(MEANING_LIMIT + shown.size).filter((hit) => !shown.has(keyOf(hit)));
+    return closeEnough(found);
+  }, [scan, listedKey]);
   const status = useMemo(
     () => (source && index ? source.status(index) : null),
     [source, index, snapshot],
