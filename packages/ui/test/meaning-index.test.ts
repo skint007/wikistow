@@ -250,6 +250,31 @@ describe('MeaningIndexer', () => {
     expect(fake.embedded.length).toBeGreaterThanOrEqual(6);
   });
 
+  it('says a hit from the kept file isn’t current once its passages don’t fit the text shown', async () => {
+    const fake = fakeWork();
+    const vector = { scale: 1, values: Int8Array.from([127, 0, 0, 0]) };
+    fake.keep(
+      new Map([
+        [
+          rev('beach-1'),
+          [
+            { hash: 'AAAAAAAAAAAAAAAAAAAAAA', start: 0, vector },
+            { hash: 'BBBBBBBBBBBBBBBBBBBBBA', start: 9, vector },
+          ],
+        ],
+      ]),
+    );
+    const indexer = new MeaningIndexer(fake.work);
+    const page = { ...beach, text: 'Day one.\nWe swam.' };
+    indexer.indexChanged(wordIndex([page]));
+    await settle();
+    const query = Float32Array.from([1, 0, 0, 0]);
+    expect(indexer.nearest(query, 1)[0]?.current).toBe(true);
+    // Saved into the queue in another tab: the same revision ID, with another text, unheard here.
+    indexer.indexChanged(wordIndex([{ ...page, text: 'Days one.\nWe swam.' }]));
+    expect(indexer.nearest(query, 1)[0]?.current).toBe(false);
+  });
+
   it('opens the kept vectors before anything, and embeds only versions without them', async () => {
     const fake = fakeWork();
     fake.keep(
@@ -338,7 +363,12 @@ describe('MeaningIndexer', () => {
     expect(fake.embedded).toHaveLength(2);
     // The version before stands in, and counts as done.
     expect(indexer.status()).toEqual({ pages: 2, total: 2 });
-    expect(indexer.nearest(Float32Array.from([1, 0, 0, 0]), 1)[0]?.pageId).toBe('beach');
+    const standing = indexer.nearest(Float32Array.from([1, 0, 0, 0]), 1)[0];
+    expect(standing?.pageId).toBe('beach');
+    // Its passages weren't cut from the draft's text, which the hit says.
+    expect(standing?.page.text).toBe(draft(2).text);
+    expect(standing?.current).toBe(false);
+    expect(indexer.nearest(query, 5).find((hit) => hit.pageId === 'boiler')?.current).toBe(true);
     await vi.advanceTimersByTimeAsync(1_000 + EMBED_MS + 10);
     expect(fake.embedded).toEqual([
       expect.any(String),
@@ -346,6 +376,7 @@ describe('MeaningIndexer', () => {
       'Summer holiday\nA week at the beach in Cornwall, and soup 2.',
     ]);
     expect(soupScore()).toBeGreaterThan(0.5);
+    expect(indexer.nearest(query, 5).find((hit) => hit.pageId === 'beach')?.current).toBe(true);
     // Only the draft is kept now.
     await settle(1);
     expect([...fake.writes.at(-1)!.keys()].sort()).toEqual([rev('beach-d2'), rev('boiler-1')]);
@@ -513,8 +544,12 @@ describe('MeaningIndexer', () => {
     indexer.indexChanged(wordIndex([{ ...beach, text: 'Soup on the beach.' }]));
     await vi.advanceTimersByTimeAsync(DRAFT_PAUSE_MS - 1_000);
     expect(fake.embedded).toHaveLength(1);
+    // The same version's vectors, of its text before, stand in meanwhile.
+    const query = Float32Array.from([1, 0, 0, 0]);
+    expect(indexer.nearest(query, 1)[0]?.current).toBe(false);
     await settle(1);
     expect(fake.embedded).toEqual([expect.any(String), 'Summer holiday\nSoup on the beach.']);
+    expect(indexer.nearest(query, 1)[0]?.current).toBe(true);
   });
 
   it('gives up a page that changes while it is embedded, and takes its new version', async () => {

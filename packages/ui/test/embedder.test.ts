@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { EmbedAnswer, EmbedRequest } from '../src/meaning/embedder';
-import { Embedder } from '../src/meaning/embedder';
+import { Embedder, ModelUnavailable, RETRY_MS, WorkerStopped } from '../src/meaning/embedder';
 
 /** A worker that answers as the embedding worker would, with `reply`. */
 class FakeWorker {
@@ -109,26 +109,69 @@ describe('Embedder', () => {
 
   it('fails what waits when the worker crashes, and starts afresh after', async () => {
     const embedder = new Embedder({ keep: true });
+    await embedder.load();
     FakeWorker.reply = () => null;
-    const waiting = embedder.embed('query', ['soup']);
+    const waiting = embedder.embed('passage', ['soup']);
+    await vi.waitFor(() => expect(FakeWorker.started[0]?.asked).toHaveLength(2));
     FakeWorker.started[0]?.crash();
-    await expect(waiting).rejects.toThrow('The embedding worker stopped.');
+    // Alone in the worker, it is at fault.
+    const error = await waiting.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(ModelUnavailable);
+    expect((error as Error).message).toBe('The embedding worker stopped.');
     expect(FakeWorker.started[0]?.terminated).toBe(true);
 
+    // A model that loaded is loaded again at once.
     FakeWorker.reply = defaultReply;
     await embedder.embed('query', ['soup']);
     expect(FakeWorker.started).toHaveLength(2);
   });
 
-  it('loads again in a new worker after a load that failed', async () => {
+  it('holds none of the requests in a worker that crashes at fault', async () => {
+    const embedder = new Embedder({ keep: true });
+    await embedder.load();
+    FakeWorker.reply = () => null;
+    // A passage the queue embeds, and a query as search's typing pauses.
+    const passage = embedder.embed('passage', ['soup']);
+    const query = embedder.embed('query', ['bread']);
+    await vi.waitFor(() => expect(FakeWorker.started[0]?.asked).toHaveLength(3));
+    FakeWorker.started[0]?.crash();
+    for (const waiting of [passage, query]) {
+      const error = await waiting.catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(WorkerStopped);
+      expect(error).toBeInstanceOf(ModelUnavailable);
+    }
+  });
+
+  it('loads again in a new worker once the wait after a failed load has passed', async () => {
     const embedder = new Embedder({ keep: true });
     FakeWorker.reply = (request) => ({ id: request.id, op: 'error', message: 'No model' });
     await expect(embedder.load()).rejects.toThrow('No model');
     expect(FakeWorker.started[0]?.terminated).toBe(true);
     FakeWorker.reply = defaultReply;
+    // Until then, a query or search opening fails at once, with no worker started.
+    vi.advanceTimersByTime(RETRY_MS - 1);
+    await expect(embedder.load()).rejects.toThrow('No model');
+    await expect(embedder.embed('query', ['soup'])).rejects.toBeInstanceOf(ModelUnavailable);
+    expect(FakeWorker.started).toHaveLength(1);
+    vi.advanceTimersByTime(1);
     await expect(embedder.load()).resolves.toEqual({ from: 'network' });
     expect(FakeWorker.started).toHaveLength(2);
     expect(FakeWorker.started[1]?.asked.map(({ op }) => op)).toEqual(['load']);
+  });
+
+  it('waits as long after the worker crashes loading the model', async () => {
+    const embedder = new Embedder({ keep: true });
+    FakeWorker.reply = () => null;
+    const loading = embedder.load();
+    FakeWorker.started[0]?.crash();
+    await expect(loading).rejects.toThrow('The embedding worker stopped.');
+    FakeWorker.reply = defaultReply;
+    await expect(embedder.embed('query', ['soup'])).rejects.toBeInstanceOf(ModelUnavailable);
+    expect(FakeWorker.started).toHaveLength(1);
+    vi.advanceTimersByTime(RETRY_MS);
+    await embedder.embed('query', ['soup']);
+    expect(FakeWorker.started).toHaveLength(2);
   });
 
   it('fails an embedding stopped just after its load, rather than start an empty worker', async () => {
@@ -147,5 +190,9 @@ describe('Embedder', () => {
     const waiting = embedder.load();
     embedder.stop();
     await expect(waiting).rejects.toThrow('The embedding worker was stopped.');
+    // A load stopped didn't fail: the next starts at once.
+    FakeWorker.reply = defaultReply;
+    await expect(embedder.load()).resolves.toEqual({ from: 'network' });
+    expect(FakeWorker.started).toHaveLength(2);
   });
 });

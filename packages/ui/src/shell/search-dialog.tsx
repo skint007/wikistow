@@ -45,12 +45,18 @@ type Hit = SearchHit<searchOperations.SearchPage>;
 
 const hitKey = ({ doc }: Hit) => `${doc.spaceId}/${doc.pageId}`;
 
-/** A page found by meaning, as a row shows it: no word marked, and the start of its passage. */
-const meaningRow = ({ page, passage, score }: MeaningHit): Hit => ({
+/**
+ * A page found by meaning, as a row shows it: no word marked, and the start
+ * of its passage, or of the page while its passages are another text's.
+ */
+const meaningRow = ({ page, passage, current, score }: MeaningHit): Hit => ({
   doc: page.doc,
   score,
   title: { text: page.title, highlights: [] },
-  snippet: () => ({ text: passageSnippet(page.text, passage.start), highlights: [] }),
+  snippet: () => ({
+    text: passageSnippet(page.text, current ? passage.start : 0),
+    highlights: [],
+  }),
 });
 
 /**

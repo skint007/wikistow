@@ -27,8 +27,9 @@ export type EmbedAnswer =
   | { id: number; op: 'error'; message: string };
 
 /**
- * The model couldn't be loaded, as distinct from the loaded worker failing
- * on what it was given: nothing asked of it is at fault.
+ * Nothing asked of the worker is at fault: the model couldn't be loaded,
+ * or, as `WorkerStopped`, which request stopped the worker isn't known. The
+ * loaded worker failing on what it was given is a plain `Error`.
  */
 export class ModelUnavailable extends Error {
   constructor(cause: unknown) {
@@ -36,6 +37,26 @@ export class ModelUnavailable extends Error {
     this.name = 'ModelUnavailable';
   }
 }
+
+/**
+ * The worker stopped with more than one request in it, as when a query
+ * comes while a passage is embedded: which stopped it isn't known, so, as
+ * for a model that can't load, none of them is held at fault.
+ */
+export class WorkerStopped extends ModelUnavailable {
+  constructor() {
+    super(new Error('The embedding worker stopped.'));
+    this.name = 'WorkerStopped';
+  }
+}
+
+/**
+ * How long a model that failed to load isn't tried again. The queue waits
+ * this long after the worker fails, and a query or search opening waits
+ * too, so a worker isn't started, and the model fetched again, at each
+ * pause in typing.
+ */
+export const RETRY_MS = 60_000;
 
 type Waiting = { resolve: (answer: EmbedAnswer) => void; reject: (error: Error) => void };
 
@@ -57,6 +78,10 @@ export class Embedder {
   #idle: ReturnType<typeof setTimeout> | null = null;
   #next = 0;
   readonly #waiting = new Map<number, Waiting>();
+  /** When the model last failed to load, and why, until `RETRY_MS` after. */
+  #failed: { at: number; message: string } | null = null;
+  /** How many times `stop` was called: a load it ended didn't fail. */
+  #stops = 0;
 
   constructor({ keep, idleMs = IDLE_MS }: { keep: boolean; idleMs?: number }) {
     this.#keep = keep;
@@ -76,7 +101,9 @@ export class Embedder {
     };
     worker.onerror = (event) => {
       event.preventDefault();
-      if (this.#worker === worker) this.#fail('The embedding worker stopped.');
+      if (this.#worker !== worker) return;
+      if (this.#waiting.size > 1) this.#fail(() => new WorkerStopped());
+      else this.#fail(() => new Error('The embedding worker stopped.'));
     };
     this.#worker = worker;
     return worker;
@@ -100,30 +127,46 @@ export class Embedder {
     this.#idle = setTimeout(() => this.stop(), this.#idleMs);
   }
 
-  #fail(message: string) {
+  /** Stop the worker, failing what waits on it with `error`'s. */
+  #fail(error: () => Error) {
     this.#worker?.terminate();
     this.#worker = null;
     this.#loaded = null;
-    for (const { reject } of this.#waiting.values()) reject(new Error(message));
+    for (const { reject } of this.#waiting.values()) reject(error());
     this.#waiting.clear();
   }
 
-  /** Load the model, if this worker hasn't yet. */
+  /**
+   * Load the model, if this worker hasn't yet. Once it fails to load, it
+   * isn't tried again for `RETRY_MS`: until then, this fails at once.
+   */
   load(): Promise<Loaded> {
-    this.#loaded ??= this.#ask({ op: 'load', keep: this.#keep }).then((answer) => {
+    if (this.#loaded) return this.#loaded;
+    if (this.#failed) {
+      // A clock set back ends the wait, rather than make it longer.
+      const since = Date.now() - this.#failed.at;
+      if (since >= 0 && since < RETRY_MS) return Promise.reject(new Error(this.#failed.message));
+      this.#failed = null;
+    }
+    const stops = this.#stops;
+    const loading = this.#ask({ op: 'load', keep: this.#keep }).then((answer) => {
       // The runtime keeps a failed start for the worker's life, so the next
       // load starts a new one.
       if (answer.op === 'error') {
-        this.#fail(answer.message);
+        this.#fail(() => new Error(answer.message));
         throw new Error(answer.message);
       }
       if (answer.op !== 'load') throw new Error('The embedding worker answered out of turn.');
       return { from: answer.from };
     });
-    // A load that fails lets the next try again, in a new worker.
-    const loading = this.#loaded;
-    loading.catch(() => {
+    this.#loaded = loading;
+    // A load that fails lets the next try again, in a new worker, once
+    // `RETRY_MS` has passed; one ended by `stop` lets it at once.
+    loading.catch((error: unknown) => {
       if (this.#loaded === loading) this.#loaded = null;
+      if (this.#stops !== stops) return;
+      const message = error instanceof Error ? error.message : 'The model couldn’t be loaded.';
+      this.#failed = { at: Date.now(), message };
     });
     return loading;
   }
@@ -165,7 +208,8 @@ export class Embedder {
   stop() {
     if (this.#idle) clearTimeout(this.#idle);
     this.#idle = null;
-    this.#fail('The embedding worker was stopped.');
+    this.#stops++;
+    this.#fail(() => new Error('The embedding worker was stopped.'));
   }
 }
 

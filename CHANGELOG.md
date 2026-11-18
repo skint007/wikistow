@@ -11,6 +11,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Search by meaning: a draft shown at unlock waits out its 30 s pause before it's embedded, vectors made from text typed offline are never kept as the version's own, and what the queue made since its last write is kept before a lock and as the page is left. (#640)
 - Online, search, query tables and plugin rows stop showing a change waiting on the device once you discard it. They also keep showing what you typed into one while it waits, where they sometimes went back to the server's version. (#642)
 - With a plugin drawing search's results, the search box names only the lists it shows, **By meaning** below the plugin's view among them, for screen readers. (#643)
+- Search by meaning scans the vectors once a query rather than at each key, lists nothing by meaning after a query fails instead of the last query's pages, and starts the model only once a search for pages starts, not for the command palette. A model that failed to load isn't tried again for a minute, a tab without the queue doesn't open the kept vectors again unless they changed, and a draft's **By meaning** snippet starts at the page's top while the version before stands in. (#641)
 
 ## 0.27.2 - 2026-11-18
 
