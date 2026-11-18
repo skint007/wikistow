@@ -8,6 +8,7 @@ import type { Literal, Nodes, Root } from 'mdast';
 import type { Options } from 'mdast-util-to-markdown';
 import type { Processor } from 'unified';
 import { drawBlock, type BlockDrawing, type BlockInputs } from '../../../plugins/block-drawing';
+import { blockProperties } from '../../../plugins/block-properties';
 import type { PluginBlock } from '../../../plugins/runtime';
 import type { VisualHost } from './host';
 import { changedRanges, EXTERNAL } from './plugins';
@@ -18,8 +19,8 @@ import { readAlone } from './read-alone';
 // written back exactly as it was read, so no plugin's code runs in reading
 // or writing the page, and the page never changes for being claimed. Where
 // a running plugin draws its type, the atom shows the plugin's view
-// (`drawBlock`), whose `setText` is the person's own edit; anywhere else,
-// the code it is.
+// (`drawBlock`), whose `setText` and `setProperty` are the person's own
+// edits, as a block's are; anywhere else, the code it is.
 
 declare module 'mdast' {
   /** Inline code a plugin claims, as the visual editor reads it: its Markdown (`value`), kept as it is. */
@@ -148,7 +149,9 @@ export const pluginInlineSchema = $node('plugin_inline', () => ({
  * A claimed span: the view of a running plugin that draws its type, in an
  * editor someone sees, else its code. The view's `setText` makes the span's
  * Markdown anew (`inlineSpan`), as the person's edit; the view that asked
- * isn't drawn again for it.
+ * isn't drawn again for it. It gets the page's properties, and sets them
+ * as a block does (`VisualHost.setProperty`), drawn again as they change
+ * but for its own change.
  */
 class PluginInlineView implements NodeView {
   readonly dom = document.createElement('span');
@@ -168,6 +171,12 @@ class PluginInlineView implements NodeView {
     this.dom.contentEditable = 'false';
     this.#draw();
     this.#unsubscribe = host.plugins()?.subscribe(() => this.#draw()) ?? (() => {});
+    host.propertyViews.add(this);
+  }
+
+  /** The page's properties changed: a span drawn for others is drawn again. */
+  propertiesChanged() {
+    this.#draw();
   }
 
   #claimed() {
@@ -198,9 +207,9 @@ class PluginInlineView implements NodeView {
             runtime,
             source: claimed.text,
             page,
-            properties: null,
+            properties: blockProperties(this.#host.properties()),
             setSource: (text) => this.#setText(text),
-            setProperty: null,
+            setProperty: this.#host.setProperty(),
           }
         : null;
     // The same view, or still none: a drawn one decides itself whether to draw again.
@@ -250,6 +259,7 @@ class PluginInlineView implements NodeView {
 
   destroy() {
     this.#unsubscribe();
+    this.#host.propertyViews.delete(this);
     this.#undraw();
   }
 }

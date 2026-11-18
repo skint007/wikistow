@@ -36,6 +36,7 @@ import {
 } from '@wikistow/plugin-sdk/manifest';
 import { createContext, use, useSyncExternalStore } from 'react';
 import { formView, readFields } from './block-form';
+import { inlineFieldView } from './inline-field';
 import type { BlockProperties } from './block-properties';
 import { changedFor, pluginError, writeLimit, type Caller, type HostPages } from './pages';
 import type { IndexChange } from './page-rows';
@@ -106,19 +107,20 @@ export type PluginThemeOption = {
 };
 /**
  * A block a running plugin draws, with which of its code registered it
- * (`snapshot.blocks`); inline code, always app code's, says none.
+ * (`snapshot.blocks`); inline code says none.
  */
 export type PluginBlock = { pluginId: string; type: string; view: View<BlockProps>; part?: Part };
 
 /**
  * A claimed span's view as a block's, so it's drawn as blocks are
- * (`drawBlock`): its text is the block's source, and `setText` its
- * `setSource`. Made once per registration, as a new view draws afresh.
+ * (`drawBlock`): its text is the block's source, `setText` its
+ * `setSource`, and the properties and `setProperty` the same. Made once
+ * per registration, as a new view draws afresh.
  */
 const spanBlockView =
   (view: View<InlineProps>): View<BlockProps> =>
-  (element, { source, page, setSource }) =>
-    view(element, { text: source, page, setText: setSource });
+  (element, { source, page, setSource, properties, setProperty }) =>
+    view(element, { text: source, page, setText: setSource, properties, setProperty });
 export type PluginStatus = { plugin: InstalledPlugin; problem: string | null };
 
 export type PluginsSnapshot = {
@@ -799,6 +801,14 @@ export function createRuntime(store: AnyPluginStore, reach: PluginReach) {
               }
             },
           });
+        },
+        inline(spec) {
+          if (!live()) return () => {};
+          if (!manifest.inline?.includes(spec.type)) {
+            problem(entry, 'script', `Its manifest claims no inline code ${spec.type}.`);
+            return () => {};
+          }
+          return registry.addInline({ type: spec.type, view: inlineFieldView(spec.field) });
         },
         listen: (event, deliverTo) =>
           whileLive(() =>

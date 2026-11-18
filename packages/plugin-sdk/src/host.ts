@@ -612,9 +612,23 @@ export type InlineProps = {
   /**
    * In the visual editor, make `text` the span's text as the person's own
    * edit, which the draft saves; the view isn't drawn again for it. Null in
-   * the reader.
+   * the reader, where a span changes the page's properties only.
    */
   setText: ((text: string) => void) | null;
+  /**
+   * The page's properties, as a block's (`BlockProps.properties`): the
+   * view is drawn again when they change, except for its own change.
+   * Missing (undefined) in an app older than it: treat that as unknown.
+   */
+  properties?: Readonly<Record<string, PropertyValue>> | null | undefined;
+  /**
+   * Set one of the page's properties, as a block's `setProperty` does and
+   * under its rules: the person's own edit in the visual editor; in the
+   * reader, for an editor who can publish, while the draft has no changes,
+   * published with the page's other changes made while reading. Null
+   * anywhere else. Missing (undefined) in an app older than it.
+   */
+  setProperty?: ((key: string, value: PropertyValue) => void) | null | undefined;
 };
 
 /**
@@ -812,7 +826,22 @@ export type ScriptBlock<Fields extends Record<string, BlockField>> = {
   outputs: Record<string, BlockOutput<Fields>>;
 };
 
-/** What a script gets: `Host`, and blocks it fills in. */
+/**
+ * A claimed span a script declares (`inline` in its manifest claims its
+ * type): one field, drawn by the app in the line of text, bound to a page
+ * property. The span's text names the property, such as `reviewed` in
+ * `` `plugin:<id>/toggle reviewed` ``; a span with no text is bound to the
+ * field's own `property`. The field shows the property's value (its
+ * `default` while the page has none) and sets it as a block's bound field
+ * does, once a value typed in is committed; where the page can't change,
+ * a value entered stays in the field. A span whose text isn't a property
+ * name, or that has none and whose field names none, shows as invalid. Its
+ * `label` names the control for screen readers, or the property its text
+ * names does. An app older than it refuses the script.
+ */
+export type ScriptInline = { type: string; field: BlockField };
+
+/** What a script gets: `Host`, and blocks and spans it fills in. */
 export interface ScriptHost extends Host {
   /** Every page operation: the SDK in the script sends each, `tree` too, whatever the app knows. */
   readonly pages: Required<Pages>;
@@ -821,6 +850,8 @@ export interface ScriptHost extends Host {
   readonly blocks: {
     register<const Fields extends Record<string, BlockField>>(block: ScriptBlock<Fields>): Disposer;
   };
+  /** A span the app draws as one field bound to a property (`ScriptInline`). */
+  readonly inline: { register(inline: ScriptInline): Disposer };
 }
 
 /**

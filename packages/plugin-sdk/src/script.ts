@@ -78,6 +78,7 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
     };
   };
   const blocks = new Map<string, ScriptBlock<Record<string, BlockField>>>();
+  const spans = new Map<string, object>();
 
   const host: ScriptHost = {
     api: PLUGIN_API,
@@ -140,6 +141,19 @@ export function defineScript(activate: (host: ScriptHost) => void | Promise<void
           if (blocks.get(block.type) !== entry) return;
           blocks.delete(block.type);
           send({ type: 'unblock', block: block.type });
+        };
+      },
+    },
+    inline: {
+      register({ type, field }): Disposer {
+        // Its own token, so a disposer of one replaced does nothing.
+        const entry = {};
+        spans.set(type, entry);
+        send({ type: 'inline', inline: { type, field: declaredField(field) } });
+        return () => {
+          if (spans.get(type) !== entry) return;
+          spans.delete(type);
+          send({ type: 'uninline', inline: type });
         };
       },
     },

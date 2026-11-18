@@ -4,7 +4,7 @@ status: built
 
 # Labels for versions made by changes while reading
 
-Since #212, an editor who can publish can tick a page's tasks, and change values a plugin block sets, while reading the page. Each burst of those changes publishes one new version. A shopping list ticked every day soon has a long history of versions that differ by a few ticks, and history shows each one the same way as a real edit: a number, who published it and when. #213 asks for those versions to say what changed, such as "Ticked 3, unticked 1" or "Changed servings", so real edits stay easy to find.
+Since #212, an editor who can publish can tick a page's tasks, and change values a plugin block sets, while reading the page. Since #402, a plugin's inline span sets them too, as a block does, and its changes are labelled the same way. Each burst of those changes publishes one new version. A shopping list ticked every day soon has a long history of versions that differ by a few ticks, and history shows each one the same way as a real edit: a number, who published it and when. #213 asks for those versions to say what changed, such as "Ticked 3, unticked 1" or "Changed servings", so real edits stay easy to find.
 
 In short:
 - The publication that carries changes made while reading writes a payload extension, `wikistow.change`, with what changed: how many tasks were ticked and unticked, and which properties changed.

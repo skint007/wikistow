@@ -20,35 +20,24 @@ export function textOf(code: Element): string {
 }
 
 /**
- * A plugin block in the reader (`drawBlock`): the plugin's view of the
- * fence's text, and of the page's properties as shown. Where the page can
- * change while it's read (`ReadingChanges`), `setProperty` queues a
- * property's change, as a tick is, once it is known to apply to the page
- * as shown; one that can't is refused as the visual editor refuses it, and
- * nothing is queued. Elsewhere it is null, and values entered stay in the
- * view. `setSource` is always null here.
+ * What a plugin block or span in the reader is drawn for: the page's
+ * properties as shown, and, where the page can change while it's read
+ * (`ReadingChanges`), a `setProperty` that queues a property's change, as
+ * a tick is, once it is known to apply to the page as shown; one that
+ * can't is refused as the visual editor refuses it, and nothing is queued.
+ * Elsewhere it is null, and values entered stay in the view. `setSource`
+ * is always null here: the reader changes no block's or span's text.
  */
-export function ReaderBlock({
-  block,
-  source,
-  page,
-}: {
-  block: PluginBlock;
-  source: string;
-  page: PageRef;
-}) {
-  const { type } = block;
-  const { spaceId, pageId } = page;
+function useReaderInputs(source: string, page: PageRef): BlockInputs {
   const read = use(PageProperties);
   const properties = useMemo(() => blockProperties(read), [read]);
   const reading = use(ReadingChanges);
   const change = reading?.rights.allowed ? reading.change : null;
   const shown = reading?.markdown ?? '';
-  const runtime = usePluginRuntime();
-  const inputs: BlockInputs = {
-    runtime,
+  return {
+    runtime: usePluginRuntime(),
     source,
-    page: { spaceId, pageId },
+    page: { spaceId: page.spaceId, pageId: page.pageId },
     properties,
     setSource: null,
     setProperty: change
@@ -61,14 +50,32 @@ export function ReaderBlock({
         }
       : null,
   };
-  const host = useDrawing<HTMLDivElement>(block, inputs);
-  return <div ref={host} className="plugin-block" data-plugin-block={type} />;
+}
+
+/**
+ * A plugin block in the reader (`drawBlock`): the plugin's view of the
+ * fence's text, and of the page's properties as shown, which it can set
+ * where the page can change while it's read (`useReaderInputs`).
+ */
+export function ReaderBlock({
+  block,
+  source,
+  page,
+}: {
+  block: PluginBlock;
+  source: string;
+  page: PageRef;
+}) {
+  const host = useDrawing<HTMLDivElement>(block, useReaderInputs(source, page));
+  return <div ref={host} className="plugin-block" data-plugin-block={block.type} />;
 }
 
 /**
  * Inline code a running plugin claims, in the reader (ADR 0011, decision
  * 7): the plugin's view of the span's text, drawn as a block's is
- * (`drawBlock`). The span's text can't change here, so `setText` is null.
+ * (`drawBlock`), with the page's properties, which it can set as a block
+ * can (`useReaderInputs`). The span's text can't change here, so `setText`
+ * is null (#402, decided 2026-11-13).
  */
 export function ReaderSpan({
   span,
@@ -79,15 +86,7 @@ export function ReaderSpan({
   text: string;
   page: PageRef;
 }) {
-  const inputs: BlockInputs = {
-    runtime: usePluginRuntime(),
-    source: text,
-    page: { spaceId: page.spaceId, pageId: page.pageId },
-    properties: null,
-    setSource: null,
-    setProperty: null,
-  };
-  const host = useDrawing<HTMLSpanElement>(span, inputs);
+  const host = useDrawing<HTMLSpanElement>(span, useReaderInputs(text, page));
   return <span ref={host} className="plugin-inline" data-plugin-inline={span.type} />;
 }
 

@@ -5,6 +5,28 @@ import { defineScript, type PageVersion } from '@wikistow/plugin-sdk';
 const INDEX = 'Index';
 
 defineScript((host) => {
+  // Spans the app draws as one field bound to a property, in the line of
+  // text: `plugin:page-tools/done` is a toggle for the page's `done`, and
+  // `plugin:page-tools/done reviewed` one for its `reviewed`.
+  // `plugin:page-tools/status` picks the page's `status` from a menu.
+  host.inline.register({
+    type: 'done',
+    field: { type: 'boolean', label: 'Done', property: 'done' },
+  });
+  host.inline.register({
+    type: 'status',
+    field: {
+      type: 'choice',
+      label: 'Status',
+      property: 'status',
+      options: [
+        { value: 'todo', label: 'To do' },
+        { value: 'doing', label: 'Doing' },
+        { value: 'done', label: 'Done' },
+      ],
+    },
+  });
+
   host.commands.register({
     id: 'folder-index',
     title: 'Write this folder’s index',
