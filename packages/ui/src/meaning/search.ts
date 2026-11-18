@@ -16,7 +16,10 @@ import {
   type MeaningIndexer,
   type MeaningStatus,
 } from './meaning-index';
+import { cutFrom } from './cut-from';
 import { meaningIndexer, meaningReader, subscribeRunning } from './running';
+
+export { cutFrom };
 
 // Search by meaning in the search dialog (ADR 0016, decision 6): the query
 // embedded as typing pauses, the pages nearest it by their best passage,
@@ -58,26 +61,6 @@ export function closeEnough<H extends { score: number }>(hits: readonly H[]): H[
   return hits
     .filter(({ score }) => score >= MEANING_FLOOR && score >= best - MEANING_GAP)
     .slice(0, MEANING_LIMIT);
-}
-
-/**
- * Whether `passages`, in order, could have been cut from `text`: each
- * starts a word of it, or the page. Passages kept under a revision ID whose
- * text has changed since, as a save into this device's queue changes it,
- * nearly always fail this, unless the change came after the last of them
- * (`meaningPassages` starts each at a word, but for a word longer than a
- * passage, cut between characters: such a page fails it too).
- */
-export function cutFrom(text: string, passages: readonly { start: number }[]): boolean {
-  let before = -1;
-  for (const { start } of passages) {
-    if (start <= before) return false;
-    if (start > 0 && !(/\s/.test(text.charAt(start - 1)) && /\S/.test(text.charAt(start)))) {
-      return false;
-    }
-    before = start;
-  }
-  return true;
 }
 
 /** The start of the passage at `start` in a page's text, on one line, cut at a word. */
@@ -297,12 +280,16 @@ export class MeaningReader implements MeaningSource {
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a === b) return true;
   if (a.byteLength !== b.byteLength) return false;
+  let from = 0;
   // Four bytes at a time where both are aligned for it, as a file read is.
-  const words = a.byteOffset % 4 === 0 && b.byteOffset % 4 === 0 ? a.byteLength >>> 2 : 0;
-  const wa = new Uint32Array(a.buffer, a.byteOffset, words);
-  const wb = new Uint32Array(b.buffer, b.byteOffset, words);
-  for (let i = 0; i < words; i++) if (wa[i] !== wb[i]) return false;
-  for (let i = words * 4; i < a.byteLength; i++) if (a[i] !== b[i]) return false;
+  if (a.byteOffset % 4 === 0 && b.byteOffset % 4 === 0) {
+    const words = a.byteLength >>> 2;
+    const wa = new Uint32Array(a.buffer, a.byteOffset, words);
+    const wb = new Uint32Array(b.buffer, b.byteOffset, words);
+    for (let i = 0; i < words; i++) if (wa[i] !== wb[i]) return false;
+    from = words * 4;
+  }
+  for (let i = from; i < a.byteLength; i++) if (a[i] !== b[i]) return false;
   return true;
 }
 
@@ -346,10 +333,10 @@ export function useMeaningSearch(
   const source = useMeaningSource();
   const text = meaningText(query);
   const [asked, setAsked] = useState<{ source: MeaningSource; vector: Float32Array } | null>(null);
-  const searches = query.trim() !== '';
+  const searchesPages = query.trim() !== '';
   useEffect(() => {
-    if (searches) source?.prepare();
-  }, [source, searches]);
+    if (searchesPages) source?.prepare();
+  }, [source, searchesPages]);
   useEffect(() => {
     if (!source || text === null) {
       setAsked(null);
@@ -390,8 +377,9 @@ export function useMeaningSearch(
     let found: MeaningHit[] = [];
     let room = 0;
     return (wanted: number) => {
-      // A scan's first pages are a shorter one's: scanned again only for
-      // more than it had room for, if it found as many as that.
+      // A scan's first pages are a shorter one's, and one that found fewer
+      // than it had room for found every page: scanned again only for more
+      // room than the last had, once it filled it.
       if (wanted > room && found.length === room) {
         room = Math.max(wanted, room * 2);
         found = source.nearest(index, vector, room, include);

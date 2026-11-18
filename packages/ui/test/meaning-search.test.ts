@@ -251,18 +251,33 @@ describe('MeaningReader', () => {
     await reader.refresh();
     expect(open).toHaveBeenCalledTimes(2);
     expect(heard).toHaveBeenCalledTimes(2);
-    // As long, but not as one an aligned read compares four bytes at a time.
-    const shifted = new Uint8Array(new ArrayBuffer(12), 1, 9);
-    shifted.set([1, 2, 3, 4, 5, 6, 7, 8, 10]);
-    file.mockImplementation(async () => ({ read: async () => shifted, write: async () => {} }));
+    // A view not aligned for four bytes at a time: compared a byte at a time.
+    const shifted = (...values: number[]) => {
+      const view = new Uint8Array(new ArrayBuffer(12), 1, 9);
+      view.set(values);
+      return view;
+    };
+    file.mockImplementation(async () => ({
+      read: async () => shifted(1, 2, 3, 4, 5, 6, 7, 8, 10),
+      write: async () => {},
+    }));
     await reader.refresh();
     expect(open).toHaveBeenCalledTimes(2);
+    file.mockImplementation(async () => ({
+      read: async () => shifted(1, 2, 3, 4, 5, 6, 7, 8, 11),
+      write: async () => {},
+    }));
+    await reader.refresh();
+    expect(open).toHaveBeenCalledTimes(3);
     // Gone, and back as it was: opened again.
     file.mockImplementation(async () => ({ read: async () => null, write: async () => {} }));
     await reader.refresh();
-    file.mockImplementation(async () => ({ read: async () => shifted, write: async () => {} }));
+    file.mockImplementation(async () => ({
+      read: async () => shifted(1, 2, 3, 4, 5, 6, 7, 8, 11),
+      write: async () => {},
+    }));
     await reader.refresh();
-    expect(open).toHaveBeenCalledTimes(3);
+    expect(open).toHaveBeenCalledTimes(4);
   });
 
   it('says when a page’s kept passages weren’t cut from the text its word index shows', async () => {

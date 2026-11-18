@@ -250,6 +250,31 @@ describe('MeaningIndexer', () => {
     expect(fake.embedded.length).toBeGreaterThanOrEqual(6);
   });
 
+  it('says a hit from the kept file isn’t current once its passages don’t fit the text shown', async () => {
+    const fake = fakeWork();
+    const vector = { scale: 1, values: Int8Array.from([127, 0, 0, 0]) };
+    fake.keep(
+      new Map([
+        [
+          rev('beach-1'),
+          [
+            { hash: 'AAAAAAAAAAAAAAAAAAAAAA', start: 0, vector },
+            { hash: 'BBBBBBBBBBBBBBBBBBBBBA', start: 9, vector },
+          ],
+        ],
+      ]),
+    );
+    const indexer = new MeaningIndexer(fake.work);
+    const page = { ...beach, text: 'Day one.\nWe swam.' };
+    indexer.indexChanged(wordIndex([page]));
+    await settle();
+    const query = Float32Array.from([1, 0, 0, 0]);
+    expect(indexer.nearest(query, 1)[0]?.current).toBe(true);
+    // Saved into the queue in another tab: the same revision ID, with another text, unheard here.
+    indexer.indexChanged(wordIndex([{ ...page, text: 'Days one.\nWe swam.' }]));
+    expect(indexer.nearest(query, 1)[0]?.current).toBe(false);
+  });
+
   it('opens the kept vectors before anything, and embeds only versions without them', async () => {
     const fake = fakeWork();
     fake.keep(

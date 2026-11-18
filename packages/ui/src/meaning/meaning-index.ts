@@ -13,6 +13,7 @@ import {
   type Vector8,
 } from '@wikistow/client';
 import { KEEP_AT_MOST_MS, KEEP_MS, systemClock, type Clock } from '../data/index-tracker';
+import { cutFrom } from './cut-from';
 import { ModelUnavailable, RETRY_MS } from './embedder';
 
 // Search by meaning's background queue (ADR 0016, decision 4): the vectors
@@ -36,9 +37,6 @@ export const REST_AT_MOST_MS = 5_000;
 
 /** How long the queue waits before looking again while a page opens or the word index updates. */
 export const BUSY_WAIT_MS = 250;
-
-/** How long the queue waits after the worker failed, before it tries again: as a model's load does. */
-export { RETRY_MS };
 
 /** How far the vectors have got: pages with vectors, of the pages the word index holds. */
 export type MeaningStatus = { pages: number; total: number };
@@ -399,7 +397,11 @@ export class MeaningIndexer {
         page,
         passage: passages[passage]!,
         // What stands for a version that is done is its own (`#standing`).
-        current: this.#done(page),
+        // Of one opened from the kept file, the text it was made from isn't
+        // known: a save into the queue in another tab may have changed it.
+        current:
+          this.#done(page) &&
+          (this.#madeFrom.has(page.doc.revisionId) || cutFrom(page.text, passages)),
         score,
       };
     });

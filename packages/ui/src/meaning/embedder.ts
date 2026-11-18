@@ -27,8 +27,9 @@ export type EmbedAnswer =
   | { id: number; op: 'error'; message: string };
 
 /**
- * The model couldn't be loaded, as distinct from the loaded worker failing
- * on what it was given: nothing asked of it is at fault.
+ * Nothing asked of the worker is at fault: the model couldn't be loaded,
+ * or, as `WorkerStopped`, which request stopped the worker isn't known. The
+ * loaded worker failing on what it was given is a plain `Error`.
  */
 export class ModelUnavailable extends Error {
   constructor(cause: unknown) {
@@ -50,10 +51,10 @@ export class WorkerStopped extends ModelUnavailable {
 }
 
 /**
- * How long a model that failed to load isn't tried again, by a query or by
- * search opening as much as by the queue, which waits as long after the
- * worker failed: a worker isn't started, and the model fetched again, at
- * each pause in typing.
+ * How long a model that failed to load isn't tried again. The queue waits
+ * this long after the worker fails, and a query or search opening waits
+ * too, so a worker isn't started, and the model fetched again, at each
+ * pause in typing.
  */
 export const RETRY_MS = 60_000;
 
@@ -142,7 +143,7 @@ export class Embedder {
   load(): Promise<Loaded> {
     if (this.#loaded) return this.#loaded;
     if (this.#failed) {
-      // At most the wait, should the clock be set back.
+      // A clock set back ends the wait, rather than make it longer.
       const since = Date.now() - this.#failed.at;
       if (since >= 0 && since < RETRY_MS) return Promise.reject(new Error(this.#failed.message));
       this.#failed = null;
