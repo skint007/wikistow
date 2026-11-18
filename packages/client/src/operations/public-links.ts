@@ -471,17 +471,25 @@ const readsSaved = ({ where, show, sort }: PageQuery) =>
  * When the server took the copied version, asked of it again (`fresh`) as
  * the other rows' times are (#458): the time this device holds for it may
  * be its own clock, for one it just published (`cacheWritten`), or none,
- * for one kept before times were. Thrown when it can't be asked, as the
- * other rows' are.
+ * for one kept before times were. That one stands in when the server can't
+ * be asked, or its answer doesn't open, so a table that may not even list
+ * the page never stops its copy going up.
  */
 async function copiedTime(ctx: ClientContext, page: PageRef, revisionId: RevisionId) {
-  const fetched = await fetchRevisions(
-    ctx,
-    page.spaceId,
-    new Map([[revisionId, { pageId: page.pageId, audience: 'published' as const }]]),
-    { fresh: true },
-  );
-  return fetched.get(revisionId)?.().createdAt ?? null;
+  const wanted = { ...page, revisionId, audience: 'published' as const };
+  const held = ctx.revisions.get(wanted)?.createdAt ?? null;
+  try {
+    const fetched = await fetchRevisions(
+      ctx,
+      page.spaceId,
+      new Map([[revisionId, { pageId: page.pageId, audience: wanted.audience }]]),
+      { fresh: true },
+    );
+    return fetched.get(revisionId)?.().createdAt ?? held;
+  } catch (error) {
+    if (error instanceof ApiError || error instanceof CryptoError) return held;
+    throw error;
+  }
 }
 
 /**

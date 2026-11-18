@@ -715,9 +715,9 @@ describe('a public page holding a query table (ADR 0006, decision 9)', () => {
       return `${at.slice(0, 10)} ${at.slice(11, 16)} UTC`;
     };
     const wanted = { ...notes.ref, revisionId: notes.revisionId, audience: 'published' } as const;
-    // This device's clock ten minutes fast, which would sort it last, and
-    // then no time for it, as for a version kept before times were.
-    for (const createdAt of [new Date(Date.now() + 10 * 60_000).toISOString(), null]) {
+    // This device's clock ten minutes slow, which would sort it before First,
+    // and then no time for it, as for a version kept before times were.
+    for (const createdAt of [new Date(Date.now() - 10 * 60_000).toISOString(), null]) {
       const held = owner.ctx.revisions.get(wanted);
       if (!held) throw new Error('The version isn’t held');
       owner.ctx.revisions.put({ ...held, createdAt });
