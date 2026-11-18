@@ -77,7 +77,7 @@ export function startMeaningIndex(queryClient: QueryClient, ctx: ClientContext) 
   if (shown) indexer.indexChanged(shown, { partial: builtFromKept(shown) });
   // What was made since the last write is kept before a lock this person
   // asks for, while the keys still work, and as the page is left, as far
-  // as there is time (#449). A lock that ends the session, and a stop
+  // as there is time (#449). A lock without asking, and a stop
   // for a phone's layout or the setting going off, write nothing.
   const unguard = vaultStore.guardLock(async () => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -89,13 +89,13 @@ export function startMeaningIndex(queryClient: QueryClient, ctx: ClientContext) 
     return true;
   });
   const leaving = () => void indexer.flush();
-  const page = typeof window === 'undefined' ? null : window;
-  page?.addEventListener('pagehide', leaving);
+  const view = typeof window === 'undefined' ? null : window;
+  view?.addEventListener('pagehide', leaving);
   return {
     indexer,
     stop() {
       unguard();
-      page?.removeEventListener('pagehide', leaving);
+      view?.removeEventListener('pagehide', leaving);
       unfollow();
       unsaved();
       indexer.stop();

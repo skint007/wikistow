@@ -157,7 +157,7 @@ export class MeaningIndexer {
   /** Each page the word index holds, by key. */
   #shown = new Map<string, IndexedPage>();
   /** The pages it holds as a change waiting on this device over their version (`PageIndex.waiting`). */
-  #waiting = new Set<string>();
+  #waitingPages = new Set<string>();
   /** The pages left to embed, best first, from `#cursor` on. */
   #todo: string[] = [];
   #cursor = 0;
@@ -255,7 +255,7 @@ export class MeaningIndexer {
       if (index.waiting(page.doc.spaceId, page.doc.pageId)) waiting.add(key);
     }
     this.#shown = shown;
-    this.#waiting = waiting;
+    this.#waitingPages = waiting;
     // A draft, this person's or one the index shows as a draft they can
     // edit (saved in another tab, say), waits until its versions pause, and
     // the version before stands in for the page until then; for any other
@@ -322,7 +322,7 @@ export class MeaningIndexer {
     for (const [key, page] of this.#shown) versions.set(key, page.doc.revisionId);
     this.#lastVersions = versions;
     this.#shown = new Map();
-    this.#waiting = new Set();
+    this.#waitingPages = new Set();
     this.#todo = [];
     this.#cursor = 0;
     this.#setStatus(null);
@@ -447,7 +447,7 @@ export class MeaningIndexer {
     this.#reusable.clear();
     this.#lastVersions = null;
     this.#shown = new Map();
-    this.#waiting = new Set();
+    this.#waitingPages = new Set();
     this.#todo = [];
     this.#index = null;
     this.#setStatus(null);
@@ -476,7 +476,7 @@ export class MeaningIndexer {
     // are made again, from the text shown, their passages reused.
     return (
       !this.#fromWaiting.has(revisionId) &&
-      !this.#waiting.has(keyOf(page.doc.spaceId, page.doc.pageId))
+      !this.#waitingPages.has(keyOf(page.doc.spaceId, page.doc.pageId))
     );
   }
 
@@ -694,7 +694,7 @@ export class MeaningIndexer {
     this.#madeFrom.set(revisionId, { title: page.title, text: page.text });
     this.#rewritten.delete(revisionId);
     // Checked as `page` was given, still shown (`#given`): its text is the index's now.
-    if (this.#waiting.has(key)) this.#fromWaiting.add(revisionId);
+    if (this.#waitingPages.has(key)) this.#fromWaiting.add(revisionId);
     else this.#fromWaiting.delete(revisionId);
     const held = this.#held.get(key);
     this.#held.delete(key);
