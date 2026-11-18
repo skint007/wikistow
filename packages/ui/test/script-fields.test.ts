@@ -171,6 +171,47 @@ describe('fields of the kinds after number and text (#402)', () => {
   });
 });
 
+describe('a span a script declares (#402)', () => {
+  const message = {
+    type: 'inline',
+    inline: { type: 'done', field: { type: 'boolean', label: 'Done', property: 'done' } },
+  };
+
+  it('is taken by this app, and refused by a released one, which knows no such message', () => {
+    expect(WorkerMessage.safeParse(message).success).toBe(true);
+    // A released app's messages: every kind but the span's two.
+    const released = WorkerMessage.options.filter(
+      (option) => !['inline', 'uninline'].includes(option.shape.type.value),
+    );
+    const before = z.discriminatedUnion('type', released as never).safeParse(message);
+    expect(before.success).toBe(false);
+    expect(before.error?.issues[0]?.path).toEqual(['type']);
+  });
+
+  it('says a kind of message, or a span’s field, this app doesn’t know may need a newer app', () => {
+    const later = { type: 'widget', widget: {} };
+    expect(refusal(later, WorkerMessage.safeParse(later).error?.issues ?? [])).toBe(
+      'Its script sent a kind of message, “widget”, this app doesn’t know: it may need a newer WikiStow.',
+    );
+    const kind = { ...message, inline: { type: 'done', field: { type: 'rating', label: 'R' } } };
+    expect(refusal(kind, WorkerMessage.safeParse(kind).error?.issues ?? [])).toBe(
+      'Its script’s inline code “done” has a field this app can’t draw: it may need a newer WikiStow.',
+    );
+    const keyed = {
+      ...message,
+      inline: { type: 'done', field: { type: 'boolean', label: 'Done', wobble: 1 } },
+    };
+    expect(refusal(keyed, WorkerMessage.safeParse(keyed).error?.issues ?? [])).toContain(
+      'inline code “done” has a field this app can’t draw',
+    );
+    // Anything else says what was wrong, as before.
+    const typed = { ...message, inline: { ...message.inline, type: 'Done' } };
+    expect(refusal(typed, WorkerMessage.safeParse(typed).error?.issues ?? [])).toMatch(
+      /^Its script sent a message the app doesn’t accept \(inline: type: /,
+    );
+  });
+});
+
 // Outputs read beside the fields: booleans among them only where a field is one.
 type Reads<F extends Record<string, BlockField>> = CalculateValues<F>[string];
 // @ts-expect-error A block without a toggle reads no booleans.

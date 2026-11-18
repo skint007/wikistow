@@ -15,6 +15,7 @@ import { useLocation } from '@tanstack/react-router';
 import type { InlineCode, Root, RootContent } from 'mdast';
 import {
   Component,
+  createContext,
   use,
   useEffect,
   useMemo,
@@ -183,6 +184,20 @@ function ClaimedCode({ code }: { code: string }) {
   if (!claimed || !span || !body) return <code>{code.replace(/\r?\n|\r/g, ' ')}</code>;
   return <ReaderSpan span={span} text={claimed.text} page={body.attachments.page} />;
 }
+
+/** What the body being rendered holds for its marked spans (`syntaxHandlers`), by mark. */
+const Held = createContext<readonly ReactElement[]>([]);
+
+/**
+ * A marked span's held element, else the span. One component for every
+ * render, so what a span holds keeps its state as the body renders again,
+ * such as a plugin span's field as a change made while reading shows.
+ */
+const HeldSpan: NonNullable<Components['span']> = ({ node, ...props }) => {
+  const held = use(Held);
+  const at = node?.properties[SYNTAX];
+  return (at !== undefined && held[Number(at)]) || <span {...props} />;
+};
 
 /** An alert (`remarkAlerts`) starts with its label. */
 const Division: NonNullable<Components['div']> = ({ node: _node, children, ...props }) => {
@@ -432,10 +447,7 @@ export function Markdown({
   }, [hash, shown]);
   const held: ReactElement[] = [];
   const components: Components = {
-    span: ({ node, ...props }) => {
-      const at = node?.properties[SYNTAX];
-      return (at !== undefined && held[Number(at)]) || <span {...props} />;
-    },
+    span: HeldSpan,
     div: Division,
     pre: CodeBlock,
     table: Table,
@@ -484,15 +496,18 @@ export function Markdown({
             ) : read.isSuccess ? (
               <AsWritten source={body}>
                 <div className="page-body" {...(passages && { [QUOTE_ROOT]: '' })}>
-                  <ReactMarkdown
-                    remarkPlugins={[[readTree, read.data]]}
-                    remarkRehypeOptions={{
-                      handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
-                    }}
-                    rehypePlugins={[[taskMarks, bodyStart(source), labels], pageHtml]}
-                    urlTransform={urlTransform}
-                    components={components}
-                  />
+                  {/* Filled as ReactMarkdown reads the body, before the spans render. */}
+                  <Held value={held}>
+                    <ReactMarkdown
+                      remarkPlugins={[[readTree, read.data]]}
+                      remarkRehypeOptions={{
+                        handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
+                      }}
+                      rehypePlugins={[[taskMarks, bodyStart(source), labels], pageHtml]}
+                      urlTransform={urlTransform}
+                      components={components}
+                    />
+                  </Held>
                 </div>
               </AsWritten>
             ) : (

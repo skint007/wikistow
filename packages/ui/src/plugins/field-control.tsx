@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Picker } from '@/components/ui/picker';
 import { Switch } from '@/components/ui/switch';
 import { useRef } from 'react';
+import { cn } from '@/lib/utils';
 import { typedValue } from '../page/property-model';
 
 /*
@@ -115,7 +116,8 @@ const timeOf = (text: string) => {
  * The control for `field`, showing `text`. Each change is `onChange`'s; a
  * value is committed (`onCommit`) on blur or Enter, as soon as it's picked
  * for a toggle or choice, and as a slider is let go. Read-only, it shows
- * its text, such as a list's items, whatever its kind.
+ * its text, such as a list's items, whatever its kind. `inline`, it is
+ * sized to sit in a line of text, as a script's span draws it.
  */
 export function FieldControl({
   field,
@@ -124,6 +126,7 @@ export function FieldControl({
   readOnly,
   label,
   describedBy,
+  inline = false,
   onChange,
   onCommit,
 }: {
@@ -134,6 +137,8 @@ export function FieldControl({
   /** Its name, where no `<label>` around it gives one. */
   label?: string | undefined;
   describedBy?: string | undefined;
+  /** Drawn in a line of text, as a script's span is, not in a form's column. */
+  inline?: boolean;
   onChange: (text: string) => void;
   onCommit: (text: string) => void;
 }) {
@@ -167,7 +172,15 @@ export function FieldControl({
       onKeyDown={(event) => {
         if (event.key === 'Enter') onCommit(text);
       }}
-      className="h-8 bg-background text-foreground"
+      className={cn(
+        'bg-background text-foreground',
+        inline
+          ? cn(
+              'inline-block h-6 px-1.5 py-0 align-middle text-sm md:text-sm',
+              kind === 'number' ? 'w-16' : kind === 'date' && !readOnly ? 'w-36' : 'w-40',
+            )
+          : 'h-8',
+      )}
     />
   );
   if (readOnly) return typed('text');
@@ -186,7 +199,7 @@ export function FieldControl({
             onChange(String(on));
             onCommit(String(on));
           }}
-          className="my-2"
+          className={inline ? 'align-middle' : 'my-2'}
         />
       );
     }
@@ -203,7 +216,10 @@ export function FieldControl({
             onChange(chosen);
             onCommit(chosen);
           }}
-          className="h-8 text-foreground"
+          className={cn(
+            'text-foreground',
+            inline ? 'inline-flex h-6 w-auto max-w-48 align-middle' : 'h-8',
+          )}
         />
       );
     }
@@ -214,7 +230,12 @@ export function FieldControl({
       const max = field.max ?? 100;
       const { value } = checkField(field, text);
       return (
-        <span className="flex h-8 min-w-0 items-center gap-2">
+        <span
+          className={cn(
+            'min-w-0 items-center',
+            inline ? 'inline-flex h-6 w-36 gap-1.5 align-middle' : 'flex h-8 gap-2',
+          )}
+        >
           <input
             {...common}
             type="range"
@@ -230,7 +251,15 @@ export function FieldControl({
             // No width of its own, which would hold its column open past the label's.
             className="w-0 min-w-0 flex-1 accent-primary"
           />
-          <span className="min-w-6 text-right text-foreground tabular-nums">{text}</span>
+          <span
+            className={cn(
+              'text-foreground tabular-nums',
+              // In a line, against the words after it; in a form, under the others' ends.
+              inline ? 'min-w-4' : 'min-w-6 text-right',
+            )}
+          >
+            {text}
+          </span>
         </span>
       );
     }

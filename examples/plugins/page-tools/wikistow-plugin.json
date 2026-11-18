@@ -3,11 +3,11 @@
   "name": "Page tools",
   "version": "0.1.0",
   "api": 1,
-  "description": "A page's word count and a reviewed stamp, today's date at the end of a draft, an index of a folder's pages, a quantity \u00d7 price block, and star ratings in the text.",
+  "description": "A page's word count and a reviewed stamp, today's date at the end of a draft, an index of a folder's pages, a quantity \u00d7 price block, star ratings in the text, and a done toggle and a status menu in a line of text.",
   "ui": "ui.js",
   "script": "script.js",
   "styles": ["page-tools.css"],
   "access": "write",
   "blocks": ["product"],
-  "inline": ["rating"]
+  "inline": ["rating", "done", "status"]
 }

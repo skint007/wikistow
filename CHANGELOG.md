@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Features
 
 - A plugin’s script blocks can show a toggle, a menu of choices, a date picker or a slider, each able to set one of the page’s properties.
+- Plugins can put a widget inside a sentence: a toggle, a menu, a slider or a date in a line of text that shows and sets one of the page’s properties, in the editor and while reading.
 
 ### Changes
 
@@ -16,6 +17,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Script blocks take `boolean`, `choice` and `date` fields, and number fields drawn as a slider (`slider`, `step`), bound to a property or written to their fence line. An app older than them refuses such a block, naming the field, and this app says a field kind it doesn't know may need a newer WikiStow. The calculator example has a `stay` block using all four. (#648)
 - Query tables: `=` and `!=` take a date to the precision it is written with, so `where: saved = 2026-11-13T09:30Z` matches the time a **saved** cell shows, and a day alone the whole day, for date properties too. A public copy's table takes the copied page's own time from the server rather than this device's clock. The `vault-tables` example has tests of its own. (#647)
+- Plugins' inline spans get the page's `properties` and `setProperty`, under a block's rules: the person's edit in the editor, and while reading for an editor who can publish, published with the page's other changes as one labelled version. While reading, a span sets properties only. Scripts can declare spans with `host.inline.register({ type, field })`, one field the app draws in the line, bound to the property the span's text names, else the field's own. An app older than them refuses such a script. The page-tools example has a `done` toggle and a `status` menu, and its `rating` stars can set the page's `rating`. (#650)
 
 ## 0.27.3-beta.1 - 2026-11-18
 

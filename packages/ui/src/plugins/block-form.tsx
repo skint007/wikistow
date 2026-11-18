@@ -85,7 +85,7 @@ function boundText(
  * value, as it can't be one.
  */
 export function readFields(
-  spec: BlockSpec,
+  spec: Pick<BlockSpec, 'fields'>,
   source: string,
   properties: BlockProperties = null,
 ): Record<string, ReadField> {
@@ -149,17 +149,27 @@ function useCalculation(calculate: Calculate, page: PageRef, values: Record<stri
   return results;
 }
 
-function BlockForm({
+/** What `useFields` is given: a block's props, as its form takes them. */
+type FieldsProps = Pick<BlockProps, 'source' | 'setSource' | 'properties' | 'setProperty'> & {
+  spec: Pick<BlockSpec, 'fields'>;
+};
+
+/**
+ * The fields of `spec` as the person sees and changes them: each one's
+ * text, read from the fence and the page's properties, and its value or
+ * what's wrong with it; `change` for each change, which rewrites an
+ * unbound field's line where the text can change, and `commit`, which
+ * sets a bound field's property. A script's block form lays them out, and
+ * a script's span draws its one (`inline-field.tsx`).
+ */
+export function useFields({
   spec,
-  calculate,
   source,
-  page,
   setSource,
   // Missing in props from an app older than them, as a view of ours never is.
   properties = null,
   setProperty = null,
-}: BlockProps & { spec: BlockSpec; calculate: Calculate }) {
-  const id = useId();
+}: FieldsProps) {
   const [first] = useState(() => readFields(spec, source, properties));
   const [texts, setTexts] = useState(() =>
     Object.fromEntries(Object.entries(first).map(([field, { text }]) => [field, text])),
@@ -239,8 +249,6 @@ function BlockForm({
       ),
     [checked],
   );
-  const results = useCalculation(calculate, page, values);
-
   const change = (field: string, text: string) => {
     typed.current.add(field);
     setTexts((now) => ({ ...now, [field]: text }));
@@ -273,6 +281,28 @@ function BlockForm({
       setRefused((now) => ({ ...now, [field]: reason }));
     }
   };
+
+  return { texts, checked, values, refused, list, change, commit };
+}
+
+function BlockForm({
+  spec,
+  calculate,
+  source,
+  page,
+  setSource,
+  properties,
+  setProperty,
+}: BlockProps & { spec: BlockSpec; calculate: Calculate }) {
+  const id = useId();
+  const { texts, checked, values, refused, list, change, commit } = useFields({
+    spec,
+    source,
+    setSource,
+    properties,
+    setProperty,
+  });
+  const results = useCalculation(calculate, page, values);
 
   return (
     <div className="flex flex-wrap items-start gap-3 rounded-control border bg-background p-3">

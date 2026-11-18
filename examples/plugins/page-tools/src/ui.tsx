@@ -142,15 +142,29 @@ function Product({ source, setSource }: BlockProps) {
 }
 
 // Inline code `plugin:page-tools/rating 3` shows three stars of five. In
-// the editor each star is a button, which sets the span's text.
+// the editor each star is a button, which sets the span's text. With no
+// text, `plugin:page-tools/rating` shows the page's `rating` property, and
+// its stars set it, in the editor and, for an editor who can publish, while
+// reading too (where `setText` is null).
 const STARS = [1, 2, 3, 4, 5];
 
-function Rating({ text, setText }: InlineProps) {
+const stars = (value: unknown) => Math.min(5, Math.max(0, Math.round(Number(value)) || 0));
+
+function Rating({ text, setText, properties, setProperty }: InlineProps) {
+  const own = text.trim() === '';
+  // `Rating: 4` too, as `setProperty('rating', …)` finds it.
   const [rating, setRating] = useState(() =>
-    Math.min(5, Math.max(0, Math.round(Number(text)) || 0)),
+    stars(
+      own
+        ? Object.entries(properties ?? {}).find(([key]) => key.toLowerCase() === 'rating')?.[1]
+        : text,
+    ),
   );
+  const set = own
+    ? setProperty && ((n: number) => setProperty('rating', n))
+    : setText && ((n: number) => setText(String(n)));
   const star = (n: number) => (n <= rating ? '★' : '☆');
-  if (!setText)
+  if (!set)
     return (
       <span className="page-tools-rating" role="img" aria-label={`Rated ${rating} of 5`}>
         {STARS.map(star).join('')}
@@ -167,7 +181,7 @@ function Rating({ text, setText }: InlineProps) {
           onClick={() => {
             // Its own change isn't drawn again, so it shows here first.
             setRating(n);
-            setText(String(n));
+            set(n);
           }}
         >
           {star(n)}
