@@ -662,7 +662,14 @@ export function inlineSpan(pluginId: string, type: string, text: string): string
  * field; outputs are never stored.
  */
 
-/** A number, entered as text: a value outside `min`–`max`, or not a number, is shown as invalid. */
+/**
+ * A number, entered as text: a value outside `min`–`max`, or not a number,
+ * is shown as invalid. With `slider`, it is drawn as a slider from `min` to
+ * `max`, which it then needs, moving by `step` (1 if not given, and no
+ * more than `max` − `min`), with its value beside it: a value between its
+ * steps is shown as invalid, and a `default` must be one of them. An app older than `slider` and `step` refuses a field
+ * with either.
+ */
 export type NumberField = {
   type: 'number';
   label: string;
@@ -670,6 +677,10 @@ export type NumberField = {
   default?: number | undefined;
   min?: number | undefined;
   max?: number | undefined;
+  /** Drawn as a slider, which needs `min` below `max`. */
+  slider?: boolean | undefined;
+  /** How far the slider moves at a time, more than 0: only with `slider`. */
+  step?: number | undefined;
   /** A property the field shows and sets (`BoundField`). */
   property?: string | undefined;
 };
@@ -683,28 +694,87 @@ export type TextField = {
   property?: string | undefined;
 };
 
+/**
+ * A toggle, on or off: written `true` or `false` (in any case), and off
+ * while it has no line and no `default`, or an empty value. Its value is a
+ * boolean. An app older than it refuses the block.
+ */
+export type BooleanField = {
+  type: 'boolean';
+  label: string;
+  default?: boolean | undefined;
+  /** A property the field shows and sets (`BoundField`), as `true` or `false`. */
+  property?: string | undefined;
+};
+
+/** One of a choice field's options: `value` is what is written, `label` what the person sees. */
+export type ChoiceOption = { value: string; label: string };
+
+/**
+ * One of `options`, picked from a menu (1 to 50 of them, each value its
+ * own, on one line, with no space at either end). A value that isn't one
+ * of them, or none without a `default`, is shown as invalid. Its value is
+ * the option's `value`. An app older than it refuses the block.
+ */
+export type ChoiceField = {
+  type: 'choice';
+  label: string;
+  options: readonly ChoiceOption[];
+  /** One of the options' values. */
+  default?: string | undefined;
+  /** A property the field shows and sets (`BoundField`), as text. */
+  property?: string | undefined;
+};
+
+/**
+ * A day, picked with the browser's date input and written `YYYY-MM-DD`, as
+ * a page's date properties are. A value with a time after the day (a
+ * property's `2026-11-18T09:30`) keeps its time when the day changes. Its
+ * value is the day, `YYYY-MM-DD`; anything else is shown as invalid. An app
+ * older than it refuses the block.
+ */
+export type DateField = {
+  type: 'date';
+  label: string;
+  /** A day, `YYYY-MM-DD`. Without one, it must be entered. */
+  default?: string | undefined;
+  /** A property the field shows and sets (`BoundField`), as its date text. */
+  property?: string | undefined;
+};
+
 /*
  * A field with `property` is bound to that page property, named by the
  * template-variable rule, as `setProperty` takes it: it shows the
  * property's value when the page has one, else its fence line or default,
  * and sets the property, never its fence line, once a valid value is
- * committed (blur or Enter), as a number for a number field. Where the
- * page can't change (`setProperty` is null), a value entered stays in the
- * form.
+ * committed (blur or Enter; a toggle or choice as it's picked, a slider as
+ * it's let go), as a number for a number field and `true` or `false` for a
+ * boolean. Where the page can't change (`setProperty` is null), a value
+ * entered stays in the form.
  */
 
-export type BlockField = NumberField | TextField;
+export type BlockField = NumberField | TextField | BooleanField | ChoiceField | DateField;
 
 /** What an output shows. Numbers must be finite. */
 export type OutputValue = number | string;
 
-/** The fields' values, typed by their declarations. */
+/** What a valid field holds: a boolean field's is a boolean, the others' as their outputs. */
+export type FieldValue = OutputValue | boolean;
+
+/** The fields' values, typed by their declarations: a choice's is one of its options' values. */
 export type FieldValues<Fields extends Record<string, BlockField>> = {
   readonly [Id in keyof Fields]: Fields[Id] extends NumberField
     ? number
-    : Fields[Id] extends TextField
-      ? string
-      : OutputValue;
+    : Fields[Id] extends BooleanField
+      ? boolean
+      : Fields[Id] extends { type: 'choice'; options: readonly { value: infer Value }[] }
+        ? Value
+        : Fields[Id] extends TextField | DateField
+          ? string
+          : // A field of several kinds: a boolean only if one of them is a toggle.
+            [Extract<Fields[Id], BooleanField>] extends [never]
+            ? OutputValue
+            : FieldValue;
 };
 
 /**
@@ -714,7 +784,13 @@ export type FieldValues<Fields extends Record<string, BlockField>> = {
  * show that they do.
  */
 export type CalculateValues<Fields extends Record<string, BlockField>> = FieldValues<Fields> &
-  Readonly<Record<string, OutputValue>>;
+  // Booleans among them only where a field is one, so other blocks' outputs read as before.
+  Readonly<
+    Record<
+      string,
+      [Extract<Fields[keyof Fields], BooleanField>] extends [never] ? OutputValue : FieldValue
+    >
+  >;
 
 export type BlockOutput<Fields extends Record<string, BlockField>> = {
   label: string;

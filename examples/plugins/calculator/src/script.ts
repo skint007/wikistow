@@ -16,6 +16,17 @@
 //   serves: 4
 //   amount: 500
 //   ```
+//
+// Fields come in other kinds too: a date, a choice, a toggle, and a number
+// drawn as a slider, as the stay's are.
+//
+//   ```plugin:calculator/stay
+//   arrive: 2026-12-20
+//   leave: 2026-12-23
+//   room: double
+//   breakfast: true
+//   guests: 2
+//   ```
 import { blockLanguage, defineScript } from '@wikistow/plugin-sdk';
 
 defineScript((host) => {
@@ -41,6 +52,42 @@ defineScript((host) => {
       scaled: {
         label: 'For your servings',
         calculate: ({ servings, serves, amount }) => Math.round((amount * servings) / serves),
+      },
+    },
+  });
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const nightly = { single: 80, double: 110 };
+  host.blocks.register({
+    type: 'stay',
+    fields: {
+      arrive: { type: 'date', label: 'Arrive' },
+      leave: { type: 'date', label: 'Leave' },
+      room: {
+        type: 'choice',
+        label: 'Room',
+        options: [
+          { value: 'single', label: 'Single' },
+          { value: 'double', label: 'Double' },
+        ],
+        default: 'double',
+      },
+      breakfast: { type: 'boolean', label: 'Breakfast' },
+      guests: { type: 'number', label: 'Guests', default: 2, min: 1, max: 6, slider: true },
+    },
+    outputs: {
+      nights: {
+        label: 'Nights',
+        calculate({ arrive, leave }) {
+          const nights = (Date.parse(leave) - Date.parse(arrive)) / DAY_MS;
+          if (nights < 1) throw new Error('Leave after you arrive');
+          return nights;
+        },
+      },
+      total: {
+        label: 'Total',
+        calculate: ({ nights, room, breakfast, guests }) =>
+          Number(nights) * (nightly[room] + (breakfast ? 15 * guests : 0)),
       },
     },
   });

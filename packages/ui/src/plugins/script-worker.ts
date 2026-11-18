@@ -3,6 +3,7 @@ import {
   type Disposer,
   type PageHandle,
   type PageRef,
+  type FieldValue,
   type PluginSettings,
 } from '@wikistow/plugin-sdk';
 import {
@@ -15,6 +16,7 @@ import {
   type ScriptEvent,
 } from '@wikistow/plugin-sdk/protocol';
 import { pluginError, type HostPages } from './pages';
+import { refusal } from './script-refusal';
 import type { EventOf } from './registry';
 
 /** What a script reaches of its settings: `host.settings` but its `on`, which it listens for as an event. */
@@ -60,7 +62,7 @@ export type ScriptRegistry = {
   /** A block it fills in: `calculate` gives its outputs from its valid fields' values. */
   block(
     spec: BlockSpec,
-    calculate: (page: PageRef, values: Record<string, number | string>) => Promise<Outputs>,
+    calculate: (page: PageRef, values: Record<string, FieldValue>) => Promise<Outputs>,
   ): Disposer;
   listen<E extends ScriptEvent['event']>(
     event: E,
@@ -201,12 +203,7 @@ export class ScriptWorker {
       message: (data) => {
         if (this.#worker !== worker) return;
         const message = WorkerMessage.safeParse(data);
-        if (!message.success) {
-          // Its first problem, such as a block's field ID the app doesn't take.
-          const [issue] = message.error.issues;
-          const where = issue ? ` (${[...issue.path, issue.message].join(': ')})` : '';
-          return this.#fail(`Its script sent a message the app doesn’t accept${where}.`);
-        }
+        if (!message.success) return this.#fail(refusal(data, message.error.issues));
         this.#receive(worker, message.data);
       },
       error: (message) => {
@@ -270,7 +267,7 @@ export class ScriptWorker {
    * so a calculation's second starts when the worker takes it, not while it
    * waits behind another block's.
    */
-  #calculate(type: string, page: PageRef, values: Record<string, number | string>) {
+  #calculate(type: string, page: PageRef, values: Record<string, FieldValue>) {
     const run = this.#calculating.then(async () => {
       // Its start has a budget of its own, which the calculation's mustn't spend.
       while (this.#worker && !this.#ready) await this.#started.promise;
