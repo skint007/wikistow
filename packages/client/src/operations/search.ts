@@ -570,10 +570,10 @@ export type SavedVersion = {
  * A save, given as it is written, needs nothing from the server. Links are
  * kept with `readLinks`, as `indexSpaces` keeps them.
  *
- * A space listed takes, over each version it finds, the change waiting on
- * this device typed over it, as it waits now (`waitingOver`), rather than
- * the saves noted for it: a save into the queue isn't lost for being noted
- * with its space's listing, or as that alone.
+ * In a space listed, a change waiting on this device goes in over the
+ * version it was typed over (`waitingOver`). It is read from the queue as
+ * it is now, not from the saves noted. So a save into the queue is kept
+ * when it was noted with its space's listing, or only as its space.
  */
 export async function updateIndex(
   ctx: ClientContext,
@@ -669,13 +669,12 @@ export async function updateIndex(
 }
 
 /**
- * The changes waiting on this device (`OfflineQueue.drafts`) for pages
- * `listed` found at the version each was typed over, as typed
- * (`WaitingText`), each at that version's time. So a listing takes what
- * waits now, whatever saves were noted, or noted only as its space: a change
- * discarded meanwhile isn't there, and one over a version someone else's
- * replaced gives way to that. Later in `listed`, each stands in for the page
- * listed (`PageIndex.with`).
+ * The changes waiting on this device (`OfflineQueue.drafts`) for the pages
+ * in `listed`, as typed (`WaitingText`), with the time of the version each
+ * was typed over. A page goes in only where the listing found that version.
+ * A change discarded since isn't in the queue, and one over a version that
+ * someone else's replaced gives way to theirs. Given after `listed`, each
+ * stands in for its page there (`PageIndex.with`).
  */
 async function waitingOver(
   ctx: ClientContext,
