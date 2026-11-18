@@ -104,14 +104,37 @@ const Value = z.union([z.number(), z.string().max(1000)]);
 export const PROPERTY_NAME = /^[\p{L}\p{N}][\p{L}\p{M}\p{N} _-]*$/u;
 const PropertyName = z.string().max(100).regex(PROPERTY_NAME);
 
-/** A field a block declares, as the host draws it. */
-export const BlockField = z.discriminatedUnion('type', [
+/** A day, `YYYY-MM-DD`, that is on the calendar. */
+const Day = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((day) => {
+    const date = new Date(`${day}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(day);
+  }, 'A day on the calendar');
+
+/** A choice's option value: what its fence line or property holds, so one line, trimmed. */
+const OptionValue = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine((value) => value === value.trim() && !/[\r\n]/.test(value), 'One line, unspaced');
+
+/**
+ * A field a block declares, as the host draws it. Each kind after `text`,
+ * and `slider` and `step`, came with #402: an app older than them refuses
+ * a block that uses one, and the SDK leaves out keys a field doesn't set
+ * (`declaredField`), so a field without them still reaches it.
+ */
+const FieldKinds = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('number'),
     label: Label,
     default: z.number().optional(),
     min: z.number().optional(),
     max: z.number().optional(),
+    slider: z.boolean().optional(),
+    step: z.number().positive().optional(),
     property: PropertyName.optional(),
   }),
   z.strictObject({
@@ -120,7 +143,53 @@ export const BlockField = z.discriminatedUnion('type', [
     default: z.string().max(1000).optional(),
     property: PropertyName.optional(),
   }),
+  z.strictObject({
+    type: z.literal('boolean'),
+    label: Label,
+    default: z.boolean().optional(),
+    property: PropertyName.optional(),
+  }),
+  z.strictObject({
+    type: z.literal('choice'),
+    label: Label,
+    options: z
+      .array(z.strictObject({ value: OptionValue, label: Label }))
+      .min(1)
+      .max(50)
+      .readonly(),
+    default: OptionValue.optional(),
+    property: PropertyName.optional(),
+  }),
+  z.strictObject({
+    type: z.literal('date'),
+    label: Label,
+    default: Day.optional(),
+    property: PropertyName.optional(),
+  }),
 ]);
+type FieldKinds = z.infer<typeof FieldKinds>;
+
+export const BlockField = FieldKinds.superRefine((field, context) => {
+  const problem = fieldProblem(field);
+  if (problem) context.addIssue({ code: 'custom', message: problem });
+});
+
+/** What is wrong with a field beyond its keys' own checks, if anything. */
+function fieldProblem(field: FieldKinds): string | null {
+  if (field.type === 'number') {
+    const { min, max, slider, step } = field;
+    if (step !== undefined && !slider) return 'Only a slider has a step';
+    if (slider && (min === undefined || max === undefined || min >= max))
+      return 'A slider needs a min below its max';
+  }
+  if (field.type === 'choice') {
+    const values = field.options.map(({ value }) => value);
+    if (new Set(values).size !== values.length) return 'Each option needs a value of its own';
+    if (field.default !== undefined && !values.includes(field.default))
+      return 'Its default must be one of its options';
+  }
+  return null;
+}
 
 /** A block a script declares: its fields and outputs, without the code. */
 export const BlockSpec = z
@@ -196,7 +265,7 @@ export type HostMessage =
             kind: 'calculate';
             block: string;
             page: PageRef;
-            values: Record<string, number | string>;
+            values: Record<string, number | string | boolean>;
           };
     }
   | { type: 'answer'; call: number; ok: true; value: unknown }
