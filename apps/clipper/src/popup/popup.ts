@@ -85,7 +85,7 @@ function call<K extends CallName>(name: K, args: Calls[K]['args']): Promise<Call
 }
 
 let tabId: number | undefined;
-let probed: Probe = { url: '', title: '', selection: null };
+let probed: Probe = { url: '', title: '', selection: null, frameId: 0 };
 let view: View | null = null;
 let clip: ClipView | null = null;
 /** The folder the clip goes to, and those offered for the search typed. */
@@ -371,6 +371,7 @@ form.addEventListener('submit', (event) => {
   saving = true;
   void call('save', {
     tabId,
+    frameId: probed.frameId,
     form: {
       mode: mode(),
       title: titleInput.value,

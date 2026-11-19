@@ -41,8 +41,12 @@ export type Form = {
   folder: Folder;
 };
 
-/** The tab, as the popup offers to clip it. `selection` is null where no script may run. */
-export type Probe = { url: string; title: string; selection: string | null };
+/**
+ * The tab, as the popup offers to clip it. `selection` is null where no
+ * script may run. `frameId` is the frame it's in: the page's own (0), or
+ * one embedded in it, which a selection clip is taken from.
+ */
+export type Probe = { url: string; title: string; selection: string | null; frameId: number };
 
 export type Folders =
   | { recent: Folder[]; matches: Folder[] }
@@ -58,8 +62,11 @@ export type Calls = {
   open: { args: object; result: { view: View; failed: string | null } };
   folders: { args: { query: string }; result: Folders };
   probe: { args: { tabId: number }; result: Probe };
-  /** Answered once sent; how it goes comes as `clip` pushes. */
-  save: { args: { tabId: number; form: Form }; result: null };
+  /**
+   * Answered once sent; how it goes comes as `clip` pushes. A selection,
+   * or a link's selected text, comes from the frame `frameId`, as probed.
+   */
+  save: { args: { tabId: number; form: Form; frameId: number }; result: null };
   show: { args: { spaceId: string; pageId: string }; result: { shown: boolean } };
 };
 export type CallName = keyof Calls;
