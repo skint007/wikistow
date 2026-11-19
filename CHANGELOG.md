@@ -9,6 +9,11 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - The visual editor's fidelity check reads each run of text by the marks on it, not by how they nest, as the editor's guard on each edit does: a page whose marks overlap only partly, such as `~~*a* b~~`, no longer stays in source mode once the editor writes them nested another way, or moves a mark off a space between them. Links still count one by one, so one written as two still differs. (#659)
+- Text in a colour just inside a link is underlined in its colour, in the reader and on public pages, as the visual editor shows it, rather than in the link's colour. The highlight and text colour marks refuse a colour the theme doesn't have. (#655)
+
+#### Development
+
+- The browser tests start the live project's HTTPS server, which needs `openssl` and a second database, only when the live project runs, so `--project chromium` leaves it out. (#656)
 
 ## 0.28.0 - 2026-11-19
 

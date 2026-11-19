@@ -16,6 +16,11 @@ import { isColor, type ColorName } from '@wikistow/client/markdown';
 export const HIGHLIGHT = 'highlight';
 export const TEXT_COLOR = 'text_color';
 
+// ProseMirror rejects an attribute only when its `validate` throws.
+const theColor = (value: unknown) => {
+  if (!isColor(value)) throw new RangeError(`Not a theme colour: ${String(value)}`);
+};
+
 const colorOf = (dom: HTMLElement | string) => {
   const color = dom instanceof HTMLElement ? dom.dataset['color'] : undefined;
   return isColor(color) ? color : null;
@@ -24,7 +29,12 @@ const colorOf = (dom: HTMLElement | string) => {
 /** A highlight, with a theme colour or none. */
 export const highlightSchema = $markSchema(HIGHLIGHT, () => ({
   attrs: {
-    color: { default: null, validate: (value: unknown) => value === null || isColor(value) },
+    color: {
+      default: null,
+      validate: (value: unknown) => {
+        if (value !== null) theColor(value);
+      },
+    },
   },
   parseDOM: [{ tag: 'mark', getAttrs: (dom) => ({ color: colorOf(dom) }) }],
   toDOM: (mark) => [
@@ -52,7 +62,7 @@ export const highlightSchema = $markSchema(HIGHLIGHT, () => ({
 
 /** Text in a theme colour. */
 export const textColorSchema = $markSchema(TEXT_COLOR, () => ({
-  attrs: { color: { validate: isColor } },
+  attrs: { color: { validate: theColor } },
   parseDOM: [
     {
       tag: 'span[data-color]',
