@@ -296,9 +296,10 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   }
   /** The screenshot, asked for with the shade and hint off the page: the box is drawn once it's taken. */
   function begin() {
+    shotTaken = false;
+    style(box, { display: 'none' });
     style(shade, { display: 'none' });
     style(hint, { display: 'none' });
-    shotTaken = false;
     const taking = shoot(++presses);
     shot = taking;
     void taking.then(() => {
@@ -339,6 +340,7 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     start = null;
     area = null;
     shot = null;
+    shotTaken = false;
     style(box, { display: 'none' });
     style(shade, { display: 'block' });
     style(hint, { display: 'block' });

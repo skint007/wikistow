@@ -831,6 +831,15 @@ test('an area matches what was drawn on a page with a CSS zoom of its own', asyn
   await page.evaluate(() => {
     document.querySelector<HTMLElement>('#box > div')!.style.background = '#ff00ff';
   });
+  // A drag let go back where it started, once its box was drawn, isn't an
+  // area, and leaves nothing of the overlay's in the next one's screenshot.
+  await page.mouse.move(40, 40);
+  await page.mouse.down();
+  await page.mouse.move(300, 300, { steps: 5 });
+  // Long enough for the box to be drawn; if not, the drag after is tested alone.
+  await page.waitForTimeout(500);
+  await page.mouse.move(41, 41, { steps: 5 });
+  await page.mouse.up();
   await page.mouse.move(80, 160);
   await page.mouse.down();
   await page.mouse.move(200, 220, { steps: 5 });
