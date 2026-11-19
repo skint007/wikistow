@@ -308,6 +308,8 @@ const SNAPSHOT_BYTES = 256 * 1024;
 // A publish holds the saver's saves this long, at most once a minute for each person.
 const PUBLISH_HOLD_MS = 10_000;
 const HOLD_EVERY_MS = 60_000;
+// How often the saver looks at the page's latest publication, for one made outside the session.
+const PUBLICATION_MS = 60_000;
 // A base's own client: one no join derives (53 bits, all set), and which never writes.
 const BASE_CLIENT = 0x1fffffffffffff;
 
@@ -337,6 +339,9 @@ type Held = {
 };
 
 type Outgoing = { message: LiveMessage; covers?: number };
+
+/** A change made in a copy of the document; `again` on a newer head. Whether it was made. */
+type Make = (document: LiveDocument, again: boolean) => boolean;
 
 /** The press of **Publish** in a session (`LiveParticipant.press`), for `publish`. */
 export type LivePress = { readonly __press: unique symbol };
@@ -734,6 +739,7 @@ export class LiveParticipant {
   #publishedFrom: RevisionId | null = null;
   #publication: Promise<void> | null = null;
   #publicationAsked = 0;
+  #publicationAt = 0;
 
   // Stored messages: the last position seen, those held, and the highest
   // position up to which every stored message has been taken.
@@ -1210,7 +1216,9 @@ export class LiveParticipant {
       for (let tries = 0; ; tries++) {
         try {
           const published = await publish(draft, check);
-          this.#published(draft, this.#drafts.get(draft)?.state ?? null);
+          // A look at the page's publications under way may have missed this one: it doesn't count.
+          this.#publicationAsked++;
+          this.#published(draft, this.#drafts.get(draft) ?? null);
           return published;
         } catch (error) {
           if (!(error instanceof ApiError) || error.code !== 'stale-head' || tries >= 2)
@@ -1226,6 +1234,8 @@ export class LiveParticipant {
       this.#publishingSeen(key(this.#me), this.#me.senderId, false);
       this.#presenceDirty = true;
       this.#schedule();
+      // A save that waited for the publish goes now.
+      this.#scheduleSave();
     }
   }
 
@@ -1257,6 +1267,7 @@ export class LiveParticipant {
     try {
       // What this app typed up to the press goes out before its Saved notice names the draft.
       await this.flush();
+      await this.#knowPublished();
       const revisionId = newId(RevisionId);
       const people = this.#with(head);
       const table = head.payload.extensions[LINKS_NAMESPACE];
@@ -1361,6 +1372,7 @@ export class LiveParticipant {
     // given a few seconds, as the head the stream names may still be on its way.
     let headId: RevisionId | null = null;
     let head: SessionDraft | undefined;
+    await this.#knowPublished();
     for (let tries = 0; tries < 10; tries++) {
       if (!this.#keyed()) return false;
       await this.flush();
@@ -1514,7 +1526,13 @@ export class LiveParticipant {
   async #commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
     // Text given whole is made a change of the text as it is now, anchored
     // in it, so whatever others type meanwhile, around it, stays.
-    const make = typeof change === 'function' ? change : this.#anchored(change);
+    const make: Make =
+      typeof change === 'function'
+        ? (document) => {
+            change(document);
+            return true;
+          }
+        : this.#anchored(change);
     if (!this.#keyed()) return false;
     // One save at a time: the copy's waits for autosave's, and autosave for it.
     while (this.#saving) await this.#saving.catch(() => false);
@@ -1535,7 +1553,7 @@ export class LiveParticipant {
   }
 
   // The copy's change, saved on the head; if another app saved first, on the new head once more.
-  async #commitCopy(make: (document: LiveDocument) => void): Promise<boolean> {
+  async #commitCopy(make: Make): Promise<boolean> {
     const further = newId(JoinId);
     const ctx = this.#ports.ctx;
     const clientId = liveClientId({
@@ -1567,6 +1585,7 @@ export class LiveParticipant {
       for (let waits = 0; waits < (tries === 0 ? 1 : 10); waits++) {
         if (waits > 0) await sleep(300, this.#abort.signal);
         if (!this.#keyed()) return giveUp();
+        await this.#knowPublished();
         await this.flush();
         await this.#ensureHead();
         headId = this.#head;
@@ -1592,9 +1611,10 @@ export class LiveParticipant {
       copy.doc.on('update', (update: Uint8Array, origin: unknown) => {
         if (origin === LOCAL_ORIGIN) updates.push(update);
       });
-      if (copy.edit(() => make(copy), LOCAL_ORIGIN).length > 0 || updates.length === 0) {
-        return giveUp();
-      }
+      // Made again on a newer head, only where what it replaces is still as it was.
+      let placed = true;
+      const misplaced = copy.edit(() => (placed = make(copy, tries > 0)), LOCAL_ORIGIN);
+      if (!placed || misplaced.length > 0 || updates.length === 0) return giveUp();
       const update = Y.mergeUpdates(updates);
       let result: { revisionId: RevisionId; payload: PagePayload };
       const revisionId = newId(RevisionId);
@@ -1670,8 +1690,11 @@ export class LiveParticipant {
   }
 
   // A change of the document as it is now, to be made later in a copy of it:
-  // each text's smallest change, its edges held as relative positions.
-  #anchored({ texts = {}, entries = [] }: DocumentChange): (document: LiveDocument) => void {
+  // each text's smallest change, its edges held as relative positions, and
+  // the text it replaces. Made `again`, on a head that moved on since, it is
+  // made only where each replaced text is still there as it was: never over
+  // typing that went in since, nor twice, as for a rename another app made.
+  #anchored({ texts = {}, entries = [] }: DocumentChange): Make {
     const spans = (Object.entries(texts) as [TextRoot, string][]).flatMap(([name, target]) => {
       const text = this.document.text(name);
       // Each run of lines that differs, so typing between them stays where it goes.
@@ -1682,10 +1705,11 @@ export class LiveParticipant {
           span.remove === 0
             ? from
             : Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
-        return { name, span, from, to };
+        const was = text.toJSON().slice(span.from, span.from + span.remove);
+        return { name, span, from, to, was };
       });
     });
-    return (document) => {
+    return (document, again) => {
       // Where each was can't be found: those texts whole, as given.
       const whole = new Set<TextRoot>();
       const placed = spans.map(({ name, span, from, to }) => {
@@ -1697,6 +1721,13 @@ export class LiveParticipant {
         }
         return { name, span, start: start?.index ?? 0, end: end?.index ?? 0 };
       });
+      if (again) {
+        const moved = placed.some(
+          ({ name, start, end }, at) =>
+            whole.has(name) || document.text(name).toJSON().slice(start, end) !== spans[at]?.was,
+        );
+        if (moved) return false;
+      }
       // From the end of each text, so each place stays where it was found.
       for (const { name, span, start, end } of placed.toReversed()) {
         if (whole.has(name)) continue;
@@ -1706,6 +1737,7 @@ export class LiveParticipant {
       }
       for (const name of whole) changeText(document.text(name), texts[name] ?? '');
       applyChange(document, { entries });
+      return true;
     };
   }
 
@@ -2330,11 +2362,9 @@ export class LiveParticipant {
       if (opened.kind === 'update') decoded = decodeUpdate(opened.content);
       else if (opened.kind === 'snapshot') {
         const read = readSnapshot(opened.content);
-        // One already in the session never applies a later snapshot: a newer format changes nothing here.
-        decoded =
-          read.kind === 'newer-format'
-            ? { structs: [], deletes: new Map() }
-            : decodeUpdate(read.state);
+        // One already in the session never applies a later snapshot; a newer format means a newer app.
+        if (read.kind === 'newer-format') return this.#updateApp();
+        decoded = decodeUpdate(read.state);
       }
     } catch (error) {
       if (error instanceof CryptoError) {
@@ -3717,27 +3747,49 @@ export class LiveParticipant {
   }
 
   /**
-   * A publication was made from the draft `from`, which holds `state`:
-   * saves on it carry none of its `with`, and those whose typing it holds
-   * all of count no longer. Without its state, everyone typed still counts.
+   * A publication was made from the draft `from`, as `published` holds it
+   * (null when this app can't tell): saves on it carry none of its `with`,
+   * and those whose typing its state holds all of count no longer, so
+   * without it everyone typed still counts. Drafts saved on it before this
+   * app knew carried its `with`: of those it names, only people whose typing
+   * the session took since stay.
    */
-  #published(from: RevisionId, state: LiveState | null): void {
+  #published(from: RevisionId, published: Pick<SessionDraft, 'state' | 'with'> | null): void {
     this.#publishedFrom = from;
-    if (!state) return;
+    if (!published) return;
     for (const [person, changed] of this.#typed) {
-      if (holdsState(state, changed)) this.#typed.delete(person);
+      if (holdsState(published.state, changed)) this.#typed.delete(person);
     }
+    const before = new Set(published.with);
+    if (before.size === 0) return;
+    for (const draft of this.#drafts.values()) {
+      if (draft.revisionId === from || !this.#descends(draft.revisionId, from)) continue;
+      draft.with = draft.with.filter((id) => !before.has(id) || this.#typed.has(id));
+    }
+  }
+
+  // Whether the draft `revision` was saved on `ancestor`, or on a draft that was, by signed `basedOn`.
+  #descends(revision: RevisionId, ancestor: RevisionId): boolean {
+    let at = this.#basedOn.get(revision) ?? null;
+    for (let steps = 0; at && steps < 256; steps++) {
+      if (at === ancestor) return true;
+      at = this.#basedOn.get(at) ?? null;
+    }
+    return false;
   }
 
   /**
    * Ask which draft the page's latest publication was made from: as this
-   * app joins, and once someone else's publish is over, as their presence
-   * stops saying so or their join goes. Only the latest answer counts.
+   * app joins, once someone else's publish is over, as their presence stops
+   * saying so or their join goes, and before the saver's save once a minute.
+   * Only the latest answer counts, and none asked before a publish of this
+   * app's own.
    */
   #learnPublished(): Promise<void> {
     const ports = this.#ports;
     if (!ports.published || this.#status.state.kind !== 'live') return Promise.resolve();
     const asked = ++this.#publicationAsked;
+    this.#publicationAt = Date.now();
     const run = (async () => {
       let from: RevisionId | null;
       try {
@@ -3746,22 +3798,28 @@ export class LiveParticipant {
         return;
       }
       if (!from || asked !== this.#publicationAsked || from === this.#publishedFrom) return;
-      let state = this.#drafts.get(from)?.state ?? null;
-      if (!state) {
+      let published: Pick<SessionDraft, 'state' | 'with'> | null = this.#drafts.get(from) ?? null;
+      if (!published) {
         try {
           const draft = await this.#ports.openDraft(from);
-          state = sessionState(draft.payload, draft.revisionId, this.sessionId);
+          const state = sessionState(draft.payload, draft.revisionId, this.sessionId);
+          if (state) published = { state, with: withOf(draft.payload) };
         } catch {
           // Not one this app can open: everyone it saw typing still counts.
         }
       }
-      if (asked === this.#publicationAsked) this.#published(from, state);
+      if (asked === this.#publicationAsked) this.#published(from, published);
     })();
     const tracked: Promise<void> = run.finally(() => {
       if (this.#publication === tracked) this.#publication = null;
     });
     this.#publication = tracked;
     return tracked;
+  }
+
+  // Once any look at the page's latest publication under way is done.
+  async #knowPublished(): Promise<void> {
+    while (this.#publication) await this.#publication;
   }
 
   /** Who saves (section 5.10, **Saving**): the first listed present join that's visible and not failing, else the first not failing. */
@@ -3818,6 +3876,12 @@ export class LiveParticipant {
       this.#scheduleSave();
       return false;
     }
+    // This app's own publish is under way: its publication counts once done, so a save waits.
+    if (this.#publishing && !force && !waited) {
+      this.#retryAt = Math.max(this.#retryAt, Date.now() + DEBOUNCE_MS);
+      this.#scheduleSave();
+      return false;
+    }
     const headId = this.#head;
     const head = headId ? this.#drafts.get(headId) : undefined;
     if (!headId || !head) {
@@ -3833,8 +3897,11 @@ export class LiveParticipant {
       return true;
     }
     await this.flush();
-    // Who edited goes by the latest publication, which a publish just over may have made.
-    if (this.#publication) await this.#publication;
+    // Who edited goes by the latest publication: one a publish just over may
+    // have made, or, looked at once a minute, one made outside the session.
+    if (Date.now() - this.#publicationAt >= PUBLICATION_MS) void this.#learnPublished();
+    await this.#knowPublished();
+    if (this.#status.state.kind !== 'live' || this.#stopSending) return false;
     const stateBytes = this.document.stateBytes();
     const savedState = this.document.state();
     const covers = this.#covers;

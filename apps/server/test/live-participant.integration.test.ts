@@ -191,6 +191,30 @@ describe('a file’s change while another app saves (#492)', () => {
     expect(mine.status().state).toEqual({ kind: 'live' });
     expect(theirs.status().state).toEqual({ kind: 'live' });
   });
+
+  it('never saves again over text another app changed meanwhile', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const theirs = await join(editor, page);
+    let raced = false;
+    const mine = await join(owner, page, (ports) => {
+      const save = ports.saveDraft.bind(ports);
+      ports.saveDraft = async (input) => {
+        if (!raced) {
+          // Another app saves first, with typing inside the text this change replaces.
+          raced = true;
+          theirs.edit((document) => document.text('body').insert('draft wo'.length, 'X'));
+          expect(await theirs.saveNow()).toBe(true);
+        }
+        return save(input);
+      };
+    });
+    await expect.poll(() => theirs.status().people.length).toBe(1);
+    expect(await mine.commitOwn({ texts: { body: 'draft pages' } })).toBe(false);
+    expect(raced).toBe(true);
+    await expect.poll(() => body(mine)).toBe('draft woXrds');
+    expect(body(theirs)).toBe('draft woXrds');
+    expect(mine.status().state).toEqual({ kind: 'live' });
+  });
 });
 
 describe('a newer format (#504)', () => {
