@@ -109,9 +109,8 @@ function obsidianSyntax(tree: Root, body: string): Unkept | null {
  */
 export const withLf = (markdown: string) => markdown.replace(/\r\n?/g, '\n');
 
-// Marks as Markdown writes them, around text, links among them: two around
-// exactly the same text show the same in either order (`==**a**==`,
-// `**==a==**`, `[==a==](u)`).
+// Marks as Markdown writes them: nodes around the text they cover, links
+// among them.
 const NESTING = new Set<string>([
   'link',
   'emphasis',
@@ -122,76 +121,99 @@ const NESTING = new Set<string>([
   'textColor',
 ]);
 
-// A tree as `inOneOrder` sees it.
-type Tree = { type: string; color?: string; value?: string; children?: Tree[] };
+// A tree as `byMarks` sees it: its own, and those it makes.
+type Tree = {
+  type: string;
+  value?: string;
+  children?: Tree[];
+  position?: unknown;
+  runs?: Run[];
+};
 
-// A colour's HTML, which the editor shows as one where two of a colour meet.
-const COLORED = new Set(['textColor', 'colorHighlight']);
+// Inline content as `byMarks` compares it: text with the marks on it, or
+// an inline node not text, with its marks. Each mark is named by its type
+// and what it holds (a link's address, a colour), a link by which of its
+// block's links it is too.
+type Run = { text: string; marks: string } | { node: Tree; marks: string };
 
-/** `children`, each colour's HTML beside one of the same colour made one, text where they meet joined. */
-function joined(children: Tree[]): Tree[] {
-  const out: Tree[] = [];
-  for (const child of children) {
-    const last = out.at(-1);
-    const same = last && COLORED.has(child.type) && last.type === child.type;
-    if (!last || !same || last.color !== child.color) {
-      out.push(child);
-      continue;
-    }
-    const inside = [...(last.children ?? [])];
-    for (const next of child.children ?? []) {
-      const end = inside.at(-1);
-      if (end?.type === 'text' && next.type === 'text')
-        inside[inside.length - 1] = { ...end, value: `${end.value ?? ''}${next.value ?? ''}` };
-      else inside.push(next);
-    }
-    out[out.length - 1] = { ...last, children: inside };
-  }
-  return out;
-}
-const nestingKey = (node: Tree) => `${node.type}:${node.color ?? ''}`;
-const byKey = (a: Tree, b: Tree) => nestingKey(a).localeCompare(nestingKey(b));
+// The nodes that say a node's children are inline content.
+const INLINE = new Set([...NESTING, 'text', 'inlineCode', 'break']);
+const INLINE_PARENTS = new Set(['paragraph', 'heading', 'tableCell']);
+
+// Spaces and line breaks, as the visual editor shows them (`shownOf`).
+const SPACES = /([ \t\r\n]+)/;
+const BLANK = /^[ \t\r\n]+$/;
+const named = (marks: readonly string[]) => JSON.stringify([...marks].sort());
 
 /**
- * `tree`, each run of marks one inside the other around the same text put
- * in one order, by type, so the order they're written in says nothing, and
- * a colour's HTML beside one of its colour made one (`joined`). In place,
- * without recursion.
+ * `children`, inline content, as runs of text each with the set of marks
+ * on it, so how the marks nest says nothing: `~~*a* b~~` reads as
+ * `*~~a~~*~~ b~~`. Spaces and line breaks have none, as the editor shows
+ * them; text beside text with the same marks is one run, so a colour's
+ * HTML beside one of its colour is one, as the editor shows it. A link is
+ * numbered in turn, so one written as two, or two as one, differs. Code
+ * is a mark on its text, as it is in the editor. Also the inline nodes not
+ * text, whose children may hold inline content of their own.
  */
-function inOneOrder(tree: Root): Root {
-  const stack: Tree[] = [tree];
-  for (let node = stack.pop(); node; node = stack.pop()) {
-    if (node.children) node.children = joined(node.children);
-    const children = node.children ?? [];
-    for (const [i, child] of children.entries()) {
-      // The marks around the same text, outermost first, and what they hold.
-      const chain: Tree[] = [];
-      let content = [child];
-      for (let at = child; NESTING.has(at.type) && at.children;) {
-        chain.push(at);
-        content = at.children;
-        const [only] = at.children;
-        if (at.children.length !== 1 || !only) break;
-        at = only;
-      }
-      if (chain.length < 2) {
-        stack.push(child);
-        continue;
-      }
-      const shells = chain.map((wrap) => ({ ...wrap })).sort(byKey);
-      shells.forEach((shell, k) => (shell.children = shells[k + 1] ? [shells[k + 1]!] : content));
-      children[i] = shells[0] ?? child;
-      // The innermost, whose children may start runs of their own.
-      stack.push(shells.at(-1) ?? child);
+function runsOf(children: readonly Tree[]): { runs: Run[]; atoms: Tree[] } {
+  const runs: Run[] = [];
+  const atoms: Tree[] = [];
+  let links = 0;
+  const add = (text: string, marks: readonly string[]) => {
+    const last = runs.at(-1);
+    if (last && 'text' in last && last.marks === named(marks)) last.text += text;
+    else runs.push({ text, marks: named(marks) });
+  };
+  const stack = children.map((node) => ({ node, marks: [] as string[] })).reverse();
+  for (let at = stack.pop(); at; at = stack.pop()) {
+    const { node, marks } = at;
+    if (NESTING.has(node.type) && node.children) {
+      const { children: inside, position: _position, ...mark } = node;
+      const name = JSON.stringify(node.type === 'link' ? { ...mark, link: ++links } : mark);
+      const within = [...marks, name];
+      // A mark around nothing, as `[](u)`, is there all the same.
+      if (inside.length === 0) runs.push({ node: { type: 'empty' }, marks: named(within) });
+      stack.push(...inside.map((child) => ({ node: child, marks: within })).reverse());
+    } else if (node.type === 'text' || node.type === 'inlineCode') {
+      const code = node.type === 'inlineCode' ? [...marks, 'inlineCode'] : marks;
+      for (const part of (node.value ?? '').split(SPACES))
+        if (BLANK.test(part)) add(part, []);
+        else if (part) add(part, code);
+    } else if (node.type === 'break') {
+      runs.push({ node: { type: 'break' }, marks: named([]) });
+    } else {
+      runs.push({ node, marks: named(marks) });
+      atoms.push(node);
     }
+  }
+  return { runs, atoms };
+}
+
+/**
+ * `tree`, the inline content of each of its nodes as runs of text by the
+ * marks on them (`runsOf`). In place, without recursion.
+ */
+function byMarks(tree: Root): Root {
+  const stack: Tree[] = [tree as Tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    const { children } = node;
+    if (!children) continue;
+    if (!INLINE_PARENTS.has(node.type) && !children.some((child) => INLINE.has(child.type))) {
+      stack.push(...children);
+      continue;
+    }
+    const { runs, atoms } = runsOf(children);
+    delete node.children;
+    node.runs = runs;
+    stack.push(...atoms);
   }
   return tree;
 }
 
 // What a tree says, without where each node sat, which line breaks it has,
-// or the order of marks around the same text.
+// or how its marks nest.
 const meaning = (tree: Root) =>
-  JSON.stringify(inOneOrder(tree), (key, value: unknown) =>
+  JSON.stringify(byMarks(tree), (key, value: unknown) =>
     key === 'position' ? undefined : typeof value === 'string' ? withLf(value) : value,
   );
 
