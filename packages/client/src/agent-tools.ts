@@ -706,6 +706,8 @@ function failure(error: unknown): Applied {
     if (error.status === 403 || error.status === 404) return REFUSED;
     return { status: 'failed', message: error.message };
   }
+  // This app refuses a write to a share the page has left, as the server does (`onlyThere`).
+  if (error instanceof CryptoError && error.code === 'region-mismatch') return ACCESS_CHANGED;
   if (error instanceof CryptoError) return { status: 'failed', message: error.message };
   return { status: 'failed', message: error instanceof Error ? error.message : 'It failed.' };
 }

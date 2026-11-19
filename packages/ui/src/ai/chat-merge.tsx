@@ -1,6 +1,6 @@
 import type { PagePayload } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { PLAIN, useClient } from '../vault/store';
 import { MergeView } from '../page/merge/merge-view';
@@ -10,16 +10,14 @@ import { AgentChat, useChatStore, type Merging } from './chat';
 /**
  * Merge… for the chat's approved edits, wherever the chat may be shown:
  * kept apart from the panel, so it opens with the panel closed and lasts
- * while the panel moves between a column and a sheet. `layout` names how
- * the chat is shown; when it changes, Merge… goes back on top of a sheet
- * opened since. Rendered after the panel, so it does so after the sheet opens.
+ * while the panel moves between a column and a sheet.
  */
-export function ChatMerges({ layout }: { layout: string }) {
+export function ChatMerges() {
   const { chat } = useChatStore();
-  return chat instanceof AgentChat ? <AgentMerges chat={chat} layout={layout} /> : null;
+  return chat instanceof AgentChat ? <AgentMerges chat={chat} /> : null;
 }
 
-function AgentMerges({ chat, layout }: { chat: AgentChat; layout: string }) {
+function AgentMerges({ chat }: { chat: AgentChat }) {
   const { merging, agent } = useSyncExternalStore(chat.subscribe, chat.state);
   useEffect(() => chat.holdMerges(), [chat]);
   if (!merging) return null;
@@ -27,11 +25,21 @@ function AgentMerges({ chat, layout }: { chat: AgentChat; layout: string }) {
     <ChatMerge
       key={merging.ask}
       merging={merging}
-      layout={layout}
       agentName={agent.name}
       onSettle={(payload) => chat.settleMerge(payload)}
     />
   );
+}
+
+/** Whether the chat's Merge… is open now. */
+export function useMergeOpen(): boolean {
+  const { chat } = useChatStore();
+  const agent = chat instanceof AgentChat ? chat : null;
+  const subscribe = useCallback(
+    (listener: () => void) => agent?.subscribe(listener) ?? (() => {}),
+    [agent],
+  );
+  return useSyncExternalStore(subscribe, () => (agent?.state().merging ?? null) !== null);
 }
 
 /**
@@ -45,14 +53,11 @@ export function ChatMerge({
   merging,
   agentName,
   onSettle,
-  layout = '',
 }: {
   merging: Merging;
   agentName: string;
   onSettle: (payload: PagePayload | null) => void;
-  layout?: string;
 }) {
-  const inside = useRef<HTMLDivElement>(null);
   // Once: Escape closes the dialog, and its close event, a task later, would close it again.
   const settled = useRef(false);
   const settle = (payload: PagePayload | null) => {
@@ -60,16 +65,6 @@ export function ChatMerge({
     settled.current = true;
     onSettle(payload);
   };
-  const shownIn = useRef(layout);
-  useEffect(() => {
-    if (shownIn.current === layout) return;
-    shownIn.current = layout;
-    // Opened again at once, it goes on top; its close event, a task later, finds it open and is let be.
-    const dialog = inside.current?.closest('dialog');
-    if (!dialog?.open) return;
-    dialog.close();
-    dialog.showModal();
-  }, [layout]);
   const ctx = useClient();
   const queryClient = useQueryClient();
   const { opened } = merging;
@@ -82,7 +77,6 @@ export function ChatMerge({
     <Dialog open onOpenChange={(open) => !open && settle(null)}>
       <DialogContent dialogClassName="sm:max-w-3xl" closesOnBackdrop={false}>
         <DialogTitle className="sr-only">Merge {agentName}’s edit</DialogTitle>
-        <div ref={inside} hidden />
         {theirs ? (
           <MergeView
             merge={opened.merge}

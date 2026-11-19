@@ -15,9 +15,11 @@ import {
   type UnlockedVault,
 } from '@wikistow/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, useEffect, useRef, type ReactNode } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, expect, it, vi } from 'vite-plus/test';
+import { afterAll, afterEach, expect, it, vi } from 'vite-plus/test';
+import { page } from 'vite-plus/test/browser/context';
+import { ChatColumn } from '../src/ai/chat-column.tsx';
 import { ChatMerge, ChatMerges } from '../src/ai/chat-merge.tsx';
 import { AgentChat, chatStore, type Merging } from '../src/ai/chat.ts';
 import { vaultStore } from '../src/vault/store.ts';
@@ -65,6 +67,7 @@ vi.mock('@wikistow/client', async (importOriginal) => {
     },
   };
 });
+vi.mock('../src/ai/chat-panel.tsx', () => ({ ChatPanel: () => <p>The chat panel</p> }));
 vi.mock('../src/ai/session.ts', () => ({
   aiStatusQuery: { queryKey: ['ai-status'] },
   // A reply that runs until stopped, so the agent's tools may propose.
@@ -81,7 +84,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 vaultStore.unlock({} as ClientContext, {} as UnlockedVault);
 
-const page = (markdown: string) => newPayload({ title: 'Plan', markdown });
+const draft = (markdown: string) => newPayload({ title: 'Plan', markdown });
 
 function merging(live: boolean): Merging {
   return {
@@ -89,9 +92,9 @@ function merging(live: boolean): Merging {
     ask: 1,
     opened: {
       merge: pageMerge.mergePayloads(
-        page('One.\n\nTwo.\n'),
-        page('One, edited.\n\nTwo.\n'),
-        page('One, typed live.\n\nTwo, too.\n'),
+        draft('One.\n\nTwo.\n'),
+        draft('One, edited.\n\nTwo.\n'),
+        draft('One, typed live.\n\nTwo, too.\n'),
       ),
       page: { spaceId: 'space' as SpaceId, pageId: 'page' as PageId },
       head: 'head' as RevisionId,
@@ -105,6 +108,7 @@ function merging(live: boolean): Merging {
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
 
 let cleanup = () => {};
+afterAll(() => page.viewport(414, 896));
 afterEach(() => {
   cleanup();
   cleanup = () => {};
@@ -199,7 +203,7 @@ async function chatWithEdits() {
       markdown,
     } as never);
   }
-  await render(<ChatMerges layout="column" />);
+  await render(<ChatMerges />);
   const states = () => chat.state().proposals.map((item) => item.state);
   return { chat, states };
 }
@@ -254,56 +258,49 @@ it('cancels Merge… once nothing on screen shows it, and doesn’t open one the
   expect(states()).toEqual(['pending', 'pending']);
 });
 
-/** A modal over the whole window, opened when it mounts, as the chat's sheet is. */
-function Sheet() {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => ref.current?.showModal(), []);
-  return (
-    <dialog
-      ref={ref}
-      aria-label="Sheet"
-      style={{ width: '100vw', height: '100vh', maxWidth: 'none', maxHeight: 'none' }}
-    />
-  );
-}
-
-it('goes back on top when the chat becomes a sheet while Merge… is open', async () => {
+it('keeps Merge… on top when the chat would become a sheet, and opens the sheet after', async () => {
+  await page.viewport(1300, 800);
   const { chat } = await chatWithEdits();
+  // ChatColumn in place of the ChatMerges chatWithEdits rendered, which goes once this one holds Merge….
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ChatColumn />
+      </QueryClientProvider>,
+    ),
+  );
+  cleanup();
+  cleanup = () => {
+    act(() => root.unmount());
+    host.remove();
+  };
+  act(() => chatStore.setOpen(true));
+  expect(document.body.textContent).toContain('The chat panel');
   let approving!: Promise<void>;
   await act(async () => {
     approving = chat.approve([1], async () => null);
   });
   await settle();
-  const host = document.createElement('div');
-  document.body.append(host);
-  const root = createRoot(host);
-  const queryClient = new QueryClient();
-  const view = (sheet: boolean) => (
-    <QueryClientProvider client={queryClient}>
-      {sheet && <Sheet />}
-      <ChatMerges layout={sheet ? 'sheet' : 'column'} />
-    </QueryClientProvider>
-  );
-  // In place of the one chatWithEdits rendered, which goes once this one holds Merge….
-  await act(async () => root.render(view(false)));
-  cleanup();
-  cleanup = () => {};
-  await settle();
-  expect(chat.state().merging).not.toBeNull();
-  const top = () => {
-    const at = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-    return (
-      at?.closest('dialog')?.getAttribute('aria-label') ??
-      at?.closest('dialog')?.querySelector('h2')?.textContent
-    );
-  };
+  const top = () =>
+    document
+      .elementFromPoint(innerWidth / 2, innerHeight / 2)
+      ?.closest('dialog')
+      ?.querySelector('h2')?.textContent;
   expect(top()).toBe('Merge Helper’s edit');
-  await act(async () => root.render(view(true)));
+
+  // Narrower than the column: the sheet waits for Merge…, rather than opening over it.
+  await page.viewport(800, 800);
   await settle();
   expect(top()).toBe('Merge Helper’s edit');
-  expect(chat.state().merging).not.toBeNull();
-  chat.settleMerge(null);
+  expect(document.body.textContent).not.toContain('The chat panel');
+  const dialog = shown();
+  if (!dialog) throw new Error('no Merge…');
+  await act(async () => button(dialog, 'Cancel').click());
   await act(() => approving);
-  act(() => root.unmount());
-  host.remove();
+  await settle();
+  expect(top()).toBe('Assistant');
+  expect(document.body.textContent).toContain('The chat panel');
 });
