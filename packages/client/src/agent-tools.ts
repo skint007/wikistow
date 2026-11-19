@@ -533,6 +533,9 @@ export async function applyProposal(
         if (stale) return stale;
         const page = { spaceId, pageId };
         const opened = await pages.openRevisionOf(ctx, page, 'draft', base, { fresh: true });
+        // Saved only there (`onlyThere`), in the share it was proposed in.
+        const shareNow = opened.region.kind === 'share' ? opened.region.shareId : null;
+        if (shareNow !== proposal.shareId) return ACCESS_CHANGED;
         // Everything else in the draft, attachments and extensions included, is carried over
         // (but `wikistow.change`, which only a publication holds).
         let edit = revisePayload(opened.opened, {
@@ -546,8 +549,9 @@ export async function applyProposal(
         // each newer head from the last, as the person settled it, so Merge…
         // opens again only for a new overlap (ADR 0015 decision 8). Five tries
         // each time, counted afresh once the person settles one: they can cancel.
-        for (let tries = 0, asked = 0; tries < 5 && asked < MAX_ASKED && head; tries++) {
-          const onto = head === from ? null : await mergedOnto(ctx, page, from, edit, head, merge);
+        for (let tries = 0, asked = 0; tries < 5 && head; tries++) {
+          const ask = asked < MAX_ASKED ? merge : undefined;
+          const onto = head === from ? null : await mergedOnto(ctx, page, from, edit, head, ask);
           if (onto === 'changed') return CHANGED;
           if (onto === 'cancelled') return { status: 'cancelled' };
           if (onto?.asked) {
@@ -559,10 +563,13 @@ export async function applyProposal(
             asked++;
           }
           try {
+            // In the region it was proposed in: a page moved to another share since,
+            // even after the checks above, is refused, so other people never read it.
             await pages.saveDraft(ctx, {
               page,
               basedOn: head,
-              ...(onto === null && { basedOnRegion: opened.region }),
+              basedOnRegion: opened.region,
+              onlyThere: true,
               payload: onto?.payload ?? edit,
             });
             return { status: 'done', spaceId, pageId, folderId: null };

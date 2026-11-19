@@ -35,17 +35,17 @@ export function useChatColumn(): boolean {
  * a sheet over it. Its Merge… stays put while the chat closes or moves.
  */
 export function ChatColumn() {
+  const { open } = useChatStore();
+  const wide = useWide();
   return (
     <>
-      <ChatMerges />
-      <ChatShown />
+      <ChatShown open={open} wide={wide} />
+      <ChatMerges layout={!open ? 'closed' : wide ? 'column' : 'sheet'} />
     </>
   );
 }
 
-function ChatShown() {
-  const { open } = useChatStore();
-  const wide = useWide();
+function ChatShown({ open, wide }: { open: boolean; wide: boolean }) {
   if (!open) return null;
   const close = () => chatStore.setOpen(false);
   if (wide) return <ChatPanel onClose={close} />;

@@ -845,7 +845,8 @@ function current(revision: OpenedRevision): PagePayload {
  * this app opens it (section 6.1): pass `basedOnRegion` if it was just
  * opened or written, or it is opened here. A share or move made elsewhere can leave `basedOnRegion` behind; the
  * write is then refused (`region-mismatch`) and tried once more with `basedOn`
- * opened fresh (`baseRegion`). If someone saved since, the server answers
+ * opened fresh (`baseRegion`), unless `onlyThere`: then the refusal stands,
+ * so a write meant for the people of one share never goes to another's. If someone saved since, the server answers
  * `stale-head` and nothing is overwritten. `linkChoices` are the pages the
  * writer picked for ambiguous links, by key (`LinkWrite.chosen`). A draft
  * larger than a version may hold is refused before anything else
@@ -869,10 +870,13 @@ export async function saveDraft(
     read,
     revisionId: given,
     renames = true,
+    onlyThere = false,
   }: {
     page: PageRef;
     basedOn: RevisionId;
     basedOnRegion?: Region;
+    /** Refuse, as `region-mismatch`, a write `basedOnRegion` no longer fits, rather than try the page's region now. */
+    onlyThere?: boolean;
     payload: PagePayload;
     restoredFrom?: RevisionId | null;
     tree?: LinkTree;
@@ -952,7 +956,7 @@ export async function saveDraft(
       const moved =
         (error instanceof ApiError || error instanceof CryptoError) &&
         error.code === 'region-mismatch';
-      if (!moved) throw error;
+      if (!moved || onlyThere) throw error;
     }
   }
   return save(await baseRegion(ctx, page, basedOn));

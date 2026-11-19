@@ -15,7 +15,7 @@ import {
   sessionState,
   type LiveParticipant,
 } from '@wikistow/client/live';
-import type { PageId, SpaceId } from '@wikistow/contracts';
+import { pageRoutes, type PageId, type SpaceId } from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { listenForTreeChanges } from '@wikistow/server';
 import { personWithVault } from './support/content.ts';
@@ -515,6 +515,33 @@ describe('an approved chat edit', () => {
     });
     expect(applied.status).toBe('stale');
     expect((await draftOf(owner, page)).revisionId).toBe(typed);
+  });
+
+  it('is refused when the page leaves its share just before it is saved', async () => {
+    const { owner, lib, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n');
+    const before = (await draftOf(owner, page)).revisionId;
+    // The page moves out of the shared folder after the checks, as the draft it revises opens.
+    const send = owner.ctx.api.call.bind(owner.ctx.api);
+    let moved = false;
+    const call = (async (route: unknown, input: unknown) => {
+      if (route === pageRoutes.fetchRevisions && !moved) {
+        moved = true;
+        const preview = await moves.previewMove(owner.ctx, {
+          spaceId: page.spaceId,
+          nodeId: page.pageId,
+          parentId: lib.above,
+        });
+        await moves.moveNode(owner.ctx, { preview });
+      }
+      return (send as (r: unknown, i: unknown) => Promise<unknown>)(route, input);
+    }) as typeof owner.ctx.api.call;
+    const ctx = { ...owner.ctx, api: { ...owner.ctx.api, call } };
+    const applied = await agentTools.applyProposal(ctx, edit);
+    expect(moved).toBe(true);
+    expect(applied.status).toBe('stale');
+    expect((await draftOf(owner, page)).revisionId).toBe(before);
   });
 
   it('names a live session’s draft as the live page, and the session folds in the merge', async () => {

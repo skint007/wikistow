@@ -15,7 +15,7 @@ import {
   type UnlockedVault,
 } from '@wikistow/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, type ReactNode } from 'react';
+import { act, useEffect, useRef, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { ChatMerge, ChatMerges } from '../src/ai/chat-merge.tsx';
@@ -199,7 +199,7 @@ async function chatWithEdits() {
       markdown,
     } as never);
   }
-  await render(<ChatMerges />);
+  await render(<ChatMerges layout="column" />);
   const states = () => chat.state().proposals.map((item) => item.state);
   return { chat, states };
 }
@@ -252,4 +252,58 @@ it('cancels Merge… once nothing on screen shows it, and doesn’t open one the
   await act(() => chat.approve([2], async () => null));
   expect(fake.applied).toEqual([null, null]);
   expect(states()).toEqual(['pending', 'pending']);
+});
+
+/** A modal over the whole window, opened when it mounts, as the chat's sheet is. */
+function Sheet() {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => ref.current?.showModal(), []);
+  return (
+    <dialog
+      ref={ref}
+      aria-label="Sheet"
+      style={{ width: '100vw', height: '100vh', maxWidth: 'none', maxHeight: 'none' }}
+    />
+  );
+}
+
+it('goes back on top when the chat becomes a sheet while Merge… is open', async () => {
+  const { chat } = await chatWithEdits();
+  let approving!: Promise<void>;
+  await act(async () => {
+    approving = chat.approve([1], async () => null);
+  });
+  await settle();
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const queryClient = new QueryClient();
+  const view = (sheet: boolean) => (
+    <QueryClientProvider client={queryClient}>
+      {sheet && <Sheet />}
+      <ChatMerges layout={sheet ? 'sheet' : 'column'} />
+    </QueryClientProvider>
+  );
+  // In place of the one chatWithEdits rendered, which goes once this one holds Merge….
+  await act(async () => root.render(view(false)));
+  cleanup();
+  cleanup = () => {};
+  await settle();
+  expect(chat.state().merging).not.toBeNull();
+  const top = () => {
+    const at = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+    return (
+      at?.closest('dialog')?.getAttribute('aria-label') ??
+      at?.closest('dialog')?.querySelector('h2')?.textContent
+    );
+  };
+  expect(top()).toBe('Merge Helper’s edit');
+  await act(async () => root.render(view(true)));
+  await settle();
+  expect(top()).toBe('Merge Helper’s edit');
+  expect(chat.state().merging).not.toBeNull();
+  chat.settleMerge(null);
+  await act(() => approving);
+  act(() => root.unmount());
+  host.remove();
 });
