@@ -156,9 +156,18 @@ const text: Handle = (node: Text, parent, state, info) => {
   return safe;
 };
 
-// An `=` in an image's alt to be written escaped (`image`), which remark's
-// own escaping leaves be.
-const HELD_EQUALS = '\uE003';
+// A private-use character none of `texts` holds, to stand for an `=` to be
+// written escaped (`image`), which remark's own escaping leaves be.
+function heldEquals(...texts: string[]): string {
+  const held = new Set(texts.join(''));
+  for (const [from, to] of [
+    [0xe003, 0xf8ff],
+    [0xf0000, 0xffffd],
+  ] as const)
+    for (let code = from; code <= to; code++)
+      if (!held.has(String.fromCodePoint(code))) return String.fromCodePoint(code);
+  throw new Error('No private-use character is free');
+}
 
 // Two `=` with only spaces on both sides, which can neither open nor close.
 const inert = (before: string | undefined, after: string | undefined) =>
@@ -168,23 +177,28 @@ const inert = (before: string | undefined, after: string | undefined) =>
  * An image, its alt's `=` escaped as text's are (`escapeEquals`): Markdown
  * reads highlights in an alt before it takes their text as the alt, so
  * `![a==b==](u)` is the alt `ab`. Every run of two that could open or close
- * is escaped, and kept so only if its block reads otherwise without
- * (`whole`); a run of three or more is never a highlight's.
+ * is escaped, and kept so only if the image, read alone, reads otherwise
+ * without; a run of three or more is never a highlight's. An alt's `==`
+ * can pair only inside the alt, so its block's text is decided apart
+ * (`whole`), and the alt apart from it.
  */
 type ImageArgs = Parameters<typeof defaultHandlers.image>;
 function image(...[node, parent, state, info]: ImageArgs) {
-  const block = state.indexStack[0] ?? -1;
-  const alt = equals.bare.has(block)
-    ? node.alt
-    : node.alt?.replace(/=+/g, (run, at: number, all: string) =>
-        run.length === 2 && !inert(all[at - 1], all[at + 2]) ? HELD_EQUALS.repeat(2) : run,
-      );
-  if (!alt || alt === node.alt) return defaultHandlers.image(node, parent, state, info);
-  equals.escaped.add(block);
-  return defaultHandlers
-    .image({ ...node, alt }, parent, state, info)
-    .replaceAll(HELD_EQUALS, '\\=');
+  const bare = defaultHandlers.image(node, parent, state, info);
+  if (!node.alt?.includes('==')) return bare;
+  const held = heldEquals(node.alt, node.url, node.title ?? '');
+  const alt = node.alt.replace(/=+/g, (run, at: number, all: string) =>
+    run.length === 2 && !inert(all[at - 1], all[at + 2]) ? held.repeat(2) : run,
+  );
+  if (alt === node.alt) return bare;
+  const safe = defaultHandlers.image({ ...node, alt }, parent, state, info).replaceAll(held, '\\=');
+  try {
+    return meaningOf(bare) === meaningOf(safe) ? bare : safe;
+  } catch {
+    return safe;
+  }
 }
+image.peek = defaultHandlers.image.peek;
 
 // The top-level blocks whose text `text` is to leave each `=` in as it is,
 // and those it escaped one in (`whole`).
