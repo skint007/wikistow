@@ -6,6 +6,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- **Import…** and `wikistow import` finish when the batch sent to make room for a folder is refused, as when the folder they fill is shared meanwhile, rather than failing with `not-found` on the folders inside it. The server's import batch holds a page that a create sent again already made, when the batch saves or publishes it, before the account's storage, as a single save does. (#669)
+
 #### Desktop
 
 - Browser clipping: a clip whose saving a reload or a crash cut short, just as its page was made, finishes that page rather than making a second, as the app keeps the page's ID before making it. A screenshot clip a lock cut short during its upload puts the page made without the screenshot in the trash once unlocked, rather than leaving it beside the one with it. (#671)

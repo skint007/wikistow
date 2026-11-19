@@ -17,6 +17,8 @@ import {
   type SpaceId,
 } from '@wikistow/client';
 import type { importRoutes } from '@wikistow/contracts';
+import { lockQuota } from '@wikistow/server';
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import type { z } from 'zod';
 import { personWithVault } from './support/content.ts';
@@ -418,6 +420,47 @@ describe('an import', () => {
     expect(a.payload.markdown).toBe('See [[Z]].');
   });
 
+  it('finishes when the batch sent to make room for a folder is refused', async () => {
+    const spaceId = await spaceOperations.createSpace(person.ctx, { name: 'Refused for room' });
+    const folderId = await spaceOperations.createFolder(person.ctx, {
+      spaceId,
+      parentId: null,
+      name: 'Inbox',
+    });
+    const reader = await personWithVault(t);
+    const member = await invite(person, reader, 'reader');
+    // Each folder keeps its key, so with keys this long, as no real
+    // export's are, each of these four, one in the other, seals to about
+    // 1.7 MB: two fit in a batch, and the third goes in the next (#480).
+    const long = (key: string | null) => (key === null ? null : `${'L'.repeat(1_300_000)}/${key}`);
+    const read = await vault([file('a/b/c/d/N.md', 'Plain words.')]);
+    const source = {
+      ...read,
+      folders: read.folders.map((f) => ({ ...f, key: long(f.key) ?? '', parent: long(f.parent) })),
+      notes: read.notes.map((note) => ({ ...note, parent: long(note.parent) })),
+    };
+    expect(source.folders).toHaveLength(4);
+    // The batch of the first two is refused, as their folder was shared
+    // after they were sealed, and the third was sealed as it went.
+    let batches = 0;
+    const sharing: Fetch = async (url, init) => {
+      if (routeOf(url, init) === BATCH && ++batches === 1) {
+        await shareFolder(person.ctx, { spaceId, rootId: folderId, people: [member] });
+      }
+      return person.browser.fetch(url, init);
+    };
+    const { ctx, sent } = through(person.ctx, sharing);
+    const summary = await importOperations.importNotes(ctx, {
+      scope: { spaceId, folderId },
+      source,
+    });
+    expect(summary).toMatchObject({ folders: 4, skipped: [] });
+    // The first two twice, then the other two, then the page: none refused again.
+    expect(byRoute(sent)[BATCH]).toBe(4);
+    const n = await publication(spaceId, pageIdOf(summary, 'a/b/c/d/N.md'), reader.ctx);
+    expect(n.payload.markdown).toBe('Plain words.');
+  });
+
   it('lands a batch whole or not at all, and makes nothing twice', async () => {
     const spaceId = await spaceOperations.createSpace(person.ctx, { name: 'Whole' });
     const source = await vault([file('A.md', 'Plain words.'), file('C.md', 'See [[A]].')]);
@@ -481,5 +524,109 @@ describe('an import', () => {
     const notHere = await resend(saved, { spaceId: elsewhere });
     expect(await notHere.json()).toMatchObject({ error: { code: 'not-found' } });
     expect((await spaceOperations.loadTree(person.ctx, elsewhere)).pages).toHaveLength(0);
+  });
+
+  it('holds the heads of every page there that it saves before its storage, one it makes again too', async () => {
+    const spaceId = await spaceOperations.createSpace(person.ctx, { name: 'Held' });
+    // Each batch the import sends, sent by `send` once changed as it says.
+    const batches: BatchBody[] = [];
+    const capture =
+      (change?: (body: BatchBody, send: () => Promise<Response>) => Promise<Response>): Fetch =>
+      async (url, init) => {
+        if (routeOf(url, init) !== BATCH) return person.browser.fetch(url, init);
+        if (typeof init.body !== 'string') throw new Error('expected a JSON body');
+        const body = JSON.parse(init.body) as BatchBody;
+        batches.push(body);
+        const send = () => person.browser.fetch(url, { ...init, body: JSON.stringify(body) });
+        return change ? change(body, send) : send();
+      };
+    const notes = [file('A.md', 'See [[B]].'), file('B.md', 'See [[A]].')];
+    await importOperations.importNotes(through(person.ctx, capture()).ctx, {
+      scope: { spaceId },
+      source: await vault(notes),
+    });
+    // Both made in one, then both saved and published in the next.
+    const [made, saved] = batches;
+    const [a, b] = made?.pages ?? [];
+    const savedOf = (pageId: string | undefined) =>
+      saved?.pages.find((page) => page.pageId === pageId)?.draft;
+    const [aSaved, bSaved] = [savedOf(a?.pageId), savedOf(b?.pageId)];
+    if (!a?.create || !b || !aSaved || !bSaved) throw new Error('expected both made, then saved');
+    const heads = async (pageId: string) =>
+      (await pages.loadPage(person.ctx, pageId as PageId)).heads;
+    const before = { a: await heads(a.pageId), b: await heads(b.pageId) };
+
+    // Whether another transaction holds `pageId`'s heads.
+    const headsHeld = (pageId: string) =>
+      t.db
+        .transaction((tx) =>
+          tx.execute(sql`select 1 from page_heads where page_id = ${pageId} for update nowait`),
+        )
+        .then(
+          () => false,
+          (error: unknown) => {
+            const codes = [error, (error as { cause?: unknown }).cause].map(
+              (e) => (e as { code?: unknown } | undefined)?.code,
+            );
+            if (codes.includes('55P03')) return true;
+            throw error;
+          },
+        );
+    // Whether a transaction waits on the account's storage (`lockQuota`).
+    const quotaKey = `wikistow:quota:${person.id}`;
+    const waitingOnStorage = async () =>
+      (
+        await t.db.execute(sql`select 1 from pg_locks l
+          join pg_database d on d.oid = l.database
+          where l.locktype = 'advisory' and not l.granted and d.datname = current_database()
+            and l.objsubid = 1
+            and (l.classid::bigint << 32 | l.objid::bigint) = hashtext(${quotaKey})::bigint`)
+      ).length > 0;
+
+    // Run again with a new note: its batch makes it, and, by hand, makes A
+    // again and saves on top, then saves B again, after it (#479). Held up
+    // at its first charge to the account's storage, it holds both pages' heads.
+    const held: Record<string, boolean> = {};
+    batches.length = 0;
+    const handMade = capture(async (body, send) => {
+      const [n] = body.pages;
+      if (!n?.create) throw new Error('expected the new page made');
+      body.pages.push(
+        { pageId: a.pageId, create: a.create, draft: aSaved, publish: null },
+        { pageId: b.pageId, create: null, draft: bSaved, publish: null },
+      );
+      let release = () => {};
+      let taken = () => {};
+      const storage = new Promise<void>((resolve) => (taken = resolve));
+      const holder = t.db.transaction(async (tx) => {
+        await lockQuota(tx, person.id);
+        taken();
+        await new Promise<void>((resolve) => (release = resolve));
+      });
+      await Promise.race([storage, holder]);
+      const answer = send();
+      try {
+        for (const deadline = Date.now() + 15_000; !(await waitingOnStorage());) {
+          if (Date.now() > deadline) throw new Error('the batch never waited on the storage');
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        held.a = await headsHeld(a.pageId);
+        held.b = await headsHeld(b.pageId);
+      } finally {
+        release();
+        await holder;
+      }
+      return answer;
+    });
+    const summary = await importOperations.importNotes(through(person.ctx, handMade).ctx, {
+      scope: { spaceId },
+      source: await vault([...notes, file('N.md', 'Plain words.')]),
+    });
+    expect(held).toEqual({ a: true, b: true });
+    // Each page sent again stays as it was; the new one is made and published.
+    expect(summary).toMatchObject({ existing: 2, pages: [{ path: 'N.md' }] });
+    expect({ a: await heads(a.pageId), b: await heads(b.pageId) }).toEqual(before);
+    const n = await publication(spaceId, pageIdOf(summary, 'N.md'));
+    expect(n.payload.markdown).toBe('Plain words.');
   });
 });
