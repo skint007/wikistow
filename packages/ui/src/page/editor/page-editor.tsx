@@ -883,7 +883,9 @@ export function PageEditor({
                   holding={() => given.current !== null || liveHeld.current}
                   onCantShow={cantShow}
                   onCanShow={canShow}
-                  onBehind={(text) => give(text, false)}
+                  // Not over the source side's typing on its way to it, made
+                  // once the session took no more: that's newer, and the page's.
+                  onBehind={(text) => given.current === null && give(text, false)}
                 />
               )}
             </div>
