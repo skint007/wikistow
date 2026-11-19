@@ -853,10 +853,12 @@ function inBatches(
       sending.map((s) => s.writes),
     );
   };
-  const flush = async () => {
+  // Whether what was sent was refused, and sealed again with fresh answers.
+  const flush = async (): Promise<boolean> => {
     let sending = batch;
     batch = [];
-    if (sending.length === 0) return;
+    if (sending.length === 0) return false;
+    let refused = false;
     try {
       await send(sending);
     } catch (error) {
@@ -867,6 +869,7 @@ function inBatches(
       // are worked out again for it too, as a rotation or a change of
       // owners may come with the change of access that refused it.
       forget();
+      refused = true;
       await spaceKeys(ctx, spaceId, { refresh: true });
       const again: Sealed[] = [];
       for (const { item } of sending) again.push(await seal(item, true));
@@ -874,16 +877,28 @@ function inBatches(
       await send(sending);
     }
     for (const { landed } of sending) landed();
+    return refused;
   };
   return {
     async add(item) {
-      const sealed = await sealOnce(item);
+      // Sealed first, as only its writes say whether it fits.
+      let sealed = await sealOnce(item);
       const next = count([...batch, sealed]);
       const over =
         next.folders > importRoutes.MAX_BATCH_FOLDERS ||
         next.pages > importRoutes.MAX_BATCH_PAGES ||
         next.bytes > importRoutes.BATCH_BYTES;
-      if (batch.length > 0 && over) await flush();
+      // If the batch that made room was refused, the answers it was sealed
+      // with are forgotten, the one for what it makes too, and what goes in
+      // that would ask the server of a folder it doesn't have yet (#480):
+      // sealed again. Anything else goes as sealed, and if refused for them
+      // is sealed again with its batch, as a resumed page's reader copies
+      // would otherwise go up twice.
+      const makes = (s: Sealed) =>
+        s.writes.folders.length > 0 || s.writes.pages.some((p) => p.create);
+      if (batch.length > 0 && over && (await flush()) && makes(sealed)) {
+        sealed = await seal(item, true);
+      }
       batch.push(sealed);
       const now = count(batch);
       if (
@@ -893,7 +908,9 @@ function inBatches(
         await flush();
       }
     },
-    flush,
+    flush: async () => {
+      await flush();
+    },
   };
 }
 

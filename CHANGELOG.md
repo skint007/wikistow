@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- **Import…** and `wikistow import` finish when the batch sent to make room for a folder is refused, as when the folder they fill is shared meanwhile, rather than failing with `not-found` on the folders inside it. The server's import batch holds a page that a create sent again already made, when the batch saves or publishes it, before the account's storage, as a single save does. (#669)
+
 ## 0.29.0-beta.1 - 2026-11-19
 
 ### Highlights
