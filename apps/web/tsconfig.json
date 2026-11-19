@@ -12,6 +12,7 @@
     "e2e",
     "screenshots",
     "drill",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "test"
   ]
 }
