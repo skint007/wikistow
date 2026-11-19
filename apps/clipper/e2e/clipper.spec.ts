@@ -635,6 +635,21 @@ test('an app’s refusal shows in the popup and on the button', async () => {
   expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('!');
 });
 
+/**
+ * The page's own script turns the box red once the overlay goes, as a
+ * page can, before a screenshot taken only then.
+ */
+async function redOnceOverlayGoes(page: Page) {
+  await page.evaluate(() => {
+    new MutationObserver((records) => {
+      if (!records.some((record) => record.removedNodes.length > 0)) return;
+      for (const half of document.querySelectorAll<HTMLElement>('#box > div')) {
+        half.style.background = '#ff0000';
+      }
+    }).observe(document.documentElement, { childList: true });
+  });
+}
+
 /** A screenshot's size, and the colour at each of `points`, in its own pixels. */
 async function pixels(page: Page, base64: string, points: [number, number][]) {
   return page.evaluate(
@@ -751,8 +766,12 @@ test('a screenshot of an area is the part dragged over, scrolled, in its device 
   ).toBeVisible();
   await page.bringToFront();
   expect(await got('stable', 'clip')).toEqual([]);
+  // The screenshot is taken as the overlay opens: the page changing after
+  // isn't in it.
+  await redOnceOverlayGoes(page);
   // The person may take a while: Chrome stops the idle service worker, and
-  // the overlay's message wakes it again, with the area chosen kept.
+  // the overlay's message wakes it again, with the area chosen, and its
+  // screenshot, kept.
   const devtools = await context!.newCDPSession(again);
   await devtools.send('ServiceWorker.enable');
   await devtools.send('ServiceWorker.stopAllWorkers');
@@ -815,6 +834,15 @@ test('an area matches what was drawn on a page with a CSS zoom of its own', asyn
     return { frame: { left, top, width, height }, tab: { width: innerWidth, height: innerHeight } };
   });
   expect(drawn.frame).toEqual({ left: 0, top: 0, ...drawn.tab });
+  // The person lets go just inside the overlay's 5 minutes, and its
+  // message comes to the background a moment past them: it's still taken.
+  await worker.evaluate(
+    (late) => {
+      const now = Date.now.bind(Date);
+      Date.now = () => now() + late;
+    },
+    5 * 60_000 + 1000,
+  );
   await page.mouse.move(320, 280, { steps: 5 });
   await page.mouse.up();
   await expect.poll(async () => (await got('stable', 'clip')).length).toBe(1);
@@ -830,6 +858,38 @@ test('an area matches what was drawn on a page with a CSS zoom of its own', asyn
     height: 120,
     colours: ['#0000ff', '#0000ff', '#00ff00', '#00ff00'],
   });
+});
+
+test('an area whose screenshot wasn’t kept through a sleep is cut from one taken after the drag', async () => {
+  const { worker, got } = await launch({ stable: ready }, { scale: 1 });
+  const origin = await serve();
+  const { page, popup } = await popupFor(worker, origin, undefined, '/shot');
+  await page.evaluate(() => scrollTo(0, 1000));
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const closed = popup.waitForEvent('close');
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  // As when it's over `storage.session`'s quota: held only while awake.
+  await expect
+    .poll(() => worker.evaluate(async () => 'areaShot' in (await chrome.storage.session.get())))
+    .toBe(true);
+  await worker.evaluate(() => chrome.storage.session.remove('areaShot'));
+  const devtools = await context!.newCDPSession(page);
+  await devtools.send('ServiceWorker.enable');
+  await devtools.send('ServiceWorker.stopAllWorkers');
+  await page.mouse.move(100, 200);
+  await page.mouse.down();
+  await page.mouse.move(400, 350, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await got('stable', 'clip')).length).toBe(1);
+  const [clip] = await got('stable', 'clip');
+  const shot = await pixels(page, String(clip!['screenshot']), [
+    [0, 0],
+    [299, 149],
+  ]);
+  expect(shot).toEqual({ width: 300, height: 150, colours: ['#0000ff', '#00ff00'] });
 });
 
 test('a clip from another tab takes off the overlay left on the first', async () => {
@@ -862,6 +922,18 @@ test('Escape stops choosing an area, sending nothing', async () => {
   const { worker, got } = await launch({ stable: ready });
   const origin = await serve();
   const { page, popup, tabId } = await popupFor(worker, origin, undefined, '/shot');
+  // A menu the page has open, and a text box with focus.
+  await page.evaluate(() => {
+    const menu = document.createElement('div');
+    menu.id = 'menu';
+    menu.popover = 'auto';
+    menu.textContent = 'A menu';
+    const field = document.createElement('input');
+    field.id = 'field';
+    document.body.prepend(menu, field);
+    menu.showPopover();
+    field.focus();
+  });
   await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
   await popup.getByRole('radio', { name: 'Choose an area' }).check();
   await page.bringToFront();
@@ -873,9 +945,20 @@ test('Escape stops choosing an area, sending nothing', async () => {
     again.getByText('Drag over the page to choose the area. Esc cancels.'),
   ).toBeVisible();
   await page.bringToFront();
-  // A click alone isn't an area: it keeps choosing.
+  // The overlay closes no menu of the page's, and leaves its focus be.
+  const kept = () =>
+    page.evaluate(() => ({
+      open: document.getElementById('menu')!.matches(':popover-open'),
+      focused: document.activeElement?.id,
+      typed: (document.getElementById('field') as HTMLInputElement).value,
+    }));
+  expect(await kept()).toEqual({ open: true, focused: 'field', typed: '' });
+  // Keys go nowhere while choosing, and a click alone isn't an area: it
+  // keeps choosing.
+  await page.keyboard.type('ab ');
   await page.mouse.click(300, 300);
   expect(await page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  expect(await kept()).toEqual({ open: true, focused: 'field', typed: '' });
   await page.keyboard.press('Escape');
   await expect(again.getByText('Drag over the page to choose the area. Esc cancels.')).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
@@ -899,4 +982,49 @@ test('Escape stops choosing an area, sending nothing', async () => {
   await expect(
     fourth.getByText('Drag over the page to choose the area. Esc cancels.'),
   ).toBeHidden();
+});
+
+test('an overlay the page hides or takes off stops choosing, and says so', async () => {
+  const { worker, got } = await launch({ stable: ready });
+  const origin = await serve();
+  const { page, popup, tabId } = await popupFor(worker, origin, undefined, '/shot');
+  const stopped = 'This page stopped Choose an area from working. Try Visible area.';
+  await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
+  await popup.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const closed = popup.waitForEvent('close');
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await closed;
+  const again = await reopen(tabId);
+  await expect(
+    again.getByText('Drag over the page to choose the area. Esc cancels.'),
+  ).toBeVisible();
+  await page.bringToFront();
+  // The page's own script hides it.
+  await page.evaluate(() =>
+    (document.documentElement.lastElementChild as HTMLElement).style.setProperty(
+      'display',
+      'none',
+      'important',
+    ),
+  );
+  await expect(again.getByText(stopped)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
+  expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('!');
+
+  // Or takes it off.
+  const third = await reopen(tabId);
+  await third.getByRole('radio', { name: 'Choose an area' }).check();
+  await page.bringToFront();
+  const gone = third.waitForEvent('close');
+  await third.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await gone;
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  await page.evaluate(() => document.documentElement.lastElementChild!.remove());
+  const fourth = await reopen(tabId);
+  await expect(fourth.getByText(stopped)).toBeVisible();
+  await expect
+    .poll(() => worker.evaluate(() => chrome.storage.session.get(['choosing', 'areaShot'])))
+    .toEqual({});
+  expect(await got('stable', 'clip')).toEqual([]);
 });

@@ -46,6 +46,7 @@ describe('the overlay’s message', () => {
   test('is taken only as it reads', () => {
     expect(isAreaMessage(message)).toBe(true);
     expect(isAreaMessage({ ...message, area: null })).toBe(true);
+    expect(isAreaMessage({ ...message, area: null, blocked: true })).toBe(true);
     for (const wrong of [
       null,
       'wikistow-area',
@@ -58,6 +59,7 @@ describe('the overlay’s message', () => {
       { ...message, area: { ...message.area, width: -1 } },
       { ...message, area: { ...message.area, y: '2' } },
       { ...message, area: { ...message.area, height: Infinity } },
+      { ...message, blocked: 'yes' },
     ]) {
       expect(isAreaMessage(wrong)).toBe(false);
     }

@@ -3,6 +3,7 @@
 // calls; the background answers each call by its `id`, and tells every
 // open popup how the app and the clip are as they change.
 import type { AppState, ErrorCode, Folder, HostKey, Saved, TextMode } from './protocol.ts';
+import type { ViewSize } from './shot.ts';
 
 export const POPUP_PORT = 'popup';
 
@@ -83,7 +84,12 @@ export type SessionState = {
   draft?: Draft;
   /** An area being chosen on a page, which its overlay names by `nonce` once dragged out. */
   choosing?: Choosing;
+  /** The screenshot taken as that overlay opened, when it fits. */
+  areaShot?: AreaShot;
 };
+
+/** A PNG data URL of the visible area, taken with the tab `view` in size, for the choice `nonce`. */
+export type AreaShot = { nonce: string; url: string; view: ViewSize };
 
 export type Choosing = { nonce: string; tabId: number; form: Form; until: number };
 

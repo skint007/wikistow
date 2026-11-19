@@ -4,6 +4,11 @@
 // the visible area's. The area is in the tab's CSS pixels; the image is in
 // the screen's, so the cut is scaled by the two's ratio, measured from the
 // image itself, which covers high-DPI screens and the browser's zoom alike.
+// The screenshot is taken as the overlay opens, before it's drawn, so the
+// area is cut from the page the person saw, not one changed since.
+
+/** How long the overlay waits for an area, which the background allows too, and a little more. */
+export const CHOOSE_MS = 5 * 60_000;
 
 /** A rectangle in the tab's CSS pixels, from its top left as shown, whatever it's scrolled. */
 export type Area = { x: number; y: number; width: number; height: number };
@@ -17,6 +22,8 @@ export type AreaMessage = {
   /** Null when the person stopped, with Escape, or the overlay gave up waiting. */
   area: Area | null;
   view: ViewSize;
+  /** The page took the overlay off, or hid it: no area can be chosen there. */
+  blocked?: boolean;
 };
 
 const finite = (value: unknown, min = 0): value is number =>
@@ -25,8 +32,9 @@ const finite = (value: unknown, min = 0): value is number =>
 /** Whether `message` reads as an `AreaMessage`, every number in it a real one. */
 export function isAreaMessage(message: unknown): message is AreaMessage {
   if (typeof message !== 'object' || message === null) return false;
-  const { type, nonce, area, view } = message as Record<string, unknown>;
+  const { type, nonce, area, view, blocked } = message as Record<string, unknown>;
   if (type !== 'wikistow-area' || typeof nonce !== 'string' || nonce.length > 100) return false;
+  if (blocked !== undefined && typeof blocked !== 'boolean') return false;
   if (typeof view !== 'object' || view === null) return false;
   const { width, height } = view as Record<string, unknown>;
   if (!finite(width, 1) || !finite(height, 1)) return false;
