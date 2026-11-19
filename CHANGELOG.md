@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - **Import…** and `wikistow import` finish when the batch sent to make room for a folder is refused, as when the folder they fill is shared meanwhile, rather than failing with `not-found` on the folders inside it. The server's import batch holds a page that a create sent again already made, when the batch saves or publishes it, before the account's storage, as a single save does. (#669)
 
+#### Web clipper
+
+- Text selected inside an embedded frame, such as an embedded document or comments, can be clipped from the popup's Selection, the context menu's **Send selection** and the shortcut, with the tab's address and title. Of several frames with a selection, the one the focus is in is taken. In Chrome, `activeTab` doesn't reach a frame from another site, so text selected there still can't be clipped: **Send selection** says so rather than sending the link. (#675)
+
 ## 0.29.0-beta.1 - 2026-11-19
 
 ### Highlights
