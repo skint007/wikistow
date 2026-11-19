@@ -8,6 +8,9 @@ import {
 } from '@wikistow/client';
 import { claimedBlock } from '@wikistow/plugin-sdk';
 
+/** Why a selection can't be quoted for a comment: it's too long. */
+export const TOO_LONG_TO_QUOTE = 'Select at most 500 characters to comment on them';
+
 /**
  * Where a page's text shows, for comments on passages (ADR 0014, decision
  * 5): the app's own reader in the published view, or the visual editor in

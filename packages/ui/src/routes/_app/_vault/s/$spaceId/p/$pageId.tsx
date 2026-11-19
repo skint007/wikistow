@@ -1329,6 +1329,7 @@ function PageBody({
             onMerged={coverEditor.show}
             hiddenAttachments={coverParts}
             toolbar={<Place name="editor.toolbar" shown={pluginShown} />}
+            onComment={commentable && !needs.offline ? commentOn : null}
           />
         )}
         {revision && payload && model.view === 'published' && (
@@ -1380,7 +1381,10 @@ function PageBody({
         )}
         {revision && payload && <LinkedFrom ctx={ctx} page={page} />}
       </PageColumns>
-      {commentable && !needs.offline && <PassageButton passages={passages} onComment={commentOn} />}
+      {/* In the draft view, Comment is in the visual editor's toolbar, clear of its text. */}
+      {model.view === 'published' && commentable && !needs.offline && (
+        <PassageButton passages={passages} onComment={commentOn} />
+      )}
       {model.view === 'published' && <PassageUnderlines page={commentsPage} />}
       <Place
         name="page.panel"
