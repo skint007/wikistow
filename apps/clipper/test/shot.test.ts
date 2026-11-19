@@ -2,7 +2,7 @@
 // screen's pixels, scaled from the tab's CSS pixels (shot.ts), and the
 // overlay's message is taken only as it reads.
 import { describe, expect, test } from 'vite-plus/test';
-import { base64, cropBox, dataBytes, isAreaMessage } from '../src/shot.ts';
+import { base64, cropBox, dataBytes, isAreaMessage, isShotMessage } from '../src/shot.ts';
 
 describe('cutting an area', () => {
   const view = { width: 1000, height: 800 };
@@ -46,6 +46,8 @@ describe('the overlay’s message', () => {
   test('is taken only as it reads', () => {
     expect(isAreaMessage(message)).toBe(true);
     expect(isAreaMessage({ ...message, area: null })).toBe(true);
+    expect(isAreaMessage({ ...message, area: null, blocked: true })).toBe(true);
+    expect(isAreaMessage({ ...message, press: 2 })).toBe(true);
     for (const wrong of [
       null,
       'wikistow-area',
@@ -58,8 +60,32 @@ describe('the overlay’s message', () => {
       { ...message, area: { ...message.area, width: -1 } },
       { ...message, area: { ...message.area, y: '2' } },
       { ...message, area: { ...message.area, height: Infinity } },
+      { ...message, blocked: 'yes' },
+      { ...message, press: 0 },
+      { ...message, press: 1.5 },
     ]) {
       expect(isAreaMessage(wrong)).toBe(false);
+    }
+  });
+
+  test('asking for a screenshot is taken only as it reads', () => {
+    const asking = {
+      type: 'wikistow-area-shot',
+      nonce: 'n',
+      press: 1,
+      view: { width: 10, height: 10 },
+    };
+    expect(isShotMessage(asking)).toBe(true);
+    expect(isAreaMessage(asking)).toBe(false);
+    expect(isShotMessage(message)).toBe(false);
+    for (const wrong of [
+      { ...asking, nonce: 1 },
+      { ...asking, press: undefined },
+      { ...asking, press: -1 },
+      { ...asking, view: { width: 10, height: Number.NaN } },
+      { ...asking, view: null },
+    ]) {
+      expect(isShotMessage(wrong)).toBe(false);
     }
   });
 });
