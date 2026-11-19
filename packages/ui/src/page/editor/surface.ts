@@ -4,6 +4,7 @@ import type {
   MovedPage,
   PropertyData,
   PropertyValue,
+  QuoteText,
 } from '@wikistow/client';
 import type { ReactNode, Ref } from 'react';
 import type { OtherPages } from '../other-pages';
@@ -141,6 +142,13 @@ export type EditorSurfaceProps = {
    * shows only while it has any.
    */
   toolbar?: ReactNode;
+  /**
+   * Comment on what the selection quotes (ADR 0014, decision 13): a
+   * **Comment** button in the visual editor's format toolbar, where the
+   * page takes comments on passages. The source editor has none; its
+   * selection holds Markdown markers, not text as it reads.
+   */
+  onComment?: ((quote: QuoteText) => Promise<void>) | null | undefined;
   /**
    * The page's body in its live session, which both editors bind to (ADR
    * 0015 decision 3): the source editor as text, the visual editor by

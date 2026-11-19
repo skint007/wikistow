@@ -253,6 +253,7 @@ function Surface({
   otherPages,
   queryTable,
   toolbar,
+  onComment,
   live,
   onCantShow,
   onCanShow,
@@ -956,6 +957,7 @@ function Surface({
       <FormatToolbar
         watch={format}
         attachments={attachments.listed ?? attachments.list}
+        onComment={onComment}
         plugins={toolbar}
       />
       <div className="min-h-0 flex-1 overflow-y-auto [&_.milkdown]:h-full [&>[data-milkdown-root]]:h-full">

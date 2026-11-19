@@ -729,9 +729,9 @@ export function PageEditor({
   };
   // The source beside the visual editor: its edits go there once typing
   // pauses; in a live session, both are bound to the shared text, and each
-  // takes the other's changes as it takes anyone's. Plugins' buttons are in
-  // the visual editor's toolbar only.
-  const { toolbar: _toolbar, ...mirrored } = assist;
+  // takes the other's changes as it takes anyone's. Plugins' buttons and
+  // Comment are in the visual editor's toolbar only.
+  const { toolbar: _toolbar, onComment: _onComment, ...mirrored } = assist;
   const mirrorProps: EditorSurfaceProps = {
     ...mirrored,
     live: assist.live ?? null,
