@@ -379,6 +379,7 @@ function AssistantMessage({
 const STATE_LABELS: Record<ProposalItem['state'], string> = {
   pending: 'Waiting for you',
   applying: 'Applying…',
+  merging: 'Merging…',
   done: 'Applied',
   rejected: 'Rejected',
   dropped: 'Dropped',

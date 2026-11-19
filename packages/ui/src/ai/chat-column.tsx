@@ -1,10 +1,11 @@
 import type { PageId, SpaceId } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
 import { Sparkles } from 'lucide-react';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { chatStore, useChatStore } from './chat';
+import { ChatMerges, useMergeOpen } from './chat-merge';
 import { ChatPanel } from './chat-panel';
 import { aiStatusQuery } from './session';
 import { useNeedsConnection } from '../shell/availability';
@@ -29,10 +30,27 @@ export function useChatColumn(): boolean {
   return useWide() && open;
 }
 
-/** The chat while it's open: a column beside the page on wide screens, else a sheet over it. */
+/**
+ * The chat while it's open: a column beside the page on wide screens, else
+ * a sheet over it. Its Merge… stays put while the chat closes or moves.
+ */
 export function ChatColumn() {
   const { open } = useChatStore();
   const wide = useWide();
+  const merging = useMergeOpen();
+  // A sheet, a modal too, would open over Merge…: one not up yet waits for it to close.
+  const [sheetUp, setSheetUp] = useState(false);
+  const sheet = open && !wide && (!merging || sheetUp);
+  if (sheet !== sheetUp) setSheetUp(sheet);
+  return (
+    <>
+      <ChatShown open={open && (wide || sheet)} wide={wide} />
+      <ChatMerges />
+    </>
+  );
+}
+
+function ChatShown({ open, wide }: { open: boolean; wide: boolean }) {
   if (!open) return null;
   const close = () => chatStore.setOpen(false);
   if (wide) return <ChatPanel onClose={close} />;

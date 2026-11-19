@@ -105,3 +105,15 @@ async function whoseIs(
   const person = people?.get(authorId);
   return person && !person.nameless ? { kind: 'person', name: person.name } : { kind: 'unknown' };
 }
+
+/**
+ * Whose an approved chat edit merges onto: "the live page" for a live
+ * session's draft (ADR 0015, **Naming the other side**), else its signer.
+ */
+export async function theirsOf(
+  ctx: ClientContext,
+  queryClient: QueryClient,
+  theirs: { authorId: string; live: boolean },
+): Promise<Theirs> {
+  return theirs.live ? { kind: 'live' } : whoseIs(ctx, queryClient, theirs.authorId);
+}
