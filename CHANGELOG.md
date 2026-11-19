@@ -8,6 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- The visual editor's fidelity check reads each run of text by the marks on it, not by how they nest, as the editor's guard on each edit does: a page whose marks overlap only partly, such as `~~*a* b~~`, no longer stays in source mode once the editor writes them nested another way, or moves a mark off a space between them. Links still count one by one, so one written as two still differs. (#659)
 - Visual editor: an image whose alt needs `==` escaped no longer makes the other `==` in its table row, list or paragraph escaped too, and a U+E003 in an image's alt, title or address stays as written rather than turning into `\=`. (#657)
 - Text in a colour just inside a link is underlined in its colour, in the reader and on public pages, as the visual editor shows it, rather than in the link's colour. The highlight and text colour marks refuse a colour the theme doesn't have. (#655)
 - The assistant's approved edit that overlaps what changed on the page since it was proposed, as in a live session, opens **Merge…** over the chat, with the assistant's edit on one side and the live page on the other, rather than being refused as stale. A choice made there is kept if the page moves on again before it saves, and Cancel leaves the proposal waiting. An approved edit to a page that left its share since is refused, even just before it saves. (#660)
