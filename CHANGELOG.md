@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- The visual editor's fidelity check reads each run of text by the marks on it, not by how they nest, as the editor's guard on each edit does: a page whose marks overlap only partly, such as `~~*a* b~~`, no longer stays in source mode once the editor writes them nested another way, or moves a mark off a space between them. Links still count one by one, so one written as two still differs. (#PR)
+- The visual editor's fidelity check reads each run of text by the marks on it, not by how they nest, as the editor's guard on each edit does: a page whose marks overlap only partly, such as `~~*a* b~~`, no longer stays in source mode once the editor writes them nested another way, or moves a mark off a space between them. Links still count one by one, so one written as two still differs. (#659)
 
 ## 0.28.0 - 2026-11-19
 
