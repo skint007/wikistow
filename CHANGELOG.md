@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Text in a colour just inside a link is underlined in its colour, in the reader and on public pages, as the visual editor shows it, rather than in the link's colour. The highlight and text colour marks refuse a colour the theme doesn't have. (#655)
+
 ## 0.28.0 - 2026-11-19
 
 ### Highlights
