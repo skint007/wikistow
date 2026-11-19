@@ -10,6 +10,7 @@ import {
   type ClientContext,
   type IdentityId,
   type PageId,
+  type PagePayload,
   type SpaceId,
 } from '@wikistow/client';
 import { useSyncExternalStore } from 'react';
@@ -29,8 +30,23 @@ export type ProposalItem = {
   proposal: Proposal;
   /** The tool call that made it, so the chat shows it there. */
   callId: string | null;
-  state: 'pending' | 'applying' | 'rejected' | 'dropped' | Applied['status'];
+  /** `merging` while **Merge…** is open for it. A cancelled merge leaves it pending. */
+  state:
+    | 'pending'
+    | 'applying'
+    | 'merging'
+    | 'rejected'
+    | 'dropped'
+    | Exclude<Applied['status'], 'cancelled'>;
   message: string | null;
+};
+
+/** An approved edit that overlaps what changed since, open in **Merge…** (ADR 0015 decision 8). */
+export type Merging = {
+  proposalId: number;
+  /** Counts each time Merge… opens, as a proposal's may open again for a new overlap. */
+  ask: number;
+  opened: agentTools.ProposalMerge;
 };
 
 /** Something the agent changed, once the person approved it. */
@@ -53,6 +69,8 @@ export type ChatState = {
   /** Where the agent may work, by name, and its access there. */
   scope: { spaceId: SpaceId; name: string | null; access: string }[];
   proposals: ProposalItem[];
+  /** The approved edit waiting for the person in **Merge…**, if any: one at a time. */
+  merging: Merging | null;
   /** Pages its tools read or found, newest last. */
   seen: PageRef[];
   changed: Changed[];
@@ -80,6 +98,11 @@ export class AgentChat {
   #stopping = false;
   // The tool call running now: tools run one at a time.
   #call: string | null = null;
+  // Answers the merge open now: the payload the person settled, or null.
+  #settle: ((payload: PagePayload | null) => void) | null = null;
+  #asks = 0;
+  // Places on screen that show Merge… (`holdMerges`): with none, it can't open.
+  #mergeHosts = 0;
   readonly #listeners = new Set<() => void>();
   readonly #onChanged: (changed: Changed) => void;
 
@@ -98,6 +121,7 @@ export class AgentChat {
       canEdit: false,
       scope: [],
       proposals: [],
+      merging: null,
       seen: [],
       changed: [],
       turns: [],
@@ -202,6 +226,7 @@ export class AgentChat {
     if (this.#state.phase === 'revoked') return;
     this.#session?.stop();
     this.#stopping = true;
+    this.settleMerge(null);
     if (this.#agentCtx) closeSession(this.#agentCtx);
     this.#set({
       phase: 'revoked',
@@ -277,6 +302,7 @@ export class AgentChat {
   /** Stop the reply, and any approved batch before its next change. Changes already made stay. */
   stop() {
     this.#stopping = true;
+    this.settleMerge(null);
     const session = this.#session;
     if (session?.state().status !== 'running') return;
     const before = session.state().messages.length;
@@ -325,9 +351,22 @@ export class AgentChat {
         const { proposal } = item;
         this.#update(id, { state: 'applying' });
         const held = proposal.kind === 'edit-page' ? await beforeEdit(proposal.pageId) : null;
+        let merged = false;
         const applied: Applied = held
           ? { status: 'refused', message: held }
-          : await agentTools.applyProposal(ctx, proposal);
+          : await agentTools.applyProposal(ctx, proposal, {
+              merge: async (opened) => {
+                const settled = await this.#askMerge(id, opened);
+                merged ||= settled !== null;
+                return settled;
+              },
+            });
+        if (applied.status === 'cancelled') {
+          // Nothing was written: it waits to be approved again, unless the agent went
+          // meanwhile. The rest of the batch waits too, as Stop is out of reach behind Merge….
+          this.#update(id, { state: this.#state.phase === 'revoked' ? 'dropped' : 'pending' });
+          break;
+        }
         if (applied.status === 'revoked' || (applied.status === 'refused' && !this.#live())) {
           this.#update(id, { state: 'pending' });
           return this.revoked();
@@ -344,7 +383,11 @@ export class AgentChat {
           };
           this.#set({ changed: [...this.#state.changed, changed] });
           this.#onChanged(changed);
-          this.#notes.push(`Proposal ${id} was approved and applied.`);
+          this.#notes.push(
+            merged
+              ? `Proposal ${id} was approved and applied, merged by me with changes made since it was proposed.`
+              : `Proposal ${id} was approved and applied.`,
+          );
         } else {
           this.#notes.push(`Proposal ${id} was approved but not applied: ${applied.message}`);
         }
@@ -354,9 +397,44 @@ export class AgentChat {
     }
   }
 
+  // Open Merge… for the approved proposal `id`, until the person saves or cancels it.
+  #askMerge(id: number, opened: agentTools.ProposalMerge): Promise<PagePayload | null> {
+    if (this.#stopping || this.#state.phase !== 'ready' || this.#mergeHosts === 0) {
+      return Promise.resolve(null);
+    }
+    this.settleMerge(null);
+    this.#update(id, { state: 'merging' });
+    this.#set({ merging: { proposalId: id, ask: ++this.#asks, opened } });
+    return new Promise((resolve) => {
+      this.#settle = (payload) => {
+        this.#settle = null;
+        this.#update(id, { state: 'applying' });
+        this.#set({ merging: null });
+        resolve(payload);
+      };
+    });
+  }
+
+  /**
+   * A place on screen shows Merge… while this holds; once none does, a merge
+   * open is cancelled, and one asked for then is too.
+   */
+  holdMerges(): () => void {
+    this.#mergeHosts++;
+    return () => {
+      if (--this.#mergeHosts === 0) this.settleMerge(null);
+    };
+  }
+
+  /** The person saved the merge open now (`payload`), or cancelled it (null): nothing is saved then. */
+  settleMerge(payload: PagePayload | null) {
+    this.#settle?.(payload);
+  }
+
   /** End the chat: the conversation is forgotten, and the agent's session closed. */
   close() {
     this.#stopping = true;
+    this.settleMerge(null);
     this.#session?.close();
     if (this.#agentCtx) closeSession(this.#agentCtx);
     if (this.#state.phase === 'opening') this.#set({ phase: 'failed', failure: null });

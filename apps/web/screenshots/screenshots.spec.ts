@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, expectSignedIn, pick, signIn, swapKey, test } from '../e2e/fixtures';
 import {
   addPerson,
@@ -1068,6 +1068,29 @@ test('capture math: inline and block, in the reader, the visual editor, its TeX 
   await visitor.screenshot({ path: 'screenshots/math-public-page.png', fullPage: true });
 });
 
+/**
+ * Each link's text in a colour is underlined in that colour (#455), as the
+ * visual editor, which writes the colour outside the link, shows it: the
+ * text's own underline or the link's, whichever is nearer the text.
+ */
+async function linksUnderlinedInTheirColour(body: Locator) {
+  for (const word of ['the drainage table', 'the trial', 'soil']) {
+    const colored = body.locator('span[data-color]', { hasText: word });
+    const underline = await colored.evaluate((span) => {
+      // The text's own element, or the link inside it in the visual editor.
+      const text = span.querySelector('a') ?? span;
+      const line = (el: Element) => getComputedStyle(el).textDecorationLine;
+      const drawn = line(text) === 'underline' ? text : text.closest('a');
+      return {
+        color: getComputedStyle(span).color,
+        underline:
+          drawn && line(drawn) === 'underline' && getComputedStyle(drawn).textDecorationColor,
+      };
+    });
+    expect(underline.underline, word).toBe(underline.color);
+  }
+}
+
 test('capture highlights and colours: in the reader, the visual editor, its colour menu, the source and the public page', async ({
   page,
   freshPage,
@@ -1086,7 +1109,7 @@ test('capture highlights and colours: in the reader, the visual editor, its colo
       '- <span data-color="green">Agree:</span> <mark data-color="green">mulch twice a year</mark>.',
       '- <span data-color="blue">Look up</span> the <mark data-color="purple">1998 trial</mark> it cites.',
       'Every colour: <mark data-color="red">red</mark> <mark data-color="orange">orange</mark> <mark data-color="yellow">yellow</mark> <mark data-color="green">green</mark> <mark data-color="blue">blue</mark> <mark data-color="purple">purple</mark>, and text in <span data-color="red">red</span> <span data-color="orange">orange</span> <span data-color="yellow">yellow</span> <span data-color="green">green</span> <span data-color="blue">blue</span> <span data-color="purple">purple</span>.',
-      'Links take the colour too: <span data-color="red">[the drainage table](https://example.com)</span> and [<span data-color="purple">the trial</span>](https://example.com).',
+      'Links take the colour too: <span data-color="red">[the drainage table](https://example.com)</span>, [<span data-color="purple">the trial</span>](https://example.com) and [the <span data-color="green">soil</span> survey](https://example.com).',
       'A comparison like a == b stays as written.',
       '',
     ].join('\n\n'),
@@ -1098,6 +1121,8 @@ test('capture highlights and colours: in the reader, the visual editor, its colo
   await showIn(page, 'Visual');
   const visual = page.locator('#page-visual');
   await expect(visual.locator('mark')).toHaveCount(10);
+  await linksUnderlinedInTheirColour(visual);
+  await shoot('visual', page);
   // The cursor in a highlight, and the colour menu open beside the Highlight button.
   await visual.getByText('plenty of organic matter').click();
   await page.getByRole('button', { name: 'Highlight and text colour' }).click();
@@ -1109,6 +1134,7 @@ test('capture highlights and colours: in the reader, the visual editor, its colo
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect(page.getByText('Published v1')).toBeVisible();
   await expect(page.locator('.page-body').first().locator('mark')).toHaveCount(10);
+  await linksUnderlinedInTheirColour(page.locator('.page-body').first());
   await shoot('reader', page);
 
   await openLinkDialog(page, 'Reading notes');
@@ -1125,6 +1151,7 @@ test('capture highlights and colours: in the reader, the visual editor, its colo
     await visitor.goto(url);
     await expect(visitor.locator('mark')).toHaveCount(10, { timeout: 2_000 });
   }).toPass();
+  await linksUnderlinedInTheirColour(visitor.locator('.page-body'));
   for (const scheme of ['light', 'dark'] as const) {
     await visitor.emulateMedia({ colorScheme: scheme });
     await visitor.screenshot({

@@ -529,9 +529,15 @@
 }
 
 /* A link in coloured text (`<span data-color>`) takes the text's colour, whichever is
-   written outside the other, over the link's own (`text-primary`, a utility). */
+   written outside the other, over the link's own (`text-primary`, a utility). A link
+   around coloured text underlines it in the link's colour, so the coloured text just
+   inside it draws its own underline, where the link has one, over the link's: as the
+   visual editor, which writes the colour outside the link, shows it (#455). */
 @layer utilities {
   .page-body span[data-color] a {
     color: inherit;
+  }
+  .page-body a > span[data-color] {
+    text-decoration-line: inherit;
   }
 }

@@ -272,9 +272,14 @@ function liveBody(initial: string) {
   text.insert(0, initial);
   const remote = new Y.Doc();
   const before = new Set<(sender: string) => void>();
+  const session = { active: true };
   const live: LiveSource = {
     text,
-    edit: (change) => doc.transact(change, LOCAL),
+    // As the participant does: nothing once the session isn't live.
+    edit: (change) => {
+      if (session.active) doc.transact(change, LOCAL);
+    },
+    active: () => session.active,
     localOrigin: LOCAL,
     carets: () => [],
     onCarets: () => () => {},
@@ -292,7 +297,7 @@ function liveBody(initial: string) {
     for (const listener of before) listener(sender);
     Y.applyUpdate(doc, update, 'remote');
   };
-  return { text, live, theirs };
+  return { text, live, theirs, session };
 }
 
 describe('in a live session', () => {
@@ -316,6 +321,45 @@ describe('in a live session', () => {
     theirs('sam', (body) => body.insert(0, 'Sam. '));
     await expect.poll(() => code.state.doc.toString()).toBe('Sam. One. Source\n\nTwo.!\n');
     await expect.poll(() => editor.textContent).toContain('Sam. One. Source');
+  });
+
+  it('in split, keeps the source side’s keystroke as the session ends, for the draft and the visual side (#513)', async () => {
+    const { text, live, session } = liveBody('One.\n\nTwo.\n');
+    const m = mount('One.\n\nTwo.\n', 'split', live);
+    await expect.poll(() => !!visual(m) && !!sourceView(m)).toBe(true);
+    const code = sourceView(m);
+    const editor = visual(m);
+    if (!code || !editor) throw new Error('No editors');
+    // Ended, but not unbound yet: the session takes nothing more.
+    session.active = false;
+    act(() => code.dispatch({ changes: { from: 4, insert: '!' } }));
+    // What the draft reads is the keystroke, at once, and the visual side takes it.
+    expect(m.handle.read()).toBe('One.!\n\nTwo.\n');
+    await expect.poll(() => editor.textContent).toContain('One.!');
+    expect(m.handle.read()).toBe('One.!\n\nTwo.\n');
+    expect(code.state.doc.toString()).toBe('One.!\n\nTwo.\n');
+    expect(text.toJSON()).toBe('One.\n\nTwo.\n');
+    // Unbound once the draft has gone on outside the session: it stays.
+    m.rejoin(null);
+    expect(m.handle.read()).toBe('One.!\n\nTwo.\n');
+    expect(code.state.doc.toString()).toBe('One.!\n\nTwo.\n');
+  });
+
+  it('in split, keeps that keystroke when unbound with the visual side still behind (#513)', async () => {
+    const { live, theirs, session } = liveBody('One.\n\nTwo.\n');
+    const m = mount('One.\n\nTwo.\n', 'split', live);
+    await expect.poll(() => !!visual(m) && !!sourceView(m)).toBe(true);
+    const code = sourceView(m);
+    if (!code) throw new Error('No source editor');
+    // Someone else's change, which the visual side hasn't taken in yet.
+    theirs('sam', (body) => body.insert(0, 'Sam. '));
+    session.active = false;
+    act(() => code.dispatch({ changes: { from: 9, insert: '!' } }));
+    m.rejoin(null);
+    expect(code.state.doc.toString()).toBe('Sam. One.!\n\nTwo.\n');
+    expect(m.handle.read()).toBe('Sam. One.!\n\nTwo.\n');
+    await expect.poll(() => visual(m)?.textContent).toContain('Sam. One.!');
+    expect(m.handle.read()).toBe('Sam. One.!\n\nTwo.\n');
   });
 
   it('joined with the visual editor open, takes others’ text in once, and typing after', async () => {
