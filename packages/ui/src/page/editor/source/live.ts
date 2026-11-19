@@ -328,11 +328,13 @@ function madeAndGone(transaction: Y.Transaction): boolean {
   return false;
 }
 
-// Whether `changes` put text in at `pos`, or take out text there or either side of it.
+// Whether `changes` put text in at `pos`, or take out text there or either
+// side of it: a unit further each way, as a change widened to a whole
+// character went into `body`.
 function touches(changes: ChangeSet, pos: number): boolean {
   let touched = false;
   changes.iterChangedRanges((fromA, toA) => {
-    if (fromA <= pos && pos <= toA) touched = true;
+    if (fromA - 1 <= pos && pos <= toA + 1) touched = true;
   });
   return touched;
 }

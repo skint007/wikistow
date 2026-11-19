@@ -342,4 +342,18 @@ describe('the source editor in a live session', () => {
     expect(m.view.state.sliceDoc()).toBe('hello one two');
     expect(caretsShown(m)).toEqual([10]);
   });
+  it('finds a caret again beside a change widened to a whole character', async () => {
+    const s = session('😀bc');
+    const m = await mount(s);
+    const sam = caretAt(s, 2);
+    act(() => s.setCarets([sam]));
+    // Someone takes out the "b" Sam was at, then the person changes only
+    // the emoji's first half, which goes into `body` as the whole emoji.
+    s.theirs((text) => text.delete(2, 1));
+    await microtasks();
+    typeAt(m, 0, '\ud83e', 1);
+    await microtasks();
+    expect(s.text.toJSON()).toBe('🨀c');
+    expect(caretsShown(m)).toEqual([resolveIn(s.text, sam.head)]);
+  });
 });
