@@ -323,4 +323,23 @@ describe('the source editor in a live session', () => {
     s.theirs((text) => text.insert(text.length, ' Bye.'));
     expect(m.view.state.sliceDoc()).toBe('Oh. Hello. Bye.');
   });
+  it('keeps a caret by its character when carets are drawn before the editor shows the person’s change', async () => {
+    const s = session('one two');
+    const m = await mount(s);
+    const sam = caretAt(s, 4);
+    act(() => s.setCarets([sam]));
+    // The visual editor writes "hello " into `body`; others' presence comes
+    // in before the source editor is shown it, then it is.
+    s.mine((text) => text.insert(0, 'hello '));
+    act(() => s.setCarets([sam]));
+    act(() =>
+      m.view.dispatch({
+        changes: { from: 0, insert: 'hello ' },
+        annotations: sessionChange.of(true),
+      }),
+    );
+    await microtasks();
+    expect(m.view.state.sliceDoc()).toBe('hello one two');
+    expect(caretsShown(m)).toEqual([10]);
+  });
 });

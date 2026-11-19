@@ -384,6 +384,7 @@ export function liveBinding(source: LiveSource): Extension {
               this.#apart = true;
               // Its changes may not be the editor's, which carets would be moved by: found again.
               this.#placed.clear();
+              this.checkSoon();
             }
             return;
           }
@@ -405,8 +406,14 @@ export function liveBinding(source: LiveSource): Extension {
           (transaction) => transaction.docChanged && !transaction.annotation(remoteChange),
         );
         if (update.docChanged) {
-          if (update.transactions.some((transaction) => transaction.annotation(resynced))) {
-            // Replaced whole, a caret's place in it is found again.
+          if (
+            update.transactions.some(
+              (transaction) =>
+                transaction.annotation(resynced) || transaction.annotation(sessionChange),
+            )
+          ) {
+            // Made to hold what `body` does, by changes other than Yjs's own:
+            // a caret's place in it is found again.
             this.#placed.clear();
           } else {
             for (const placed of this.#placed.values()) {
@@ -579,6 +586,8 @@ export function liveBinding(source: LiveSource): Extension {
           });
         }
         for (const key of this.#placed.keys()) if (!shown.has(key)) this.#placed.delete(key);
+        // Found in a `body` the editor may not show yet: not kept, so found again once it does.
+        if (this.#apart) this.#placed.clear();
         marks.sort((a, b) => a.from - b.from || a.to - b.to);
         const builder = new RangeSetBuilder<Decoration>();
         for (const mark of marks) builder.add(mark.from, mark.to, mark.decoration);
