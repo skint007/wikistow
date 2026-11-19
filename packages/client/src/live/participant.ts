@@ -553,6 +553,11 @@ async function newcomerFrom(
       const started = new Set<string>();
       for (const stored of served.latest) {
         const message = open(stored.message);
+        // A Saved notice of a newer format, which the snapshot covers: a newer app is in it.
+        if (message.kind === 'saved' && newerSaved(message.content)) {
+          newerIn.add(opened.record.subjectId);
+          return { kind: 'update-app' };
+        }
         joins.startFrom(message);
         started.add(key(message));
       }
@@ -1598,33 +1603,39 @@ export class LiveParticipant {
     };
     // On the head, a session draft this app holds, with nothing of its own
     // unsent; after a `stale-head`, given a few seconds to catch up with it.
+    const ready = () => {
+      const headId = this.#head;
+      const head = headId ? this.#drafts.get(headId) : undefined;
+      const now =
+        this.#keyed() &&
+        this.#pending.length === 0 &&
+        this.#queue.length === 0 &&
+        // One copy at a time: the main join waits for each to be placed.
+        !this.#placing &&
+        head !== undefined &&
+        holdsState(this.document.state(), head.state);
+      return headId && head && now ? { headId, head } : null;
+    };
     const onHead = async (waits: number) => {
       await this.#knowPublished();
       for (let waited = 0; waited < waits; waited++) {
         if (waited > 0) await sleep(300, this.#abort.signal);
-        if (!this.#keyed()) return null;
+        if (!this.#keyed()) return false;
         await this.flush();
         await this.#ensureHead();
-        const headId = this.#head;
-        const head = headId ? this.#drafts.get(headId) : undefined;
-        const ready =
-          this.#keyed() &&
-          this.#pending.length === 0 &&
-          this.#queue.length === 0 &&
-          // One copy at a time: the main join waits for each to be placed.
-          !this.#placing &&
-          head !== undefined &&
-          holdsState(this.document.state(), head.state);
         // A change worked out on one draft goes only on that one.
-        if (on && headId !== on) return null;
-        if (headId && head && ready) return { headId, head };
+        if (on && this.#head !== on) return false;
+        if (ready()) return true;
       }
-      return null;
+      return false;
     };
     for (let tries = 0; ; tries++) {
       // Its further join made already, kept present meanwhile.
-      const found = made ? await this.#whileAlive(further, () => onHead(10)) : await onHead(10);
-      if (!found) return giveUp();
+      const waited = made ? await this.#whileAlive(further, () => onHead(10)) : await onHead(10);
+      // As it is now, with nothing awaited before the copy is made: typing
+      // meanwhile, as while the further join's last request finished, waits.
+      const found = waited ? ready() : null;
+      if (!found || (on && found.headId !== on)) return giveUp();
       const { headId, head } = found;
       // Made afresh each try, under the same client: nothing of an earlier try went out.
       const build = () => {
@@ -1748,6 +1759,8 @@ export class LiveParticipant {
         return { name, span, from, to, was };
       });
     });
+    // Each entry as it is now: one someone else set since stays theirs.
+    const entriesWere = entries.map(({ root, key }) => this.document.map(root).get(key) ?? null);
     return (document, again) => {
       // Where each was can't be found: those texts whole, as given.
       const whole = new Set<TextRoot>();
@@ -1765,6 +1778,11 @@ export class LiveParticipant {
         whole.has(name) ? again : document.text(name).toJSON().slice(start, end) !== spans[at]?.was,
       );
       if (moved) return false;
+      const changed = entries.some(({ root, key, value }, at) => {
+        const now = document.map(root).get(key) ?? null;
+        return now !== entriesWere[at] && now !== value;
+      });
+      if (changed) return false;
       // From the end of each text, so each place stays where it was found.
       for (const { name, span, start, end } of placed.toReversed()) {
         if (whole.has(name)) continue;
@@ -3267,7 +3285,11 @@ export class LiveParticipant {
     const written = this.#payload(draft.payload, copy);
     // Nothing of the session's since the base, and theirs is what the document then writes.
     const unsaved = !sameState(before, base.state) || !samePayload(written, draft.payload);
-    const people = this.#with(base, draft.authorId);
+    // A draft from outside that was published: who edited it was published with it.
+    const people =
+      head === this.#publishedFrom
+        ? this.#with({ revisionId: head, with: [] })
+        : this.#with(base, draft.authorId);
     const seenSeq = this.#publishedSeq;
     const stateBytes = copy.stateBytes();
     const copyState = copy.state();
@@ -3428,7 +3450,7 @@ export class LiveParticipant {
       payload: draft.payload,
       state,
       compared: false,
-      with: this.#carried(base, draft.authorId),
+      with: revision === this.#publishedFrom ? [] : this.#carried(base, draft.authorId),
       openedAt: Date.now(),
       foldedBy: key(grant.holder),
     });
@@ -3814,7 +3836,18 @@ export class LiveParticipant {
     for (const [person, changed] of this.#typed) {
       if (holdsState(published.state, changed)) this.#typed.delete(person);
     }
-    if (!holdsState(published.state, this.#startState)) return;
+    if (!holdsState(published.state, this.#startState)) {
+      // This app joined after it, holding typing never taken through `#typed`:
+      // whoever wrote what it holds beyond the publication typed since.
+      for (const [client, clock] of this.#startState.vector) {
+        const was = published.state.vector.get(client) ?? 0;
+        const join = clock > was ? this.#joins.joinOf(client) : undefined;
+        if (!join) continue;
+        const structs = [{ client, start: was, end: clock, items: [] }];
+        this.#typedBy(join.senderId, { structs, deletes: new Map() });
+      }
+      return;
+    }
     this.#publishedWith = new Set(published.with);
     for (const draft of this.#drafts.values()) {
       if (draft.revisionId === from || !this.#descends(draft.revisionId, from)) continue;
@@ -3881,13 +3914,14 @@ export class LiveParticipant {
    * What a publication made from the draft `from` holds, as far as this
    * app can tell: a session draft's state and `with`; for a draft written
    * outside the session, those of the nearest session draft it was saved
-   * on, with the signers of the drafts between, since it holds all that
-   * draft holds. Null when it can't tell; it throws when a draft won't open.
+   * on, a few drafts down at most, with the signers of the drafts between,
+   * since it holds all that draft holds. Null when it can't tell; it throws
+   * when a draft won't open.
    */
   async #publishedAs(from: RevisionId): Promise<Pick<SessionDraft, 'state' | 'with'> | null> {
     const signers: IdentityId[] = [];
     let at: RevisionId | null = from;
-    for (let steps = 0; at && steps < 16; steps++) {
+    for (let steps = 0; at && steps < 4; steps++) {
       const known = this.#drafts.get(at);
       if (known) return { state: known.state, with: [...known.with, ...signers] };
       const draft: OpenedDraft = this.#outsiderDrafts.get(at) ?? (await this.#ports.openDraft(at));
@@ -3984,7 +4018,7 @@ export class LiveParticipant {
     }
     // Who edited goes by the latest publication: one a publish just over may
     // have made, or, looked at once a minute, one made outside the session.
-    if (Date.now() - this.#publicationAt >= PUBLICATION_MS) void this.#learnPublished();
+    if (!force && Date.now() - this.#publicationAt >= PUBLICATION_MS) void this.#learnPublished();
     await this.#knowPublished();
     // Everything the save holds of this app's own goes out before its Saved notice.
     await this.flush();
@@ -4711,6 +4745,15 @@ const TRY_AGAIN_MS = 60_000;
 const WAIT_MS = 11 * 60_000;
 // Sessions this app left once because it couldn't catch up with the others.
 const cantCatchUp = new Set<string>();
+// Whether a Saved notice is of a newer major format; one that doesn't read is no sign of it.
+function newerSaved(content: Uint8Array): boolean {
+  try {
+    return readSaved(content).kind === 'newer-format';
+  } catch {
+    return false;
+  }
+}
+
 // Sessions where this app found something of a newer format: it doesn't join them again.
 const newerIn = new Set<string>();
 /** Why an app stopped at something of a newer format, as the page says it. */
