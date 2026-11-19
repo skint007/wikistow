@@ -344,9 +344,6 @@ type Held = {
 
 type Outgoing = { message: LiveMessage; covers?: number };
 
-// How much of the text on each side of a change tells whether it went in already.
-const CONTEXT = 16;
-
 /** A change made in a copy of the document; `again` on a newer head. Whether it was made. */
 type Make = (document: LiveDocument, again: boolean) => boolean;
 
@@ -1755,11 +1752,12 @@ export class LiveParticipant {
   }
 
   // A change of the document as it is now, to be made later in a copy of it:
-  // each text's smallest change, its edges held as relative positions, and
-  // the text it replaces. It is made only where each replaced text is still
-  // there as it was, so never over typing that went in since, nor twice, as
-  // for a rename another app made. A text whose place is lost is written
-  // whole, unless it is made `again`, on a head that moved on since.
+  // each text's smallest change, its edges held as relative positions, the
+  // text it replaces and the lines it changes. It is made only where each
+  // replaced text is still there as it was, so never over typing that went
+  // in since. Made `again`, on a head that moved on since, it is made only
+  // where the lines it changes all read as they did, so never twice, and a
+  // text whose place is lost isn't written whole.
   #anchored({ texts = {}, entries = [] }: DocumentChange): Make {
     const spans = (Object.entries(texts) as [TextRoot, string][]).flatMap(([name, target]) => {
       const text = this.document.text(name);
@@ -1773,11 +1771,16 @@ export class LiveParticipant {
             : Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
         const now = text.toJSON();
         const was = now.slice(span.from, span.from + span.remove);
-        // What the change makes around its place, with a little of the text on each side.
-        const left = now.slice(Math.max(0, span.from - CONTEXT), span.from) + span.insert;
-        const right =
-          span.insert + now.slice(span.from + span.remove, span.from + span.remove + CONTEXT);
-        return { name, span, from, to, was, left, right };
+        // The whole lines it changes, as they read now, and how far they reach on each side.
+        const first = span.from === 0 ? 0 : now.lastIndexOf('\n', span.from - 1) + 1;
+        const next = now.indexOf('\n', span.from + span.remove);
+        const last = next === -1 ? now.length : next;
+        const lines = {
+          text: now.slice(first, last),
+          before: span.from - first,
+          after: last - (span.from + span.remove),
+        };
+        return { name, span, from, to, was, lines };
       });
     });
     // Each entry as it is now: one someone else set since stays theirs.
@@ -1794,18 +1797,26 @@ export class LiveParticipant {
         }
         return { name, span, start: start?.index ?? 0, end: end?.index ?? 0 };
       });
+      // Made again, on a head that moved on, only where every line it changes
+      // reads as it did: so never twice, where someone made the same change,
+      // nor where they changed anything else on those lines.
+      const touched =
+        again &&
+        placed.some(({ name, start, end }, at) => {
+          const lines = spans[at]?.lines;
+          if (!lines || whole.has(name)) return true;
+          const now = document.text(name).toJSON();
+          const first = start - lines.before;
+          const last = end + lines.after;
+          return (
+            first < 0 ||
+            now.slice(first, last) !== lines.text ||
+            (first > 0 && now[first - 1] !== '\n') ||
+            (last < now.length && now[last] !== '\n')
+          );
+        });
+      if (touched) return false;
       // Never over text that changed since: made again, also never where a place is lost.
-      // An insertion whose place already reads as the change makes it went in from someone else.
-      const twice = placed.some(({ name, span, start, end }, at) => {
-        const anchored = spans[at];
-        if (!anchored || span.insert === '' || whole.has(name)) return false;
-        const now = document.text(name).toJSON();
-        return (
-          now.slice(Math.max(0, start - anchored.left.length), start) === anchored.left ||
-          now.slice(end, end + anchored.right.length) === anchored.right
-        );
-      });
-      if (twice) return false;
       const moved = placed.some(({ name, start, end }, at) =>
         whole.has(name) ? again : document.text(name).toJSON().slice(start, end) !== spans[at]?.was,
       );

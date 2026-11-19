@@ -172,9 +172,9 @@ describe('a file’s change while another app saves (#492)', () => {
       const save = ports.saveDraft.bind(ports);
       ports.saveDraft = async (input) => {
         if (!raced) {
-          // Another app's save lands first: this one meets `stale-head`.
+          // Another app's save lands first, with typing on another line: this one meets `stale-head`.
           raced = true;
-          type(theirs, ' typed meanwhile');
+          theirs.edit((document) => document.text('body').insert(0, 'Typed meanwhile.\n'));
           expect(await theirs.saveNow()).toBe(true);
         }
         return save(input);
@@ -184,7 +184,7 @@ describe('a file’s change while another app saves (#492)', () => {
     const target = `${body(mine)} ![photo](attachment:photo)`;
     expect(await mine.commitOwn({ texts: { body: target } })).toBe(true);
     expect(raced).toBe(true);
-    const both = 'draft words typed meanwhile ![photo](attachment:photo)';
+    const both = 'Typed meanwhile.\ndraft words ![photo](attachment:photo)';
     await expect.poll(() => body(theirs)).toBe(both);
     expect(body(mine)).toBe(both);
     expect((await draftOf(owner, page)).payload.markdown).toBe(both);
@@ -214,6 +214,29 @@ describe('a file’s change while another app saves (#492)', () => {
     await expect.poll(() => body(mine)).toBe('draft woXrds');
     expect(body(theirs)).toBe('draft woXrds');
     expect(mine.status().state).toEqual({ kind: 'live' });
+  });
+
+  it('never makes again a change another app made meanwhile', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const theirs = await join(editor, page);
+    let raced = false;
+    const mine = await join(owner, page, (ports) => {
+      const save = ports.saveDraft.bind(ports);
+      ports.saveDraft = async (input) => {
+        if (!raced) {
+          // Another app makes the same insertion first, and saves it.
+          raced = true;
+          type(theirs, 's');
+          expect(await theirs.saveNow()).toBe(true);
+        }
+        return save(input);
+      };
+    });
+    await expect.poll(() => theirs.status().people.length).toBe(1);
+    expect(await mine.commitOwn({ texts: { body: 'draft wordss' } })).toBe(false);
+    expect(raced).toBe(true);
+    await expect.poll(() => body(mine)).toBe('draft wordss');
+    expect(body(theirs)).toBe('draft wordss');
   });
 });
 
