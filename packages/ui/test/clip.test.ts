@@ -10,7 +10,7 @@ import {
   type DraftSave,
   type PageWriter,
 } from '@wikistow/client';
-import type { ClipImage, DesktopClip } from '@wikistow/contracts';
+import type { ClipImage, ClipMade, DesktopClip } from '@wikistow/contracts';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   clipFrontmatter,
@@ -220,15 +220,23 @@ describe('the folder search', () => {
 /** A page writer that records what it's asked, as the server or queue would answer. */
 function fakeWriter({
   refuse,
-}: { refuse?: 'page' | 'attach' | 'attach-failed' | 'save' | 'delete' } = {}) {
+  made = [],
+}: {
+  refuse?: 'page' | 'attach' | 'attach-failed' | 'save' | 'delete';
+  /** Pages made already, which making again is refused as. */
+  made?: PageId[];
+} = {}) {
   const calls: { call: string; input: unknown }[] = [];
   const revisionId = newId(RevisionId);
   let n = 0;
   const writer = {
-    async newPageDraft(input: unknown) {
+    async newPageDraft(input: { ids?: { pageId: PageId; revisionId: RevisionId } }) {
       calls.push({ call: 'newPageDraft', input });
       if (refuse === 'page') throw new ApiError(403, 'forbidden', 'No');
-      return { pageId: newId(PageId), revisionId };
+      if (input.ids && made.includes(input.ids.pageId)) {
+        throw new ApiError(409, 'duplicate', 'That page ID is taken');
+      }
+      return { pageId: input.ids?.pageId ?? newId(PageId), revisionId };
     },
     async attach(_page: unknown, file: { name: string; mediaType: string; bytes: Uint8Array }) {
       calls.push({ call: 'attach', input: file.name });
@@ -308,6 +316,11 @@ describe('saving a clip', () => {
       title: 'A story',
       markdown:
         '---\nsource: https://news.example/story?id=1\nclipped: 2026-11-13\n---\nHi[](https://cdn.test/a.png)[](https://cdn.test/broken.png)\n',
+      ids: {
+        pageId: (saved.outcome as { pageId: PageId }).pageId,
+        revisionId: expect.any(String),
+        sent: false,
+      },
     });
     expect(calls[1]?.input).toBe('a.png');
     const save = calls[2]?.input as DraftSave;
@@ -402,19 +415,62 @@ describe('saving a clip', () => {
     expect(calls).toEqual([]);
   });
 
-  it('says the page is made as soon as it is, before its images', async () => {
+  it('says the page’s ID before it’s made, and that it is as soon as it is, before its images', async () => {
     const { writer, calls } = fakeWriter();
-    const told: string[] = [];
-    await saveClip(
+    const told: ClipMade[] = [];
+    const when: string[] = [];
+    const saved = await saveClip(
       clip({ html: '<img src="https://cdn.test/a.png">' }),
       deps({
         writer,
         made: async (page) => {
-          told.push(`${page.path} after ${calls.map((c) => c.call).join(',')}`);
+          told.push(page);
+          when.push(calls.map((c) => c.call).join(','));
         },
       }),
     );
-    expect(told).toEqual(['Home / News after newPageDraft']);
+    const { ids } = calls[0]!.input as { ids: { pageId: PageId; revisionId: RevisionId } };
+    const { pageId, revisionId } = ids;
+    expect(ids).toEqual({ pageId, revisionId, sent: false });
+    expect(told).toEqual([
+      { spaceId, pageId, revisionId, path: 'Home / News', making: true },
+      { spaceId, pageId, path: 'Home / News' },
+    ]);
+    expect(when).toEqual(['', 'newPageDraft']);
+    expect(saved.outcome).toMatchObject({ ok: true, pageId });
+  });
+
+  it('makes a page a reload cut short before it was made under the IDs kept', async () => {
+    const { writer, calls } = fakeWriter();
+    const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
+    const told: ClipMade[] = [];
+    const saved = await saveClip(
+      clip({
+        html: '<p>Hi<img src="https://cdn.test/a.png"></p>',
+        made: { spaceId, pageId, revisionId, path: 'Home / News', making: true },
+      }),
+      deps({ writer, made: async (page) => void told.push(page) }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, pageId, images: { saved: 1, skipped: 0 } });
+    expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'save']);
+    // As sent: the server, or this device, may have it under them.
+    expect(calls[0]?.input).toMatchObject({ ids: { pageId, revisionId, sent: true } });
+    expect(told).toEqual([{ spaceId, pageId, path: 'Home / News' }]);
+  });
+
+  it('finishes a clip whose page a reload cut short just after it was made, making no other', async () => {
+    const pageId = newId(PageId);
+    const { writer, calls } = fakeWriter({ made: [pageId] });
+    const saved = await saveClip(
+      clip({
+        html: '<p>Hi<img src="https://cdn.test/a.png"></p>',
+        made: { spaceId, pageId, revisionId: newId(RevisionId), path: 'Home / News', making: true },
+      }),
+      deps({ writer }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, spaceId, pageId, path: 'Home / News' });
+    expect(calls.map((c) => c.call)).toEqual(['newPageDraft']);
   });
 
   it('queues a clip to a space not kept offline, whose folders it can’t read', async () => {
@@ -534,13 +590,79 @@ describe('saving a screenshot', () => {
       deps({
         writer,
         made: async (page) => {
-          told.push(
-            `${page.partial ? 'partly' : 'whole'} after ${calls.map((c) => c.call).join(',')}`,
-          );
+          const stage = page.making ? 'making' : page.partial ? 'partly' : 'whole';
+          told.push(`${stage} after ${calls.map((c) => c.call).join(',')}`);
         },
       }),
     );
-    expect(told).toEqual(['partly after newPageDraft', 'whole after newPageDraft,attach,save']);
+    expect(told).toEqual([
+      'making after ',
+      'partly after newPageDraft',
+      'whole after newPageDraft,attach,save',
+    ]);
+  });
+
+  it('makes a page a reload cut short before it was made under the ID kept, with the screenshot', async () => {
+    const { writer, calls } = fakeWriter();
+    const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
+    const saved = await saveClip(
+      shot({ made: { spaceId, pageId, revisionId, path: 'Home / News', making: true } }),
+      deps({ writer }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, pageId, images: { saved: 1, skipped: 0 } });
+    expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'save']);
+    expect(calls[0]?.input).toMatchObject({ ids: { pageId, revisionId, sent: true } });
+  });
+
+  it('puts a page a reload cut short just after it was made in the trash, and saves the screenshot again', async () => {
+    const pageId = newId(PageId);
+    const { writer, calls } = fakeWriter({ made: [pageId] });
+    const told: ClipMade[] = [];
+    const saved = await saveClip(
+      shot({ made: { spaceId, pageId, path: 'Home / News', making: true } }),
+      deps({ writer, made: async (page) => void told.push(page) }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    expect(saved.outcome).not.toMatchObject({ pageId });
+    expect(calls.map((c) => c.call)).toEqual([
+      'newPageDraft',
+      'deleteNode',
+      'newPageDraft',
+      'attach',
+      'save',
+    ]);
+    expect(calls[1]?.input).toMatchObject({ spaceId, nodeId: pageId, dropChanges: true });
+    // The new page's ID is kept before it's made, as any.
+    const { ids: again } = calls[2]!.input as {
+      ids: { pageId: PageId; revisionId: RevisionId; sent: boolean };
+    };
+    expect(again.pageId).not.toBe(pageId);
+    expect(again.sent).toBe(false);
+    expect(told[0]).toEqual({
+      spaceId,
+      pageId: again.pageId,
+      revisionId: again.revisionId,
+      path: 'Home / News',
+      making: true,
+    });
+  });
+
+  it('saves the screenshot again if the page a reload cut short is in the trash already', async () => {
+    const pageId = newId(PageId);
+    const { writer, calls } = fakeWriter({ made: [pageId], refuse: 'delete' });
+    const saved = await saveClip(
+      shot({ made: { spaceId, pageId, path: 'Home / News', making: true } }),
+      deps({ writer }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    expect(calls.map((c) => c.call)).toEqual([
+      'newPageDraft',
+      'deleteNode',
+      'newPageDraft',
+      'attach',
+      'save',
+    ]);
   });
 
   it('puts a page made partly before a reload in the trash, and saves the screenshot again', async () => {
