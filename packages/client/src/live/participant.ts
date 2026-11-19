@@ -1227,6 +1227,8 @@ export class LiveParticipant {
     this.#presenceDirty = true;
     this.#schedule();
     try {
+      // Others see it publishing before it does, so they look at its publication once it's over.
+      await this.#presenceOut();
       let draft = await this.#saveAtPress(pressed);
       for (let tries = 0; ; tries++) {
         try {
@@ -1565,7 +1567,8 @@ export class LiveParticipant {
     this.#saving = mine;
     let done = false;
     try {
-      done = await this.#commitCopy(make, retry, on);
+      // A change given as code is never made again: only text and entries are checked for that.
+      done = await this.#commitCopy(make, retry && typeof change !== 'function', on);
       return done;
     } finally {
       if (this.#saving === mine) this.#saving = null;
@@ -3285,11 +3288,14 @@ export class LiveParticipant {
     const written = this.#payload(draft.payload, copy);
     // Nothing of the session's since the base, and theirs is what the document then writes.
     const unsaved = !sameState(before, base.state) || !samePayload(written, draft.payload);
-    // A draft from outside that was published: who edited it was published with it.
+    // A draft from outside published, or saved on one that was: who edited
+    // before it was published with it.
     const people =
       head === this.#publishedFrom
         ? this.#with({ revisionId: head, with: [] })
-        : this.#with(base, draft.authorId);
+        : this.#publishedBetween(head, base.revisionId)
+          ? this.#with({ revisionId: head, with: [] }, draft.authorId)
+          : this.#with(base, draft.authorId);
     const seenSeq = this.#publishedSeq;
     const stateBytes = copy.stateBytes();
     const copyState = copy.state();
@@ -3842,7 +3848,8 @@ export class LiveParticipant {
       for (const [client, clock] of this.#startState.vector) {
         const was = published.state.vector.get(client) ?? 0;
         const join = clock > was ? this.#joins.joinOf(client) : undefined;
-        if (!join) continue;
+        // A further join's changes are a save's own, as `#take` counts them.
+        if (!join || join.parent) continue;
         const structs = [{ client, start: was, end: clock, items: [] }];
         this.#typedBy(join.senderId, { structs, deletes: new Map() });
       }
@@ -3862,6 +3869,18 @@ export class LiveParticipant {
     if (seq === this.#publishedSeq) return [...people];
     const before = this.#publishedWith;
     return people.filter((id) => !before.has(id) || this.#typed.has(id) || keep.includes(id));
+  }
+
+  // Whether the latest publication this app saw was made from a draft from
+  // `head` down to, not including, `base`, by signed `basedOn`.
+  #publishedBetween(head: RevisionId, base: RevisionId): boolean {
+    const from = this.#publishedFrom;
+    let at: RevisionId | null = head;
+    for (let steps = 0; from && at && at !== base && steps < 256; steps++) {
+      if (at === from) return true;
+      at = this.#basedOn.get(at) ?? this.#outsiderDrafts.get(at)?.basedOn ?? null;
+    }
+    return false;
   }
 
   // Whether the draft `revision` was saved on `ancestor`, or on a draft that was, by signed `basedOn`.
@@ -4312,6 +4331,16 @@ export class LiveParticipant {
     }, wait);
   }
 
+  // Until this app's presence as it is now has gone out, for a second at most.
+  async #presenceOut(): Promise<void> {
+    const until = Date.now() + 1_000;
+    while (this.#presenceDirty && this.#keyed() && this.#joined && Date.now() < until) {
+      if (this.#sending) await this.#sending.catch(() => {});
+      else if (this.#placing) await sleep(SEND_MS, this.#abort.signal);
+      else await this.#send();
+    }
+  }
+
   /** Seal what's pending and send one request, the join's only one in flight. */
   #send(): Promise<void> {
     if (this.#sending) return this.#sending;
@@ -4461,13 +4490,8 @@ export class LiveParticipant {
   // ---- Status ----
 
   /**
-   * Leave the session, going on outside it. `end` ends it for everyone, as
-   * an app that can't take part does, so the next start makes a fresh one;
-   * otherwise only this app leaves (section 5.10, **Saving**).
-   */
-  /**
    * Something of a newer major format came (ADR 0015 decision 10): a
-   * `wikistow.live`, a draft or a Saved notice. This app says to update
+   * `wikistow.live`, a draft, a snapshot or a Saved notice. This app says to update
    * and edits as a writer outside the session, leaving it but never ending
    * it, since newer apps are in it. It doesn't join that session again.
    */
@@ -4478,6 +4502,11 @@ export class LiveParticipant {
     this.#close({ kind: 'stopped', why: UPDATE_APP_WHY, saveOver: null, rejoin: false });
   }
 
+  /**
+   * Leave the session, going on outside it. `end` ends it for everyone, as
+   * an app that can't take part does, so the next start makes a fresh one;
+   * otherwise only this app leaves (section 5.10, **Saving**).
+   */
   #stop(why: string, saveOver: RevisionId | null, rejoin: boolean, end = false): void {
     // Before it is made, as from a grant served with the session: once it is.
     if (!this.#status) {
