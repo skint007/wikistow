@@ -4,6 +4,12 @@
 // the visible area's. The area is in the tab's CSS pixels; the image is in
 // the screen's, so the cut is scaled by the two's ratio, measured from the
 // image itself, which covers high-DPI screens and the browser's zoom alike.
+// The screenshot is taken as the drag starts, with nothing of the
+// overlay's shown, so the area is cut from the page the person saw, not
+// one changed since.
+
+/** How long the overlay waits for an area, which the background allows too, and a little more. */
+export const CHOOSE_MS = 5 * 60_000;
 
 /** A rectangle in the tab's CSS pixels, from its top left as shown, whatever it's scrolled. */
 export type Area = { x: number; y: number; width: number; height: number };
@@ -17,19 +23,46 @@ export type AreaMessage = {
   /** Null when the person stopped, with Escape, or the overlay gave up waiting. */
   area: Area | null;
   view: ViewSize;
+  /** The press the area was dragged out from, whose screenshot it's cut from. */
+  press?: number;
+  /** The page took the overlay off, or hid it: no area can be chosen there. */
+  blocked?: boolean;
+};
+
+/** What the overlay asks of the background as a drag starts: the visible area's screenshot, the tab `view` in size. */
+export type ShotMessage = {
+  type: 'wikistow-area-shot';
+  nonce: string;
+  /** Which press of the overlay's, counted from 1. */
+  press: number;
+  view: ViewSize;
 };
 
 const finite = (value: unknown, min = 0): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= min;
+const count = (value: unknown): value is number => Number.isSafeInteger(value) && finite(value, 1);
+
+/** Whether `message` is of `type`, with a nonce and a tab's size, every number in it a real one. */
+function overlayMessage(message: unknown, type: string): message is Record<string, unknown> {
+  if (typeof message !== 'object' || message === null) return false;
+  const { type: was, nonce, view } = message as Record<string, unknown>;
+  if (was !== type || typeof nonce !== 'string' || nonce.length > 100) return false;
+  if (typeof view !== 'object' || view === null) return false;
+  const { width, height } = view as Record<string, unknown>;
+  return finite(width, 1) && finite(height, 1);
+}
+
+/** Whether `message` reads as a `ShotMessage`. */
+export function isShotMessage(message: unknown): message is ShotMessage {
+  return overlayMessage(message, 'wikistow-area-shot') && count(message['press']);
+}
 
 /** Whether `message` reads as an `AreaMessage`, every number in it a real one. */
 export function isAreaMessage(message: unknown): message is AreaMessage {
-  if (typeof message !== 'object' || message === null) return false;
-  const { type, nonce, area, view } = message as Record<string, unknown>;
-  if (type !== 'wikistow-area' || typeof nonce !== 'string' || nonce.length > 100) return false;
-  if (typeof view !== 'object' || view === null) return false;
-  const { width, height } = view as Record<string, unknown>;
-  if (!finite(width, 1) || !finite(height, 1)) return false;
+  if (!overlayMessage(message, 'wikistow-area')) return false;
+  const { area, blocked, press } = message;
+  if (blocked !== undefined && typeof blocked !== 'boolean') return false;
+  if (press !== undefined && !count(press)) return false;
   if (area === null) return true;
   if (typeof area !== 'object') return false;
   const box = area as Record<string, unknown>;
