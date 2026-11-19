@@ -70,6 +70,22 @@ const SHOT = `<!doctype html><html><head><title>Boxes</title></head>
 const FORM = `<!doctype html><html><head><title>A form</title></head>
 <body><p>Write to us.</p><textarea id="box">Some typed words</textarea></body></html>`;
 
+// A page with frames: one of its own site, one of another (the same server
+// by another name) in a web component's closed shadow root, and a `data:` one.
+const framed = (port: number) => `<!doctype html><html><head><title>A framed page</title></head>
+<body><p>Words of the page itself.</p>
+<iframe id="same" src="/inner"></iframe>
+<div id="widget"></div>
+<iframe id="data" src="data:text/html,<p>Some data</p>"></iframe>
+<script>
+document.getElementById('widget').attachShadow({ mode: 'closed' }).innerHTML =
+  '<iframe id="other" src="http://localhost:${port}/inner"></iframe>';
+</script>
+</body></html>`;
+const INNER = `<!doctype html><html><head><title>The comments</title></head>
+<body><p id="said">A comment worth keeping, <a href="/thread">with its thread</a>.</p>
+<button id="reply">Reply</button></body></html>`;
+
 type Folder = { spaceId: string; folderId: string | null; path: string };
 const PERSONAL: Folder = { spaceId: 'space1', folderId: null, path: 'Personal' };
 const RECIPES: Folder = { spaceId: 'space1', folderId: 'folder1', path: 'Personal / Recipes' };
@@ -110,6 +126,10 @@ async function serve() {
         `<!doctype html><html><head><title>Slow page</title></head><body><p>${WORDS.repeat(20)}</p>`,
       );
     }
+    if (request.url === '/framed') {
+      return response.end(framed((site!.address() as AddressInfo).port));
+    }
+    if (request.url === '/inner') return response.end(INNER);
     response.end(request.url === '/shot' ? SHOT : request.url === '/form' ? FORM : ARTICLE);
   });
   await new Promise<void>((resolve) => site!.listen(0, '127.0.0.1', resolve));
@@ -382,6 +402,150 @@ test('text selected in a text box isn’t offered as the selection, and the shor
     { mode: 'link', text: '', url: `${origin}/form` },
   ]);
   expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('✓');
+});
+
+/**
+ * Select the comment in the page's frame from another site, after the
+ * page's own words and the comment in its frame of the same site, as a
+ * person might, clicking in each frame first.
+ */
+async function selectInFrame(page: Page, port: string) {
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('p')!);
+    getSelection()!.addRange(range);
+  });
+  const origin = new URL(page.url()).origin;
+  await selectComment(page, `${origin}/inner`);
+  await selectComment(page, `http://localhost:${port}/inner`);
+}
+
+/** Click in the frame at `url`, and select its comment. */
+async function selectComment(page: Page, url: string) {
+  const frame = page.frames().find((frame) => frame.url() === url)!;
+  await frame.waitForLoadState();
+  await frame.locator('#reply').click();
+  await frame.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById('said')!);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+  });
+}
+
+test('a selection in a frame is offered and clipped as the tab’s page', async () => {
+  const { worker, got } = await launch({ stable: ready });
+  const origin = await serve();
+  const port = new URL(origin).port;
+  const { page, popup } = await popupFor(
+    worker,
+    origin,
+    (page) => selectInFrame(page, port),
+    '/framed',
+  );
+  await expect(popup.getByRole('radio', { name: 'Selection' })).toBeChecked();
+  await expect(popup.getByLabel('Title')).toHaveValue('A framed page');
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal / Recipes')).toBeVisible();
+  // A link takes the frame's selected text too.
+  await popup.getByRole('radio', { name: 'Link' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect.poll(async () => (await got('stable', 'clip')).length).toBe(2);
+
+  const [selection, link] = await got('stable', 'clip');
+  expect(selection).toMatchObject({
+    mode: 'selection',
+    url: `${origin}/framed`,
+    title: 'A framed page',
+    text: 'A comment worth keeping, with its thread.',
+  });
+  const html = String(selection!['html']);
+  expect(html).toContain(`<a href="http://localhost:${port}/thread">with its thread</a>`);
+  expect(html).not.toContain('Words of the page itself');
+  expect(link).toMatchObject({
+    mode: 'link',
+    url: `${origin}/framed`,
+    text: 'A comment worth keeping, with its thread.',
+  });
+
+  // Selected again in the frame of the page's own site, it's that frame's.
+  await selectComment(page, `${origin}/inner`);
+  await popup.reload();
+  await expect(popup.getByRole('radio', { name: 'Selection' })).toBeChecked();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect.poll(async () => (await got('stable', 'clip')).length).toBe(3);
+  expect(String((await got('stable', 'clip'))[2]!['html'])).toContain(
+    `<a href="${origin}/thread">with its thread</a>`,
+  );
+});
+
+test('the context menu and the shortcut send a selection in a frame', async () => {
+  const { worker, got } = await launch({
+    stable: { ...ready, clip: [{ ...SAVED, path: 'Personal' }] },
+  });
+  const origin = await serve();
+  const port = new URL(origin).port;
+  const { page, popup, tabId } = await popupFor(worker, origin, undefined, '/framed');
+  await popup.getByRole('radio', { name: 'Link' }).check();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect(popup.getByText('Saved to Personal', { exact: true })).toBeVisible();
+  await popup.close();
+  await selectInFrame(page, port);
+
+  // The frame's ID, as the context menu names the frame it was opened in.
+  const frameId = await worker.evaluate(
+    async ([tabId, url]) =>
+      (
+        await chrome.scripting.executeScript({
+          target: { tabId, allFrames: true },
+          func: () => location.href,
+        })
+      ).find((ran) => ran.result === url)!.frameId,
+    [tabId, `http://localhost:${port}/inner`] as const,
+  );
+  expect(frameId).toBeGreaterThan(0);
+  const menu = (frameId: number) =>
+    worker.evaluate(
+      async ([tabId, frameId]) =>
+        globalThis.wikistowClipper!.menuClicked(
+          { menuItemId: 'send-selection', editable: false, pageUrl: '', frameId },
+          await chrome.tabs.get(tabId),
+        ),
+      [tabId, frameId] as const,
+    );
+  await menu(frameId);
+  await worker.evaluate(
+    async (tabId) => globalThis.wikistowClipper!.commanded('send', await chrome.tabs.get(tabId)),
+    tabId,
+  );
+  const clips = await got('stable', 'clip');
+  expect(clips).toHaveLength(3);
+  for (const clip of clips.slice(1)) {
+    expect(clip).toMatchObject({
+      mode: 'selection',
+      url: `${origin}/framed`,
+      title: 'A framed page',
+      text: 'A comment worth keeping, with its thread.',
+    });
+  }
+
+  // Back in the page, the frame's selection is left behind: the shortcut sends the link.
+  await page.locator('p').first().click();
+  await worker.evaluate(
+    async (tabId) => globalThis.wikistowClipper!.commanded('send', await chrome.tabs.get(tabId)),
+    tabId,
+  );
+  expect((await got('stable', 'clip'))[3]).toMatchObject({ mode: 'link', text: '' });
+
+  // A frame no script may reach sends nothing, and says why, rather than the link.
+  await menu(9999);
+  expect(await got('stable', 'clip')).toHaveLength(4);
+  expect(await worker.evaluate(() => chrome.storage.session.get('clip'))).toMatchObject({
+    clip: {
+      phase: 'failed',
+      message: 'WikiStow can’t clip text selected in this part of the page. Try Link.',
+    },
+  });
 });
 
 test('the popup works while the tab’s page is still loading', async () => {

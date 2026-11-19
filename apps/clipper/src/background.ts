@@ -8,6 +8,7 @@
 // the nonce it was given there.
 import { api, browserName } from './api.ts';
 import type { Captured } from './capture.ts';
+import { chooseFrame, frameReads, readFrame, type FrameRead } from './frames.ts';
 import {
   base64,
   CHOOSE_MS,
@@ -191,30 +192,38 @@ async function folders(query: string): Promise<Calls['folders']['result']> {
  * It runs at once, not once the page has loaded, as a slow page may take a
  * while to. The title is the page's own where a script runs: a tab's is its
  * address until the page's title has come.
+ *
+ * Each frame has a selection of its own, so it looks in every frame the
+ * extension may reach, or only in `frameId`, the one the context menu was
+ * opened in. A frame it may not reach is left out: one from another site,
+ * under `activeTab`, which grants Chrome the page's own site alone. Of the
+ * rest, it takes the frame the focus is in (`chooseFrame` in frames.ts),
+ * and says which (`frameId`).
  */
-async function probe(tabId: number): Promise<Calls['probe']['result']> {
+async function probe(tabId: number, frameId?: number): Promise<Calls['probe']['result']> {
   const tab = await api.tabs.get(tabId);
-  let selection: string | null;
-  let title = tab.title ?? '';
+  const top = frameId ?? 0;
+  let reads: FrameRead[];
   try {
-    const [ran] = await api.scripting.executeScript({
-      target: { tabId },
-      injectImmediately: true,
-      func: () => {
-        const chosen = getSelection();
-        return {
-          selection: chosen && !chosen.isCollapsed ? chosen.toString() : '',
-          title: document.title,
-        };
-      },
-    });
-    const got = ran?.result as { selection?: unknown; title?: unknown } | undefined;
-    selection = typeof got?.selection === 'string' ? got.selection : '';
-    title = typeof got?.title === 'string' ? got.title : '';
+    reads = frameReads(
+      await api.scripting.executeScript({
+        target: frameId === undefined ? { tabId, allFrames: true } : { tabId, frameIds: [frameId] },
+        injectImmediately: true,
+        func: readFrame,
+      }),
+    );
   } catch {
-    selection = null;
+    reads = [];
   }
-  return { url: tab.url ?? '', title, selection };
+  const page = reads.find((read) => read.frameId === top);
+  if (!page) return { url: tab.url ?? '', title: tab.title ?? '', selection: null, frameId: top };
+  const from = chooseFrame(reads, page);
+  return {
+    url: tab.url ?? '',
+    title: page.title,
+    selection: from.selection,
+    frameId: from.frameId,
+  };
 }
 
 /** A page that hasn't loaded in `LOAD_MS`, as one that never finishes doesn't. */
@@ -223,8 +232,11 @@ class StillLoading extends Error {}
 /**
  * Capture the tab in `mode`, once its page has loaded, waiting `LOAD_MS`
  * at most; a link, which needs only its address and selection, at once.
+ * A selection, and a link's selected text, come from `frameId`: the page's
+ * own frame (0), or the one `probe` found it in.
  */
-async function capture(tabId: number, mode: TextMode): Promise<Captured> {
+async function capture(tabId: number, mode: TextMode, frameId = 0): Promise<Captured> {
+  const target = { tabId, frameIds: [frameId] };
   const injectImmediately = mode === 'link';
   let timer: ReturnType<typeof setTimeout> | undefined;
   const loading = new Promise<never>((_, reject) => {
@@ -232,12 +244,12 @@ async function capture(tabId: number, mode: TextMode): Promise<Captured> {
   });
   try {
     await Promise.race([
-      api.scripting.executeScript({ target: { tabId }, injectImmediately, files: ['capture.js'] }),
+      api.scripting.executeScript({ target, injectImmediately, files: ['capture.js'] }),
       loading,
     ]);
     const [ran] = await Promise.race([
       api.scripting.executeScript({
-        target: { tabId },
+        target,
         injectImmediately,
         func: (mode: TextMode) => globalThis.wikistowCapture!(mode),
         args: [mode],
@@ -540,9 +552,11 @@ const NOTHING: Captured = { url: '', title: '', html: '', text: '', byline: null
  * closed, `open` first, which the helper holds the clip behind until the
  * app listens. How it goes is `current`, which open popups hear. An area's
  * screenshot is taken as the overlay opens (`choose`), and cut and sent
- * here once the person has dragged it out (`part`).
+ * here once the person has dragged it out (`part`). A selection, and a
+ * link's selected text, come from the frame `frameId` (`probe`); an article
+ * and a whole page, from the page's own.
  */
-async function send(tabId: number, form: Form, part: Part | null = null) {
+async function send(tabId: number, form: Form, part: Part | null = null, frameId = 0) {
   // The clip on its way stays the one shown, which the popup waits on.
   if (sending) return flashBusy();
   if (form.mode === 'area' && !part) return choose(tabId, form);
@@ -563,7 +577,8 @@ async function send(tabId: number, form: Form, part: Part | null = null) {
       }
     } else {
       try {
-        captured = await capture(tabId, form.mode);
+        const selects = form.mode === 'selection' || form.mode === 'link';
+        captured = await capture(tabId, form.mode, selects ? frameId : 0);
       } catch (error) {
         // A link needs no script: the browser's own pages, or one too busy
         // to answer, can still be linked.
@@ -572,7 +587,9 @@ async function send(tabId: number, form: Form, part: Part | null = null) {
             'capture',
             error instanceof StillLoading
               ? 'This page is still loading. Try again once it has, or try Link.'
-              : 'WikiStow can’t clip this page. Try Link.',
+              : form.mode === 'selection' && frameId !== 0
+                ? 'WikiStow can’t clip text selected in this part of the page. Try Link.'
+                : 'WikiStow can’t clip this page. Try Link.',
           );
         }
         captured = NOTHING;
@@ -673,6 +690,10 @@ async function send(tabId: number, form: Form, part: Part | null = null) {
   }
 }
 
+/** A frame's ID as the popup names it: the page's own unless it's one. */
+const frameOf = (frameId: unknown) =>
+  Number.isSafeInteger(frameId) && (frameId as number) >= 0 ? (frameId as number) : 0;
+
 async function answer(call: Call, signal: AbortSignal): Promise<unknown> {
   switch (call.call) {
     case 'status':
@@ -684,7 +705,7 @@ async function answer(call: Call, signal: AbortSignal): Promise<unknown> {
     case 'probe':
       return probe(call.tabId);
     case 'save':
-      void send(call.tabId, call.form);
+      void send(call.tabId, call.form, null, frameOf(call.frameId));
       return null;
     case 'show':
       return show(call.spaceId, call.pageId);
@@ -769,8 +790,11 @@ const OPENS_POPUP_AT_ONCE = browserName() === 'firefox';
  * none, or when the background has just woken for this and not yet read it
  * from `storage.session`. With one read then, the clip goes too, and the
  * popup shows it going.
+ *
+ * Either sends the selection, if there's one, from `frameId`, the frame the
+ * context menu was opened in, or else from the frame `probe` finds it in.
  */
-async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'either') {
+async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'either', frameId?: number) {
   const opened =
     lastFolder === null || (lastFolder === undefined && OPENS_POPUP_AT_ONCE)
       ? api.action.openPopup()
@@ -784,8 +808,21 @@ async function quick(tab: chrome.tabs.Tab | undefined, mode: 'link' | 'either') 
   if (!lastFolder) return (opened ?? api.action.openPopup()).catch(noFolder);
   if (tabId === undefined) return;
   let chosen: TextMode = 'link';
-  if (mode === 'either') chosen = (await probe(tabId)).selection?.trim() ? 'selection' : 'link';
-  await send(tabId, { mode: chosen, title: '', note: '', tags: [], folder: lastFolder });
+  let from = 0;
+  if (mode === 'either') {
+    const probed = await probe(tabId, frameId);
+    from = probed.frameId;
+    // A frame the menu named that no script may reach has a selection the
+    // link would drop: capturing it says why it can't be clipped.
+    const unreached = probed.selection === null && from !== 0;
+    if (probed.selection?.trim() || unreached) chosen = 'selection';
+  }
+  await send(
+    tabId,
+    { mode: chosen, title: '', note: '', tags: [], folder: lastFolder },
+    null,
+    from,
+  );
 }
 
 const MENU = { link: 'send-link', selection: 'send-selection' } as const;
@@ -793,8 +830,11 @@ const MENU = { link: 'send-link', selection: 'send-selection' } as const;
 function menuClicked(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) {
   if (info.menuItemId === MENU.link) return quick(tab, 'link');
   // The browser offers it for text selected in a text box too, which
-  // isn't a selection of the page to capture: then the link goes.
-  if (info.menuItemId === MENU.selection) return quick(tab, 'either');
+  // isn't a selection of the page to capture: then the link goes. It
+  // names the frame the text is selected in, the page's own or another.
+  if (info.menuItemId === MENU.selection) {
+    return quick(tab, 'either', info.frameId === undefined ? undefined : frameOf(info.frameId));
+  }
 }
 
 function commanded(command: string, tab?: chrome.tabs.Tab) {
