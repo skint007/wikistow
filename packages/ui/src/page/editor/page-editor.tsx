@@ -739,7 +739,11 @@ export function PageEditor({
     initial: body.current,
     onChange: (text) => {
       changed(text);
-      if (modeNow.current === 'split' && !assist.live)
+      // In a live session the shared text carries it across, but not once
+      // the session takes no more of the person's changes, just before
+      // it's left: then, as outside one, so the draft reads it here too.
+      const shared = assist.live && assist.live.active?.() !== false;
+      if (modeNow.current === 'split' && !shared)
         syncVisual(text, Math.max(TAKE_MS, WHOLE_SHARE * tookTake.current));
     },
     lineBreak,
@@ -879,7 +883,9 @@ export function PageEditor({
                   holding={() => given.current !== null || liveHeld.current}
                   onCantShow={cantShow}
                   onCanShow={canShow}
-                  onBehind={(text) => give(text, false)}
+                  // Not over the source side's typing on its way to it, made
+                  // once the session took no more: that's newer, and the page's.
+                  onBehind={(text) => given.current === null && give(text, false)}
                 />
               )}
             </div>
