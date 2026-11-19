@@ -733,8 +733,9 @@ export class DraftSession {
   hasUnsaved() {
     if (this.#settling) return true;
     if (this.#participant) {
-      // Kept on this device as it is now, it is put back on the next join.
-      return this.#unreported || (!this.#participant.status().saved && !this.#keptFresh);
+      // Only the person's own typing: others' is theirs to save. Kept on
+      // this device as it is now, it is put back on the next join.
+      return this.#unreported || (this.#ownUnsaved() && !this.#keptFresh);
     }
     return this.#unreported || this.#autosave.unsaved() !== null;
   }
@@ -770,7 +771,7 @@ export class DraftSession {
   /** A save is waiting for its answer, or a file is still uploading. */
   isBusy() {
     if (this.#settling) return true;
-    if (this.#participant) return !this.#participant.status().saved || this.#uploads.size > 0;
+    if (this.#participant) return this.#ownUnsaved() || this.#uploads.size > 0;
     return this.#autosave.isSaving() || this.#uploads.size > 0;
   }
 
@@ -1622,10 +1623,13 @@ export class DraftSession {
       participant.subscribe(() => this.#liveStatus()),
       participant.onChange((local) => {
         this.#keptFresh = false;
+        // After the status it changed, which says it isn't saved yet.
+        if (local) this.#typedLive = true;
         this.#fromDocument(!local);
       }),
     );
     this.#keptFresh = false;
+    this.#typedLive = false;
     this.#rejoins = 0;
     this.#joinTries = 0;
     this.#unlive.push(
@@ -1691,6 +1695,19 @@ export class DraftSession {
 
   // Whether what is kept on this device is the document as it is now.
   #keptFresh = false;
+
+  // Whether the person changed the session's document since a draft this
+  // app compared last held all of its own typing (`saved`). Others' typing
+  // isn't the person's to lose: while they type, the head is often a draft
+  // this app hasn't compared yet, which holds the person's typing all the same.
+  #typedLive = false;
+
+  #ownUnsaved(): boolean {
+    const participant = this.#participant;
+    if (!participant) return false;
+    if (participant.status().saved) this.#typedLive = false;
+    return this.#typedLive;
+  }
 
   /**
    * Keep `participant`'s document on this device, as a change waiting for
@@ -1776,6 +1793,7 @@ export class DraftSession {
     // Drafts of the session it compared are this draft's own, not someone else's save.
     this.#known.add(status.checked);
     if (status.state.kind !== 'live') return void this.#leftLive(participant, status);
+    if (status.saved) this.#typedLive = false;
     if (status.saved && !this.#unreported) {
       // A compared draft of the session holds what was kept here, or put in: it goes.
       if (this.#keepTimer) clearTimeout(this.#keepTimer);

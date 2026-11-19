@@ -113,37 +113,78 @@ export const offsetOf = (doc: Text, pos: number, breakLength: number): number =>
 
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
-const splits = (text: string, at: number) =>
-  at > 0 && at < text.length && isHigh(text.charCodeAt(at - 1)) && isLow(text.charCodeAt(at));
+// The UTF-16 unit at `pos` in `doc`, or NaN past either end: read without copying the text.
+const unitAt = (doc: Text, pos: number) =>
+  pos >= 0 && pos < doc.length ? doc.sliceString(pos, pos + 1).charCodeAt(0) : NaN;
+// Whether position `pos` in `doc` falls between an emoji's two halves.
+const splits = (doc: Text, pos: number) => isHigh(unitAt(doc, pos - 1)) && isLow(unitAt(doc, pos));
+// Whether a half of a pair sits alone at `pos`'s either side, as one Yjs split would leave it.
+const brokenAt = (doc: Text, pos: number) =>
+  (isHigh(unitAt(doc, pos - 1)) && !isLow(unitAt(doc, pos))) ||
+  (isLow(unitAt(doc, pos)) && !isHigh(unitAt(doc, pos - 1)));
 
 /**
  * Put one CodeMirror transaction's changes into `text`, which held what its
  * start state did: last first, so each one's offsets still hold, each
- * widened to whole characters and inserted well-formed.
+ * widened to whole characters and inserted well-formed. The characters at
+ * each edge are read from the start state, which holds the same text, so
+ * the work is the change's, never the page's. Whether `text` now holds
+ * just what was typed: false when a half of a pair had to go in as U+FFFD.
  */
-export function putChanges(text: Y.Text, transaction: Transaction): void {
-  const before = text.toJSON();
+export function putChanges(text: Y.Text, transaction: Transaction): boolean {
   const doc = transaction.startState.doc;
   const breakLength = transaction.startState.lineBreak.length;
   const changes: { from: number; to: number; insert: string }[] = [];
+  let exact = true;
   transaction.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
     let from = offsetOf(doc, fromA, breakLength);
     let to = offsetOf(doc, toA, breakLength);
     let insert = inserted.sliceString(0, inserted.length, transaction.startState.lineBreak);
-    if (splits(before, from)) {
+    // A pair is never a line break, so its halves are as many apart in both texts.
+    if (splits(doc, fromA)) {
       from--;
-      insert = before.charAt(from) + insert;
+      insert = doc.sliceString(fromA - 1, fromA) + insert;
     }
-    if (splits(before, to)) {
-      insert += before.charAt(to);
+    if (splits(doc, toA)) {
+      insert += doc.sliceString(toA, toA + 1);
       to++;
     }
-    changes.push({ from, to, insert: insert.toWellFormed() });
+    const wellFormed = insert.toWellFormed();
+    if (wellFormed !== insert) exact = false;
+    changes.push({ from, to, insert: wellFormed });
   });
   for (const { from, to, insert } of changes.reverse()) {
     if (to > from) text.delete(from, to - from);
     if (insert !== '') text.insert(from, insert);
   }
+  return exact;
+}
+
+/**
+ * Whether, after `delta` went into both, `state`'s text may differ from
+ * `body`'s where Yjs split a pair: Yjs stores each half of a pair it splits
+ * as U+FFFD and doesn't say so, and a split falls at an edge of the change,
+ * where `state` then holds a half of a pair alone. Only the edges are read.
+ */
+export function mayHaveSplit(
+  state: EditorState,
+  delta: readonly { insert?: unknown; delete?: number | undefined; retain?: number | undefined }[],
+): boolean {
+  const breakLength = state.lineBreak.length;
+  const at = (y: number) => brokenAt(state.doc, positionOf(state.doc, y, breakLength));
+  // Offsets in the text after the change.
+  let y = 0;
+  for (const op of delta) {
+    if (op.retain !== undefined) y += op.retain;
+    else if (op.delete !== undefined) {
+      if (at(y)) return true;
+    } else if (typeof op.insert === 'string') {
+      if (at(y)) return true;
+      y += op.insert.length;
+      if (at(y)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -246,9 +287,41 @@ const caretTheme = EditorView.baseTheme({
 // How often the person's cursor is reported: at most every tenth of a second.
 const CURSOR_MS = 100;
 
+// How long after a change the whole texts are compared, once for any number of changes.
+const CHECK_MS = 1000;
+
+// A change the binding made to hold what `body` does, after which each caret is found again.
+const resynced = Annotation.define<boolean>();
+
+// Which way a caret moves for text put in where it is, as its relative
+// position says: after it (1), which names the character it is before, or
+// before it (-1), which names the one it is after.
+function sideOf(encoded: Uint8Array): 1 | -1 {
+  try {
+    return Y.decodeRelativePosition(encoded).assoc >= 0 ? 1 : -1;
+  } catch {
+    return 1;
+  }
+}
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) =>
+  a === b || (a.length === b.length && a.every((byte, i) => byte === b[i]));
+
+/** A caret's place in the editor, from the relative positions it was found by. */
+type Placed = {
+  anchor: Uint8Array;
+  head: Uint8Array;
+  /** Null while either isn't in `body`, as before its text arrived: looked for again. */
+  at: { anchor: number; head: number; anchorSide: 1 | -1; headSide: 1 | -1 } | null;
+};
+
 /**
  * The binding: the person's changes into `body`, others' out of it, both
  * ways checked so CodeMirror always holds what `body` does, and carets.
+ * The work for each change is the change's: what it touches is checked at
+ * once, and the whole texts compared only a second later, once for any
+ * number of changes. Each caret is found in `body` once for each presence
+ * that moves it, then moves with the text as Yjs moves it.
  */
 export function liveBinding(source: LiveSource): Extension {
   const plugin = ViewPlugin.fromClass(
@@ -258,6 +331,9 @@ export function liveBinding(source: LiveSource): Extension {
       #destroyed = false;
       #retries = 0;
       #cursorTimer: ReturnType<typeof setTimeout> | null = null;
+      #checkTimer: ReturnType<typeof setTimeout> | null = null;
+      // Others' carets as last found, by their join.
+      readonly #placed = new Map<string, Placed>();
 
       constructor(view: EditorView) {
         this.#view = view;
@@ -280,7 +356,19 @@ export function liveBinding(source: LiveSource): Extension {
         const local = update.transactions.some(
           (transaction) => transaction.docChanged && !transaction.annotation(remoteChange),
         );
-        if (update.docChanged) queueMicrotask(() => this.#drawCarets());
+        if (update.docChanged) {
+          if (update.transactions.some((transaction) => transaction.annotation(resynced))) {
+            // Replaced whole, a caret's place in it is found again.
+            this.#placed.clear();
+          } else {
+            for (const { at } of this.#placed.values()) {
+              if (!at) continue;
+              at.anchor = update.changes.mapPos(at.anchor, at.anchorSide);
+              at.head = update.changes.mapPos(at.head, at.headSide);
+            }
+          }
+          queueMicrotask(() => this.#drawCarets());
+        }
         // Leaving the text says so too, so others don't see a caret nobody is at.
         if (update.selectionSet || local || update.focusChanged) this.#reportCursor();
       }
@@ -289,13 +377,15 @@ export function liveBinding(source: LiveSource): Extension {
         this.#destroyed = true;
         for (const stop of this.#stop) stop();
         if (this.#cursorTimer) clearTimeout(this.#cursorTimer);
+        if (this.#checkTimer) clearTimeout(this.#checkTimer);
         source.cursor(null);
       }
 
       // Someone else's change, as small edits out of the person's undo history.
       #takeIn(event: Y.YTextEvent) {
         const view = this.#view;
-        const changes = changesFrom(view.state, event.delta);
+        const { delta } = event;
+        const changes = changesFrom(view.state, delta);
         if (changes.length > 0) {
           view.dispatch({
             changes,
@@ -303,13 +393,28 @@ export function liveBinding(source: LiveSource): Extension {
           });
         }
         // Yjs doesn't say when a pair it split became U+FFFD: read the text again.
-        if (view.state.sliceDoc() !== source.text.toJSON()) this.resync();
+        if (mayHaveSplit(view.state, delta)) this.resync();
+        else this.checkSoon();
         this.#drawCarets();
+      }
+
+      /**
+       * Compare the whole texts a second from now, as a change may leave
+       * them apart where nothing says so: a pair split by text someone put
+       * in and took out again before sending it.
+       */
+      checkSoon() {
+        if (this.#checkTimer || this.#destroyed) return;
+        this.#checkTimer = setTimeout(() => {
+          this.#checkTimer = null;
+          this.resync();
+        }, CHECK_MS);
       }
 
       /** Make CodeMirror hold exactly what `body` does, by the smallest change. */
       resync() {
-        if (this.#destroyed) return;
+        // Once the session no longer takes the person's changes, what they typed stays shown.
+        if (this.#destroyed || source.active?.() === false) return;
         const view = this.#view;
         const now = view.state.sliceDoc();
         const wanted = source.text.toJSON();
@@ -336,7 +441,11 @@ export function liveBinding(source: LiveSource): Extension {
         const insert = wanted.slice(fromY, wanted.length - (now.length - toY));
         view.dispatch({
           changes: { from, to, insert: view.state.toText(insert) },
-          annotations: [remoteChange.of(true), Transaction.addToHistory.of(false)],
+          annotations: [
+            remoteChange.of(true),
+            resynced.of(true),
+            Transaction.addToHistory.of(false),
+          ],
         });
       }
 
@@ -359,18 +468,40 @@ export function liveBinding(source: LiveSource): Extension {
         }, CURSOR_MS);
       }
 
+      // Where `caret` is in the editor, found in `body`, which walks its text up to there.
+      #place(caret: RemoteCaret): Placed['at'] {
+        const anchor = resolveIn(source.text, caret.anchor);
+        const head = resolveIn(source.text, caret.head);
+        if (anchor === null || head === null) return null;
+        const { state } = this.#view;
+        const breakLength = state.lineBreak.length;
+        return {
+          anchor: positionOf(state.doc, anchor, breakLength),
+          head: positionOf(state.doc, head, breakLength),
+          anchorSide: sideOf(caret.anchor),
+          headSide: sideOf(caret.head),
+        };
+      }
+
       #drawCarets() {
         if (this.#destroyed) return;
         const view = this.#view;
-        const { state } = view;
-        const breakLength = state.lineBreak.length;
         const marks: { from: number; to: number; decoration: Decoration }[] = [];
+        const shown = new Set<string>();
         for (const caret of source.carets()) {
-          const anchor = resolveIn(source.text, caret.anchor);
-          const head = resolveIn(source.text, caret.head);
-          if (anchor === null || head === null) continue;
-          const headAt = positionOf(state.doc, head, breakLength);
-          const anchorAt = positionOf(state.doc, anchor, breakLength);
+          shown.add(caret.key);
+          let placed = this.#placed.get(caret.key);
+          // Found again only once it moved, or wasn't found.
+          if (
+            !placed?.at ||
+            !sameBytes(placed.anchor, caret.anchor) ||
+            !sameBytes(placed.head, caret.head)
+          ) {
+            placed = { anchor: caret.anchor, head: caret.head, at: this.#place(caret) };
+            this.#placed.set(caret.key, placed);
+          }
+          if (!placed.at) continue;
+          const { anchor: anchorAt, head: headAt } = placed.at;
           const from = Math.min(headAt, anchorAt);
           const to = Math.max(headAt, anchorAt);
           if (to > from) {
@@ -389,6 +520,7 @@ export function liveBinding(source: LiveSource): Extension {
             }),
           });
         }
+        for (const key of this.#placed.keys()) if (!shown.has(key)) this.#placed.delete(key);
         marks.sort((a, b) => a.from - b.from || a.to - b.to);
         const builder = new RangeSetBuilder<Decoration>();
         for (const mark of marks) builder.add(mark.from, mark.to, mark.decoration);
@@ -406,17 +538,28 @@ export function liveBinding(source: LiveSource): Extension {
   // The person's changes go into `body` before anything else hears of them:
   // this listener comes before the surface's own (`codemirror.tsx`).
   const put = EditorView.updateListener.of((update) => {
+    // Once the session no longer takes the person's changes, as just after
+    // it ended and before the editor is unbound, they stay as typed: the
+    // draft saves them from outside the session, as the surface reports them.
+    if (source.active?.() === false) return;
     let local = false;
+    let exact = true;
     for (const transaction of update.transactions) {
       if (!transaction.docChanged || transaction.annotation(remoteChange)) continue;
       if (transaction.annotation(sessionChange)) continue;
       local = true;
-      source.edit(() => putChanges(source.text, transaction));
+      let put = false;
+      source.edit(() => {
+        put = true;
+        if (!putChanges(source.text, transaction)) exact = false;
+      });
+      // A change the session didn't take isn't in `body`.
+      if (!put) exact = false;
     }
-    // A change put in well-formed may differ from what was typed: show `body`'s.
-    if (local && update.state.sliceDoc() !== source.text.toJSON()) {
-      queueMicrotask(() => update.view.plugin(plugin)?.resync());
-    }
+    if (!local) return;
+    // A change put in well-formed differs from what was typed: show `body`'s.
+    if (!exact) queueMicrotask(() => update.view.plugin(plugin)?.resync());
+    else update.view.plugin(plugin)?.checkSoon();
   });
   return [caretField, caretTheme, put, plugin];
 }

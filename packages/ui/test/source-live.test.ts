@@ -7,6 +7,7 @@ import * as Y from 'yjs';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   changesFrom,
+  mayHaveSplit,
   offsetOf,
   positionOf,
   putChanges,
@@ -70,6 +71,39 @@ describe('the source editor’s live binding', () => {
     const result = relay('x😀\r\ny', '\r\n', () => ({ changes: { from: 1, to: 4 } }));
     expect(result.body).toBe('xy');
     expect(result.theirs).toBe('xy');
+  });
+
+  it('says whether what went in is just what was typed', () => {
+    const typed = (text: string, insert: string) => {
+      const state = editor(text);
+      const body = bodyOf(text);
+      return putChanges(body, state.update({ changes: { from: 1, insert } }));
+    };
+    expect(typed('ab', '😀')).toBe(true);
+    expect(typed('ab', '\ud83d')).toBe(false);
+  });
+
+  it('reads a split Yjs may have made only at a change’s edges', () => {
+    const body = bodyOf('a😀b c😀d');
+    const doc = body.doc as Y.Doc;
+    const deltas: Parameters<typeof changesFrom>[1][] = [];
+    body.observe((event) => deltas.push(event.delta));
+    let state = editor(body.toJSON());
+    // Another app's insert between the first emoji's halves, as Yjs takes it.
+    const remote = new Y.Doc();
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
+    remote.getText('body').insert(2, 'x');
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(remote, Y.encodeStateVector(doc)));
+    const [split] = deltas;
+    if (!split) throw new Error('no change');
+    state = state.update({ changes: changesFrom(state, split) }).state;
+    expect(body.toJSON()).toBe('a\ufffdx\ufffdb c😀d');
+    expect(mayHaveSplit(state, split)).toBe(true);
+    // One between whole characters, past the other emoji, splits nothing.
+    const whole = editor('a😀b cy😀');
+    expect(
+      mayHaveSplit(whole, [{ retain: 6 }, { insert: 'y' }, { retain: 2 }, { delete: 1 }]),
+    ).toBe(false);
   });
 
   it('resolves a caret only inside `body`', () => {

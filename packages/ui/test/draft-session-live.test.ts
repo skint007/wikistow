@@ -370,6 +370,32 @@ describe('a draft session in a live session', () => {
     expect(saves).toHaveLength(0);
   });
 
+  it('counts only the person’s own typing as unsaved, not others’ (#494)', async () => {
+    const { draft, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    const R1 = RevisionId.parse('r1');
+    // Others type, and the head is a draft of theirs this app hasn't compared yet.
+    live.theirs('Start. Their line.');
+    live.set({ saved: false, head: R1 });
+    expect(draft.hasUnsaved()).toBe(false);
+    expect(draft.isBusy()).toBe(false);
+    // The person types: theirs to lose, until a draft this app compared holds it.
+    type('Start. Their line. Mine.');
+    expect(draft.hasUnsaved()).toBe(true);
+    expect(draft.isBusy()).toBe(true);
+    live.theirs('Start. Their line. Mine. More of theirs.');
+    expect(draft.hasUnsaved()).toBe(true);
+    live.set({ saved: true, head: R1, checked: R1 });
+    expect(draft.hasUnsaved()).toBe(false);
+    // Saved once, it stays so while others go on typing.
+    live.theirs('Start. Their line. Mine. More of theirs, and more.');
+    live.set({ saved: false, head: RevisionId.parse('r2') });
+    expect(draft.hasUnsaved()).toBe(false);
+    expect(draft.isBusy()).toBe(false);
+  });
+
   it('shows others’ changes in the editor, out of the person’s way', async () => {
     const { draft, surface, joins } = session();
     await draft.joinLive();
