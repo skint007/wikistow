@@ -67,6 +67,11 @@ describe('choosing the frame', () => {
     const older = frame([0, 0], 'An older comment');
     const focused = frame([0, 1], 'The comment', undefined, true);
     expect(chooseFrame([page, older, focused], page)).toBe(focused);
+    // Over a deeper one that may have it too.
+    const holder = frame([0, 1], '', 0);
+    const deeper = frame([0, 1, 0], 'An older comment');
+    const here = frame([0, 0], 'The comment', undefined, true);
+    expect(chooseFrame([page, holder, deeper, here], page)).toBe(here);
   });
 
   test('a frame in a shadow root, which has no index, alone or under another', () => {

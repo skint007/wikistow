@@ -116,8 +116,10 @@ const within = (read: FrameRead, prefix: number[]) =>
  * read, such as one from another site, the one above those. Frames in
  * shadow roots share their paths, so the focus may be in any that do, and
  * goes on into whichever says it went on. Of the frames it may end in,
- * the deepest is taken; of several, one with the focus, else one with a
- * selection, else the first as they came.
+ * one that says it has the focus is taken; else the deepest, one with a
+ * selection first, else the first as they came. That a frame doesn't say
+ * so tells nothing: one from another site, in a process of its own, may
+ * not, as seen in Chromium.
  */
 export function chooseFrame(reads: FrameRead[], page: FrameRead): FrameRead {
   const has = (read: FrameRead) => read.selection.trim() !== '';
@@ -137,9 +139,9 @@ export function chooseFrame(reads: FrameRead[], page: FrameRead): FrameRead {
     }
   }
   const passed = new Set([...from.values()].flat());
-  // Deepest first; then focused, then with a selection.
+  // Focused first; then the deepest, then with a selection.
   const rank = (read: FrameRead) =>
-    read.path.length * 4 + Number(read.focused) * 2 + Number(has(read));
+    (read.focused ? Infinity : read.path.length * 2) + Number(has(read));
   let end = page;
   for (const read of from.keys()) {
     if (!passed.has(read) && rank(read) > rank(end)) end = read;
