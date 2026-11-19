@@ -167,8 +167,19 @@ async function folders(query: string): Promise<Calls['folders']['result']> {
   }
 }
 
-/** What `probe` reads in one frame of the tab. */
-type FrameRead = { frameId: number; selection: string; title: string; focused: boolean };
+/**
+ * What `probe` reads in one frame of the tab. `left` says the focus went
+ * from it into a frame within it, which the frame keeps as its own focused
+ * element after the popup takes the focus: a selection it still has is
+ * older than the focus's move.
+ */
+type FrameRead = {
+  frameId: number;
+  selection: string;
+  title: string;
+  focused: boolean;
+  left: boolean;
+};
 
 /** The frames' reads among `ran`, as they came: none for a frame no script ran in. */
 function frameReads(ran: chrome.scripting.InjectionResult<unknown>[]): FrameRead[] {
@@ -181,6 +192,7 @@ function frameReads(ran: chrome.scripting.InjectionResult<unknown>[]): FrameRead
         selection: got.selection,
         title: typeof got.title === 'string' ? got.title : '',
         focused: got.focused === true,
+        left: got.left === true,
       },
     ];
   });
@@ -199,8 +211,10 @@ function frameReads(ran: chrome.scripting.InjectionResult<unknown>[]): FrameRead
  * extension may reach, or only in `frameId`, the one the context menu was
  * opened in. A frame it may not reach is left out: one from another site,
  * under `activeTab`, which grants Chrome the page's own site alone. Of the
- * frames with text selected, it takes the one with the focus, else the
- * page's own, else the first, and says which (`frameId`).
+ * frames with text selected, it takes the one with the focus; else, as the
+ * popup has the focus, one the focus didn't leave for a frame within it,
+ * the page's own first; else the page's own, else the first. It says which
+ * (`frameId`).
  */
 async function probe(tabId: number, frameId?: number): Promise<Calls['probe']['result']> {
   const tab = await api.tabs.get(tabId);
@@ -214,13 +228,13 @@ async function probe(tabId: number, frameId?: number): Promise<Calls['probe']['r
         func: () => {
           const chosen = getSelection();
           const inner = document.activeElement;
+          // A frame's document has the focus with its own, which is then an iframe.
+          const left = inner instanceof HTMLIFrameElement || inner instanceof HTMLFrameElement;
           return {
             selection: chosen && !chosen.isCollapsed ? chosen.toString() : '',
             title: document.title,
-            // A frame's document has the focus with its own, which is then an iframe.
-            focused:
-              document.hasFocus() &&
-              !(inner instanceof HTMLIFrameElement || inner instanceof HTMLFrameElement),
+            focused: document.hasFocus() && !left,
+            left,
           };
         },
       }),
@@ -233,6 +247,8 @@ async function probe(tabId: number, frameId?: number): Promise<Calls['probe']['r
   const selected = reads.filter((read) => read.selection.trim());
   const from =
     selected.find((read) => read.focused) ??
+    selected.find((read) => !read.left && read.frameId === top) ??
+    selected.find((read) => !read.left) ??
     selected.find((read) => read.frameId === top) ??
     selected[0] ??
     page;

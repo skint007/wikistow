@@ -79,7 +79,8 @@ const framed = (port: number) => `<!doctype html><html><head><title>A framed pag
 <iframe id="data" src="data:text/html,<p>Out of reach</p>"></iframe>
 </body></html>`;
 const INNER = `<!doctype html><html><head><title>The comments</title></head>
-<body><p id="said">A comment worth keeping, <a href="/thread">with its thread</a>.</p></body></html>`;
+<body><p id="said">A comment worth keeping, <a href="/thread">with its thread</a>.</p>
+<button id="reply">Reply</button></body></html>`;
 
 type Folder = { spaceId: string; folderId: string | null; path: string };
 const PERSONAL: Folder = { spaceId: 'space1', folderId: null, path: 'Personal' };
@@ -399,10 +400,19 @@ test('text selected in a text box isn’t offered as the selection, and the shor
   expect(await worker.evaluate(() => chrome.action.getBadgeText({}))).toBe('✓');
 });
 
-/** Select the comment in the page's frame from another site. */
+/**
+ * Select the comment in the page's frame from another site, after the
+ * page's own words, as a person might, clicking in the frame between.
+ */
 async function selectInFrame(page: Page, port: string) {
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('p')!);
+    getSelection()!.addRange(range);
+  });
   const frame = page.frames().find((frame) => frame.url() === `http://localhost:${port}/inner`)!;
   await frame.waitForLoadState();
+  await frame.locator('#reply').click();
   await frame.evaluate(() => {
     const range = document.createRange();
     range.selectNodeContents(document.getElementById('said')!);
