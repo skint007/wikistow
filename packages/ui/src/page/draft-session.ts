@@ -1623,13 +1623,14 @@ export class DraftSession {
       participant.subscribe(() => this.#liveStatus()),
       participant.onChange((local) => {
         this.#keptFresh = false;
-        // After the status it changed, which says it isn't saved yet.
-        if (local) this.#typedLive = true;
+        // The status now may not count this change yet, as a deletion's:
+        // only one worked out after it can say it's saved.
+        if (local) this.#typedLive = participant.status();
         this.#fromDocument(!local);
       }),
     );
     this.#keptFresh = false;
-    this.#typedLive = false;
+    this.#typedLive = null;
     this.#rejoins = 0;
     this.#joinTries = 0;
     this.#unlive.push(
@@ -1696,17 +1697,25 @@ export class DraftSession {
   // Whether what is kept on this device is the document as it is now.
   #keptFresh = false;
 
-  // Whether the person changed the session's document since a draft this
-  // app compared last held all of its own typing (`saved`). Others' typing
-  // isn't the person's to lose: while they type, the head is often a draft
-  // this app hasn't compared yet, which holds the person's typing all the same.
-  #typedLive = false;
+  // While the person has changed the session's document since a draft this
+  // app compared last held all of its own typing (`saved`): the
+  // participant's status when they did. Others' typing isn't the person's
+  // to lose: while they type, the head is often a draft this app hasn't
+  // compared yet, which holds the person's typing all the same.
+  #typedLive: ParticipantStatus | null = null;
 
   #ownUnsaved(): boolean {
     const participant = this.#participant;
     if (!participant) return false;
-    if (participant.status().saved) this.#typedLive = false;
-    return this.#typedLive;
+    this.#savedNow(participant.status());
+    return this.#typedLive !== null;
+  }
+
+  // Saved, by a status worked out since the person's latest change: each change makes a new one.
+  #savedNow(status: ParticipantStatus) {
+    if (status.saved && this.#typedLive !== null && status !== this.#typedLive) {
+      this.#typedLive = null;
+    }
   }
 
   /**
@@ -1793,7 +1802,7 @@ export class DraftSession {
     // Drafts of the session it compared are this draft's own, not someone else's save.
     this.#known.add(status.checked);
     if (status.state.kind !== 'live') return void this.#leftLive(participant, status);
-    if (status.saved) this.#typedLive = false;
+    this.#savedNow(status);
     if (status.saved && !this.#unreported) {
       // A compared draft of the session holds what was kept here, or put in: it goes.
       if (this.#keepTimer) clearTimeout(this.#keepTimer);

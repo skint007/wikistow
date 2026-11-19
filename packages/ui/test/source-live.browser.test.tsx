@@ -4,7 +4,12 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import * as Y from 'yjs';
 import CodeMirrorSurface from '../src/page/editor/source/codemirror.tsx';
-import type { LiveSource, RemoteCaret } from '../src/page/editor/source/live.ts';
+import { resolveIn } from '../src/page/editor/live-cursor.ts';
+import {
+  sessionChange,
+  type LiveSource,
+  type RemoteCaret,
+} from '../src/page/editor/source/live.ts';
 import type { EditorSurfaceHandle, LinkAssist } from '../src/page/editor/surface.ts';
 
 // The source editor in a live session (ADR 0015 decision 3), mounted for
@@ -33,6 +38,12 @@ type Session = {
   live: LiveSource;
   /** Someone else's change, made in their copy and sent over. */
   theirs: (change: (text: Y.Text) => void) => void;
+  /** The person's own change, made not through this editor, as the visual editor's. */
+  mine: (change: (text: Y.Text) => void) => void;
+  /** A copy of the document as it is now, as another app holds it. */
+  copy: () => Y.Doc;
+  /** A copy's changes, sent over. */
+  from: (copy: Y.Doc) => void;
   setCarets: (carets: RemoteCaret[]) => void;
   /** Whether the session still takes the person's changes. */
   active: boolean;
@@ -58,6 +69,14 @@ function session(initial: string): Session {
       change(remote.getText('body'));
       Y.applyUpdate(doc, Y.encodeStateAsUpdate(remote, Y.encodeStateVector(doc)), 'remote');
     },
+    mine: (change) => doc.transact(() => change(text), LOCAL),
+    copy: () => {
+      const copy = new Y.Doc();
+      Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+      return copy;
+    },
+    from: (copy) =>
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(copy, Y.encodeStateVector(doc)), 'remote'),
     live: {
       text,
       // As the participant does: nothing once the session isn't live.
@@ -239,5 +258,69 @@ describe('the source editor in a live session', () => {
     await microtasks();
     expect(m.view.state.sliceDoc()).toBe('one two');
     expect(caretsShown(m)).toEqual([6]);
+  });
+  it('finds a caret again where text at it was replaced, as Yjs places it', async () => {
+    const s = session('abcde');
+    const m = await mount(s);
+    const sam = caretAt(s, 2);
+    act(() => s.setCarets([sam]));
+    expect(caretsShown(m)).toEqual([2]);
+    // The person types over "bcd", the caret's character among them.
+    typeAt(m, 1, 'XY', 4);
+    await microtasks();
+    expect(s.text.toJSON()).toBe('aXYe');
+    // Before the text put in, where Yjs places it, not after it.
+    expect(resolveIn(s.text, sam.head)).toBe(1);
+    expect(caretsShown(m)).toEqual([1]);
+  });
+
+  it('keeps a caret by its character when one change of the session’s spans it', async () => {
+    const s = session('one\ntwo\nthree');
+    const m = await mount(s);
+    act(() => s.setCarets([caretAt(s, 5)]));
+    expect(caretsShown(m)).toEqual([5]);
+    // The draft session changes the first and last lines in `body`, and the
+    // editor by one change from the first difference to the last.
+    s.mine((text) => {
+      text.insert(13, '!');
+      text.insert(0, '1 ');
+    });
+    act(() =>
+      m.view.dispatch({
+        changes: { from: 0, to: 13, insert: '1 one\ntwo\nthree!' },
+        annotations: sessionChange.of(true),
+      }),
+    );
+    await microtasks();
+    expect(m.view.state.sliceDoc()).toBe('1 one\ntwo\nthree!');
+    expect(caretsShown(m)).toEqual([7]);
+  });
+
+  it('places a caret whose character went as Yjs does, by the text’s history', async () => {
+    const s = session('abc');
+    const m = await mount(s);
+    // Sam is before "b"; Bob takes "b" out while Carol puts "X" in after it.
+    const sam = caretAt(s, 1);
+    act(() => s.setCarets([sam]));
+    const bob = s.copy();
+    const carol = s.copy();
+    bob.getText('body').delete(1, 1);
+    carol.getText('body').insert(2, 'X');
+    s.from(bob);
+    s.from(carol);
+    await microtasks();
+    expect(m.view.state.sliceDoc()).toBe('aXc');
+    // Before "X", put in after the "b" Sam was at.
+    expect(resolveIn(s.text, sam.head)).toBe(1);
+    expect(caretsShown(m)).toEqual([1]);
+  });
+
+  it('reads the text whole when the person’s own change went in elsewhere just before others’', async () => {
+    const s = session('Hello.');
+    const m = await mount(s);
+    // The visual editor writes its edit just before someone else's change comes in.
+    s.mine((text) => text.insert(0, 'Oh. '));
+    s.theirs((text) => text.insert(text.length, ' Bye.'));
+    expect(m.view.state.sliceDoc()).toBe('Oh. Hello. Bye.');
   });
 });

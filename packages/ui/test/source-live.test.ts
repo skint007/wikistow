@@ -7,7 +7,7 @@ import * as Y from 'yjs';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   changesFrom,
-  mayHaveSplit,
+  mayDiffer,
   offsetOf,
   positionOf,
   putChanges,
@@ -83,27 +83,58 @@ describe('the source editor’s live binding', () => {
     expect(typed('ab', '\ud83d')).toBe(false);
   });
 
-  it('reads a split Yjs may have made only at a change’s edges', () => {
-    const body = bodyOf('a😀b c😀d');
+  /** Another app's change, as Yjs takes it: whether the editor may now differ from `body`, read at its edges. */
+  function theirs(text: string, lineBreak: string, change: (body: Y.Text) => void) {
+    const body = bodyOf(text);
     const doc = body.doc as Y.Doc;
     const deltas: Parameters<typeof changesFrom>[1][] = [];
     body.observe((event) => deltas.push(event.delta));
-    let state = editor(body.toJSON());
-    // Another app's insert between the first emoji's halves, as Yjs takes it.
+    const before = editor(text, lineBreak);
     const remote = new Y.Doc();
     Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
-    remote.getText('body').insert(2, 'x');
+    change(remote.getText('body'));
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(remote, Y.encodeStateVector(doc)));
-    const [split] = deltas;
-    if (!split) throw new Error('no change');
-    state = state.update({ changes: changesFrom(state, split) }).state;
-    expect(body.toJSON()).toBe('a\ufffdx\ufffdb c😀d');
-    expect(mayHaveSplit(state, split)).toBe(true);
-    // One between whole characters, past the other emoji, splits nothing.
-    const whole = editor('a😀b cy😀');
-    expect(
-      mayHaveSplit(whole, [{ retain: 6 }, { insert: 'y' }, { retain: 2 }, { delete: 1 }]),
-    ).toBe(false);
+    const [delta] = deltas;
+    if (!delta) throw new Error('no change');
+    const after = before.update({ changes: changesFrom(before, delta) }).state;
+    return {
+      body: body.toJSON(),
+      shown: after.sliceDoc(),
+      differs: mayDiffer(before, after, delta),
+    };
+  }
+
+  it('reads a split Yjs may have made only at a change’s edges', () => {
+    // An insert between an emoji's halves.
+    const inserted = theirs('a😀b c😀d', '\n', (body) => body.insert(2, 'x'));
+    expect(inserted.body).toBe('a\ufffdx\ufffdb c😀d');
+    expect(inserted.differs).toBe(true);
+    // A deletion from inside one emoji to inside another, which joins two halves.
+    const joined = theirs('😀ab😁', '\n', (body) => body.delete(1, 4));
+    expect(joined.shown).not.toBe(joined.body);
+    expect(joined.differs).toBe(true);
+    // Changes between whole characters, beside emoji, split nothing.
+    const whole = theirs('a😀b c😀d', '\n', (body) => {
+      body.insert(3, 'y');
+      body.delete(7, 2);
+    });
+    expect(whole.shown).toBe(whole.body);
+    expect(whole.differs).toBe(false);
+  });
+
+  it('reads a change inside a CRLF line break as one the editor can’t take as it came', () => {
+    const lone = theirs('a\r\nb\r\nc', '\r\n', (body) => body.delete(1, 1));
+    expect(lone.body).toBe('a\nb\r\nc');
+    expect(lone.differs).toBe(true);
+    const between = theirs('a\r\nb', '\r\n', (body) => body.insert(2, 'x'));
+    expect(between.differs).toBe(true);
+    // Whole line breaks, and text beside them, are taken as they came.
+    const whole = theirs('a\r\nb\r\nc', '\r\n', (body) => {
+      body.delete(1, 2);
+      body.insert(2, '\r\nd');
+    });
+    expect(whole.shown).toBe(whole.body);
+    expect(whole.differs).toBe(false);
   });
 
   it('resolves a caret only inside `body`', () => {
