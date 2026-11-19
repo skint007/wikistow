@@ -117,6 +117,15 @@ class FakeParticipant {
     this.set({ saved: false });
     for (const listener of this.#changes) listener(true);
   }
+  /**
+   * The person's deletion, as the participant tells of it: its listeners
+   * hear of the change before the status counts it as unsaved.
+   */
+  deleteLate(text: string) {
+    this.document.edit(() => changeText(this.document.text('body'), text));
+    for (const listener of this.#changes) listener(true);
+    this.set({ saved: false });
+  }
   /** Someone else's change. */
   theirs(text: string) {
     this.document.edit(() => changeText(this.document.text('body'), text), 'remote');
@@ -368,6 +377,49 @@ describe('a draft session in a live session', () => {
     await settle();
     // Only the session saves while it's live.
     expect(saves).toHaveLength(0);
+  });
+
+  it('counts only the person’s own typing as unsaved, not others’ (#494)', async () => {
+    const { draft, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    const R1 = RevisionId.parse('r1');
+    // Others type, and the head is a draft of theirs this app hasn't compared yet.
+    live.theirs('Start. Their line.');
+    live.set({ saved: false, head: R1 });
+    expect(draft.hasUnsaved()).toBe(false);
+    expect(draft.isBusy()).toBe(false);
+    // The person types: theirs to lose, until a draft this app compared holds it.
+    type('Start. Their line. Mine.');
+    expect(draft.hasUnsaved()).toBe(true);
+    expect(draft.isBusy()).toBe(true);
+    live.theirs('Start. Their line. Mine. More of theirs.');
+    expect(draft.hasUnsaved()).toBe(true);
+    live.set({ saved: true, head: R1, checked: R1 });
+    expect(draft.hasUnsaved()).toBe(false);
+    // Saved once, it stays so while others go on typing.
+    live.theirs('Start. Their line. Mine. More of theirs, and more.');
+    live.set({ saved: false, head: RevisionId.parse('r2') });
+    expect(draft.hasUnsaved()).toBe(false);
+    expect(draft.isBusy()).toBe(false);
+  });
+
+  it('counts a deletion of the person’s as unsaved, read as it goes in (#494)', async () => {
+    const { draft, joins, surface } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    // Something on the page reads it each time the draft changes.
+    const read: boolean[] = [];
+    draft.subscribe(() => read.push(draft.hasUnsaved()));
+    surface.text = 'Start';
+    live.deleteLate('Start');
+    expect(read.length).toBeGreaterThan(0);
+    expect(draft.hasUnsaved()).toBe(true);
+    expect(draft.isBusy()).toBe(true);
+    live.set({ saved: true });
+    expect(draft.hasUnsaved()).toBe(false);
   });
 
   it('shows others’ changes in the editor, out of the person’s way', async () => {
