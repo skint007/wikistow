@@ -766,12 +766,11 @@ test('a screenshot of an area is the part dragged over, scrolled, in its device 
   ).toBeVisible();
   await page.bringToFront();
   expect(await got('stable', 'clip')).toEqual([]);
-  // The screenshot is taken as the overlay opens: the page changing after
-  // isn't in it.
+  // The screenshot is taken as the drag starts: the page changing as the
+  // overlay goes isn't in it.
   await redOnceOverlayGoes(page);
   // The person may take a while: Chrome stops the idle service worker, and
-  // the overlay's message wakes it again, with the area chosen, and its
-  // screenshot, kept.
+  // the overlay's messages wake it again, with the area chosen kept.
   const devtools = await context!.newCDPSession(again);
   await devtools.send('ServiceWorker.enable');
   await devtools.send('ServiceWorker.stopAllWorkers');
@@ -824,6 +823,11 @@ test('an area matches what was drawn on a page with a CSS zoom of its own', asyn
   await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
   await closed;
   await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  // The page changes while the person chooses: the screenshot is of it as
+  // the drag starts.
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('#box > div')!.style.background = '#ff00ff';
+  });
   await page.mouse.move(80, 160);
   await page.mouse.down();
   await page.mouse.move(200, 220, { steps: 5 });
@@ -856,31 +860,40 @@ test('an area matches what was drawn on a page with a CSS zoom of its own', asyn
   expect(shot).toEqual({
     width: 240,
     height: 120,
-    colours: ['#0000ff', '#0000ff', '#00ff00', '#00ff00'],
+    colours: ['#ff00ff', '#ff00ff', '#00ff00', '#00ff00'],
   });
 });
 
-test('an area whose screenshot wasn’t kept through a sleep is cut from one taken after the drag', async () => {
+test('over a modal in a shadow root, an area is chosen though the background sleeps mid-drag', async () => {
   const { worker, got } = await launch({ stable: ready }, { scale: 1 });
   const origin = await serve();
   const { page, popup } = await popupFor(worker, origin, undefined, '/shot');
   await page.evaluate(() => scrollTo(0, 1000));
+  // A component's modal dialog, in its shadow root, away from the box and
+  // with no backdrop: the rest of the page is inert.
+  await page.evaluate(() => {
+    const component = document.createElement('div');
+    document.body.append(component);
+    const inside = component.attachShadow({ mode: 'closed' });
+    inside.innerHTML = `<style>dialog::backdrop { background: transparent }
+      dialog { margin: 0; inset: 20px 20px auto auto }</style><dialog><button>A button</button></dialog>`;
+    inside.querySelector('dialog')!.showModal();
+  });
   await expect(popup.getByRole('radio', { name: 'Personal', exact: true })).toBeChecked();
   await popup.getByRole('radio', { name: 'Choose an area' }).check();
   await page.bringToFront();
   const closed = popup.waitForEvent('close');
   await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
   await closed;
-  // As when it's over `storage.session`'s quota: held only while awake.
-  await expect
-    .poll(() => worker.evaluate(async () => 'areaShot' in (await chrome.storage.session.get())))
-    .toBe(true);
-  await worker.evaluate(() => chrome.storage.session.remove('areaShot'));
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  await page.mouse.move(100, 200);
+  await page.mouse.down();
+  await page.mouse.move(250, 300, { steps: 5 });
+  // The screenshot taken as the drag started goes with the background: one
+  // is taken once the area's chosen.
   const devtools = await context!.newCDPSession(page);
   await devtools.send('ServiceWorker.enable');
   await devtools.send('ServiceWorker.stopAllWorkers');
-  await page.mouse.move(100, 200);
-  await page.mouse.down();
   await page.mouse.move(400, 350, { steps: 5 });
   await page.mouse.up();
   await expect.poll(async () => (await got('stable', 'clip')).length).toBe(1);
@@ -959,6 +972,15 @@ test('Escape stops choosing an area, sending nothing', async () => {
   await page.mouse.click(300, 300);
   expect(await page.evaluate(() => document.documentElement.children.length)).toBe(3);
   expect(await kept()).toEqual({ open: true, focused: 'field', typed: '' });
+  // The page closes its menu, which the overlay is nested in: it stays.
+  await page.evaluate(async () => {
+    document.getElementById('menu')!.hidePopover();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+  expect(await page.evaluate(() => document.documentElement.children.length)).toBe(3);
+  await expect(
+    again.getByText('Drag over the page to choose the area. Esc cancels.'),
+  ).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(again.getByText('Drag over the page to choose the area. Esc cancels.')).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
@@ -1024,7 +1046,7 @@ test('an overlay the page hides or takes off stops choosing, and says so', async
   const fourth = await reopen(tabId);
   await expect(fourth.getByText(stopped)).toBeVisible();
   await expect
-    .poll(() => worker.evaluate(() => chrome.storage.session.get(['choosing', 'areaShot'])))
+    .poll(() => worker.evaluate(() => chrome.storage.session.get('choosing')))
     .toEqual({});
   expect(await got('stable', 'clip')).toEqual([]);
 });

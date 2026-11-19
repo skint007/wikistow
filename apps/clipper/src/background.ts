@@ -14,13 +14,15 @@ import {
   cropPng,
   dataBytes,
   isAreaMessage,
+  isShotMessage,
   type Area,
+  type AreaMessage,
+  type ShotMessage,
   type ViewSize,
 } from './shot.ts';
 import { ask, converse, find, HostGone, TimedOut, type Found } from './host.ts';
 import {
   POPUP_PORT,
-  type AreaShot,
   type Call,
   type Calls,
   type Choosing,
@@ -324,12 +326,12 @@ async function visibleArea(tab: chrome.tabs.Tab): Promise<string> {
   return url;
 }
 
-/** An area dragged out in a tab of `view`'s size, and the screenshot taken as it opened, if it's kept. */
+/** An area dragged out in a tab of `view`'s size, and the screenshot taken as the drag started, if it's kept. */
 type Part = { area: Area; view: ViewSize; shot: string | null };
 
 /**
  * The tab as shown, as PNG base64, or the part of it under `part`, cut
- * here from the screenshot taken as the overlay opened, or from one taken
+ * here from the screenshot taken as the drag started, or from one taken
  * now if that one's gone.
  */
 async function screenshot(tab: chrome.tabs.Tab, part: Part | null): Promise<string> {
@@ -367,22 +369,28 @@ async function overlayShown(tabId: number): Promise<boolean> {
 }
 
 /**
- * The screenshot taken as the overlay opened, held while the background is
- * awake: `storage.session` keeps it too, when it fits, for one that slept.
+ * The screenshot taken as the person started dragging, for the choice
+ * `nonce`, in a tab of `view`'s size. Held only while the background is
+ * awake, which the drag's messages keep it: one that slept meanwhile takes
+ * another once the area is chosen.
  */
-let areaShot: AreaShot | null = null;
-
-/** The screenshot taken for the choice `nonce`, if it's kept. */
-async function shotFor(nonce: string): Promise<AreaShot | null> {
-  if (areaShot?.nonce === nonce) return areaShot;
-  const kept = ((await api.storage.session.get('areaShot')) as SessionState).areaShot;
-  return kept?.nonce === nonce ? kept : null;
-}
+let areaShot: { nonce: string; url: string; view: ViewSize } | null = null;
 
 /** Forget the area being chosen, and its screenshot. */
 async function forgetChoice() {
   areaShot = null;
-  await api.storage.session.remove(['choosing', 'areaShot']);
+  await api.storage.session.remove('choosing');
+}
+
+/** Take the overlay for `nonce` off `tabId`, if it's still there, once the page is drawn again without it. */
+async function stopOverlay(tabId: number, nonce: string) {
+  await api.scripting
+    .executeScript({
+      target: { tabId },
+      func: (nonce: string) => globalThis.wikistowAreaStop?.(nonce),
+      args: [nonce],
+    })
+    .catch(() => {});
 }
 
 /** Stop choosing an area, taking the overlay off its page, which is drawn again without it once this is done. */
@@ -390,35 +398,16 @@ async function stopChoosing() {
   const was = await choosing();
   if (!was) return;
   await forgetChoice();
-  await api.scripting
-    .executeScript({ target: { tabId: was.tabId }, func: () => globalThis.wikistowAreaStop?.() })
-    .catch(() => {});
-}
-
-/** The tab's size as the overlay opened, as it answers. */
-function openedView(result: unknown): ViewSize | null {
-  if (typeof result !== 'object' || result === null) return null;
-  const view = (result as { view?: unknown }).view;
-  if (typeof view !== 'object' || view === null) return null;
-  const { width, height } = view as Record<string, unknown>;
-  return typeof width === 'number' && typeof height === 'number' ? { width, height } : null;
+  await stopOverlay(was.tabId, was.nonce);
 }
 
 /**
- * Put the overlay on the tab, for the person to drag out an area. The
- * screenshot is taken first, before the overlay is drawn, so the area is
- * cut from the page as the person saw it, whatever it does meanwhile. The
- * overlay names `nonce` once they've dragged it out (`areaChosen`).
+ * Put the overlay on the tab, for the person to drag out an area. It asks
+ * for the screenshot as the drag starts (`shootArea`), and names `nonce`
+ * once the area's dragged out (`areaChosen`).
  */
 async function choose(tabId: number, form: Form) {
   await stopChoosing();
-  let url: string;
-  try {
-    url = await visibleArea(await api.tabs.get(tabId));
-  } catch (error) {
-    if (error instanceof NoShot) return fail(error.code, error.message);
-    return fail('capture', NO_SHOT);
-  }
   const nonce = crypto.randomUUID();
   const next: Choosing = { nonce, tabId, form, until: Date.now() + CHOOSE_MS + LATE_MS };
   await api.storage.session.set({ choosing: next });
@@ -434,14 +423,13 @@ async function choose(tabId: number, form: Form) {
   } catch {
     started = null;
   }
-  const view = openedView(started);
-  if (view) {
-    areaShot = { nonce, url, view };
-    // Over `storage.session`'s quota, it's kept only while awake; one taken
-    // after the drag stands in for it.
-    await api.storage.session.set({ areaShot }).catch(() => {});
+  if (started === 'choosing') {
+    // Settled meanwhile by the overlay's own message, or a newer clip took
+    // over, whose state stands: an overlay left on the page goes.
+    if ((await choosing())?.nonce !== nonce) return stopOverlay(tabId, nonce);
     return setClip({ phase: 'choosing' });
   }
+  if ((await choosing())?.nonce !== nonce) return;
   await forgetChoice();
   if (started === 'zoomed') {
     return fail('capture', 'Pinch the page back to its usual size, then choose an area.');
@@ -449,19 +437,43 @@ async function choose(tabId: number, form: Form) {
   fail('capture', NO_SHOT);
 }
 
+/** The tab the overlay's message came from: its page's top frame, never one of the extension's own. */
+function overlayTab(sender: chrome.runtime.MessageSender): number | null {
+  if (sender.id !== api.runtime.id || sender.frameId !== 0 || sender.tab?.id === undefined) {
+    return null;
+  }
+  if (!sender.url || sender.url.startsWith(api.runtime.getURL(''))) return null;
+  return sender.tab.id;
+}
+
+/**
+ * The overlay asks, as the person starts dragging, with nothing of its own
+ * shown: the visible area's screenshot, kept for the area to be cut from.
+ * Done once it's taken, or couldn't be: then one's taken after the drag.
+ */
+async function shootArea(message: ShotMessage, tabId: number) {
+  const was = await choosing();
+  if (!was || was.nonce !== message.nonce || was.tabId !== tabId) return;
+  let url: string;
+  try {
+    url = await visibleArea(await api.tabs.get(tabId));
+  } catch {
+    return;
+  }
+  // Still this choice: one stopped meanwhile keeps no screenshot.
+  if ((await choosing())?.nonce !== message.nonce) return;
+  areaShot = { nonce: message.nonce, url, view: message.view };
+}
+
 /**
  * The overlay's message: the area the person dragged out, or that they
  * stopped, or that the page did. Done once the clip shows how it goes: the
  * sending itself goes on after.
  */
-async function areaChosen(message: unknown, sender: chrome.runtime.MessageSender) {
-  if (sender.id !== api.runtime.id || sender.frameId !== 0 || sender.tab?.id === undefined) return;
-  // A content script's sender is its page, never one of the extension's own.
-  if (!sender.url || sender.url.startsWith(api.runtime.getURL(''))) return;
-  if (!isAreaMessage(message)) return;
+async function areaChosen(message: AreaMessage, tabId: number) {
   const was = await choosing();
-  if (!was || was.nonce !== message.nonce || was.tabId !== sender.tab.id) return;
-  const kept = await shotFor(was.nonce);
+  if (!was || was.nonce !== message.nonce || was.tabId !== tabId) return;
+  const kept = areaShot?.nonce === was.nonce ? areaShot : null;
   await forgetChoice();
   if (message.blocked) {
     return fail('capture', 'This page stopped Choose an area from working. Try Visible area.');
@@ -665,10 +677,19 @@ function fromPopup(port: chrome.runtime.Port) {
   return `${url.origin}${url.pathname}` === api.runtime.getURL('popup.html');
 }
 
+/** A message from the area overlay, the only one the background takes. */
+async function fromOverlay(message: unknown, sender: chrome.runtime.MessageSender) {
+  const tabId = overlayTab(sender);
+  if (tabId === null) return;
+  if (isShotMessage(message)) return shootArea(message, tabId);
+  if (isAreaMessage(message)) return areaChosen(message, tabId);
+}
+
 api.runtime.onMessage.addListener((message, sender, respond) => {
-  // Answered once taken, so the overlay counts as shown until then (`overlayShown`).
+  // Answered once taken: the overlay draws its box once its screenshot is,
+  // and counts as shown until its area is (`overlayShown`).
   const answered = () => respond(null);
-  void areaChosen(message, sender).then(answered, answered);
+  void fromOverlay(message, sender).then(answered, answered);
   return true;
 });
 
