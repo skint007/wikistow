@@ -4,6 +4,49 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.28.0 - 2026-11-19
+
+### Highlights
+
+#### Features
+
+- A plugin’s script blocks can show a toggle, a menu of choices, a date picker or a slider, each able to set one of the page’s properties.
+- Plugins can put a widget inside a sentence: a toggle, a menu, a slider or a date in a line of text that shows and sets one of the page’s properties, in the editor and while reading.
+
+#### Fixes
+
+- In a query table, a date copied from a cell into `where` now matches its row, a day alone matches the whole day, and `<=` takes in all of the day written.
+- Search no longer shows a change waiting on this device after you discard it, and keeps showing what you typed into one while it waits.
+- **By meaning** no longer lists pages found for an earlier query when a search fails.
+- A draft’s **By meaning** snippet starts at the top of the page while its earlier version stands in, rather than mid-word.
+- Search by meaning keeps the vectors it made before you lock the vault or close the tab, and no longer keeps vectors made from text typed offline as the version’s own.
+
+#### Optimizations
+
+- Opening the command palette no longer starts the search-by-meaning model, and typing no longer scans every page’s vectors again at each key.
+
+#### Maintenance
+
+- The desktop app runs on Electron 44.11.5.
+
+### Changes
+
+#### App
+
+- Script blocks take `boolean`, `choice` and `date` fields, and number fields drawn as a slider (`slider`, `step`), bound to a property or written to their fence line. An app older than them refuses such a block, naming the field, and this app says a field kind it doesn't know may need a newer WikiStow. The calculator example has a `stay` block using all four. (#648)
+- Query tables: a date cell shows as `where` reads it back, a time in your zone with its offset (`2026-11-13 20:30 +11:00`), so a cell copied into `where: saved = …` matches its row. `<=` and `>` compare with the end of the day or minute a date is written to, so `saved <= 2026-11-13` includes all of that day, and `saved > 2026-11-13` starts the next. A public copy's **saved** cells read `+00:00` rather than `UTC`. (#651)
+- Query tables: `=` and `!=` take a date to the precision it is written with, so `where: saved = 2026-11-13T09:30Z` matches the time a **saved** cell shows, and a day alone the whole day, for date properties too. A public copy's table takes the copied page's own time from the server rather than this device's clock. The `vault-tables` example has tests of its own. (#647)
+- Plugins' inline spans get the page's `properties` and `setProperty`, under a block's rules: the person's edit in the editor, and while reading for an editor who can publish, published with the page's other changes as one labelled version. While reading, a span sets properties only. Scripts can declare spans with `host.inline.register({ type, field })`, one field the app draws in the line, bound to the property the span's text names, else the field's own. An app older than them refuses such a script. The page-tools example has a `done` toggle and a `status` menu, and its `rating` stars can set the page's `rating`. (#650)
+- The `vault-tables` example sends Dataview's `date(2026-11-14)` as the moment that day starts, as Dataview compares it, so `WHERE file.mtime > date(2026-11-14)` lists pages saved later on the 14th. (#652)
+- Search by meaning: a draft shown at unlock waits out its 30 s pause before it's embedded, vectors made from text typed offline are never kept as the version's own, and what the queue made since its last write is kept before a lock and as the page is left. (#640)
+- Online, search, query tables and plugin rows stop showing a change waiting on the device once you discard it. They also keep showing what you typed into one while it waits, where they sometimes went back to the server's version. (#642)
+- With a plugin drawing search's results, the search box names only the lists it shows, **By meaning** below the plugin's view among them, for screen readers. (#643)
+- Search by meaning scans the vectors once a query rather than at each key, lists nothing by meaning after a query fails instead of the last query's pages, and starts the model only once a search for pages starts, not for the command palette. A model that failed to load isn't tried again for a minute, a tab without the queue doesn't open the kept vectors again unless they changed, and a draft's **By meaning** snippet starts at the page's top while the version before stands in. (#641)
+
+#### Releases and packaging
+
+- Electron 44.11.5, from 44.11.4.
+
 ## 0.28.0-beta.1 - 2026-11-18
 
 ### Highlights
