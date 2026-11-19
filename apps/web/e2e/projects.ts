@@ -8,8 +8,16 @@
  * Playwright's own filter matches them: ignoring case, with `*` matching
  * anything. `--project` takes every value up to the next option, as
  * `--project chromium live`, and can be repeated or written `--project=live`.
+ * In UI and watch mode every project can run.
  */
-export function runsProject(argv: readonly string[], name: string): boolean {
+export function runsProject(
+  argv: readonly string[],
+  name: string,
+  env: Record<string, string | undefined> = {},
+): boolean {
+  // UI and watch mode let you choose any project once they're open,
+  // whatever `--project` ticked to start with.
+  if (env['PWTEST_WATCH'] || argv.some((arg) => /^--ui(-host|-port)?(=|$)/.test(arg))) return true;
   const chosen = projectFilter(argv);
   return chosen === undefined || chosen.some((pattern) => matches(pattern, name));
 }
@@ -32,6 +40,10 @@ function projectFilter(argv: readonly string[]): string[] | undefined {
 }
 
 function matches(pattern: string, name: string): boolean {
-  const parts = pattern.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  return new RegExp(`^${parts.join('.*')}$`, 'i').test(name);
+  // Lowercased as Playwright lowercases both, so a locale's own rules agree.
+  const parts = pattern
+    .toLocaleLowerCase()
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(`^${parts.join('.*')}$`, 'i').test(name.toLocaleLowerCase());
 }

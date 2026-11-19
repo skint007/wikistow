@@ -29,6 +29,13 @@ describe('runsProject', () => {
     expect(runsProject(cli('--project', 'li.e'), 'live')).toBe(false);
   });
 
+  it('runs every project in UI and watch mode, whatever --project ticks first', () => {
+    expect(runsProject(cli('--ui', '--project', 'chromium'), 'live')).toBe(true);
+    expect(runsProject(cli('--ui-port=8080', '--project', 'chromium'), 'live')).toBe(true);
+    expect(runsProject(cli('--project', 'chromium'), 'live', { PWTEST_WATCH: '1' })).toBe(true);
+    expect(runsProject(cli('--project', 'chromium', '--uix'), 'live')).toBe(false);
+  });
+
   it('stops reading options at --', () => {
     expect(runsProject(cli('--', '--project', 'chromium'), 'live')).toBe(true);
   });

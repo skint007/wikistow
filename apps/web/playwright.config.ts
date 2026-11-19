@@ -12,7 +12,7 @@ const livePort = port + 10;
 const LIVE = /live-[a-z-]+\.spec\.ts/;
 // Its server, which needs `openssl` and a database of its own, starts only
 // when the run includes the live project: not for `--project chromium` (#514).
-const live = runsProject(process.argv, 'live');
+const live = runsProject(process.argv, 'live', process.env);
 const env = Object.fromEntries(
   Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
 );
