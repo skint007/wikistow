@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { runsProject } from './e2e/projects';
 
 // Runs against the built app (`vp build` first) served by the real server.
 // E2E_PORT moves the app off 3100, control off 3101, and loopback SMTP off 3102.
@@ -9,6 +10,9 @@ const port = Number(process.env['E2E_PORT'] ?? 3100);
 // 10), on the ports ten above: the app, control and SMTP.
 const livePort = port + 10;
 const LIVE = /live-[a-z-]+\.spec\.ts/;
+// Its server, which needs `openssl` and a database of its own, starts only
+// when the run includes the live project: not for `--project chromium` (#514).
+const live = runsProject(process.argv, 'live');
 const env = Object.fromEntries(
   Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
 );
@@ -51,15 +55,19 @@ export default defineConfig({
       // Playwright SIGKILLs it and the database is left behind.
       gracefulShutdown: { signal: 'SIGTERM', timeout: 30_000 },
     },
-    {
-      command: 'node e2e/serve.ts',
-      env: { ...env, E2E_PORT: String(livePort), E2E_TLS: '1' },
-      url: `https://localhost:${livePort}/api/health`,
-      ignoreHTTPSErrors: true,
-      reuseExistingServer: false,
-      stdout: 'pipe',
-      timeout: 60_000,
-      gracefulShutdown: { signal: 'SIGTERM', timeout: 30_000 },
-    },
+    ...(live
+      ? [
+          {
+            command: 'node e2e/serve.ts',
+            env: { ...env, E2E_PORT: String(livePort), E2E_TLS: '1' },
+            url: `https://localhost:${livePort}/api/health`,
+            ignoreHTTPSErrors: true,
+            reuseExistingServer: false,
+            stdout: 'pipe' as const,
+            timeout: 60_000,
+            gracefulShutdown: { signal: 'SIGTERM' as const, timeout: 30_000 },
+          },
+        ]
+      : []),
   ],
 });

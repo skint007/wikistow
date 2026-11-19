@@ -84,7 +84,7 @@ The web build fetches the search model (ADR 0016) from Hugging Face the first ti
 
 Integration tests use the local Postgres service. The backup and restore tests also need Postgres 17's `pg_dump`, `pg_restore`, and `psql`. Browser tests need Playwright's Chromium, installed with `pnpm --filter @wikistow/web exec playwright install chromium`.
 
-Run the web workflow checks with `pnpm --filter @wikistow/web e2e`. Desktop setup and checks are in [docs/desktop.md](docs/desktop.md).
+Run the web workflow checks with `pnpm --filter @wikistow/web e2e`. They run as two Playwright projects, each against a server of its own on a fresh database. `live`, the live editing tests (`e2e/live-*.spec.ts`), runs over HTTPS with a certificate made by `openssl`. `chromium` runs the rest. `--project chromium` runs only the rest, without starting the live server, so `openssl` isn't needed. Desktop setup and checks are in [docs/desktop.md](docs/desktop.md).
 
 GitHub Actions runs these checks on every pull request and every push to `main`. Pull-request jobs only read the repository and publish nothing. Each push to `main` publishes a server image, and each release tag publishes the image under its version, and the desktop app and the CLI as a GitHub Release. [Releasing](docs/releasing.md) describes versions, releases and the repository settings they need. A pull request that changes what ships adds a line to [`CHANGELOG.md`](CHANGELOG.md), as [Releasing](docs/releasing.md#the-changelog) describes.
 
