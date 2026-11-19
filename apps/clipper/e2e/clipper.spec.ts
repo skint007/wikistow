@@ -71,12 +71,16 @@ const FORM = `<!doctype html><html><head><title>A form</title></head>
 <body><p>Write to us.</p><textarea id="box">Some typed words</textarea></body></html>`;
 
 // A page with frames: one of its own site, one of another (the same server
-// by another name), and one no script may run in.
+// by another name) in a web component's shadow root, and a `data:` one.
 const framed = (port: number) => `<!doctype html><html><head><title>A framed page</title></head>
 <body><p>Words of the page itself.</p>
 <iframe id="same" src="/inner"></iframe>
-<iframe id="other" src="http://localhost:${port}/inner"></iframe>
-<iframe id="data" src="data:text/html,<p>Out of reach</p>"></iframe>
+<div id="widget"></div>
+<iframe id="data" src="data:text/html,<p>Some data</p>"></iframe>
+<script>
+document.getElementById('widget').attachShadow({ mode: 'open' }).innerHTML =
+  '<iframe id="other" src="http://localhost:${port}/inner"></iframe>';
+</script>
 </body></html>`;
 const INNER = `<!doctype html><html><head><title>The comments</title></head>
 <body><p id="said">A comment worth keeping, <a href="/thread">with its thread</a>.</p>
@@ -402,7 +406,8 @@ test('text selected in a text box isn’t offered as the selection, and the shor
 
 /**
  * Select the comment in the page's frame from another site, after the
- * page's own words, as a person might, clicking in the frame between.
+ * page's own words and the comment in its frame of the same site, as a
+ * person might, clicking in each frame first.
  */
 async function selectInFrame(page: Page, port: string) {
   await page.evaluate(() => {
@@ -410,12 +415,20 @@ async function selectInFrame(page: Page, port: string) {
     range.selectNodeContents(document.querySelector('p')!);
     getSelection()!.addRange(range);
   });
-  const frame = page.frames().find((frame) => frame.url() === `http://localhost:${port}/inner`)!;
+  const origin = new URL(page.url()).origin;
+  await selectComment(page, `${origin}/inner`);
+  await selectComment(page, `http://localhost:${port}/inner`);
+}
+
+/** Click in the frame at `url`, and select its comment. */
+async function selectComment(page: Page, url: string) {
+  const frame = page.frames().find((frame) => frame.url() === url)!;
   await frame.waitForLoadState();
   await frame.locator('#reply').click();
   await frame.evaluate(() => {
     const range = document.createRange();
     range.selectNodeContents(document.getElementById('said')!);
+    getSelection()!.removeAllRanges();
     getSelection()!.addRange(range);
   });
 }
@@ -424,7 +437,12 @@ test('a selection in a frame is offered and clipped as the tab’s page', async 
   const { worker, got } = await launch({ stable: ready });
   const origin = await serve();
   const port = new URL(origin).port;
-  const { popup } = await popupFor(worker, origin, (page) => selectInFrame(page, port), '/framed');
+  const { page, popup } = await popupFor(
+    worker,
+    origin,
+    (page) => selectInFrame(page, port),
+    '/framed',
+  );
   await expect(popup.getByRole('radio', { name: 'Selection' })).toBeChecked();
   await expect(popup.getByLabel('Title')).toHaveValue('A framed page');
   await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
@@ -449,6 +467,16 @@ test('a selection in a frame is offered and clipped as the tab’s page', async 
     url: `${origin}/framed`,
     text: 'A comment worth keeping, with its thread.',
   });
+
+  // Selected again in the frame of the page's own site, it's that frame's.
+  await selectComment(page, `${origin}/inner`);
+  await popup.reload();
+  await expect(popup.getByRole('radio', { name: 'Selection' })).toBeChecked();
+  await popup.getByRole('button', { name: 'Save to WikiStow' }).click();
+  await expect.poll(async () => (await got('stable', 'clip')).length).toBe(3);
+  expect(String((await got('stable', 'clip'))[2]!['html'])).toContain(
+    `<a href="${origin}/thread">with its thread</a>`,
+  );
 });
 
 test('the context menu and the shortcut send a selection in a frame', async () => {

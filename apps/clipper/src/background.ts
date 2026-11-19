@@ -168,16 +168,21 @@ async function folders(query: string): Promise<Calls['folders']['result']> {
 }
 
 /**
- * What `probe` reads in one frame of the tab. `left` says the focus went
- * from it into a frame within it, which the frame keeps as its own focused
- * element after the popup takes the focus: a selection it still has is
- * older than the focus's move.
+ * What `probe` reads in one frame of the tab. `path` is where the frame
+ * is, as the index of each frame from the page's own down to it, which a
+ * frame can tell though its parent is of another site; null for one in a
+ * shadow root, which its parent's frames leave out. `into` is the index of
+ * the frame within it the focus went into, -1 if none; `left`, that the
+ * focus went into one, which `into` may not name: a frame's document keeps
+ * its focused element once the popup takes the focus, and its selection
+ * too, from before the focus moved.
  */
 type FrameRead = {
   frameId: number;
   selection: string;
   title: string;
-  focused: boolean;
+  path: number[] | null;
+  into: number;
   left: boolean;
 };
 
@@ -186,16 +191,38 @@ function frameReads(ran: chrome.scripting.InjectionResult<unknown>[]): FrameRead
   return ran.flatMap(({ frameId, result }) => {
     const got = result as Partial<Record<keyof FrameRead, unknown>> | null | undefined;
     if (typeof frameId !== 'number' || typeof got?.selection !== 'string') return [];
+    const path =
+      Array.isArray(got.path) && got.path.every((at) => Number.isSafeInteger(at) && at >= 0)
+        ? (got.path as number[])
+        : null;
     return [
       {
         frameId,
         selection: got.selection,
         title: typeof got.title === 'string' ? got.title : '',
-        focused: got.focused === true,
+        path,
+        into: Number.isSafeInteger(got.into) ? (got.into as number) : -1,
         left: got.left === true,
       },
     ];
   });
+}
+
+/**
+ * The frame the focus is in, among `reads`, from `page` down: `unread` if
+ * it's in one not read, `unplaced` if in one with no index, as in a shadow
+ * root.
+ */
+function focusIn(reads: FrameRead[], page: FrameRead): FrameRead | 'unread' | 'unplaced' {
+  const at = new Map(reads.flatMap((read) => (read.path ? [[read.path.join('/'), read]] : [])));
+  let focus = page;
+  while (focus.left) {
+    if (!focus.path || focus.into < 0) return 'unplaced';
+    const next = at.get([...focus.path, focus.into].join('/'));
+    if (!next) return 'unread';
+    focus = next;
+  }
+  return focus;
 }
 
 /**
@@ -211,9 +238,11 @@ function frameReads(ran: chrome.scripting.InjectionResult<unknown>[]): FrameRead
  * extension may reach, or only in `frameId`, the one the context menu was
  * opened in. A frame it may not reach is left out: one from another site,
  * under `activeTab`, which grants Chrome the page's own site alone. Of the
- * frames with text selected, it takes the one with the focus; else, as the
- * popup has the focus, one the focus didn't leave for a frame within it,
- * the page's own first; else the page's own, else the first. It says which
+ * frames with text selected, it takes the one the focus is in, followed
+ * from the page down, which holds as the popup has the focus; else, if the
+ * focus went into a frame with no index, one with none that the focus
+ * didn't leave; else one the focus didn't leave for a frame within it, the
+ * page's own first; else the page's own, else the first. It says which
  * (`frameId`).
  */
 async function probe(tabId: number, frameId?: number): Promise<Calls['probe']['result']> {
@@ -227,14 +256,32 @@ async function probe(tabId: number, frameId?: number): Promise<Calls['probe']['r
         injectImmediately: true,
         func: () => {
           const chosen = getSelection();
-          const inner = document.activeElement;
-          // A frame's document has the focus with its own, which is then an iframe.
-          const left = inner instanceof HTMLIFrameElement || inner instanceof HTMLFrameElement;
+          // The focused element, within the open shadow roots it's in.
+          let inner = document.activeElement;
+          while (inner?.shadowRoot?.activeElement) inner = inner.shadowRoot.activeElement;
+          const child =
+            inner instanceof HTMLIFrameElement ||
+            inner instanceof HTMLFrameElement ||
+            inner instanceof HTMLObjectElement
+              ? inner.contentWindow
+              : null;
+          // A window's index among its parent's frames, which another site may ask.
+          const indexIn = (parent: Window, frame: Window) => {
+            for (let index = 0; index < parent.length; index++) {
+              if (parent[index] === frame) return index;
+            }
+            return -1;
+          };
+          const path: number[] = [];
+          for (let at: Window = window; at !== at.parent; at = at.parent) {
+            path.unshift(indexIn(at.parent, at));
+          }
           return {
             selection: chosen && !chosen.isCollapsed ? chosen.toString() : '',
             title: document.title,
-            focused: document.hasFocus() && !left,
-            left,
+            path,
+            into: child ? indexIn(window, child) : -1,
+            left: child !== null,
           };
         },
       }),
@@ -245,8 +292,10 @@ async function probe(tabId: number, frameId?: number): Promise<Calls['probe']['r
   const page = reads.find((read) => read.frameId === top);
   if (!page) return { url: tab.url ?? '', title: tab.title ?? '', selection: null, frameId: top };
   const selected = reads.filter((read) => read.selection.trim());
+  const focus = focusIn(reads, page);
   const from =
-    selected.find((read) => read.focused) ??
+    (typeof focus === 'object' && focus.selection.trim() ? focus : undefined) ??
+    (focus === 'unplaced' ? selected.find((read) => !read.path && !read.left) : undefined) ??
     selected.find((read) => !read.left && read.frameId === top) ??
     selected.find((read) => !read.left) ??
     selected.find((read) => read.frameId === top) ??
