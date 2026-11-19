@@ -184,12 +184,13 @@ const inert = (before: string | undefined, after: string | undefined) =>
  */
 type ImageArgs = Parameters<typeof defaultHandlers.image>;
 function image(...[node, parent, state, info]: ImageArgs) {
-  const held = heldEquals(node.alt ?? '', node.url, node.title ?? '');
-  const alt = node.alt?.replace(/=+/g, (run, at: number, all: string) =>
+  const bare = defaultHandlers.image(node, parent, state, info);
+  if (!node.alt?.includes('==')) return bare;
+  const held = heldEquals(node.alt, node.url, node.title ?? '');
+  const alt = node.alt.replace(/=+/g, (run, at: number, all: string) =>
     run.length === 2 && !inert(all[at - 1], all[at + 2]) ? held.repeat(2) : run,
   );
-  const bare = defaultHandlers.image(node, parent, state, info);
-  if (!alt || alt === node.alt) return bare;
+  if (alt === node.alt) return bare;
   const safe = defaultHandlers.image({ ...node, alt }, parent, state, info).replaceAll(held, '\\=');
   try {
     return meaningOf(bare) === meaningOf(safe) ? bare : safe;
@@ -197,6 +198,7 @@ function image(...[node, parent, state, info]: ImageArgs) {
     return safe;
   }
 }
+image.peek = defaultHandlers.image.peek;
 
 // The top-level blocks whose text `text` is to leave each `=` in as it is,
 // and those it escaped one in (`whole`).
