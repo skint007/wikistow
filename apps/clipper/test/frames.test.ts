@@ -6,13 +6,14 @@ import { chooseFrame, frameReads, type FrameRead } from '../src/frames.ts';
 
 let next = 0;
 /** A frame at `path`: with the focus gone into its frame `into`, if given. */
-const frame = (path: number[], selection = '', into?: number): FrameRead => ({
+const frame = (path: number[], selection = '', into?: number, focused = false): FrameRead => ({
   frameId: path.length === 0 ? 0 : ++next,
   selection,
   title: '',
   path,
   into: into ?? -1,
   left: into !== undefined,
+  focused,
 });
 
 describe('choosing the frame', () => {
@@ -58,6 +59,16 @@ describe('choosing the frame', () => {
     expect(chooseFrame([page, older, holder, newer], page)).toBe(newer);
   });
 
+  test('of frames within one no script may reach, the focused one, else one with a selection', () => {
+    const page = frame([], '', 0);
+    const idle = frame([0, 0]);
+    const selected = frame([0, 1], 'The comment');
+    expect(chooseFrame([page, idle, selected], page)).toBe(selected);
+    const older = frame([0, 0], 'An older comment');
+    const focused = frame([0, 1], 'The comment', undefined, true);
+    expect(chooseFrame([page, older, focused], page)).toBe(focused);
+  });
+
   test('a frame in a shadow root, which has no index, alone or under another', () => {
     const page = frame([], 'Old words of the page', -1);
     const shadowed = frame([-1], 'In a widget');
@@ -86,7 +97,14 @@ describe('choosing the frame', () => {
 });
 
 test('reads keep only what a frame said in the shape asked', () => {
-  const read = { selection: 'Words', title: 'A page', path: [0, -1], into: 2, left: true };
+  const read = {
+    selection: 'Words',
+    title: 'A page',
+    path: [0, -1],
+    into: 2,
+    left: true,
+    focused: false,
+  };
   expect(
     frameReads([
       { frameId: 0, result: read },
@@ -98,6 +116,14 @@ test('reads keep only what a frame said in the shape asked', () => {
     ]),
   ).toEqual([
     { frameId: 0, ...read },
-    { frameId: 4, selection: 'Words', title: '', path: [0, -1], into: -1, left: false },
+    {
+      frameId: 4,
+      selection: 'Words',
+      title: '',
+      path: [0, -1],
+      into: -1,
+      left: false,
+      focused: false,
+    },
   ]);
 });

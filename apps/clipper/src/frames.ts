@@ -12,7 +12,9 @@
  * which a frame can tell though its parent is of another site. A frame in
  * a shadow root has no index there, as its parent's frames leave it out:
  * -1. `into` is the index of the frame within it that the focus went into,
- * -1 if that has none; `left`, that the focus went into one.
+ * -1 if that has none; `left`, that the focus went into one. `focused`,
+ * that it has the focus itself, while the page has it, as it does for the
+ * shortcut and the context menu, but not once the popup takes it.
  */
 export type FrameRead = {
   frameId: number;
@@ -21,6 +23,7 @@ export type FrameRead = {
   path: number[];
   into: number;
   left: boolean;
+  focused: boolean;
 };
 
 /**
@@ -74,6 +77,7 @@ export function readFrame() {
     path,
     into: child ? indexIn(window, child) : -1,
     left: child !== null,
+    focused: child === null && document.hasFocus(),
   };
 }
 
@@ -93,6 +97,7 @@ export function frameReads(ran: { frameId?: unknown; result?: unknown }[]): Fram
         path: got.path as number[],
         into: index(got.into) ? (got.into as number) : -1,
         left: got.left === true,
+        focused: got.focused === true,
       },
     ];
   });
@@ -111,7 +116,8 @@ const within = (read: FrameRead, prefix: number[]) =>
  * read, such as one from another site, the one above those. Frames in
  * shadow roots share their paths, so the focus may be in any that do, and
  * goes on into whichever says it went on. Of the frames it may end in,
- * the deepest is taken, the first of those as they came.
+ * the deepest is taken; of several, one with the focus, else one with a
+ * selection, else the first as they came.
  */
 export function chooseFrame(reads: FrameRead[], page: FrameRead): FrameRead {
   const has = (read: FrameRead) => read.selection.trim() !== '';
@@ -131,9 +137,12 @@ export function chooseFrame(reads: FrameRead[], page: FrameRead): FrameRead {
     }
   }
   const passed = new Set([...from.values()].flat());
+  // Deepest first; then focused, then with a selection.
+  const rank = (read: FrameRead) =>
+    read.path.length * 4 + Number(read.focused) * 2 + Number(has(read));
   let end = page;
   for (const read of from.keys()) {
-    if (!passed.has(read) && read.path.length > end.path.length) end = read;
+    if (!passed.has(read) && rank(read) > rank(end)) end = read;
   }
   for (let at: FrameRead | undefined = end; at; at = from.get(at)?.[0]) {
     if (has(at)) return at;
