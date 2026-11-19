@@ -160,8 +160,9 @@ const sameMarks = (a: readonly string[], b: readonly string[]) =>
  * `*~~a~~*~~ b~~`. Spaces and line breaks have none, as the editor shows
  * them; text beside text with the same marks is one run, so a colour's
  * HTML beside one of its colour is one, as the editor shows it. A mark
- * around nothing but spaces, as `[ ](u)`, is there all the same. A link
- * is numbered in turn, so one written as two, or two as one, differs.
+ * inside one the same is one. A link is numbered in turn, so one written
+ * as two, or two as one, differs, and one around nothing but spaces, as
+ * `[ ](u)`, is there all the same.
  * Code, and other inline nodes not text, are runs of their own with their
  * marks; the children of those may hold inline content of their own.
  * Null if HTML is inside a mark: it may open in one and close in another,
@@ -171,7 +172,7 @@ function runsOf(children: readonly Tree[]): { runs: Run[]; atoms: Tree[] } | nul
   const runs: Run[] = [];
   const atoms: Tree[] = [];
   let links = 0;
-  // How many runs not spaces there have been, for a mark to tell whether it's around any.
+  // How many runs not spaces there have been, for a link to tell whether it's around any.
   let solid = 0;
   const add = (text: string, marks: string[]) => {
     const last = runs.at(-1);
@@ -190,8 +191,8 @@ function runsOf(children: readonly Tree[]): { runs: Run[]; atoms: Tree[] } | nul
     if (NESTING.has(node.type) && node.children) {
       const { children: inside, position: _position, ...mark } = node;
       const name = nameOf(node.type === 'link' ? { ...mark, link: ++links } : mark);
-      const within = [...marks, name].sort();
-      stack.push({ ends: name, solid });
+      const within = marks.includes(name) ? marks : [...marks, name].sort();
+      if (node.type === 'link') stack.push({ ends: name, solid });
       for (let i = inside.length - 1; i >= 0; i--) stack.push({ node: inside[i]!, marks: within });
     } else if (node.type === 'text') {
       for (const part of (node.value ?? '').split(SPACES))

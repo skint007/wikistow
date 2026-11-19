@@ -119,6 +119,14 @@ describe('marks that overlap partly', () => {
       ['[==a==](u)\n', '==[a](u)==\n'],
       ['[**a**](u)[b](u)\n', '**[a](u)**[b](u)\n'],
       ['*==gh==*==x==\n', '==*gh*x==\n'],
+      // A colour in two parts, one only a space, and a mark the editor drops around one.
+      [
+        '*<span data-color="red">d</span>*<span data-color="red"> </span>f\n',
+        '<span data-color="red">*d* </span>f\n',
+      ],
+      ['**<span data-color="blue"> </span>**\n', '<span data-color="blue"> </span>\n'],
+      // A mark inside one the same.
+      ['**a __b__ c**\n', '**a b c**\n'],
       [
         '<span data-color="red">a</span><span data-color="red">b</span>\n',
         '<span data-color="red">ab</span>\n',
@@ -169,5 +177,9 @@ describe('marks that overlap partly', () => {
     const words = Array.from({ length: 2_048 }, (_, i) => (i % 2 ? `**w${i}**` : `w${i}`));
     const page = `[${words.join(' ')}](u "${title}")\n`;
     expect(meaningOf(page).length).toBeLessThan(page.length * 4);
+    // Nor a mark inside one the same, for each.
+    const red = (depth: number) =>
+      `${'<span data-color="red">'.repeat(depth)}${words.join(' ')}${'</span>'.repeat(depth)}\n`;
+    expect(meaningOf(red(256)).length).toBe(meaningOf(red(1)).length);
   });
 });
