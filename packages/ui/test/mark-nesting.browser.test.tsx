@@ -39,7 +39,8 @@ const PAGES = [
   'x y\n',
   'ab cd ef gh ij\n',
 ];
-const MARKS = ['strong', 'emphasis', 'strike_through', 'inlineCode', 'link'];
+// Not code: a mark starting at a space in it parts the code span as written (#658).
+const MARKS = ['strong', 'emphasis', 'strike_through', 'link'];
 const COLOURED = [...MARKS, 'highlight', 'highlight', 'text_color'];
 
 const attrsFor = (name: string, rng: ReturnType<typeof random>) =>
@@ -143,7 +144,30 @@ describe('marks that overlap partly', () => {
       ['**a**\\\n**b**\n', '**a b**\n'],
       ['**![x](i)**\n', '![x](i)\n'],
       ['x[](u)\n', 'x\n'],
+      // A link around only a space, as Milkdown writes it without one.
+      ['x[ ](u)y\n', 'x y\n'],
+      ['x **[ ](u)** y\n', 'x   y\n'],
+      // Code spans side by side aren't one, nor one two.
+      [
+        '<span data-color="red">`=servings`</span><span data-color="red">`2`</span>\n',
+        '<span data-color="red">`=servings2`</span>\n',
+      ],
+      ['`a b`\n', '`a` `b`\n'],
+      ['x ~~` `~~ y\n', 'x ` ` y\n'],
+      // HTML in marks, which may close in another than it opens in.
+      ['*<sub>a****b</sub>* c**\n', '*<sub>a**b</sub>*** **c**\n'],
     ] as const)
       expect(meaningOf(a), `${a} and ${b}`).not.toBe(meaningOf(b));
+  });
+
+  it('read a link’s title the same in either line break', () => {
+    expect(meaningOf('x\r\n\r\n[a](u "a\r\nb")\r\n')).toBe(meaningOf('x\n\n[a](u "a\nb")\n'));
+  });
+
+  it('name each mark once however many words it is on', () => {
+    const title = 't'.repeat(16_384);
+    const words = Array.from({ length: 2_048 }, (_, i) => (i % 2 ? `**w${i}**` : `w${i}`));
+    const page = `[${words.join(' ')}](u "${title}")\n`;
+    expect(meaningOf(page).length).toBeLessThan(page.length * 4);
   });
 });

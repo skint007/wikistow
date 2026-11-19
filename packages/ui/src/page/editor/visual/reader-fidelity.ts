@@ -124,17 +124,17 @@ const NESTING = new Set<string>([
 // A tree as `byMarks` sees it: its own, and those it makes.
 type Tree = {
   type: string;
+  color?: string;
   value?: string;
   children?: Tree[];
   position?: unknown;
-  runs?: Run[];
+  runs?: { text?: string; node?: Tree; marks: string }[];
+  marks?: string[];
 };
 
-// Inline content as `byMarks` compares it: text with the marks on it, or
-// an inline node not text, with its marks. Each mark is named by its type
-// and what it holds (a link's address, a colour), a link by which of its
-// block's links it is too.
-type Run = { text: string; marks: string } | { node: Tree; marks: string };
+// Inline content as `runsOf` reads it: text with the marks on it, or an
+// inline node not text, with its marks. Each mark is named (`nameOf`).
+type Run = { text: string; marks: string[] } | { node: Tree; marks: string[] };
 
 // The nodes that say a node's children are inline content.
 const INLINE = new Set([...NESTING, 'text', 'inlineCode', 'break']);
@@ -143,47 +143,70 @@ const INLINE_PARENTS = new Set(['paragraph', 'heading', 'tableCell']);
 // Spaces and line breaks, as the visual editor shows them (`shownOf`).
 const SPACES = /([ \t\r\n]+)/;
 const BLANK = /^[ \t\r\n]+$/;
-const named = (marks: readonly string[]) => JSON.stringify([...marks].sort());
+
+// A mark by its type and what it holds, a link's address or a colour, in
+// LF; a link by which of its block's links it is too.
+const nameOf = (mark: object) =>
+  JSON.stringify(mark, (_key, value: unknown) =>
+    typeof value === 'string' ? withLf(value) : value,
+  );
+
+const sameMarks = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((name, i) => name === b[i]);
 
 /**
  * `children`, inline content, as runs of text each with the set of marks
  * on it, so how the marks nest says nothing: `~~*a* b~~` reads as
  * `*~~a~~*~~ b~~`. Spaces and line breaks have none, as the editor shows
  * them; text beside text with the same marks is one run, so a colour's
- * HTML beside one of its colour is one, as the editor shows it. A link is
- * numbered in turn, so one written as two, or two as one, differs. Code
- * is a mark on its text, as it is in the editor. Also the inline nodes not
- * text, whose children may hold inline content of their own.
+ * HTML beside one of its colour is one, as the editor shows it. A mark
+ * around nothing but spaces, as `[ ](u)`, is there all the same. A link
+ * is numbered in turn, so one written as two, or two as one, differs.
+ * Code, and other inline nodes not text, are runs of their own with their
+ * marks; the children of those may hold inline content of their own.
+ * Null if HTML is inside a mark: it may open in one and close in another,
+ * so how they nest says what it's around.
  */
-function runsOf(children: readonly Tree[]): { runs: Run[]; atoms: Tree[] } {
+function runsOf(children: readonly Tree[]): { runs: Run[]; atoms: Tree[] } | null {
   const runs: Run[] = [];
   const atoms: Tree[] = [];
   let links = 0;
-  const add = (text: string, marks: readonly string[]) => {
+  // How many runs not spaces there have been, for a mark to tell whether it's around any.
+  let solid = 0;
+  const add = (text: string, marks: string[]) => {
     const last = runs.at(-1);
-    if (last && 'text' in last && last.marks === named(marks)) last.text += text;
-    else runs.push({ text, marks: named(marks) });
+    if (last && 'text' in last && sameMarks(last.marks, marks)) last.text += text;
+    else runs.push({ text, marks });
   };
-  const stack = children.map((node) => ({ node, marks: [] as string[] })).reverse();
+  type At = { node: Tree; marks: string[] } | { ends: string; solid: number };
+  const stack: At[] = [];
+  for (let i = children.length - 1; i >= 0; i--) stack.push({ node: children[i]!, marks: [] });
   for (let at = stack.pop(); at; at = stack.pop()) {
+    if ('ends' in at) {
+      if (solid === at.solid) runs.push({ node: { type: 'empty' }, marks: [at.ends] });
+      continue;
+    }
     const { node, marks } = at;
     if (NESTING.has(node.type) && node.children) {
       const { children: inside, position: _position, ...mark } = node;
-      const name = JSON.stringify(node.type === 'link' ? { ...mark, link: ++links } : mark);
-      const within = [...marks, name];
-      // A mark around nothing, as `[](u)`, is there all the same.
-      if (inside.length === 0) runs.push({ node: { type: 'empty' }, marks: named(within) });
-      stack.push(...inside.map((child) => ({ node: child, marks: within })).reverse());
-    } else if (node.type === 'text' || node.type === 'inlineCode') {
-      const code = node.type === 'inlineCode' ? [...marks, 'inlineCode'] : marks;
+      const name = nameOf(node.type === 'link' ? { ...mark, link: ++links } : mark);
+      const within = [...marks, name].sort();
+      stack.push({ ends: name, solid });
+      for (let i = inside.length - 1; i >= 0; i--) stack.push({ node: inside[i]!, marks: within });
+    } else if (node.type === 'text') {
       for (const part of (node.value ?? '').split(SPACES))
         if (BLANK.test(part)) add(part, []);
-        else if (part) add(part, code);
+        else if (part) {
+          add(part, marks);
+          solid++;
+        }
     } else if (node.type === 'break') {
-      runs.push({ node: { type: 'break' }, marks: named([]) });
+      runs.push({ node: { type: 'break' }, marks: [] });
     } else {
-      runs.push({ node, marks: named(marks) });
+      if (node.type === 'html' && marks.length > 0) return null;
+      runs.push({ node, marks });
       atoms.push(node);
+      solid++;
     }
   }
   return { runs, atoms };
@@ -191,23 +214,103 @@ function runsOf(children: readonly Tree[]): { runs: Run[]; atoms: Tree[] } {
 
 /**
  * `tree`, the inline content of each of its nodes as runs of text by the
- * marks on them (`runsOf`). In place, without recursion.
+ * marks on them (`runsOf`), each mark by its place in a list of their
+ * names, which the tree holds once; or, where HTML is inside a mark, with
+ * its marks around the same text put in one order (`inOneOrder`). In
+ * place, without recursion.
  */
 function byMarks(tree: Root): Root {
-  const stack: Tree[] = [tree as Tree];
+  const root = tree as Tree;
+  const read: { node: Tree; runs: Run[] }[] = [];
+  const stack: Tree[] = [root];
   for (let node = stack.pop(); node; node = stack.pop()) {
     const { children } = node;
     if (!children) continue;
-    if (!INLINE_PARENTS.has(node.type) && !children.some((child) => INLINE.has(child.type))) {
-      stack.push(...children);
+    const inline =
+      INLINE_PARENTS.has(node.type) || children.some((child) => INLINE.has(child.type));
+    const runs = inline ? runsOf(children) : null;
+    if (runs) {
+      read.push({ node, runs: runs.runs });
+      for (const atom of runs.atoms) stack.push(atom);
+    } else if (inline) inOneOrder(node);
+    else for (const child of children) stack.push(child);
+  }
+  const names = new Set<string>();
+  for (const { runs } of read)
+    for (const run of runs) for (const name of run.marks) names.add(name);
+  const table = [...names].sort();
+  const index = new Map(table.map((name, i) => [name, i]));
+  for (const { node, runs } of read) {
+    delete node.children;
+    node.runs = runs.map(({ marks, ...run }) => ({
+      ...run,
+      marks: marks.map((name) => index.get(name)).join(','),
+    }));
+  }
+  root.marks = table;
+  return tree;
+}
+
+// A colour's HTML, which the editor shows as one where two of a colour meet.
+const COLORED = new Set(['textColor', 'colorHighlight']);
+
+/** `children`, each colour's HTML beside one of the same colour made one, text where they meet joined. */
+function joined(children: Tree[]): Tree[] {
+  const out: Tree[] = [];
+  for (const child of children) {
+    const last = out.at(-1);
+    const same = last && COLORED.has(child.type) && last.type === child.type;
+    if (!last || !same || last.color !== child.color) {
+      out.push(child);
       continue;
     }
-    const { runs, atoms } = runsOf(children);
-    delete node.children;
-    node.runs = runs;
-    stack.push(...atoms);
+    const inside = [...(last.children ?? [])];
+    for (const next of child.children ?? []) {
+      const end = inside.at(-1);
+      if (end?.type === 'text' && next.type === 'text')
+        inside[inside.length - 1] = { ...end, value: `${end.value ?? ''}${next.value ?? ''}` };
+      else inside.push(next);
+    }
+    out[out.length - 1] = { ...last, children: inside };
   }
-  return tree;
+  return out;
+}
+const nestingKey = (node: Tree) => `${node.type}:${node.color ?? ''}`;
+const byKey = (a: Tree, b: Tree) => nestingKey(a).localeCompare(nestingKey(b));
+
+/**
+ * `tree`, each run of marks one inside the other around the same text put
+ * in one order, by type, so the order they're written in says nothing, and
+ * a colour's HTML beside one of its colour made one (`joined`). In place,
+ * without recursion.
+ */
+function inOneOrder(tree: Tree): void {
+  const stack: Tree[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    if (node.children) node.children = joined(node.children);
+    const children = node.children ?? [];
+    for (const [i, child] of children.entries()) {
+      // The marks around the same text, outermost first, and what they hold.
+      const chain: Tree[] = [];
+      let content = [child];
+      for (let at = child; NESTING.has(at.type) && at.children;) {
+        chain.push(at);
+        content = at.children;
+        const [only] = at.children;
+        if (at.children.length !== 1 || !only) break;
+        at = only;
+      }
+      if (chain.length < 2) {
+        stack.push(child);
+        continue;
+      }
+      const shells = chain.map((wrap) => ({ ...wrap })).sort(byKey);
+      shells.forEach((shell, k) => (shell.children = shells[k + 1] ? [shells[k + 1]!] : content));
+      children[i] = shells[0] ?? child;
+      // The innermost, whose children may start runs of their own.
+      stack.push(shells.at(-1) ?? child);
+    }
+  }
 }
 
 // What a tree says, without where each node sat, which line breaks it has,
