@@ -7,6 +7,7 @@ import * as Y from 'yjs';
 import { describe, expect, it } from 'vite-plus/test';
 import {
   changesFrom,
+  mayDiffer,
   offsetOf,
   positionOf,
   putChanges,
@@ -70,6 +71,70 @@ describe('the source editor’s live binding', () => {
     const result = relay('x😀\r\ny', '\r\n', () => ({ changes: { from: 1, to: 4 } }));
     expect(result.body).toBe('xy');
     expect(result.theirs).toBe('xy');
+  });
+
+  it('says whether what went in is just what was typed', () => {
+    const typed = (text: string, insert: string) => {
+      const state = editor(text);
+      const body = bodyOf(text);
+      return putChanges(body, state.update({ changes: { from: 1, insert } }));
+    };
+    expect(typed('ab', '😀')).toBe(true);
+    expect(typed('ab', '\ud83d')).toBe(false);
+  });
+
+  /** Another app's change, as Yjs takes it: whether the editor may now differ from `body`, read at its edges. */
+  function theirs(text: string, lineBreak: string, change: (body: Y.Text) => void) {
+    const body = bodyOf(text);
+    const doc = body.doc as Y.Doc;
+    const deltas: Parameters<typeof changesFrom>[1][] = [];
+    body.observe((event) => deltas.push(event.delta));
+    const before = editor(text, lineBreak);
+    const remote = new Y.Doc();
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(doc));
+    change(remote.getText('body'));
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(remote, Y.encodeStateVector(doc)));
+    const [delta] = deltas;
+    if (!delta) throw new Error('no change');
+    const after = before.update({ changes: changesFrom(before, delta) }).state;
+    return {
+      body: body.toJSON(),
+      shown: after.sliceDoc(),
+      differs: mayDiffer(before, after, delta),
+    };
+  }
+
+  it('reads a split Yjs may have made only at a change’s edges', () => {
+    // An insert between an emoji's halves.
+    const inserted = theirs('a😀b c😀d', '\n', (body) => body.insert(2, 'x'));
+    expect(inserted.body).toBe('a\ufffdx\ufffdb c😀d');
+    expect(inserted.differs).toBe(true);
+    // A deletion from inside one emoji to inside another, which joins two halves.
+    const joined = theirs('😀ab😁', '\n', (body) => body.delete(1, 4));
+    expect(joined.shown).not.toBe(joined.body);
+    expect(joined.differs).toBe(true);
+    // Changes between whole characters, beside emoji, split nothing.
+    const whole = theirs('a😀b c😀d', '\n', (body) => {
+      body.insert(3, 'y');
+      body.delete(7, 2);
+    });
+    expect(whole.shown).toBe(whole.body);
+    expect(whole.differs).toBe(false);
+  });
+
+  it('reads a change inside a CRLF line break as one the editor can’t take as it came', () => {
+    const lone = theirs('a\r\nb\r\nc', '\r\n', (body) => body.delete(1, 1));
+    expect(lone.body).toBe('a\nb\r\nc');
+    expect(lone.differs).toBe(true);
+    const between = theirs('a\r\nb', '\r\n', (body) => body.insert(2, 'x'));
+    expect(between.differs).toBe(true);
+    // Whole line breaks, and text beside them, are taken as they came.
+    const whole = theirs('a\r\nb\r\nc', '\r\n', (body) => {
+      body.delete(1, 2);
+      body.insert(2, '\r\nd');
+    });
+    expect(whole.shown).toBe(whole.body);
+    expect(whole.differs).toBe(false);
   });
 
   it('resolves a caret only inside `body`', () => {
