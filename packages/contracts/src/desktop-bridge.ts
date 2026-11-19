@@ -3,7 +3,7 @@ import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk/mani
 // Types only: the preload bundles this file and may load nothing but electron.
 // The package's index exports `PluginScope`.
 import type { PluginScope } from './plugin-installs.ts';
-import type { FolderId, PageId, SpaceId } from './records/ids.ts';
+import type { FolderId, PageId, RevisionId, SpaceId } from './records/ids.ts';
 
 /**
  * A plugin installed on this computer or loaded from a development folder,
@@ -203,21 +203,27 @@ export type DesktopClip = {
   /** It came while the app was starting or locked, so its answer may reach no popup. */
   waited: boolean;
   /**
-   * Its page, once made (`clipMade`): a page that loads again with it held
-   * finishes it as saved, its text in, rather than making a second.
+   * Its page, from just before it's made (`clipMade`): a page that loads
+   * again with it held finishes it as saved, its text in, rather than
+   * making a second.
    */
   made: ClipMade | null;
 };
 
 /**
- * A clip's page, made. `partial`: a screenshot's, made with its note and
- * link but not the screenshot yet, which a page that loads again puts in
- * the trash and makes again, rather than finish without its screenshot.
+ * A clip's page, made. `making`: the IDs it's about to be made under, its
+ * own and its first draft's (`revisionId`), which a page that loads again
+ * makes it under, so it finds it if it was made and makes no second
+ * (#486). `partial`: a screenshot's, made with its note and link but not
+ * the screenshot yet, which a page that loads again puts in the trash and
+ * makes again, rather than finish without its screenshot.
  */
 export type ClipMade = {
   spaceId: SpaceId;
   pageId: PageId;
   path: string;
+  making?: boolean | undefined;
+  revisionId?: RevisionId | undefined;
   partial?: boolean | undefined;
 };
 
@@ -468,7 +474,10 @@ export type DesktopBridge = {
   onClipRequest(listener: (request: ClipRequest) => void): () => void;
   /** The clips main holds that no `clipDone` answered yet, oldest first, as after a reload. */
   waitingClips(): Promise<DesktopClip[]>;
-  /** Say the clip `clipId`'s page is made, with its text, before its images are attached. */
+  /**
+   * Say the clip `clipId`'s page is about to be made (`making`), then that
+   * it is, with its text, before its images are attached.
+   */
   clipMade(clipId: string, page: ClipMade): Promise<void>;
   /** Say how saving the clip `clipId` went; main lets it go. */
   clipDone(clipId: string, outcome: ClipOutcome): Promise<void>;

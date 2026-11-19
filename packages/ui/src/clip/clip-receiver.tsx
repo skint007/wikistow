@@ -240,9 +240,12 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
     setSaving(true);
     const save = async () => {
       // Only a clip main still holds: one a sign-out let go isn't saved.
+      // Main's copy, which says what was made of it before a lock or a
+      // reload cut it short (`clipMade`), so it isn't made twice (#487).
       const held = await bridge.waitingClips().catch(() => null);
-      if (!held?.some((clip) => clip.id === next.id)) return keepOnly(held ?? []);
-      const saved: Saved = await saveClip(next, {
+      const clip = held?.find((one) => one.id === next.id);
+      if (!clip) return keepOnly(held ?? []);
+      const saved: Saved = await saveClip(clip, {
         writer: pageWriter(ctx),
         places: () => loadPlaces(queryClient, ctx),
         convert,
@@ -271,7 +274,7 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
       // Saved, though the vault locked since: no folder's name leaves it now.
       if (outcome.ok && locked) outcome = { ...outcome, path: '' };
       await bridge.clipDone(next.id, outcome).catch(() => {});
-      waiting = waiting.filter((clip) => clip.id !== next.id);
+      waiting = waiting.filter((one) => one.id !== next.id);
       emit();
       if (!outcome.ok) {
         const title = clipTitle(next);

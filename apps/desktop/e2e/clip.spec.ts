@@ -431,3 +431,172 @@ test('the extension clips a page into the app from its popup', async ({
     .poll(() => shown.evaluate((image: HTMLImageElement) => image.naturalWidth))
     .toBeGreaterThan(100);
 });
+
+/**
+ * Hold main's requests to the server: with `pages`, a new page is made but
+ * its answer is held; with `blobs`, an upload waits to be sent. `release`
+ * answers each held one as the server does. The next `trash` requests to
+ * put something in the trash are refused.
+ */
+type Hold = {
+  pages: boolean;
+  blobs: boolean;
+  trash: number;
+  made: number;
+  uploads: number;
+  release: (() => void)[];
+};
+
+async function holdRequests(app: Desktop) {
+  await app.app.evaluate(() => {
+    const send = globalThis.fetch;
+    const hold: Hold = {
+      pages: false,
+      blobs: false,
+      trash: 0,
+      made: 0,
+      uploads: 0,
+      release: [],
+    };
+    Reflect.set(globalThis, '__hold', hold);
+    globalThis.fetch = async (input, init) => {
+      // Main sends each on as an address and its init (`forward`).
+      const request = input instanceof Request ? input : null;
+      const path = new URL(request?.url ?? (input as string | URL)).pathname;
+      const method = request?.method ?? init?.method ?? 'GET';
+      if (method === 'POST' && hold.pages && /^\/api\/spaces\/[^/]+\/pages$/.test(path)) {
+        const answer = await send(input, init);
+        hold.made += 1;
+        return new Promise<Response>((resolve) => hold.release.push(() => resolve(answer)));
+      }
+      if (method === 'PUT' && hold.blobs && /^\/api\/pages\/[^/]+\/blobs$/.test(path)) {
+        hold.uploads += 1;
+        return new Promise<Response>((resolve) =>
+          hold.release.push(() => resolve(send(input, init))),
+        );
+      }
+      if (method === 'DELETE' && hold.trash > 0 && /^\/api\/spaces\/[^/]+\/nodes\//.test(path)) {
+        hold.trash -= 1;
+        const error = { code: 'internal', message: 'Not now' };
+        return Response.json({ error }, { status: 500 });
+      }
+      return send(input, init);
+    };
+  });
+  const set = (fields: Partial<Pick<Hold, 'pages' | 'blobs' | 'trash'>>) =>
+    app.app.evaluate((_electron, fields) => {
+      Object.assign(Reflect.get(globalThis, '__hold') as Hold, fields);
+    }, fields);
+  const count = () =>
+    app.app.evaluate(() => {
+      const { made, uploads } = Reflect.get(globalThis, '__hold') as Hold;
+      return { made, uploads };
+    });
+  const release = () =>
+    app.app.evaluate(() => {
+      const hold = Reflect.get(globalThis, '__hold') as Hold;
+      for (const answer of hold.release.splice(0)) answer();
+    });
+  return { set, count, release };
+}
+
+test('a clip a reload or a lock cuts short is saved as one page', async ({
+  page,
+  freshPage,
+  admin,
+  baseURL,
+}) => {
+  test.skip(process.platform !== 'linux', 'The helper is built for Linux here');
+  test.setTimeout(180_000);
+  expect(existsSync(HELPER), 'Build the helper first: scripts/clip-host.sh').toBe(true);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  const { app, config, env } = await clippingApp();
+  desktop = app;
+  const { window } = desktop;
+  await signInAndUnlock(desktop, page, baseURL ?? '');
+  browser = await chromium.launchPersistentContext(join(config, 'chromium'), {
+    channel: 'chromium',
+    args: [`--disable-extensions-except=${EXTENSION}`, `--load-extension=${EXTENSION}`],
+    env,
+  });
+  const worker = browser.serviceWorkers()[0] ?? (await browser.waitForEvent('serviceworker'));
+  const hello = { v: 1, id: 'a', type: 'hello', extension: '0.0.1', browser: 'chromium' };
+  await expect
+    .poll(async () => (await converse(worker, [hello])).received)
+    .toMatchObject([{ app: 'ready' }]);
+  const search = await converse(worker, [{ v: 1, id: 'f', type: 'folders', query: 'perso' }]);
+  const [found] = search.received as { matches: { spaceId: string }[] }[];
+  const personal = { spaceId: found!.matches[0]!.spaceId, folderId: null };
+  const held = await holdRequests(desktop);
+  const unlock = async () => {
+    await window.getByLabel('Vault passphrase').fill(PASSPHRASE);
+    await window.getByRole('button', { name: 'Unlock' }).click();
+  };
+
+  // Reloaded once the server made its page, before the page heard it did
+  // (#486): the page that loads again finds it, and makes no second.
+  await held.set({ pages: true });
+  const link = {
+    v: 1,
+    id: 'r',
+    type: 'clip',
+    mode: 'link',
+    url: 'https://example.com/reloaded',
+    title: 'Reloaded',
+    note: 'Made once',
+    folder: personal,
+  };
+  const reloaded = converse(worker, [link], 2);
+  await expect.poll(async () => (await held.count()).made).toBe(1);
+  await held.set({ pages: false });
+  await window.reload();
+  await held.release();
+  await unlock();
+  expect((await reloaded).received).toMatchObject([
+    { id: 'r', type: 'accepted', waits: null },
+    { id: 'r', type: 'saved', title: 'Reloaded', path: 'Personal' },
+  ]);
+  await expect(window.getByText('Saved “Reloaded” to Personal')).toBeVisible();
+
+  // Locked while its screenshot uploads (#487), so its draft can't be
+  // saved, nor, here, can the page go in the trash: once unlocked, the
+  // page made without it goes in the trash, and one with it is made.
+  await held.set({ blobs: true, trash: 1 });
+  const shot = {
+    v: 1,
+    id: 's',
+    type: 'clip',
+    mode: 'screenshot',
+    url: 'https://example.com/shown',
+    title: 'Shown',
+    note: 'Saved whole',
+    screenshot: PNG.toString('base64'),
+    folder: personal,
+  };
+  const locked = converse(worker, [shot], 2);
+  await expect.poll(async () => (await held.count()).uploads).toBe(1);
+  await accountMenu(window, 'Lock vault');
+  await expect(window.getByLabel('Vault passphrase')).toBeVisible();
+  await held.set({ blobs: false });
+  await held.release();
+  await expect(window.getByText('1 clip waits to be saved from your browser.')).toBeVisible();
+  await unlock();
+  expect((await locked).received).toMatchObject([
+    { id: 's', type: 'accepted', waits: null },
+    { id: 's', type: 'saved', title: 'Shown', images: { saved: 1, skipped: 0 } },
+  ]);
+  await expect(window.getByText('Saved “Shown” to Personal')).toBeVisible();
+
+  // Loaded afresh, the tree is the server's: one page for each clip.
+  await window.reload();
+  await unlock();
+  for (const title of ['Reloaded', 'Shown']) {
+    const pages = window.getByRole('treeitem', { name: title });
+    await expect(pages.first()).toBeVisible();
+    await expect(pages).toHaveCount(1);
+  }
+  await window.getByRole('treeitem', { name: 'Shown' }).click();
+  await expect
+    .poll(() => sourceOf(window))
+    .toMatch(/^Saved whole\n\n!\[Screenshot\]\(attachment:[\w-]{22}\)\n\n\[Shown\]/);
+});

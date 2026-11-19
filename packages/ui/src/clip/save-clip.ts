@@ -3,17 +3,20 @@
 // its images as any new page does: the page with its text first, its
 // images' links pointing at their sites (`newPageDraft`), then each image
 // main fetched attached to it (`attach`), then the text pointing at them
-// (`draft`). A clip that stops partway still leaves its text.
+// (`draft`). A clip that stops partway still leaves its text. Main hears
+// the page's ID before it's made, and again once it is (`made`), so a
+// clip a reload cut short makes no second page.
 import {
   ApiError,
+  newId,
   newPayload,
+  PageId,
   PageTooLarge,
+  RevisionId,
   linkSpans,
   type AttachmentRef,
   type LinkSpans,
-  type PageId,
   type PageWriter,
-  type RevisionId,
 } from '@wikistow/client';
 import type { ClipImage, ClipMade, ClipOutcome, DesktopClip } from '@wikistow/contracts';
 import {
@@ -43,7 +46,10 @@ export type SaveClipDeps = {
   convert: Convert;
   /** Where the Markdown's links are (`linkSpans`), as the app reads it, in a worker. */
   spans?: (markdown: string) => Promise<LinkSpans>;
-  /** Tell main the clip's page is made, so a reload finishes it rather than making another. */
+  /**
+   * Tell main the ID the clip's page is about to be made under, then that
+   * it is made, so a reload finishes it rather than making another.
+   */
   made?: (page: ClipMade) => Promise<void>;
   /** Main's fetch of one of the clip's images (`DesktopBridge.clipImage`). */
   image: (url: string) => Promise<ClipImage>;
@@ -73,7 +79,7 @@ const savedTo = (path: readonly string[]) => path.join(' / ');
 export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<Saved> {
   const title = clipTitle(clip);
   const shot = clip.mode === 'screenshot' ? clip.screenshot : null;
-  if (clip.mode === 'screenshot' && !shot && !clip.made) {
+  if (clip.mode === 'screenshot' && !shot && (!clip.made || clip.made.making)) {
     return failed('failed', 'WikiStow couldn’t read this screenshot.');
   }
   // A screenshot's page made before a reload cut it short, without the
@@ -89,7 +95,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
     return saveClip({ ...clip, made: null }, deps);
   }
   // Made before a reload cut it short: its text is saved, so it's done.
-  if (clip.made) {
+  if (clip.made && !clip.made.making) {
     const { spaceId, pageId, path } = clip.made;
     return {
       outcome: {
@@ -159,6 +165,19 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   if (shot && !fitsPage(shown('x'.repeat(22)))) return failed('too-large', TOO_LONG);
 
   const { spaceId, folderId } = place;
+  // Its IDs, kept with main before the page is made, so a reload makes it
+  // under the same ones: the writer then finds it, if it was made (#486).
+  const making = clip.made?.making ? clip.made : null;
+  const ids = {
+    pageId: making?.pageId ?? newId(PageId),
+    revisionId: making?.revisionId ?? newId(RevisionId),
+    sent: making !== null,
+  };
+  if (!making) {
+    const { pageId, revisionId } = ids;
+    const path = savedTo(place.path);
+    await deps.made?.({ spaceId, pageId, revisionId, path, making: true }).catch(() => {});
+  }
   let made: { pageId: PageId; revisionId: RevisionId };
   try {
     made = await deps.writer.newPageDraft({
@@ -166,8 +185,16 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       parentId: folderId,
       title,
       markdown: first,
+      ids,
     });
   } catch (error) {
+    // Made before the reload, its text in: done, or, without its
+    // screenshot, made only partly.
+    if (making && error instanceof ApiError && error.code === 'duplicate') {
+      const { spaceId: was, pageId, path } = making;
+      const found = { spaceId: was, pageId, path };
+      return saveClip({ ...clip, made: shot ? { ...found, partial: true } : found }, deps);
+    }
     if (error instanceof PageTooLarge) return failed('too-large', TOO_LONG);
     if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
       return failed('not-allowed', 'You can’t add pages to that folder any more. Choose another.');

@@ -727,22 +727,25 @@ export class OfflineQueue {
    * offline, holding `payload`. Its ID and its first draft's are made now,
    * or are `pageId` and `revisionId`. A `revisionId` given is one a request
    * that got no answer already used for `payload`: it is recorded as being
-   * sent, so what is typed into the page later goes on top of it.
+   * sent, so what is typed into the page later goes on top of it. With
+   * `sent: false`, it is one the caller chose and never sent.
    */
   async newPage({
     spaceId,
     parentId,
     payload,
     pageId = newId(PageId),
-    revisionId: sent,
+    revisionId: given,
+    sent = given !== undefined,
   }: {
     spaceId: SpaceId;
     parentId: FolderId | null;
     payload: PagePayload;
     pageId?: PageId;
     revisionId?: RevisionId;
+    sent?: boolean;
   }): Promise<QueuedPage> {
-    const revisionId = sent ?? newId(RevisionId);
+    const revisionId = given ?? newId(RevisionId);
     const first = this.#firstVersion();
     const entry: QueuedPage = {
       kind: 'page',
