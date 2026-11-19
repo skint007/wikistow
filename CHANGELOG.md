@@ -4,6 +4,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Text in a colour just inside a link is underlined in its colour, in the reader and on public pages, as the visual editor shows it, rather than in the link's colour. The highlight and text colour marks refuse a colour the theme doesn't have. (#655)
+
+#### Development
+
+- The browser tests start the live project's HTTPS server, which needs `openssl` and a second database, only when the live project runs, so `--project chromium` leaves it out. (#656)
+
 ## 0.28.0 - 2026-11-19
 
 ### Highlights
