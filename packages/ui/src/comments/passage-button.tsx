@@ -8,7 +8,14 @@ import { cn } from '@/lib/utils';
 import { useNeedsConnection } from '../shell/availability';
 import { useClient } from '../vault/store';
 import { quoteOf } from './model';
-import { clearUnderlines, pointAt, selectedIn, underline, type Passages } from './passages';
+import {
+  clearUnderlines,
+  pointAt,
+  selectedIn,
+  TOO_LONG_TO_QUOTE,
+  underline,
+  type Passages,
+} from './passages';
 import { pageCommentsQuery } from './queries';
 import {
   commentsStore,
@@ -25,15 +32,14 @@ const TOUCH_GAP = 56;
 // The button's height and a margin: with less room above the selection, it goes below.
 const ROOM = 40;
 
-const TOO_LONG = 'Select at most 500 characters to comment on them';
-
 type Shown = { left: number; top: number; below: boolean; quote: QuoteText | 'too-long' };
 
 /**
- * The **Comment** button over a selection in the page's text (ADR 0014,
- * decisions 5 and 13), in the app's own reader or the visual editor
- * (`passages`), never over a plugin's view, which gives none. Pressed, it
- * gives `onComment` what the selection quotes.
+ * The **Comment** button over a selection in the page's text as read
+ * (ADR 0014, decisions 5 and 13), in the app's own reader (`passages`),
+ * never over a plugin's view, which gives none. Pressed, it gives
+ * `onComment` what the selection quotes. The visual editor has its
+ * **Comment** in its format toolbar instead, where it covers no control.
  */
 export function PassageButton({
   passages,
@@ -110,8 +116,8 @@ export function PassageButton({
         // Dimmed, it says why on hover, as `disabled` wouldn't let it.
         {...(tooLong && {
           'aria-disabled': true,
-          'data-hint': TOO_LONG,
-          'aria-description': TOO_LONG,
+          'data-hint': TOO_LONG_TO_QUOTE,
+          'aria-description': TOO_LONG_TO_QUOTE,
         })}
         // The selection stays as it is while the button is pressed.
         onPointerDown={(event) => {

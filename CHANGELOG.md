@@ -9,6 +9,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - **Import…** and `wikistow import` finish when the batch sent to make room for a folder is refused, as when the folder they fill is shared meanwhile, rather than failing with `not-found` on the folders inside it. The server's import batch holds a page that a create sent again already made, when the batch saves or publishes it, before the account's storage, as a single save does. (#669)
+- The visual editor's **Comment** is in its format toolbar, after the attachment button, rather than floating above the selection, where it covered the toolbar's buttons over the page's first lines. It is dimmed while no text, or more than 500 characters, is selected, or while the focus is outside the editor and its toolbar. The page as read keeps its floating button. (#673)
 
 #### Desktop
 
