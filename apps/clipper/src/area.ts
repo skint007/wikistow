@@ -264,6 +264,8 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   let shot: Promise<void> | null = null;
   /** Whether it's settled, so the box may be drawn: before, it would be in the screenshot. */
   let shotTaken = false;
+  /** Once let go, or stopped, as the area's on its way. */
+  let finishing = false;
   const timer = setTimeout(() => void finish(null), CHOOSE_MS);
 
   const clampX = (x: number) => Math.min(Math.max(x, 0), innerWidth);
@@ -287,7 +289,23 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
       width: Math.abs(x - start!.x),
       height: Math.abs(y - start!.y),
     };
+    // Moved, so likely a drag, not a click, which costs no screenshot: the
+    // browser takes only a couple a second.
+    if (!shot && (area.width >= SMALLEST || area.height >= SMALLEST)) begin();
     draw();
+  }
+  /** The screenshot, asked for with the shade and hint off the page: the box is drawn once it's taken. */
+  function begin() {
+    style(shade, { display: 'none' });
+    style(hint, { display: 'none' });
+    shotTaken = false;
+    const taking = shoot(++presses);
+    shot = taking;
+    void taking.then(() => {
+      if (shot !== taking) return;
+      shotTaken = true;
+      draw();
+    });
   }
   /** The page as the person sees it, with nothing of the overlay's shown, to the background. */
   async function shoot(press: number) {
@@ -305,20 +323,9 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     // Any button: the middle one would start the browser's autoscroll.
     event.preventDefault();
     event.stopPropagation();
-    if (event.button !== 0 || start) return;
+    if (event.button !== 0 || start || finishing) return;
     start = { x: clampX(event.clientX), y: clampY(event.clientY), pointer: event.pointerId };
     host.setPointerCapture(event.pointerId);
-    // Off the page before the screenshot: the box is drawn once it's taken.
-    style(shade, { display: 'none' });
-    style(hint, { display: 'none' });
-    shotTaken = false;
-    const taking = shoot(++presses);
-    shot = taking;
-    void taking.then(() => {
-      if (shot !== taking) return;
-      shotTaken = true;
-      draw();
-    });
     drag(event);
   }
   /** Whether `event` is the person's, by the pointer the drag follows. */
@@ -387,6 +394,8 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
    */
   function raise(modal: boolean) {
     if (modal && !(frame instanceof HTMLDialogElement)) {
+      // Moved, the host loses the pointer: a drag under way starts again.
+      if (start) again();
       const dialog = container(true);
       dialog.append(host);
       frame.replaceWith(dialog);
@@ -478,7 +487,6 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     if (shown.stop === remove) Object.assign(shown, { nonce: null, stop: null, look: null });
     frame.remove();
   }
-  let finishing = false;
   async function finish(chosen: Area | null, blocked = false) {
     if (shown.stop !== remove || finishing) return;
     finishing = true;

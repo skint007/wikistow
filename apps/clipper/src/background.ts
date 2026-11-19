@@ -324,8 +324,11 @@ async function visibleArea(tab: chrome.tabs.Tab): Promise<string> {
   if (!tab.active) throw away;
   const url = await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }).catch(() => '');
   if (!url.startsWith('data:image/png;base64,')) throw new NoShot('capture', NO_SHOT);
-  // Of the window's tab shown: one switched to meanwhile isn't this one.
-  if (tab.id !== undefined && !(await api.tabs.get(tab.id)).active) throw away;
+  // Of the window's tab shown: one switched to, or moved, meanwhile isn't this one.
+  if (tab.id !== undefined) {
+    const now = await api.tabs.get(tab.id);
+    if (!now.active || now.windowId !== tab.windowId) throw away;
+  }
   return url;
 }
 
@@ -477,8 +480,10 @@ async function shootArea(message: ShotMessage, tabId: number) {
   } catch {
     return;
   }
-  // Still this choice: one stopped meanwhile keeps no screenshot.
+  // Still this choice: one stopped meanwhile keeps no screenshot. A later
+  // press's taken first stands.
   if ((await choosing())?.nonce !== message.nonce) return;
+  if (areaShot?.nonce === message.nonce && areaShot.press > message.press) return;
   areaShot = { nonce: message.nonce, press: message.press, url, view: message.view };
 }
 
