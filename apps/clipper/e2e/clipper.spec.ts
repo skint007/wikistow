@@ -71,14 +71,14 @@ const FORM = `<!doctype html><html><head><title>A form</title></head>
 <body><p>Write to us.</p><textarea id="box">Some typed words</textarea></body></html>`;
 
 // A page with frames: one of its own site, one of another (the same server
-// by another name) in a web component's shadow root, and a `data:` one.
+// by another name) in a web component's closed shadow root, and a `data:` one.
 const framed = (port: number) => `<!doctype html><html><head><title>A framed page</title></head>
 <body><p>Words of the page itself.</p>
 <iframe id="same" src="/inner"></iframe>
 <div id="widget"></div>
 <iframe id="data" src="data:text/html,<p>Some data</p>"></iframe>
 <script>
-document.getElementById('widget').attachShadow({ mode: 'open' }).innerHTML =
+document.getElementById('widget').attachShadow({ mode: 'closed' }).innerHTML =
   '<iframe id="other" src="http://localhost:${port}/inner"></iframe>';
 </script>
 </body></html>`;
@@ -529,9 +529,17 @@ test('the context menu and the shortcut send a selection in a frame', async () =
     });
   }
 
+  // Back in the page, the frame's selection is left behind: the shortcut sends the link.
+  await page.locator('p').first().click();
+  await worker.evaluate(
+    async (tabId) => globalThis.wikistowClipper!.commanded('send', await chrome.tabs.get(tabId)),
+    tabId,
+  );
+  expect((await got('stable', 'clip'))[3]).toMatchObject({ mode: 'link', text: '' });
+
   // A frame no script may reach sends nothing, and says why, rather than the link.
   await menu(9999);
-  expect(await got('stable', 'clip')).toHaveLength(3);
+  expect(await got('stable', 'clip')).toHaveLength(4);
   expect(await worker.evaluate(() => chrome.storage.session.get('clip'))).toMatchObject({
     clip: {
       phase: 'failed',
