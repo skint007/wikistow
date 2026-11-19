@@ -249,6 +249,41 @@ describe('highlights and colours in the visual editor', () => {
     );
   });
 
+  it('decide an image’s alt apart from the text in its block (#451)', async () => {
+    const t = await transformer();
+    for (const page of [
+      '| a                     |\n| --------------------- |\n| ![x\\=\\=y\\=\\=](u) x==z |\n',
+      '- ![a\\=\\=b\\=\\=](u)\n- c==d\n',
+      '![a\\=\\=b\\=\\=](u) c==d\n',
+      // The text's own pair is still escaped, and the alt's `==` as typed.
+      '![a==b](u) x\\=\\=y z\\=\\=w\n',
+      // A highlight around the image can't pair with the alt's `==`.
+      '==![a==b](u)== c==d\n',
+    ]) {
+      expect(t.serialize(t.parse(page))).toBe(page);
+      expect(fidelityOf(page, t).visual, page).toBe(true);
+    }
+  });
+
+  it('escape only the alt’s `=`, whatever else the image holds (#452)', async () => {
+    const t = await transformer();
+    const { schema } = t.parse('x').type;
+    const page = (attrs: { src: string; alt: string; title?: string }) => {
+      const image = schema.nodes['image']?.create(attrs);
+      if (!image) throw new Error('No image');
+      return schema.topNodeType.create(null, schema.node('paragraph', null, [image]));
+    };
+    for (const [attrs, written] of [
+      [{ src: 'u', alt: 'a\uE003b==c==' }, '![a\uE003b\\=\\=c\\=\\=](u)\n'],
+      [{ src: 'u', alt: 'a==b==', title: 'T==x==\uE003' }, '![a\\=\\=b\\=\\=](u "T==x==\uE003")\n'],
+      [{ src: 'u\uE003', alt: 'a==b==' }, '![a\\=\\=b\\=\\=](u\uE003)\n'],
+    ] as const) {
+      const doc = page(attrs);
+      expect(t.serialize(doc), attrs.alt).toBe(written);
+      expect(writesAsShown(doc, written, t.parse), attrs.alt).toBe(true);
+    }
+  });
+
   it('leave a held space out of a mark before a soft line break', async () => {
     const t = await transformer();
     const { schema } = t.parse('x').type;
