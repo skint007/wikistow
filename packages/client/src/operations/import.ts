@@ -888,10 +888,17 @@ function inBatches(
         next.folders > importRoutes.MAX_BATCH_FOLDERS ||
         next.pages > importRoutes.MAX_BATCH_PAGES ||
         next.bytes > importRoutes.BATCH_BYTES;
-      // Sealed again if the batch that made room was refused: the answers
-      // it was sealed with are forgotten, a folder it makes with them, so
-      // what goes in that folder would ask the server of one it hasn't (#480).
-      if (batch.length > 0 && over && (await flush())) sealed = await seal(item, true);
+      // If the batch that made room was refused, the answers it was sealed
+      // with are forgotten, the one for what it makes too, and what goes in
+      // that would ask the server of a folder it doesn't have yet (#480):
+      // sealed again. Anything else goes as sealed, and if refused for them
+      // is sealed again with its batch, as a resumed page's reader copies
+      // would otherwise go up twice.
+      const makes = (s: Sealed) =>
+        s.writes.folders.length > 0 || s.writes.pages.some((p) => p.create);
+      if (batch.length > 0 && over && (await flush()) && makes(sealed)) {
+        sealed = await seal(item, true);
+      }
       batch.push(sealed);
       const now = count(batch);
       if (
