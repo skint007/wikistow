@@ -310,6 +310,8 @@ const PUBLISH_HOLD_MS = 10_000;
 const HOLD_EVERY_MS = 60_000;
 // How often the saver looks at the page's latest publication, for one made outside the session.
 const PUBLICATION_MS = 60_000;
+// How long a save waits for such a look.
+const PUBLICATION_WAIT_MS = 5_000;
 // A base's own client: one no join derives (53 bits, all set), and which never writes.
 const BASE_CLIENT = 0x1fffffffffffff;
 
@@ -1691,9 +1693,10 @@ export class LiveParticipant {
 
   // A change of the document as it is now, to be made later in a copy of it:
   // each text's smallest change, its edges held as relative positions, and
-  // the text it replaces. Made `again`, on a head that moved on since, it is
-  // made only where each replaced text is still there as it was: never over
-  // typing that went in since, nor twice, as for a rename another app made.
+  // the text it replaces. It is made only where each replaced text is still
+  // there as it was, so never over typing that went in since, nor twice, as
+  // for a rename another app made. A text whose place is lost is written
+  // whole, unless it is made `again`, on a head that moved on since.
   #anchored({ texts = {}, entries = [] }: DocumentChange): Make {
     const spans = (Object.entries(texts) as [TextRoot, string][]).flatMap(([name, target]) => {
       const text = this.document.text(name);
@@ -1721,13 +1724,11 @@ export class LiveParticipant {
         }
         return { name, span, start: start?.index ?? 0, end: end?.index ?? 0 };
       });
-      if (again) {
-        const moved = placed.some(
-          ({ name, start, end }, at) =>
-            whole.has(name) || document.text(name).toJSON().slice(start, end) !== spans[at]?.was,
-        );
-        if (moved) return false;
-      }
+      // Never over text that changed since: made again, also never where a place is lost.
+      const moved = placed.some(({ name, start, end }, at) =>
+        whole.has(name) ? again : document.text(name).toJSON().slice(start, end) !== spans[at]?.was,
+      );
+      if (moved) return false;
       // From the end of each text, so each place stays where it was found.
       for (const { name, span, start, end } of placed.toReversed()) {
         if (whole.has(name)) continue;
@@ -3817,9 +3818,13 @@ export class LiveParticipant {
     return tracked;
   }
 
-  // Once any look at the page's latest publication under way is done.
+  // Once any look at the page's latest publication under way is done, or
+  // after a few seconds: a save never waits long on it.
   async #knowPublished(): Promise<void> {
-    while (this.#publication) await this.#publication;
+    const until = Date.now() + PUBLICATION_WAIT_MS;
+    for (let left = until - Date.now(); this.#publication && left > 0; left = until - Date.now()) {
+      await withTimeout(this.#publication, left).catch(() => {});
+    }
   }
 
   /** Who saves (section 5.10, **Saving**): the first listed present join that's visible and not failing, else the first not failing. */
