@@ -86,14 +86,14 @@ vaultStore.unlock({} as ClientContext, {} as UnlockedVault);
 
 const draft = (markdown: string) => newPayload({ title: 'Plan', markdown });
 
-function merging(live: boolean): Merging {
+function merging(live: boolean, edited = 'One, edited.'): Merging {
   return {
     proposalId: 1,
     ask: 1,
     opened: {
       merge: pageMerge.mergePayloads(
         draft('One.\n\nTwo.\n'),
-        draft('One, edited.\n\nTwo.\n'),
+        draft(`${edited}\n\nTwo.\n`),
         draft('One, typed live.\n\nTwo, too.\n'),
       ),
       page: { spaceId: 'space' as SpaceId, pageId: 'page' as PageId },
@@ -131,8 +131,10 @@ async function render(node: ReactNode) {
   };
 }
 
-async function mount(onSettle: (payload: PagePayload | null) => void) {
-  await render(<ChatMerge merging={merging(true)} agentName="Helper" onSettle={onSettle} />);
+async function mount(onSettle: (payload: PagePayload | null) => void, edited?: string) {
+  await render(
+    <ChatMerge merging={merging(true, edited)} agentName="Helper" onSettle={onSettle} />,
+  );
   const dialog = document.querySelector('dialog');
   if (!dialog) throw new Error('no dialog');
   return dialog;
@@ -164,6 +166,24 @@ it('merges the assistant’s edit with the live page, and hands back what the pe
   expect(dialog.textContent).toContain('Saving makes these changes to the live page.');
   await act(async () => button(dialog, 'Save merged draft').click());
   expect(settled.map((payload) => payload?.markdown)).toEqual(['One, edited.\n\nTwo, too.\n']);
+});
+
+it('keeps Merge… open, saying so, when what was chosen is too large to save', async () => {
+  const settled: (PagePayload | null)[] = [];
+  const dialog = await mount((payload) => settled.push(payload), 'x'.repeat(300 * 1024));
+  const overlap = dialog.querySelector('li[aria-label]');
+  if (!overlap) throw new Error('no overlap');
+  await act(async () => button(overlap, 'Use Helper’s').click());
+  await act(async () => button(dialog, 'Review merged draft').click());
+  await act(async () => button(dialog, 'Save merged draft').click());
+  expect(settled).toEqual([]);
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector('[role="alert"]')?.textContent).toMatch(
+    /^This page’s Markdown is .* KB, more than the .* a page can hold\. Go back and make it shorter\.$/,
+  );
+  await act(async () => button(dialog, 'Back').click());
+  await act(async () => button(dialog, 'Cancel').click());
+  expect(settled).toEqual([null]);
 });
 
 it('saves nothing when the person cancels, or presses Escape', async () => {

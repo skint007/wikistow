@@ -1,6 +1,11 @@
-import type { PagePayload } from '@wikistow/client';
+import {
+  checkPayloadSize,
+  PageTooLarge,
+  withoutLinkTable,
+  type PagePayload,
+} from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { PLAIN, useClient } from '../vault/store';
 import { MergeView } from '../page/merge/merge-view';
@@ -60,8 +65,19 @@ export function ChatMerge({
 }) {
   // Once: Escape closes the dialog, and its close event, a task later, would close it again.
   const settled = useRef(false);
+  // Too large to save, as an Edit… can make it: said here, so what was chosen stays to shorten.
+  const [tooLarge, setTooLarge] = useState<string | null>(null);
   const settle = (payload: PagePayload | null) => {
     if (settled.current) return;
+    if (payload) {
+      try {
+        checkPayloadSize(withoutLinkTable(payload));
+      } catch (error) {
+        if (!(error instanceof PageTooLarge)) throw error;
+        setTooLarge(`${error.message} Go back and make it shorter.`);
+        return;
+      }
+    }
     settled.current = true;
     onSettle(payload);
   };
@@ -77,6 +93,11 @@ export function ChatMerge({
     <Dialog open onOpenChange={(open) => !open && settle(null)}>
       <DialogContent dialogClassName="sm:max-w-3xl" closesOnBackdrop={false}>
         <DialogTitle className="sr-only">Merge {agentName}’s edit</DialogTitle>
+        {tooLarge && (
+          <p role="alert" className="mb-3 text-sm text-destructive">
+            {tooLarge}
+          </p>
+        )}
         {theirs ? (
           <MergeView
             merge={opened.merge}
