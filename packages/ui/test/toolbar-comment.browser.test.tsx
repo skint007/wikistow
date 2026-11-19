@@ -166,6 +166,11 @@ it('counts a selection only while it shows', async () => {
   await expect.poll(() => document.activeElement).toBe(comment());
   await new Promise((done) => setTimeout(done, 200));
   expect(comment()?.getAttribute('aria-disabled')).toBe('false');
+  // Out of the window and back, as to another tab, it still counts.
+  act(() => comment()!.blur());
+  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('true');
+  act(() => comment()!.focus());
+  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('false');
   await userEvent.keyboard('{Enter}');
   await expect.poll(() => quotes.length).toBe(1);
 });

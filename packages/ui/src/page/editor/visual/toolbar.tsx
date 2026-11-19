@@ -189,6 +189,10 @@ export class FormatWatch {
   #quoting = false;
   #passage: Status['passage'] = 'none';
   #reading: ReturnType<typeof setTimeout> | undefined;
+  // The editor state `#passage` was read from, and the state and passage
+  // the status was made from, so a move of the focus alone does no work.
+  #readFrom: EditorState | null = null;
+  #madeFrom: [EditorState | null, Status['passage']] | null = null;
   // Whether the focus in the toolbar came there from the editor.
   #carried = false;
   readonly #listeners = new Set<() => void>();
@@ -215,8 +219,9 @@ export class FormatWatch {
     if (!state || !this.#quoting || !this.#shows(focused) || !textSelected(state)) {
       clearTimeout(this.#reading);
       this.#reading = undefined;
+      this.#readFrom = null;
       this.#passage = 'none';
-    } else
+    } else if (state !== this.#readFrom)
       // Not put off again by each change, which in a live session may
       // come from others faster than this.
       this.#reading ??= setTimeout(() => {
@@ -224,6 +229,7 @@ export class FormatWatch {
         const view = this.#view;
         if (!view) return;
         const quoted = quoteIn(view.state)?.kind;
+        this.#readFrom = view.state;
         this.#passage = quoted === 'quote' ? 'text' : quoted === 'too-long' ? quoted : 'none';
         this.#show(view.state);
       }, READ_MS);
@@ -231,6 +237,9 @@ export class FormatWatch {
   }
 
   #show(state: EditorState | null) {
+    const [madeState, madePassage] = this.#madeFrom ?? [];
+    if (this.#madeFrom && madeState === state && madePassage === this.#passage) return;
+    this.#madeFrom = [state, this.#passage];
     const status = state && statusOf(state, this.#passage);
     const shown = JSON.stringify(status);
     if (shown === this.#shown) return;
@@ -325,8 +334,11 @@ export class FormatWatch {
             const bar = document.getElementById(this.id);
             const within = (element: Element | null, root: Element | null | undefined) =>
               element !== null && root?.contains(element) === true;
-            this.#carried =
-              within(to, bar) && (within(from, view.dom) || (within(from, bar) && this.#carried));
+            // Out of the window and back, as to another tab, it stays as it was.
+            if (to !== null && from !== null)
+              this.#carried =
+                within(to, bar) && (within(from, view.dom) || (within(from, bar) && this.#carried));
+            else if (to !== null && !within(to, bar)) this.#carried = false;
             this.#update(view.state, to);
           };
           document.addEventListener('focusin', moved);
