@@ -1,4 +1,4 @@
-import type { Mark, Node } from '@milkdown/kit/prose/model';
+import { DOMParser, Mark, type Node } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { act, createRef } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -249,6 +249,41 @@ describe('highlights and colours in the visual editor', () => {
     );
   });
 
+  it('decide an image’s alt apart from the text in its block (#451)', async () => {
+    const t = await transformer();
+    for (const page of [
+      '| a                     |\n| --------------------- |\n| ![x\\=\\=y\\=\\=](u) x==z |\n',
+      '- ![a\\=\\=b\\=\\=](u)\n- c==d\n',
+      '![a\\=\\=b\\=\\=](u) c==d\n',
+      // The text's own pair is still escaped, and the alt's `==` as typed.
+      '![a==b](u) x\\=\\=y z\\=\\=w\n',
+      // A highlight around the image can't pair with the alt's `==`.
+      '==![a==b](u)== c==d\n',
+    ]) {
+      expect(t.serialize(t.parse(page))).toBe(page);
+      expect(fidelityOf(page, t).visual, page).toBe(true);
+    }
+  });
+
+  it('escape only the alt’s `=`, whatever else the image holds (#452)', async () => {
+    const t = await transformer();
+    const { schema } = t.parse('x').type;
+    const page = (attrs: { src: string; alt: string; title?: string }) => {
+      const image = schema.nodes['image']?.create(attrs);
+      if (!image) throw new Error('No image');
+      return schema.topNodeType.create(null, schema.node('paragraph', null, [image]));
+    };
+    for (const [attrs, written] of [
+      [{ src: 'u', alt: 'a\uE003b==c==' }, '![a\uE003b\\=\\=c\\=\\=](u)\n'],
+      [{ src: 'u', alt: 'a==b==', title: 'T==x==\uE003' }, '![a\\=\\=b\\=\\=](u "T==x==\uE003")\n'],
+      [{ src: 'u\uE003', alt: 'a==b==' }, '![a\\=\\=b\\=\\=](u\uE003)\n'],
+    ] as const) {
+      const doc = page(attrs);
+      expect(t.serialize(doc), attrs.alt).toBe(written);
+      expect(writesAsShown(doc, written, t.parse), attrs.alt).toBe(true);
+    }
+  });
+
   it('leave a held space out of a mark before a soft line break', async () => {
     const t = await transformer();
     const { schema } = t.parse('x').type;
@@ -275,6 +310,46 @@ describe('highlights and colours in the visual editor', () => {
       );
       expect(t.serialize(doc)).toBe(written);
     }
+  });
+
+  it('reject a colour the theme hasn’t, and keep its own from Markdown and pasted HTML', async () => {
+    const t = await transformer();
+    const { schema } = t.parse('x').type;
+    const { highlight, text_color: textColor } = schema.marks;
+    if (!highlight || !textColor) throw new Error('No colour marks');
+    expect(() => textColor.create({ color: 'pink' })).toThrow(RangeError);
+    expect(() => highlight.create({ color: 'pink' })).toThrow(RangeError);
+    expect(() => Mark.fromJSON(schema, { type: 'text_color', attrs: { color: 'pink' } })).toThrow(
+      RangeError,
+    );
+    expect(textColor.create({ color: 'red' }).attrs).toEqual({ color: 'red' });
+    expect(highlight.create({ color: 'blue' }).attrs).toEqual({ color: 'blue' });
+    expect(highlight.create().attrs).toEqual({ color: null });
+
+    // Markdown keeps a theme colour as a mark, and another's HTML as HTML.
+    const page =
+      '<span data-color="pink">p</span> <span data-color="red">r</span> <mark data-color="pink">m</mark> <mark data-color="green">g</mark>\n';
+    const doc = t.parse(page);
+    const colors: unknown[] = [];
+    doc.descendants((node) => {
+      for (const mark of node.marks) colors.push(`${mark.type.name}:${mark.attrs['color']}`);
+    });
+    expect(colors).toEqual(['text_color:red', 'highlight:green']);
+    expect(t.serialize(doc)).toBe(page);
+
+    // Pasted HTML: an unknown colour's span is text, and its highlight plain.
+    const html = document.createElement('div');
+    html.innerHTML =
+      '<p><span data-color="pink">p</span><span data-color="red">r</span><mark data-color="pink">m</mark><mark data-color="green">g</mark></p>';
+    const pasted = DOMParser.fromSchema(schema).parse(html);
+    const marks: string[] = [];
+    pasted.descendants((node) => {
+      if (node.isText)
+        marks.push(
+          `${node.text}:${node.marks.map((mark) => `${mark.type.name}=${mark.attrs['color']}`).join()}`,
+        );
+    });
+    expect(marks).toEqual(['p:', 'r:text_color=red', 'm:highlight=null', 'g:highlight=green']);
   });
 
   it('give the selection a highlight and text colour from the toolbar', async () => {
