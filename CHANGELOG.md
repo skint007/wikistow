@@ -4,6 +4,28 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.29.0-beta.1 - 2026-11-19
+
+### Highlights
+
+#### Features
+
+- When an edit you approve in the assistant overlaps changes made since it was proposed, as in a live session, **Merge…** opens over the chat instead of the edit being refused.
+
+#### Fixes
+
+- A page whose bold, italic, strikethrough, highlight or colour overlap only partly no longer reopens in source mode after the visual editor saves it.
+- An image whose alt text has `==` no longer adds backslashes to the other `==` beside it.
+- Coloured text inside a link is underlined in its own colour.
+- In live editing, a keystroke typed just as the session ends stays on screen and is saved.
+- In live editing, someone who typed nothing is no longer asked before leaving while others type.
+- In live editing, adding a file while someone else’s app saves goes in rather than failing.
+- A page saved by a newer version of WikiStow during a live session asks you to update the app, and leaves the session open for the others.
+
+#### Optimizations
+
+- In live editing, each keystroke in the source editor no longer does work for the whole page.
+
 ### Changes
 
 #### App
