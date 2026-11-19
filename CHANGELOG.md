@@ -11,9 +11,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - **Import…** and `wikistow import` finish when the batch sent to make room for a folder is refused, as when the folder they fill is shared meanwhile, rather than failing with `not-found` on the folders inside it. The server's import batch holds a page that a create sent again already made, when the batch saves or publishes it, before the account's storage, as a single save does. (#669)
 - The visual editor's **Comment** is in its format toolbar, after the attachment button, rather than floating above the selection, where it covered the toolbar's buttons over the page's first lines. It is dimmed while no text, or more than 500 characters, is selected, or while the focus is outside the editor and its toolbar. The page as read keeps its floating button. (#673)
 
-#### Web clipper
+#### Desktop
 
-- Text selected inside an embedded frame, such as an embedded document or comments, can be clipped from the popup's Selection, the context menu's **Send selection** and the shortcut, with the tab's address and title. Of several frames with a selection, the one the focus is in is taken. In Chrome, `activeTab` doesn't reach a frame from another site, so text selected there still can't be clipped: **Send selection** says so rather than sending the link. (#675)
+- Web clipper, **Choose an area**: the screenshot is taken as the drag starts, so the area shows the page as the person saw it, not as it changed once the overlay went, and the overlay's backdrop is never in it. The overlay no longer closes the page's open menus and popovers or takes its focus, and keys do nothing in the page while choosing. A page that takes the overlay off or hides it makes the popup say so, rather than asking for an area for 5 minutes. An area let go just inside the 5 minutes is kept. (#674)
+- Web clipper: text selected inside an embedded frame, such as an embedded document or comments, can be clipped from the popup's Selection, the context menu's **Send selection** and the shortcut, with the tab's address and title. Of several frames with a selection, the one the focus is in is taken. In Chrome, `activeTab` doesn't reach a frame from another site, so text selected there still can't be clipped: **Send selection** says so rather than sending the link. (#675)
 
 ## 0.29.0-beta.1 - 2026-11-19
 
