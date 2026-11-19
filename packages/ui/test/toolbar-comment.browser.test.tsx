@@ -166,13 +166,14 @@ it('counts a selection only while it shows', async () => {
   await expect.poll(() => document.activeElement).toBe(comment());
   await new Promise((done) => setTimeout(done, 200));
   expect(comment()?.getAttribute('aria-disabled')).toBe('false');
-  // Out of the window and back, as to another tab, it still counts.
+  await userEvent.keyboard('{Enter}');
+  await expect.poll(() => quotes.length).toBe(1);
+  // Out to nothing, as by a click on the page beside the editor, and back, it no longer counts.
   act(() => comment()!.blur());
   await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('true');
   act(() => comment()!.focus());
-  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('false');
-  await userEvent.keyboard('{Enter}');
-  await expect.poll(() => quotes.length).toBe(1);
+  await new Promise((done) => setTimeout(done, 200));
+  expect(comment()?.getAttribute('aria-disabled')).toBe('true');
 });
 
 it('leaves the toolbar a tab stop when Comment, the last one focused, goes', async () => {
@@ -184,4 +185,14 @@ it('leaves the toolbar a tab stop when Comment, the last one focused, goes', asy
   const bar = document.querySelector('[role="toolbar"][aria-label="Formatting"]')!;
   expect(bar.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
   expect(bar.querySelector('[tabindex="0"]')?.getAttribute('aria-label')).toMatch(/^Text style/);
+});
+
+it('counts no selection while a control in the editor has the focus', async () => {
+  const { dom } = await mount('- [ ] Brown the mince\n- [ ] Bake it\n', async () => {});
+  select(dom, 'Brown', 'mince');
+  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('false');
+  const checkbox = dom.querySelector<HTMLElement>('input[type="checkbox"]');
+  expect(checkbox).not.toBeNull();
+  act(() => checkbox!.focus());
+  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('true');
 });

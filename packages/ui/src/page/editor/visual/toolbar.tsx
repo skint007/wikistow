@@ -147,6 +147,10 @@ function statusOf(state: EditorState, passage: Status['passage']): Status {
   };
 }
 
+/** Whether `a` and `b` show the same, for the status: their text, selection and marks to type with. */
+const sameShown = (a: EditorState, b: EditorState) =>
+  a.doc === b.doc && a.selection.eq(b.selection) && a.storedMarks === b.storedMarks;
+
 type Range = { from: number; to: number };
 
 /**
@@ -207,11 +211,12 @@ export class FormatWatch {
   status = () => this.#status;
 
   // A selection counts for Comment while it shows: the focus (`focused`)
-  // is in the editor, or in the toolbar, reached from it. The editor keeps
-  // a selection it's left, as the title or the source beside it takes one.
+  // is on the editor's text, not a control in it such as a checkbox, or in
+  // the toolbar, reached from there. The editor keeps a selection it's
+  // left, as the title or the source beside it takes one.
   #shows(focused: Element | null) {
     if (focused === null) return false;
-    if (this.#view?.dom.contains(focused)) return true;
+    if (focused === this.#view?.dom) return true;
     return this.#carried && document.getElementById(this.id)?.contains(focused) === true;
   }
 
@@ -221,7 +226,7 @@ export class FormatWatch {
       this.#reading = undefined;
       this.#readFrom = null;
       this.#passage = 'none';
-    } else if (state !== this.#readFrom)
+    } else if (!this.#readFrom || !sameShown(state, this.#readFrom))
       // Not put off again by each change, which in a live session may
       // come from others faster than this.
       this.#reading ??= setTimeout(() => {
@@ -237,8 +242,11 @@ export class FormatWatch {
   }
 
   #show(state: EditorState | null) {
-    const [madeState, madePassage] = this.#madeFrom ?? [];
-    if (this.#madeFrom && madeState === state && madePassage === this.#passage) return;
+    if (this.#madeFrom) {
+      const [made, passage] = this.#madeFrom;
+      const same = made === null || state === null ? made === state : sameShown(state, made);
+      if (same && passage === this.#passage) return;
+    }
     this.#madeFrom = [state, this.#passage];
     const status = state && statusOf(state, this.#passage);
     const shown = JSON.stringify(status);
@@ -332,25 +340,16 @@ export class FormatWatch {
                 : [event.target, event.relatedTarget]
             ) as [Element | null, Element | null];
             const bar = document.getElementById(this.id);
-            const within = (element: Element | null, root: Element | null | undefined) =>
-              element !== null && root?.contains(element) === true;
-            // Out of the window and back, as to another tab, it stays as it was.
-            if (to !== null && from !== null)
-              this.#carried =
-                within(to, bar) && (within(from, view.dom) || (within(from, bar) && this.#carried));
-            else if (to !== null && !within(to, bar)) this.#carried = false;
+            const within = (element: Element | null) =>
+              element !== null && bar?.contains(element) === true;
+            this.#carried = within(to) && (from === view.dom || (within(from) && this.#carried));
             this.#update(view.state, to);
           };
           document.addEventListener('focusin', moved);
           document.addEventListener('focusout', moved);
           return {
             update: (view, previous) => {
-              const { doc, selection, storedMarks } = view.state;
-              const same =
-                doc === previous.doc &&
-                selection.eq(previous.selection) &&
-                storedMarks === previous.storedMarks;
-              if (!same) this.#update(view.state);
+              if (!sameShown(view.state, previous)) this.#update(view.state);
             },
             destroy: () => {
               document.removeEventListener('focusin', moved);
