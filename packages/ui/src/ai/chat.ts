@@ -10,6 +10,7 @@ import {
   type ClientContext,
   type IdentityId,
   type PageId,
+  type PagePayload,
   type SpaceId,
 } from '@wikistow/client';
 import { useSyncExternalStore } from 'react';
@@ -29,9 +30,19 @@ export type ProposalItem = {
   proposal: Proposal;
   /** The tool call that made it, so the chat shows it there. */
   callId: string | null;
-  state: 'pending' | 'applying' | 'rejected' | 'dropped' | Applied['status'];
+  /** `merging` while **Merge…** is open for it. A cancelled merge leaves it pending. */
+  state:
+    | 'pending'
+    | 'applying'
+    | 'merging'
+    | 'rejected'
+    | 'dropped'
+    | Exclude<Applied['status'], 'cancelled'>;
   message: string | null;
 };
+
+/** An approved edit that overlaps what changed since, open in **Merge…** (ADR 0015 decision 8). */
+export type Merging = { proposalId: number; opened: agentTools.ProposalMerge };
 
 /** Something the agent changed, once the person approved it. */
 export type Changed = {
@@ -53,6 +64,8 @@ export type ChatState = {
   /** Where the agent may work, by name, and its access there. */
   scope: { spaceId: SpaceId; name: string | null; access: string }[];
   proposals: ProposalItem[];
+  /** The approved edit waiting for the person in **Merge…**, if any: one at a time. */
+  merging: Merging | null;
   /** Pages its tools read or found, newest last. */
   seen: PageRef[];
   changed: Changed[];
@@ -80,6 +93,8 @@ export class AgentChat {
   #stopping = false;
   // The tool call running now: tools run one at a time.
   #call: string | null = null;
+  // Answers the merge open now: the payload the person settled, or null.
+  #settle: ((payload: PagePayload | null) => void) | null = null;
   readonly #listeners = new Set<() => void>();
   readonly #onChanged: (changed: Changed) => void;
 
@@ -98,6 +113,7 @@ export class AgentChat {
       canEdit: false,
       scope: [],
       proposals: [],
+      merging: null,
       seen: [],
       changed: [],
       turns: [],
@@ -202,6 +218,7 @@ export class AgentChat {
     if (this.#state.phase === 'revoked') return;
     this.#session?.stop();
     this.#stopping = true;
+    this.settleMerge(null);
     if (this.#agentCtx) closeSession(this.#agentCtx);
     this.#set({
       phase: 'revoked',
@@ -277,6 +294,7 @@ export class AgentChat {
   /** Stop the reply, and any approved batch before its next change. Changes already made stay. */
   stop() {
     this.#stopping = true;
+    this.settleMerge(null);
     const session = this.#session;
     if (session?.state().status !== 'running') return;
     const before = session.state().messages.length;
@@ -325,9 +343,21 @@ export class AgentChat {
         const { proposal } = item;
         this.#update(id, { state: 'applying' });
         const held = proposal.kind === 'edit-page' ? await beforeEdit(proposal.pageId) : null;
+        let merged = false;
         const applied: Applied = held
           ? { status: 'refused', message: held }
-          : await agentTools.applyProposal(ctx, proposal);
+          : await agentTools.applyProposal(ctx, proposal, {
+              merge: async (opened) => {
+                const settled = await this.#askMerge(id, opened);
+                merged ||= settled !== null;
+                return settled;
+              },
+            });
+        if (applied.status === 'cancelled') {
+          // Nothing was written: it waits to be approved again, unless the agent went meanwhile.
+          this.#update(id, { state: this.#state.phase === 'revoked' ? 'dropped' : 'pending' });
+          continue;
+        }
         if (applied.status === 'revoked' || (applied.status === 'refused' && !this.#live())) {
           this.#update(id, { state: 'pending' });
           return this.revoked();
@@ -344,7 +374,11 @@ export class AgentChat {
           };
           this.#set({ changed: [...this.#state.changed, changed] });
           this.#onChanged(changed);
-          this.#notes.push(`Proposal ${id} was approved and applied.`);
+          this.#notes.push(
+            merged
+              ? `Proposal ${id} was approved and applied, merged by me with changes made since it was proposed.`
+              : `Proposal ${id} was approved and applied.`,
+          );
         } else {
           this.#notes.push(`Proposal ${id} was approved but not applied: ${applied.message}`);
         }
@@ -354,9 +388,31 @@ export class AgentChat {
     }
   }
 
+  // Open Merge… for the approved proposal `id`, until the person saves or cancels it.
+  #askMerge(id: number, opened: agentTools.ProposalMerge): Promise<PagePayload | null> {
+    if (this.#stopping || this.#state.phase !== 'ready') return Promise.resolve(null);
+    this.settleMerge(null);
+    this.#update(id, { state: 'merging' });
+    this.#set({ merging: { proposalId: id, opened } });
+    return new Promise((resolve) => {
+      this.#settle = (payload) => {
+        this.#settle = null;
+        this.#update(id, { state: 'applying' });
+        this.#set({ merging: null });
+        resolve(payload);
+      };
+    });
+  }
+
+  /** The person saved the merge open now (`payload`), or cancelled it (null): nothing is saved then. */
+  settleMerge(payload: PagePayload | null) {
+    this.#settle?.(payload);
+  }
+
   /** End the chat: the conversation is forgotten, and the agent's session closed. */
   close() {
     this.#stopping = true;
+    this.settleMerge(null);
     this.#session?.close();
     if (this.#agentCtx) closeSession(this.#agentCtx);
     if (this.#state.phase === 'opening') this.#set({ phase: 'failed', failure: null });

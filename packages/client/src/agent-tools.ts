@@ -16,9 +16,16 @@ import * as pages from './operations/pages.ts';
 import { indexSpaces, nameOf, readableSpaces } from './operations/search.ts';
 import type { ClientContext } from './operations/session.ts';
 import * as spaces from './operations/spaces.ts';
+import { draftLive } from './live/extension.ts';
 import { withinTime } from './merge/body.ts';
-import { mergePayloads, resolve } from './merge/payload.ts';
-import { checkPayloadSize, newPayload, revisePayload, type PagePayload } from './payload.ts';
+import { mergePayloads, resolve, type Merge } from './merge/payload.ts';
+import {
+  checkPayloadSize,
+  newPayload,
+  revisePayload,
+  type AttachmentRef,
+  type PagePayload,
+} from './payload.ts';
 import { shownTitle, treeInOrder } from './tree.ts';
 
 type Tree = Awaited<ReturnType<typeof spaces.loadTree>>;
@@ -72,7 +79,29 @@ export type Applied =
   /** Something it was based on changed, or the agent lost access: ask for a fresh proposal. */
   | { status: 'stale' | 'refused' | 'failed'; message: string }
   /** The server refused the agent's token: it was revoked. */
-  | { status: 'revoked' };
+  | { status: 'revoked' }
+  /** The person cancelled **Merge…**: nothing was written, and it can be approved again. */
+  | { status: 'cancelled' };
+
+/**
+ * An approved edit that overlaps what changed since it was proposed, for
+ * the person to settle with **Merge…**: yours is the edit, theirs the head.
+ */
+export type ProposalMerge = {
+  merge: Merge;
+  page: { spaceId: SpaceId; pageId: PageId };
+  /** The draft it merges onto. */
+  head: RevisionId;
+  /** Who signed the head, and whether it is a live session's draft (ADR 0015, Naming the other side). */
+  theirs: { authorId: string; live: boolean };
+  /** Both sides' attachments, for the pictures a banner or icon overlap shows. */
+  attachments: readonly AttachmentRef[];
+};
+
+export type ApplyOptions = {
+  /** **Merge…** where an edit overlaps: the payload the person settled, or null if they cancelled. */
+  merge?: (merge: ProposalMerge) => Promise<PagePayload | null>;
+};
 
 /** A page the agent looked at, for the chat to link to. */
 export type PageRef = { spaceId: SpaceId; pageId: PageId; title: string };
@@ -466,10 +495,15 @@ export async function readPage(
  * the agent proposes again. A move earlier in the same batch, within one
  * share, doesn't make it stale. The server checks the agent's access on
  * every write too, so a revoked agent or a lost grant is `refused`.
+ *
+ * An edit is merged onto the head from the draft it was made on. Where it
+ * overlaps what changed since, `merge` asks the person (**Merge…**, ADR 0015
+ * decision 8); without it, or if the person cancels, nothing is written.
  */
 export async function applyProposal(
   ctx: ClientContext,
   proposal: ProposedChange,
+  { merge }: ApplyOptions = {},
 ): Promise<Applied> {
   try {
     switch (proposal.kind) {
@@ -509,10 +543,12 @@ export async function applyProposal(
         let head = info.heads.draftHead;
         // While people edit the page live its head moves every few seconds: the
         // edit is merged onto the head from the draft it was made on, and onto
-        // each newer head from the last (ADR 0015 decision 8).
+        // each newer head from the last, as the person settled it, so Merge…
+        // opens again only for a new overlap (ADR 0015 decision 8).
         for (let tries = 0; tries < 5 && head; tries++) {
-          const onto = head === from ? null : await mergedOnto(ctx, page, from, edit, head);
+          const onto = head === from ? null : await mergedOnto(ctx, page, from, edit, head, merge);
           if (onto === 'changed') return CHANGED;
+          if (onto === 'cancelled') return { status: 'cancelled' };
           try {
             await pages.saveDraft(ctx, {
               page,
@@ -552,8 +588,10 @@ export async function applyProposal(
 
 /**
  * `edit`, made on the draft `from`, merged onto the draft `head` by block
- * (ADR 0013), when `head` descends from `from` and nothing overlaps;
- * 'changed' otherwise, and the agent proposes again.
+ * (ADR 0013), when `head` descends from `from`. Where it overlaps, or
+ * doesn't read as merged, `ask` settles it; without `ask` it is
+ * 'changed', and the agent proposes again, as it is when `head` doesn't
+ * descend from `from`.
  */
 async function mergedOnto(
   ctx: ClientContext,
@@ -561,31 +599,46 @@ async function mergedOnto(
   from: RevisionId,
   edit: PagePayload,
   head: RevisionId,
-): Promise<{ payload: PagePayload } | 'changed'> {
+  ask: ApplyOptions['merge'],
+): Promise<{ payload: PagePayload } | 'changed' | 'cancelled'> {
   let at: RevisionId | null = head;
-  let theirs: PagePayload | null = null;
+  let theirs: { payload: PagePayload; authorId: string } | null = null;
   for (let steps = 0; at && at !== from && steps < 64; steps++) {
     const opened = await pages.openRevisionOf(ctx, page, 'draft', at);
     if (opened.opened.kind !== 'current') return 'changed';
-    theirs ??= opened.opened.payload;
+    theirs ??= { payload: opened.opened.payload, authorId: opened.record.authorId };
     at = opened.record.basedOn as RevisionId | null;
   }
   if (at !== from || !theirs) return 'changed';
   const base = await pages.openRevisionOf(ctx, page, 'draft', from);
   if (base.opened.kind !== 'current') return 'changed';
   const was = base.opened.payload;
-  const onto = theirs;
+  const onto = theirs.payload;
   // Within a second, as a fold's: one too large to merge here is proposed again.
+  let merged: { merge: Merge; payload: PagePayload | null };
   try {
-    return withinTime(1_000, () => {
+    merged = withinTime(1_000, () => {
       const merge = mergePayloads(was, edit, onto);
-      if (merge.overlaps.length > 0) return 'changed' as const;
+      if (merge.overlaps.length > 0) return { merge, payload: null };
       const resolved = resolve(merge, {}, { review: false });
-      return resolved.ok ? { payload: resolved.payload } : ('changed' as const);
+      return { merge, payload: resolved.ok ? resolved.payload : null };
     });
   } catch {
     return 'changed';
   }
+  if (merged.payload) return { payload: merged.payload };
+  if (!ask) return 'changed';
+  const settled = await ask({
+    merge: merged.merge,
+    page,
+    head,
+    theirs: {
+      authorId: theirs.authorId,
+      live: draftLive(onto, head).kind === 'live',
+    },
+    attachments: [...edit.attachments, ...onto.attachments],
+  });
+  return settled ? { payload: settled } : 'cancelled';
 }
 
 const CHANGED: Applied = {
