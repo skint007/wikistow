@@ -152,6 +152,12 @@ it('counts a selection only while it shows', async () => {
   await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('true');
   act(() => comment()!.click());
   expect(quotes).toEqual([]);
+  // Nor once the focus reaches the toolbar from that field.
+  act(() => comment()!.focus());
+  await new Promise((done) => setTimeout(done, 200));
+  expect(comment()?.getAttribute('aria-disabled')).toBe('true');
+  act(() => comment()!.click());
+  expect(quotes).toEqual([]);
   // Back in the editor, it counts again.
   act(() => dom.focus());
   await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('false');

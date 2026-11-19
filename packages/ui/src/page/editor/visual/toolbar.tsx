@@ -80,7 +80,7 @@ import type { Upload } from './plugins';
 
 let bars = 0;
 
-// How long the selection rests before Comment reads what it quotes.
+// How often, at most, Comment reads what the selection quotes.
 const READ_MS = 120;
 
 const headingLabel = (level: number) => (level === 0 ? 'Text' : `Heading ${level}`);
@@ -184,11 +184,13 @@ export class FormatWatch {
   #status: Status | null = null;
   #shown = '';
   // Whether the status says what the selection quotes, for Comment, which
-  // reads the page's whole text: only while the toolbar shows it, and once
-  // the selection rests (`#reading`), not on each update as it's dragged.
+  // reads the page's whole text: only while the toolbar shows it, and at
+  // most once a while (`#reading`), not on each update as it's dragged.
   #quoting = false;
   #passage: Status['passage'] = 'none';
   #reading: ReturnType<typeof setTimeout> | undefined;
+  // Whether the focus in the toolbar came there from the editor.
+  #carried = false;
   readonly #listeners = new Set<() => void>();
   // The selection shown while a form of the toolbar's has the focus (`hold`).
   readonly #held = new PluginKey<DecorationSet>();
@@ -204,18 +206,21 @@ export class FormatWatch {
   // is in the editor, or in the toolbar, reached from it. The editor keeps
   // a selection it's left, as the title or the source beside it takes one.
   #shows(focused: Element | null) {
-    return (
-      focused !== null &&
-      (this.#view?.dom.contains(focused) || document.getElementById(this.id)?.contains(focused))
-    );
+    if (focused === null) return false;
+    if (this.#view?.dom.contains(focused)) return true;
+    return this.#carried && document.getElementById(this.id)?.contains(focused) === true;
   }
 
   #update(state: EditorState | null, focused = document.activeElement) {
-    clearTimeout(this.#reading);
-    if (!state || !this.#quoting || !this.#shows(focused) || !textSelected(state))
+    if (!state || !this.#quoting || !this.#shows(focused) || !textSelected(state)) {
+      clearTimeout(this.#reading);
+      this.#reading = undefined;
       this.#passage = 'none';
-    else
-      this.#reading = setTimeout(() => {
+    } else
+      // Not put off again by each change, which in a live session may
+      // come from others faster than this.
+      this.#reading ??= setTimeout(() => {
+        this.#reading = undefined;
         const view = this.#view;
         if (!view) return;
         const quoted = quoteIn(view.state)?.kind;
@@ -309,13 +314,21 @@ export class FormatWatch {
         view: (view) => {
           this.#view = view;
           this.#update(view.state);
-          // Where the focus goes next, which `focusout` names before it's there.
-          const moved = (event: FocusEvent) =>
-            this.#view === view &&
-            this.#update(
-              view.state,
-              (event.type === 'focusin' ? event.target : event.relatedTarget) as Element | null,
-            );
+          // Where the focus goes from and to, which `focusout` names before it's there.
+          const moved = (event: FocusEvent) => {
+            if (this.#view !== view) return;
+            const [from, to] = (
+              event.type === 'focusin'
+                ? [event.relatedTarget, event.target]
+                : [event.target, event.relatedTarget]
+            ) as [Element | null, Element | null];
+            const bar = document.getElementById(this.id);
+            const within = (element: Element | null, root: Element | null | undefined) =>
+              element !== null && root?.contains(element) === true;
+            this.#carried =
+              within(to, bar) && (within(from, view.dom) || (within(from, bar) && this.#carried));
+            this.#update(view.state, to);
+          };
           document.addEventListener('focusin', moved);
           document.addEventListener('focusout', moved);
           return {
@@ -332,6 +345,7 @@ export class FormatWatch {
               document.removeEventListener('focusout', moved);
               if (this.#view !== view) return;
               clearTimeout(this.#reading);
+              this.#reading = undefined;
               this.#view = null;
               this.#update(null);
             },
