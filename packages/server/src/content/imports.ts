@@ -73,14 +73,15 @@ export async function importBatch(
  * there that the caller may edit, each in the mode its step takes: the
  * caller's place in their account's queue of writes (`queueWriter`), the
  * space, then the shares they are in, then the space's row if something
- * goes at its top, then the folders things go in and the pages saved or
- * published, then those pages' heads. Shares and nodes go in ID order,
- * shares first, as a delete or a rotation takes them, so two batches, or a
- * batch and one of those, never each wait on what the other holds; and
- * every page's heads before the account's storage, which the first step to
- * store a version takes. Each step then takes its locks again, which it
- * holds already. One the caller may not edit is held by nothing here: its
- * step refuses it, as its own route would. A page already there must be in
+ * goes at its top, then the folders things go in and the pages saved,
+ * published or made already (a create sent again), then those pages'
+ * heads. Shares and nodes go in ID order, shares first, as a delete or a
+ * rotation takes them, so two batches, or a batch and one of those, never
+ * each wait on what the other holds; and every page's heads before the
+ * account's storage, which the first step to store a version takes. Each
+ * step then takes its locks again, which it holds already. One the caller
+ * may not edit is held by nothing here: its step refuses it, as its own
+ * route would. A page saved or published that isn't made must be in
  * `spaceId`.
  */
 async function holdForBatch(
@@ -99,14 +100,26 @@ async function holdForBatch(
     ...pages.flatMap((page) => (page.create ? [page.create.parentId] : [])),
   ];
   const parents = new Set(parentIds.filter((id) => id === null || !made.has(id)));
-  const written = new Set<string>(pages.flatMap((page) => (page.create ? [] : [page.pageId])));
-  if (written.size > 0) {
+  const saved = new Set<string>(pages.flatMap((page) => (page.create ? [] : [page.pageId])));
+  if (saved.size > 0) {
     const here = await tx
       .select({ id: nodes.id })
       .from(nodes)
-      .where(and(anyId(nodes.id, [...written]), eq(nodes.spaceId, spaceId)));
-    if (here.length !== written.size) throw new ContentError('not-found');
+      .where(and(anyId(nodes.id, [...saved]), eq(nodes.spaceId, spaceId)));
+    if (here.length !== saved.size) throw new ContentError('not-found');
   }
+  // A create sent again for a page it made (`replayed` in `createPage`)
+  // finds the page there, and a save or publish on top holds it as any
+  // other's does (#479). One made elsewhere is its create's to refuse.
+  const created = pages.flatMap((page) => (page.create ? [page.pageId] : []));
+  const remade =
+    created.length === 0
+      ? []
+      : await tx
+          .select({ id: nodes.id })
+          .from(nodes)
+          .where(and(anyId(nodes.id, created), eq(nodes.spaceId, spaceId), eq(nodes.kind, 'page')));
+  const written = new Set<string>([...saved, ...remade.map((page) => page.id)]);
 
   const shares = new Map<string, ShareRow>();
   const editable: string[] = [];

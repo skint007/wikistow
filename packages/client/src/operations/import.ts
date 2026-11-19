@@ -853,10 +853,12 @@ function inBatches(
       sending.map((s) => s.writes),
     );
   };
-  const flush = async () => {
+  // Whether what was sent was refused, and sealed again with fresh answers.
+  const flush = async (): Promise<boolean> => {
     let sending = batch;
     batch = [];
-    if (sending.length === 0) return;
+    if (sending.length === 0) return false;
+    let refused = false;
     try {
       await send(sending);
     } catch (error) {
@@ -867,6 +869,7 @@ function inBatches(
       // are worked out again for it too, as a rotation or a change of
       // owners may come with the change of access that refused it.
       forget();
+      refused = true;
       await spaceKeys(ctx, spaceId, { refresh: true });
       const again: Sealed[] = [];
       for (const { item } of sending) again.push(await seal(item, true));
@@ -874,16 +877,21 @@ function inBatches(
       await send(sending);
     }
     for (const { landed } of sending) landed();
+    return refused;
   };
   return {
     async add(item) {
-      const sealed = await sealOnce(item);
+      // Sealed first, as only its writes say whether it fits.
+      let sealed = await sealOnce(item);
       const next = count([...batch, sealed]);
       const over =
         next.folders > importRoutes.MAX_BATCH_FOLDERS ||
         next.pages > importRoutes.MAX_BATCH_PAGES ||
         next.bytes > importRoutes.BATCH_BYTES;
-      if (batch.length > 0 && over) await flush();
+      // Sealed again if the batch that made room was refused: the answers
+      // it was sealed with are forgotten, a folder it makes with them, so
+      // what goes in that folder would ask the server of one it hasn't (#480).
+      if (batch.length > 0 && over && (await flush())) sealed = await seal(item, true);
       batch.push(sealed);
       const now = count(batch);
       if (
@@ -893,7 +901,9 @@ function inBatches(
         await flush();
       }
     },
-    flush,
+    flush: async () => {
+      await flush();
+    },
   };
 }
 
