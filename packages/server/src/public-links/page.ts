@@ -217,6 +217,7 @@ ${STEPS.slice(1)
 .page-body th { background: var(--table-head); padding: 0.5rem 0.75rem; text-align: left; font-weight: 700; }
 .page-body td { border-top: 1px solid var(--border); padding: 0.5rem 0.75rem; }
 .page-body span[data-color] a { color: inherit; }
+.page-body a > span[data-color] { text-decoration-line: inherit; }
 .page-body mark { background: var(--highlight); color: inherit; border-radius: 3px; padding: 0 0.125rem; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 ${COLORS.map((color) => `.page-body mark[data-color="${color}"] { background: var(--highlight-${color}); }\n.page-body span[data-color="${color}"] { color: var(--text-${color}); }`).join('\n')}
 .page-body kbd { font: 0.85em ${MONO}; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; background: var(--card); padding: 0.125rem 0.375rem; }
