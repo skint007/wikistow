@@ -747,6 +747,7 @@ export class LiveParticipant {
   #publication: Promise<void> | null = null;
   #publicationAsked = 0;
   #publicationAt = 0;
+  #publicationAgain = false;
   // Each publication learned counts one, and those the latest one's draft
   // named, for a save that was under way as it was learned.
   #publishedSeq = 0;
@@ -1229,6 +1230,9 @@ export class LiveParticipant {
     try {
       // Others see it publishing before it does, so they look at its publication once it's over.
       await this.#presenceOut();
+      if (this.#status.state.kind !== 'live' || !this.#keyed()) {
+        throw new LivePublishStopped('left');
+      }
       let draft = await this.#saveAtPress(pressed);
       for (let tries = 0; ; tries++) {
         try {
@@ -1780,6 +1784,19 @@ export class LiveParticipant {
         return { name, span, start: start?.index ?? 0, end: end?.index ?? 0 };
       });
       // Never over text that changed since: made again, also never where a place is lost.
+      // Made again, an insertion already beside its place went in from someone else.
+      const twice =
+        again &&
+        placed.some(({ name, span, start, end }) => {
+          const now = document.text(name).toJSON();
+          const { insert } = span;
+          return (
+            insert !== '' &&
+            (now.slice(end, end + insert.length) === insert ||
+              now.slice(start - insert.length, start) === insert)
+          );
+        });
+      if (twice) return false;
       const moved = placed.some(({ name, start, end }, at) =>
         whole.has(name) ? again : document.text(name).toJSON().slice(start, end) !== spans[at]?.was,
       );
@@ -2528,7 +2545,8 @@ export class LiveParticipant {
       const ref = { senderId: opened.senderId, joinId: opened.joinId };
       const changes =
         (held.decoded?.structs.length ?? 0) > 0 || (held.decoded?.deletes.size ?? 0) > 0;
-      if (changes && held.decoded && !this.#further.has(key(ref))) {
+      // This app's own were counted as typed (`#own`).
+      if (changes && held.decoded && !this.#further.has(key(ref)) && key(ref) !== key(this.#me)) {
         this.#typedBy(opened.senderId, held.decoded);
       }
       // This app's own were counted as they were sealed.
@@ -3911,6 +3929,11 @@ export class LiveParticipant {
   #learnPublished(): Promise<void> {
     const ports = this.#ports;
     if (!ports.published || this.#status.state.kind !== 'live') return Promise.resolve();
+    // One at a time: those asked for meanwhile come to one more, a second later.
+    if (this.#publication) {
+      this.#publicationAgain = true;
+      return this.#publication;
+    }
     const asked = ++this.#publicationAsked;
     this.#publicationAt = Date.now();
     const run = (async () => {
@@ -3931,7 +3954,11 @@ export class LiveParticipant {
       if (asked === this.#publicationAsked) this.#published(from, published);
     })();
     const tracked: Promise<void> = run.finally(() => {
-      if (this.#publication === tracked) this.#publication = null;
+      if (this.#publication !== tracked) return;
+      this.#publication = null;
+      if (!this.#publicationAgain) return;
+      this.#publicationAgain = false;
+      void sleep(1_000, this.#abort.signal).then(() => this.#learnPublished());
     });
     this.#publication = tracked;
     return tracked;
@@ -4050,6 +4077,16 @@ export class LiveParticipant {
     // Everything the save holds of this app's own goes out before its Saved notice.
     await this.flush();
     if (this.#status.state.kind !== 'live' || this.#stopSending) return false;
+    // A publish that began meanwhile holds it still.
+    const holds =
+      !force && !waited
+        ? Math.max(this.#heldUntil(), this.#publishing ? Date.now() + DEBOUNCE_MS : 0)
+        : 0;
+    if (holds > Date.now()) {
+      this.#retryAt = Math.max(this.#retryAt, holds);
+      this.#scheduleSave();
+      return false;
+    }
     const stateBytes = this.document.stateBytes();
     const savedState = this.document.state();
     const covers = this.#covers;
@@ -4342,7 +4379,8 @@ export class LiveParticipant {
   // Until this app's presence as it is now has gone out, for a second at most.
   async #presenceOut(): Promise<void> {
     const until = Date.now() + 1_000;
-    while (this.#presenceDirty && this.#keyed() && this.#joined) {
+    // Built into a request, it is out once that request is answered.
+    while ((this.#presenceDirty || this.#sending) && this.#keyed() && this.#joined) {
       const left = until - Date.now();
       if (left <= 0) return;
       // Sent as sends are spaced; a request already on its way is waited for first.
