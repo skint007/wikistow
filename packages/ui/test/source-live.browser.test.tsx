@@ -200,7 +200,7 @@ describe('the source editor in a live session', () => {
     expect(m.view.state.sliceDoc()).toBe(s.text.toJSON());
   });
 
-  it('catches up, a second later, with a split nothing in the change says', async () => {
+  it('shows a split nothing in the change says, made by text put in and taken out', async () => {
     const s = session('a😀b');
     const m = await mount(s);
     // Put in and taken out again before it was sent: only the split is left.
@@ -211,7 +211,7 @@ describe('the source editor in a live session', () => {
       }),
     );
     expect(s.text.toJSON()).toBe('a\ufffd\ufffdb');
-    await expect.poll(() => m.view.state.sliceDoc(), { timeout: 3000 }).toBe('a\ufffd\ufffdb');
+    expect(m.view.state.sliceDoc()).toBe('a\ufffd\ufffdb');
   });
 
   it('moves others’ carets with the text, as Yjs does, until they move', async () => {

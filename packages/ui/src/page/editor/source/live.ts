@@ -315,6 +315,19 @@ function sideOf(encoded: Uint8Array): 1 | -1 {
   }
 }
 
+/**
+ * Whether `transaction` deleted some of what it put in itself, as text
+ * someone typed and took out again before sending it: Yjs placed it, and
+ * may have split a pair where it went, though the change doesn't say so.
+ */
+function madeAndGone(transaction: Y.Transaction): boolean {
+  for (const [client, deleted] of transaction.deleteSet.clients) {
+    const before = transaction.beforeState.get(client) ?? 0;
+    if (deleted.some(({ clock, len }) => clock + len > before)) return true;
+  }
+  return false;
+}
+
 // Whether `changes` put text in at `pos`, or take out text there or either side of it.
 function touches(changes: ChangeSet, pos: number): boolean {
   let touched = false;
@@ -367,10 +380,14 @@ export function liveBinding(source: LiveSource): Extension {
             // The person's change, but not through this editor, as the
             // visual editor's just before someone else's: this editor may
             // not show it yet, so the next change from outside is read whole.
-            if (!this.putting) this.#apart = true;
+            if (!this.putting) {
+              this.#apart = true;
+              // Its changes may not be the editor's, which carets would be moved by: found again.
+              this.#placed.clear();
+            }
             return;
           }
-          this.#takeIn(event);
+          this.#takeIn(event, madeAndGone(transaction));
         };
         source.text.observe(observer);
         this.#stop.push(() => source.text.unobserve(observer));
@@ -421,7 +438,7 @@ export function liveBinding(source: LiveSource): Extension {
       }
 
       // Someone else's change, as small edits out of the person's undo history.
-      #takeIn(event: Y.YTextEvent) {
+      #takeIn(event: Y.YTextEvent, unsaid: boolean) {
         const view = this.#view;
         const { delta } = event;
         const before = view.state;
@@ -433,7 +450,7 @@ export function liveBinding(source: LiveSource): Extension {
           });
         }
         // Yjs doesn't say when a pair it split became U+FFFD: read the text again then.
-        if (this.#apart || mayDiffer(before, view.state, delta)) this.resync();
+        if (this.#apart || unsaid || mayDiffer(before, view.state, delta)) this.resync();
         else this.checkSoon();
         this.#drawCarets();
       }
