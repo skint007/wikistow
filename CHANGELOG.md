@@ -4,6 +4,25 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.29.0-beta.2 - 2026-11-19
+
+### Highlights
+
+#### Features
+
+- The web clipper can clip text you select inside an embedded frame on the page, such as an embedded document or a comments box.
+
+#### Fixes
+
+- The web clipper’s **Choose an area** no longer closes the page’s open menus and popovers, and its screenshot shows the page as it was when you started dragging.
+- When a page stops **Choose an area** from working, the clipper’s popup says so rather than waiting five minutes for an area.
+- A clip cut short by a reload, or by locking the vault while its screenshot uploads, is no longer saved as two pages.
+- **Import…** no longer fails when a folder it fills is shared while it runs.
+
+#### UI polish
+
+- The visual editor’s **Comment** button is in the format toolbar, rather than floating over the page’s first lines.
+
 ### Changes
 
 #### App
