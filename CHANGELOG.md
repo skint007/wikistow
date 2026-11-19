@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Desktop
+
+- Browser clipping: a clip whose saving a reload or a crash cut short, just as its page was made, finishes that page rather than making a second, as the app keeps the page's ID before making it. A screenshot clip a lock cut short during its upload puts the page made without the screenshot in the trash once unlocked, rather than leaving it beside the one with it. (#671)
+
 ## 0.29.0-beta.1 - 2026-11-19
 
 ### Highlights
