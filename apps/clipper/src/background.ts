@@ -320,9 +320,12 @@ const NO_SHOT = 'WikiStow can’t take a screenshot of this page.';
  * URL, which `activeTab` allows for the tab the person clicked in.
  */
 async function visibleArea(tab: chrome.tabs.Tab): Promise<string> {
-  if (!tab.active) throw new NoShot('capture', 'Switch to that tab, then try again.');
+  const away = new NoShot('capture', 'Switch to that tab, then try again.');
+  if (!tab.active) throw away;
   const url = await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }).catch(() => '');
   if (!url.startsWith('data:image/png;base64,')) throw new NoShot('capture', NO_SHOT);
+  // Of the window's tab shown: one switched to meanwhile isn't this one.
+  if (tab.id !== undefined && !(await api.tabs.get(tab.id)).active) throw away;
   return url;
 }
 
@@ -374,7 +377,20 @@ async function overlayShown(tabId: number): Promise<boolean> {
  * awake, which the drag's messages keep it: one that slept meanwhile takes
  * another once the area is chosen.
  */
-let areaShot: { nonce: string; url: string; view: ViewSize } | null = null;
+let areaShot: { nonce: string; press: number; url: string; view: ViewSize } | null = null;
+
+/**
+ * The overlay's modal dialog's backdrop, which the page's own styles may
+ * shade, off the screenshot: the person's own stylesheet, as the browser
+ * puts it, wins over any of the page's.
+ */
+const AREA_CSS = `[data-wikistow-area]::backdrop {
+  display: none !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  opacity: 0 !important;
+}`;
 
 /** Forget the area being chosen, and its screenshot. */
 async function forgetChoice() {
@@ -413,6 +429,7 @@ async function choose(tabId: number, form: Form) {
   await api.storage.session.set({ choosing: next });
   let started: unknown;
   try {
+    await api.scripting.insertCSS({ target: { tabId }, css: AREA_CSS, origin: 'USER' });
     await api.scripting.executeScript({ target: { tabId }, files: ['area.js'] });
     const [ran] = await api.scripting.executeScript({
       target: { tabId },
@@ -462,7 +479,7 @@ async function shootArea(message: ShotMessage, tabId: number) {
   }
   // Still this choice: one stopped meanwhile keeps no screenshot.
   if ((await choosing())?.nonce !== message.nonce) return;
-  areaShot = { nonce: message.nonce, url, view: message.view };
+  areaShot = { nonce: message.nonce, press: message.press, url, view: message.view };
 }
 
 /**
@@ -473,7 +490,8 @@ async function shootArea(message: ShotMessage, tabId: number) {
 async function areaChosen(message: AreaMessage, tabId: number) {
   const was = await choosing();
   if (!was || was.nonce !== message.nonce || was.tabId !== tabId) return;
-  const kept = areaShot?.nonce === was.nonce ? areaShot : null;
+  // The screenshot of the press the area was dragged from, not a click's before.
+  const kept = areaShot?.nonce === was.nonce && areaShot.press === message.press ? areaShot : null;
   await forgetChoice();
   if (message.blocked) {
     return fail('capture', 'This page stopped Choose an area from working. Try Visible area.');

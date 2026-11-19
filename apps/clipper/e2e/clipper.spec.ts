@@ -742,10 +742,13 @@ test('a screenshot of an area is the part dragged over, scrolled, in its device 
   await page.evaluate(() => scrollTo(0, 1000));
   // A dialog the page has open, modal, which makes the rest of it inert,
   // away from the box and with no backdrop, takes nothing from the overlay.
+  // The page shades any other dialog's backdrop, which the overlay's, in the
+  // screenshot as the drag starts, mustn't be.
   await page.evaluate(() => {
     const style = document.createElement('style');
-    style.textContent =
-      'dialog::backdrop { background: transparent } #modal { margin: 0; inset: 20px 20px auto auto }';
+    style.textContent = `dialog::backdrop { background: transparent }
+      html > dialog::backdrop { background: #000 !important }
+      #modal { margin: 0; inset: 20px 20px auto auto }`;
     const modal = document.createElement('dialog');
     modal.id = 'modal';
     modal.innerHTML = '<button>A button</button>';

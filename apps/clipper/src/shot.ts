@@ -23,15 +23,24 @@ export type AreaMessage = {
   /** Null when the person stopped, with Escape, or the overlay gave up waiting. */
   area: Area | null;
   view: ViewSize;
+  /** The press the area was dragged out from, whose screenshot it's cut from. */
+  press?: number;
   /** The page took the overlay off, or hid it: no area can be chosen there. */
   blocked?: boolean;
 };
 
 /** What the overlay asks of the background as a drag starts: the visible area's screenshot, the tab `view` in size. */
-export type ShotMessage = { type: 'wikistow-area-shot'; nonce: string; view: ViewSize };
+export type ShotMessage = {
+  type: 'wikistow-area-shot';
+  nonce: string;
+  /** Which press of the overlay's, counted from 1. */
+  press: number;
+  view: ViewSize;
+};
 
 const finite = (value: unknown, min = 0): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= min;
+const count = (value: unknown): value is number => Number.isSafeInteger(value) && finite(value, 1);
 
 /** Whether `message` is of `type`, with a nonce and a tab's size, every number in it a real one. */
 function overlayMessage(message: unknown, type: string): message is Record<string, unknown> {
@@ -45,14 +54,15 @@ function overlayMessage(message: unknown, type: string): message is Record<strin
 
 /** Whether `message` reads as a `ShotMessage`. */
 export function isShotMessage(message: unknown): message is ShotMessage {
-  return overlayMessage(message, 'wikistow-area-shot');
+  return overlayMessage(message, 'wikistow-area-shot') && count(message['press']);
 }
 
 /** Whether `message` reads as an `AreaMessage`, every number in it a real one. */
 export function isAreaMessage(message: unknown): message is AreaMessage {
   if (!overlayMessage(message, 'wikistow-area')) return false;
-  const { area, blocked } = message;
+  const { area, blocked, press } = message;
   if (blocked !== undefined && typeof blocked !== 'boolean') return false;
+  if (press !== undefined && !count(press)) return false;
   if (area === null) return true;
   if (typeof area !== 'object') return false;
   const box = area as Record<string, unknown>;

@@ -47,6 +47,7 @@ describe('the overlay’s message', () => {
     expect(isAreaMessage(message)).toBe(true);
     expect(isAreaMessage({ ...message, area: null })).toBe(true);
     expect(isAreaMessage({ ...message, area: null, blocked: true })).toBe(true);
+    expect(isAreaMessage({ ...message, press: 2 })).toBe(true);
     for (const wrong of [
       null,
       'wikistow-area',
@@ -60,18 +61,27 @@ describe('the overlay’s message', () => {
       { ...message, area: { ...message.area, y: '2' } },
       { ...message, area: { ...message.area, height: Infinity } },
       { ...message, blocked: 'yes' },
+      { ...message, press: 0 },
+      { ...message, press: 1.5 },
     ]) {
       expect(isAreaMessage(wrong)).toBe(false);
     }
   });
 
   test('asking for a screenshot is taken only as it reads', () => {
-    const asking = { type: 'wikistow-area-shot', nonce: 'n', view: { width: 10, height: 10 } };
+    const asking = {
+      type: 'wikistow-area-shot',
+      nonce: 'n',
+      press: 1,
+      view: { width: 10, height: 10 },
+    };
     expect(isShotMessage(asking)).toBe(true);
     expect(isAreaMessage(asking)).toBe(false);
     expect(isShotMessage(message)).toBe(false);
     for (const wrong of [
       { ...asking, nonce: 1 },
+      { ...asking, press: undefined },
+      { ...asking, press: -1 },
       { ...asking, view: { width: 10, height: Number.NaN } },
       { ...asking, view: null },
     ]) {

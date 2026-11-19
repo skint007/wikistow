@@ -182,11 +182,14 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     const element = document.createElement(modal ? 'dialog' : 'div');
     if (!modal) element.setAttribute('popover', source ? 'auto' : 'manual');
     element.tabIndex = -1;
+    // What the background's own stylesheet names, to take a modal dialog's
+    // backdrop off the screenshot (background.ts, `AREA_CSS`).
+    element.setAttribute('data-wikistow-area', '');
     style(element, FRAME);
     // A modal dialog's own Escape, should the key reach it first.
     element.addEventListener('cancel', (event) => {
       event.preventDefault();
-      void finish(null);
+      if (event.isTrusted) void finish(null);
     });
     element.addEventListener('toggle', look);
     element.addEventListener('close', look);
@@ -252,8 +255,11 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   });
   root.append(shade, box, hint);
 
-  let start: { x: number; y: number } | null = null;
+  /** Where the drag started, and by which pointer: the one it follows. */
+  let start: { x: number; y: number; pointer: number } | null = null;
   let area: Area | null = null;
+  /** Each press, counted, so the area names its own screenshot, not an earlier click's. */
+  let presses = 0;
   /** The screenshot asked for as this drag started: settled once it's taken, or couldn't be. */
   let shot: Promise<void> | null = null;
   /** Whether it's settled, so the box may be drawn: before, it would be in the screenshot. */
@@ -284,11 +290,12 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     draw();
   }
   /** The page as the person sees it, with nothing of the overlay's shown, to the background. */
-  async function shoot() {
+  async function shoot(press: number) {
     await drawn();
     const message: ShotMessage = {
       type: 'wikistow-area-shot',
       nonce,
+      press,
       view: { width: innerWidth, height: innerHeight },
     };
     await api.runtime.sendMessage(message).catch(() => {});
@@ -299,13 +306,13 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     event.preventDefault();
     event.stopPropagation();
     if (event.button !== 0 || start) return;
-    start = { x: clampX(event.clientX), y: clampY(event.clientY) };
+    start = { x: clampX(event.clientX), y: clampY(event.clientY), pointer: event.pointerId };
     host.setPointerCapture(event.pointerId);
     // Off the page before the screenshot: the box is drawn once it's taken.
     style(shade, { display: 'none' });
     style(hint, { display: 'none' });
     shotTaken = false;
-    const taking = shoot();
+    const taking = shoot(++presses);
     shot = taking;
     void taking.then(() => {
       if (shot !== taking) return;
@@ -314,24 +321,34 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     });
     drag(event);
   }
+  /** Whether `event` is the person's, by the pointer the drag follows. */
+  const dragging = (event: PointerEvent) => event.isTrusted && start?.pointer === event.pointerId;
   function move(event: PointerEvent) {
-    if (!event.isTrusted) return;
     event.stopPropagation();
-    if (start) drag(event);
+    if (dragging(event)) drag(event);
   }
-  function up(event: PointerEvent) {
-    if (!event.isTrusted) return;
-    event.stopPropagation();
-    if (!start) return;
-    drag(event);
+  /** No area after all: start again. */
+  function again() {
     start = null;
-    if (area && area.width >= SMALLEST && area.height >= SMALLEST) return void finish(area);
-    // A click: start again.
     area = null;
     shot = null;
     style(box, { display: 'none' });
     style(shade, { display: 'block' });
     style(hint, { display: 'block' });
+  }
+  function up(event: PointerEvent) {
+    event.stopPropagation();
+    if (!dragging(event)) return;
+    drag(event);
+    start = null;
+    if (area && area.width >= SMALLEST && area.height >= SMALLEST) return void finish(area);
+    // A click.
+    again();
+  }
+  /** The browser took the pointer away, for a gesture of its own, say. */
+  function cancel(event: PointerEvent) {
+    event.stopPropagation();
+    if (dragging(event)) again();
   }
   function key(event: KeyboardEvent) {
     if (!event.isTrusted) return;
@@ -351,7 +368,7 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
   host.addEventListener('pointerdown', down);
   host.addEventListener('pointermove', move);
   host.addEventListener('pointerup', up);
-  host.addEventListener('pointercancel', still);
+  host.addEventListener('pointercancel', cancel);
   host.addEventListener('wheel', still, { passive: false });
   host.addEventListener('contextmenu', still);
   host.addEventListener('mousedown', still);
@@ -468,6 +485,7 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
     const view = { width: innerWidth, height: innerHeight };
     // The screenshot as the drag started taken first, while nothing of the
     // overlay's is shown, and before the page sees it go.
+    const press = presses;
     if (chosen) await shot;
     // Taken off meanwhile, by a newer clip.
     if (shown.stop !== remove) return;
@@ -480,6 +498,7 @@ function choose(nonce: string): 'choosing' | 'zoomed' {
         nonce,
         area: chosen,
         view,
+        ...(chosen ? { press } : {}),
         ...(blocked ? { blocked } : {}),
       };
       await api.runtime.sendMessage(message).catch(() => {});
