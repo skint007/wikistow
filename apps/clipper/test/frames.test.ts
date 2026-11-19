@@ -50,6 +50,14 @@ describe('choosing the frame', () => {
     expect(chooseFrame([page, frame([1], 'Off the way'), frame([0, 0])], page)).toBe(page);
   });
 
+  test('past a frame no script may reach, the frames within it say where the focus went', () => {
+    const page = frame([], 'Old words of the page', 0);
+    const holder = frame([0, 0], '', 1);
+    const older = frame([0, 0, 0], 'An older comment');
+    const newer = frame([0, 0, 1], 'The comment');
+    expect(chooseFrame([page, older, holder, newer], page)).toBe(newer);
+  });
+
   test('a frame in a shadow root, which has no index, alone or under another', () => {
     const page = frame([], 'Old words of the page', -1);
     const shadowed = frame([-1], 'In a widget');

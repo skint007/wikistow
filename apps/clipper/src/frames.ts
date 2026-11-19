@@ -104,25 +104,39 @@ const within = (read: FrameRead, prefix: number[]) =>
 /**
  * The frame whose selection to clip, of `reads`, from `page` down: the one
  * the focus is in, else the nearest above it with one, else `page`. A
- * selection in a frame the focus isn't in is older, and left out. Where
- * the focus went into a frame that wasn't read, or into one of several
- * with no index, it's somewhere within: a frame there the focus didn't
- * leave, with a selection, comes first.
+ * selection in a frame the focus isn't in is older, and left out.
+ *
+ * The focus is in a frame if the nearest frame read above it says the
+ * focus went in its way: the one just above, or, past frames that weren't
+ * read, such as one from another site, the one above those. Frames in
+ * shadow roots share their paths, so the focus may be in any that do, and
+ * goes on into whichever says it went on. Of the frames it may end in,
+ * the deepest is taken, the first of those as they came.
  */
 export function chooseFrame(reads: FrameRead[], page: FrameRead): FrameRead {
   const has = (read: FrameRead) => read.selection.trim() !== '';
-  const chain = [page];
-  let below: FrameRead[] = [];
-  for (let focus = page; focus.left;) {
-    const step = [...focus.path, focus.into];
-    const next = reads.filter((read) => read.path.length === step.length && within(read, step));
-    const onward = next.length === 1 ? next : next.filter((read) => read.left);
-    if (onward.length !== 1) {
-      below = reads.filter((read) => within(read, step));
+  const inside = reads
+    .filter((read) => read.path.length > page.path.length && within(read, page.path))
+    .sort((one, other) => one.path.length - other.path.length);
+  /** The frames the focus may be in, each with those above it that it came from. */
+  const from = new Map<FrameRead, FrameRead[]>([[page, []]]);
+  for (const read of inside) {
+    for (let depth = read.path.length - 1; depth >= page.path.length; depth--) {
+      const prefix = read.path.slice(0, depth);
+      const above = reads.filter((at) => at.path.length === depth && within(at, prefix));
+      if (above.length === 0) continue;
+      const into = above.filter((at) => from.has(at) && at.left && at.into === read.path[depth]);
+      if (into.length > 0) from.set(read, into);
       break;
     }
-    focus = onward[0]!;
-    chain.push(focus);
   }
-  return below.find((read) => !read.left && has(read)) ?? [...chain].reverse().find(has) ?? page;
+  const passed = new Set([...from.values()].flat());
+  let end = page;
+  for (const read of from.keys()) {
+    if (!passed.has(read) && read.path.length > end.path.length) end = read;
+  }
+  for (let at: FrameRead | undefined = end; at; at = from.get(at)?.[0]) {
+    if (has(at)) return at;
+  }
+  return page;
 }
