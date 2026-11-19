@@ -746,6 +746,7 @@ export class LiveParticipant {
   // named, for a save that was under way as it was learned.
   #publishedSeq = 0;
   #publishedWith = new Set<IdentityId>();
+  #publishedState: LiveState | null = null;
   // The document as this app joined: typing it held then never went through `#typed`.
   readonly #startState: LiveState;
 
@@ -1275,8 +1276,8 @@ export class LiveParticipant {
     };
     try {
       // What this app typed up to the press goes out before its Saved notice names the draft.
-      await this.flush();
       await this.#knowPublished();
+      await this.flush();
       if (this.#status.state.kind !== 'live' || this.#stopSending) {
         throw new LivePublishStopped('left');
       }
@@ -1539,7 +1540,7 @@ export class LiveParticipant {
 
   async #commitOwn(
     change: ((document: LiveDocument) => void) | DocumentChange,
-    { retry = true }: { retry?: boolean } = {},
+    { retry = true, on = null }: { retry?: boolean; on?: RevisionId | null } = {},
   ): Promise<boolean> {
     // Text given whole is made a change of the text as it is now, anchored
     // in it, so whatever others type meanwhile, around it, stays.
@@ -1559,7 +1560,7 @@ export class LiveParticipant {
     this.#saving = mine;
     let done = false;
     try {
-      done = await this.#commitCopy(make, retry);
+      done = await this.#commitCopy(make, retry, on);
       return done;
     } finally {
       if (this.#saving === mine) this.#saving = null;
@@ -1571,7 +1572,7 @@ export class LiveParticipant {
 
   // The copy's change, saved on the head; if another app saved first, on
   // the new head once more, when it may be `retry`d.
-  async #commitCopy(make: Make, retry: boolean): Promise<boolean> {
+  async #commitCopy(make: Make, retry: boolean, on: RevisionId | null): Promise<boolean> {
     const further = newId(JoinId);
     const ctx = this.#ports.ctx;
     const clientId = liveClientId({
@@ -1614,37 +1615,51 @@ export class LiveParticipant {
           !this.#placing &&
           head !== undefined &&
           holdsState(this.document.state(), head.state);
+        // A change worked out on one draft goes only on that one.
+        if (on && headId !== on) return null;
         if (headId && head && ready) return { headId, head };
       }
       return null;
     };
     for (let tries = 0; ; tries++) {
       // Its further join made already, kept present meanwhile.
-      const found =
-        tries === 0 ? await onHead(1) : await this.#whileAlive(further, () => onHead(10));
+      const found = made ? await this.#whileAlive(further, () => onHead(10)) : await onHead(10);
       if (!found) return giveUp();
       const { headId, head } = found;
       // Made afresh each try, under the same client: nothing of an earlier try went out.
-      const copy = new LiveDocument(clientId);
-      if (copy.apply(Y.encodeStateAsUpdate(this.document.doc), 'copy').length > 0) return giveUp();
+      const build = () => {
+        const copy = new LiveDocument(clientId);
+        if (copy.apply(Y.encodeStateAsUpdate(this.document.doc), 'copy').length > 0) return null;
+        const updates: Uint8Array[] = [];
+        copy.doc.on('update', (update: Uint8Array, origin: unknown) => {
+          if (origin === LOCAL_ORIGIN) updates.push(update);
+        });
+        // Made again on a newer head, only where what it replaces is still as it was.
+        let placed = true;
+        const misplaced = copy.edit(() => (placed = make(copy, tries > 0)), LOCAL_ORIGIN);
+        if (!placed || misplaced.length > 0 || updates.length === 0) return null;
+        return {
+          copy,
+          update: Y.mergeUpdates(updates),
+          payload: this.#payload(head.payload, copy),
+        };
+      };
+      let built: ReturnType<typeof build>;
+      try {
+        built = build();
+      } catch {
+        built = null;
+      }
+      if (!built) return giveUp();
+      const { copy, update, payload } = built;
       // What the copy holds of the stored messages: everything up to here.
       const covers = this.#covers;
-      const updates: Uint8Array[] = [];
-      copy.doc.on('update', (update: Uint8Array, origin: unknown) => {
-        if (origin === LOCAL_ORIGIN) updates.push(update);
-      });
-      // Made again on a newer head, only where what it replaces is still as it was.
-      let placed = true;
-      const misplaced = copy.edit(() => (placed = make(copy, tries > 0)), LOCAL_ORIGIN);
-      if (!placed || misplaced.length > 0 || updates.length === 0) return giveUp();
-      const update = Y.mergeUpdates(updates);
       let result: { revisionId: RevisionId; payload: PagePayload };
       const revisionId = newId(RevisionId);
       const stateBytes = copy.stateBytes();
       const savedState = copy.state();
       const people = this.#with(head);
       const seenSeq = this.#publishedSeq;
-      const payload = this.#payload(head.payload, copy);
       try {
         // The further join, made before the save, belonging to this app's join.
         if (!made) {
@@ -2385,9 +2400,12 @@ export class LiveParticipant {
       if (opened.kind === 'update') decoded = decodeUpdate(opened.content);
       else if (opened.kind === 'snapshot') {
         const read = readSnapshot(opened.content);
-        // One already in the session never applies a later snapshot; a newer format means a newer app.
-        if (read.kind === 'newer-format') return this.#updateApp();
-        decoded = decodeUpdate(read.state);
+        // One already in the session never applies a later snapshot: a newer
+        // format means a newer app, once the snapshot is in order (`#take`).
+        decoded =
+          read.kind === 'newer-format'
+            ? { structs: [], deletes: new Map() }
+            : decodeUpdate(read.state);
       }
     } catch (error) {
       if (error instanceof CryptoError) {
@@ -2443,6 +2461,9 @@ export class LiveParticipant {
         break;
     }
     const { opened, stored } = held;
+    if (opened.kind === 'snapshot' && readSnapshot(opened.content).kind === 'newer-format') {
+      return this.#updateApp();
+    }
     if (opened.kind === 'update' && this.#further.has(key(opened))) {
       // The change of a second grant for a revision whose fold was placed is never placed.
       for (const grant of this.#grants.values()) {
@@ -3757,6 +3778,11 @@ export class LiveParticipant {
 
   // Someone's typing the session took: what it changed, counted until a publication holds it.
   #typedBy(person: IdentityId, decoded: DecodedUpdate): void {
+    // Typing the latest publication holds, taken late, was published.
+    const held = this.#publishedState;
+    if (held && holdsState(held, plusUpdate({ vector: new Map(), deletes: new Map() }, decoded))) {
+      return;
+    }
     const changed = this.#typed.get(person) ?? { vector: new Map(), deletes: new Map() };
     for (const structs of decoded.structs) {
       const clock = changed.vector.get(structs.client) ?? 0;
@@ -3783,6 +3809,7 @@ export class LiveParticipant {
     this.#publishedFrom = from;
     this.#publishedSeq++;
     this.#publishedWith = new Set();
+    this.#publishedState = published?.state ?? null;
     if (!published) return;
     for (const [person, changed] of this.#typed) {
       if (holdsState(published.state, changed)) this.#typed.delete(person);
@@ -3834,15 +3861,12 @@ export class LiveParticipant {
         return;
       }
       if (!from || asked !== this.#publicationAsked || from === this.#publishedFrom) return;
-      let published: Pick<SessionDraft, 'state' | 'with'> | null = this.#drafts.get(from) ?? null;
-      if (!published) {
-        try {
-          const draft = await this.#ports.openDraft(from);
-          const state = sessionState(draft.payload, draft.revisionId, this.sessionId);
-          if (state) published = { state, with: withOf(draft.payload) };
-        } catch {
-          // Not one this app can open: everyone it saw typing still counts.
-        }
+      let published: Pick<SessionDraft, 'state' | 'with'> | null;
+      try {
+        published = await this.#publishedAs(from);
+      } catch {
+        // Asked again later: a passing failure never stands for the publication.
+        return;
       }
       if (asked === this.#publicationAsked) this.#published(from, published);
     })();
@@ -3851,6 +3875,28 @@ export class LiveParticipant {
     });
     this.#publication = tracked;
     return tracked;
+  }
+
+  /**
+   * What a publication made from the draft `from` holds, as far as this
+   * app can tell: a session draft's state and `with`; for a draft written
+   * outside the session, those of the nearest session draft it was saved
+   * on, with the signers of the drafts between, since it holds all that
+   * draft holds. Null when it can't tell; it throws when a draft won't open.
+   */
+  async #publishedAs(from: RevisionId): Promise<Pick<SessionDraft, 'state' | 'with'> | null> {
+    const signers: IdentityId[] = [];
+    let at: RevisionId | null = from;
+    for (let steps = 0; at && steps < 16; steps++) {
+      const known = this.#drafts.get(at);
+      if (known) return { state: known.state, with: [...known.with, ...signers] };
+      const draft: OpenedDraft = this.#outsiderDrafts.get(at) ?? (await this.#ports.openDraft(at));
+      const state = sessionState(draft.payload, draft.revisionId, this.sessionId);
+      if (state) return { state, with: [...withOf(draft.payload), ...signers] };
+      signers.push(draft.authorId);
+      at = draft.basedOn;
+    }
+    return null;
   }
 
   // Once any look at the page's latest publication under way is done, or
@@ -3936,11 +3982,12 @@ export class LiveParticipant {
       this.#unsavedSince = null;
       return true;
     }
-    await this.flush();
     // Who edited goes by the latest publication: one a publish just over may
     // have made, or, looked at once a minute, one made outside the session.
     if (Date.now() - this.#publicationAt >= PUBLICATION_MS) void this.#learnPublished();
     await this.#knowPublished();
+    // Everything the save holds of this app's own goes out before its Saved notice.
+    await this.flush();
     if (this.#status.state.kind !== 'live' || this.#stopSending) return false;
     const stateBytes = this.document.stateBytes();
     const savedState = this.document.state();
@@ -4063,7 +4110,10 @@ export class LiveParticipant {
     if ((was.frontmatter ?? '') !== now.frontmatter || was.body !== now.body) return;
     // Never once more on a newer head: the next save renames again, from what that holds.
     await this.#tracked(
-      this.#commitOwn({ texts: { frontmatter: frontmatter ?? '', body } }, { retry: false }),
+      this.#commitOwn(
+        { texts: { frontmatter: frontmatter ?? '', body } },
+        { retry: false, on: saved },
+      ),
     );
   }
 
@@ -4204,11 +4254,14 @@ export class LiveParticipant {
     // shows as saved is worked out again now it is pending.
     this.#update();
     try {
-      for (const [client, ranges] of decodeUpdate(update).deletes) {
+      const decoded = decodeUpdate(update);
+      for (const [client, ranges] of decoded.deletes) {
         const list = this.#ownDeletes.get(client) ?? [];
         list.push(...ranges);
         this.#ownDeletes.set(client, list);
       }
+      // The person's own typing counts from now, before it comes back from the server.
+      this.#typedBy(this.#me.senderId, decoded);
     } catch {
       // Yjs's own output decodes; one that doesn't is refused when sealed.
     }
