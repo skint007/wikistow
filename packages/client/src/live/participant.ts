@@ -742,6 +742,12 @@ export class LiveParticipant {
   #publication: Promise<void> | null = null;
   #publicationAsked = 0;
   #publicationAt = 0;
+  // Each publication learned counts one, and those the latest one's draft
+  // named, for a save that was under way as it was learned.
+  #publishedSeq = 0;
+  #publishedWith = new Set<IdentityId>();
+  // The document as this app joined: typing it held then never went through `#typed`.
+  readonly #startState: LiveState;
 
   // Stored messages: the last position seen, those held, and the highest
   // position up to which every stored message has been taken.
@@ -862,6 +868,7 @@ export class LiveParticipant {
     this.#joins = opening.joins;
     this.document = opening.document;
     this.#startUpdate = Y.encodeStateAsUpdate(opening.document.doc);
+    this.#startState = opening.document.state();
     this.#clientId = opening.document.clientId;
     this.sessionId = opening.opened.record.subjectId;
     this.#transport = liveTransport(ports.ctx, this.sessionId, ports.live);
@@ -1270,8 +1277,12 @@ export class LiveParticipant {
       // What this app typed up to the press goes out before its Saved notice names the draft.
       await this.flush();
       await this.#knowPublished();
+      if (this.#status.state.kind !== 'live' || this.#stopSending) {
+        throw new LivePublishStopped('left');
+      }
       const revisionId = newId(RevisionId);
       const people = this.#with(head);
+      const seenSeq = this.#publishedSeq;
       const table = head.payload.extensions[LINKS_NAMESPACE];
       const onHead = withoutLinkTable(pressed.payload);
       const payload =
@@ -1307,7 +1318,7 @@ export class LiveParticipant {
         payload: result.payload,
         state: pressed.state,
         compared,
-        with: [...people],
+        with: this.#since(seenSeq, people),
         openedAt: Date.now(),
       });
       if (this.#head === headId) this.#head = result.revisionId;
@@ -1403,6 +1414,7 @@ export class LiveParticipant {
     });
     const covers = this.#covers;
     const people = this.#with(head, ctx.identity.public.id);
+    const seenSeq = this.#publishedSeq;
     const revisionId = newId(RevisionId);
     const base = Y.encodeStateAsUpdate(this.document.doc);
     // Made afresh each time the write asks, as it may again with fresh keys.
@@ -1476,7 +1488,7 @@ export class LiveParticipant {
         payload: result.payload,
         state: done.copy.state(),
         compared: samePayload(done.written, result.payload),
-        with: people,
+        with: this.#since(seenSeq, people, ctx.identity.public.id),
         openedAt: Date.now(),
       });
       if (this.#head === headId) this.#head = result.revisionId;
@@ -1525,7 +1537,10 @@ export class LiveParticipant {
     return work;
   }
 
-  async #commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
+  async #commitOwn(
+    change: ((document: LiveDocument) => void) | DocumentChange,
+    { retry = true }: { retry?: boolean } = {},
+  ): Promise<boolean> {
     // Text given whole is made a change of the text as it is now, anchored
     // in it, so whatever others type meanwhile, around it, stays.
     const make: Make =
@@ -1544,7 +1559,7 @@ export class LiveParticipant {
     this.#saving = mine;
     let done = false;
     try {
-      done = await this.#commitCopy(make);
+      done = await this.#commitCopy(make, retry);
       return done;
     } finally {
       if (this.#saving === mine) this.#saving = null;
@@ -1554,8 +1569,9 @@ export class LiveParticipant {
     }
   }
 
-  // The copy's change, saved on the head; if another app saved first, on the new head once more.
-  async #commitCopy(make: Make): Promise<boolean> {
+  // The copy's change, saved on the head; if another app saved first, on
+  // the new head once more, when it may be `retry`d.
+  async #commitCopy(make: Make, retry: boolean): Promise<boolean> {
     const further = newId(JoinId);
     const ctx = this.#ports.ctx;
     const clientId = liveClientId({
@@ -1579,19 +1595,17 @@ export class LiveParticipant {
       if (made) void this.#transport.leave(further).catch(() => {});
       return false;
     };
-    for (let tries = 0; ; tries++) {
-      // On the head, a session draft this app holds, with nothing of its own
-      // unsent; after a `stale-head`, given a few seconds to catch up with it.
-      let headId: RevisionId | null = null;
-      let head: SessionDraft | undefined;
-      for (let waits = 0; waits < (tries === 0 ? 1 : 10); waits++) {
-        if (waits > 0) await sleep(300, this.#abort.signal);
-        if (!this.#keyed()) return giveUp();
-        await this.#knowPublished();
+    // On the head, a session draft this app holds, with nothing of its own
+    // unsent; after a `stale-head`, given a few seconds to catch up with it.
+    const onHead = async (waits: number) => {
+      await this.#knowPublished();
+      for (let waited = 0; waited < waits; waited++) {
+        if (waited > 0) await sleep(300, this.#abort.signal);
+        if (!this.#keyed()) return null;
         await this.flush();
         await this.#ensureHead();
-        headId = this.#head;
-        head = headId ? this.#drafts.get(headId) : undefined;
+        const headId = this.#head;
+        const head = headId ? this.#drafts.get(headId) : undefined;
         const ready =
           this.#keyed() &&
           this.#pending.length === 0 &&
@@ -1600,10 +1614,16 @@ export class LiveParticipant {
           !this.#placing &&
           head !== undefined &&
           holdsState(this.document.state(), head.state);
-        if (ready) break;
-        head = undefined;
+        if (headId && head && ready) return { headId, head };
       }
-      if (!headId || !head) return giveUp();
+      return null;
+    };
+    for (let tries = 0; ; tries++) {
+      // Its further join made already, kept present meanwhile.
+      const found =
+        tries === 0 ? await onHead(1) : await this.#whileAlive(further, () => onHead(10));
+      if (!found) return giveUp();
+      const { headId, head } = found;
       // Made afresh each try, under the same client: nothing of an earlier try went out.
       const copy = new LiveDocument(clientId);
       if (copy.apply(Y.encodeStateAsUpdate(this.document.doc), 'copy').length > 0) return giveUp();
@@ -1623,6 +1643,7 @@ export class LiveParticipant {
       const stateBytes = copy.stateBytes();
       const savedState = copy.state();
       const people = this.#with(head);
+      const seenSeq = this.#publishedSeq;
       const payload = this.#payload(head.payload, copy);
       try {
         // The further join, made before the save, belonging to this app's join.
@@ -1646,7 +1667,7 @@ export class LiveParticipant {
         );
       } catch (error) {
         // Another app saved first (ADR 0015 decision 5): once more, on the new head.
-        if (tries === 0 && error instanceof ApiError && error.code === 'stale-head') {
+        if (retry && tries === 0 && error instanceof ApiError && error.code === 'stale-head') {
           const detail = error.detail as { draftHead?: unknown } | undefined;
           const parsed = RevisionId.safeParse(detail?.draftHead);
           if (parsed.success) this.#setHead(parsed.data);
@@ -1668,7 +1689,7 @@ export class LiveParticipant {
           payload: result.payload,
           state: savedState,
           compared: samePayload(payload, result.payload),
-          with: people,
+          with: this.#since(seenSeq, people),
           openedAt: Date.now(),
         });
         if (this.#head === headId) this.#head = result.revisionId;
@@ -1900,6 +1921,7 @@ export class LiveParticipant {
       }
       const revisionId = newId(RevisionId);
       const people = this.#with(head);
+      const seenSeq = this.#publishedSeq;
       try {
         const result = await this.#ports.saveDraft({
           basedOn: headId,
@@ -1917,7 +1939,7 @@ export class LiveParticipant {
           payload: result.payload,
           state,
           compared: samePayload(payload, result.payload),
-          with: people,
+          with: this.#since(seenSeq, people),
           openedAt: Date.now(),
         });
         this.#head = result.revisionId;
@@ -3225,6 +3247,7 @@ export class LiveParticipant {
     // Nothing of the session's since the base, and theirs is what the document then writes.
     const unsaved = !sameState(before, base.state) || !samePayload(written, draft.payload);
     const people = this.#with(base, draft.authorId);
+    const seenSeq = this.#publishedSeq;
     const stateBytes = copy.stateBytes();
     const copyState = copy.state();
     const seal = (seq: number, kind: 'update' | 'saved', clock: number, content: Uint8Array) =>
@@ -3297,7 +3320,7 @@ export class LiveParticipant {
         payload: saved?.payload ?? draft.payload,
         state: copyState,
         compared: saved ? samePayload(written, saved.payload) : true,
-        with: people,
+        with: this.#since(seenSeq, people, draft.authorId),
         openedAt: Date.now(),
         ...(!saved && { foldedBy: key(this.#me) }),
       });
@@ -3753,20 +3776,32 @@ export class LiveParticipant {
    * and those whose typing its state holds all of count no longer, so
    * without it everyone typed still counts. Drafts saved on it before this
    * app knew carried its `with`: of those it names, only people whose typing
-   * the session took since stay.
+   * the session took since stay, when this app took all of that typing
+   * itself, having joined before the publication.
    */
   #published(from: RevisionId, published: Pick<SessionDraft, 'state' | 'with'> | null): void {
     this.#publishedFrom = from;
+    this.#publishedSeq++;
+    this.#publishedWith = new Set();
     if (!published) return;
     for (const [person, changed] of this.#typed) {
       if (holdsState(published.state, changed)) this.#typed.delete(person);
     }
-    const before = new Set(published.with);
-    if (before.size === 0) return;
+    if (!holdsState(published.state, this.#startState)) return;
+    this.#publishedWith = new Set(published.with);
     for (const draft of this.#drafts.values()) {
       if (draft.revisionId === from || !this.#descends(draft.revisionId, from)) continue;
-      draft.with = draft.with.filter((id) => !before.has(id) || this.#typed.has(id));
+      draft.with = this.#since(-1, draft.with);
     }
+  }
+
+  // Who a draft saved with `people` names, as this app keeps it: when a
+  // publication was learned since `seq`, of those its draft named only
+  // people who typed since, and `keep`.
+  #since(seq: number, people: readonly IdentityId[], ...keep: IdentityId[]): IdentityId[] {
+    if (seq === this.#publishedSeq) return [...people];
+    const before = this.#publishedWith;
+    return people.filter((id) => !before.has(id) || this.#typed.has(id) || keep.includes(id));
   }
 
   // Whether the draft `revision` was saved on `ancestor`, or on a draft that was, by signed `basedOn`.
@@ -3912,6 +3947,7 @@ export class LiveParticipant {
     const covers = this.#covers;
     const revisionId = newId(RevisionId);
     const people = this.#with(head);
+    const seenSeq = this.#publishedSeq;
     let payload: PagePayload;
     try {
       payload = this.#payload(head.payload);
@@ -3938,7 +3974,7 @@ export class LiveParticipant {
         payload: result.payload,
         state: savedState,
         compared: samePayload(payload, result.payload),
-        with: [...people],
+        with: this.#since(seenSeq, people),
         openedAt: Date.now(),
       });
       if (this.#head === headId) this.#head = result.revisionId;
@@ -4025,7 +4061,10 @@ export class LiveParticipant {
     const was = splitFrontmatter(draft.payload.markdown);
     // The document's parts as the draft splits them: only a change within each.
     if ((was.frontmatter ?? '') !== now.frontmatter || was.body !== now.body) return;
-    await this.commitOwn({ texts: { frontmatter: frontmatter ?? '', body } });
+    // Never once more on a newer head: the next save renames again, from what that holds.
+    await this.#tracked(
+      this.#commitOwn({ texts: { frontmatter: frontmatter ?? '', body } }, { retry: false }),
+    );
   }
 
   // The payload a save writes from the document, with the head's link table.
