@@ -310,6 +310,8 @@ const PUBLISH_HOLD_MS = 10_000;
 const HOLD_EVERY_MS = 60_000;
 // How often the saver looks at the page's latest publication, for one made outside the session.
 const PUBLICATION_MS = 60_000;
+// How long a look may take before the next may be asked.
+const LOOKUP_MS = 15_000;
 // How long a save waits for such a look.
 const PUBLICATION_WAIT_MS = 5_000;
 // A base's own client: one no join derives (53 bits, all set), and which never writes.
@@ -341,6 +343,9 @@ type Held = {
 };
 
 type Outgoing = { message: LiveMessage; covers?: number };
+
+// How much of the text on each side of a change tells whether it went in already.
+const CONTEXT = 16;
 
 /** A change made in a copy of the document; `again` on a newer head. Whether it was made. */
 type Make = (document: LiveDocument, again: boolean) => boolean;
@@ -564,6 +569,7 @@ async function newcomerFrom(
       if (!started.has(key(first))) joins.startFrom(first);
       const read = readSnapshot(later.content);
       if (read.kind === 'newer-format') return { kind: 'update-app' };
+      if (readSnapshot(first.content).kind === 'newer-format') return { kind: 'update-app' };
       const draft = await ports.openDraft(read.revisionId);
       // A draft of the session: signed by a person with a join it has
       // taken a message from, under the record's key material.
@@ -1765,8 +1771,13 @@ export class LiveParticipant {
           span.remove === 0
             ? from
             : Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
-        const was = text.toJSON().slice(span.from, span.from + span.remove);
-        return { name, span, from, to, was };
+        const now = text.toJSON();
+        const was = now.slice(span.from, span.from + span.remove);
+        // What the change makes around its place, with a little of the text on each side.
+        const left = now.slice(Math.max(0, span.from - CONTEXT), span.from) + span.insert;
+        const right =
+          span.insert + now.slice(span.from + span.remove, span.from + span.remove + CONTEXT);
+        return { name, span, from, to, was, left, right };
       });
     });
     // Each entry as it is now: one someone else set since stays theirs.
@@ -1784,18 +1795,16 @@ export class LiveParticipant {
         return { name, span, start: start?.index ?? 0, end: end?.index ?? 0 };
       });
       // Never over text that changed since: made again, also never where a place is lost.
-      // Made again, an insertion already beside its place went in from someone else.
-      const twice =
-        again &&
-        placed.some(({ name, span, start, end }) => {
-          const now = document.text(name).toJSON();
-          const { insert } = span;
-          return (
-            insert !== '' &&
-            (now.slice(end, end + insert.length) === insert ||
-              now.slice(start - insert.length, start) === insert)
-          );
-        });
+      // An insertion whose place already reads as the change makes it went in from someone else.
+      const twice = placed.some(({ name, span, start, end }, at) => {
+        const anchored = spans[at];
+        if (!anchored || span.insert === '' || whole.has(name)) return false;
+        const now = document.text(name).toJSON();
+        return (
+          now.slice(Math.max(0, start - anchored.left.length), start) === anchored.left ||
+          now.slice(end, end + anchored.right.length) === anchored.right
+        );
+      });
       if (twice) return false;
       const moved = placed.some(({ name, start, end }, at) =>
         whole.has(name) ? again : document.text(name).toJSON().slice(start, end) !== spans[at]?.was,
@@ -3154,11 +3163,18 @@ export class LiveParticipant {
       let opened: OpenedDraft;
       try {
         opened = this.#outsiderDrafts.get(at) ?? (await this.#ports.openDraft(at));
-      } catch {
+      } catch (error) {
+        // A draft of a newer format beneath it: an app newer than this one saved it.
+        if (error instanceof CryptoError && error.code === 'unsupported-format') this.#updateApp();
         return null;
       }
       this.#basedOn.set(at, opened.basedOn);
       if (ofAnotherSession(opened, this.sessionId)) return 'other-session';
+      // A newer app's draft of the session: never walked past as from outside.
+      if (draftLive(opened.payload, at).kind === 'newer-format') {
+        this.#updateApp();
+        return null;
+      }
       const state = sessionState(opened.payload, at, this.sessionId);
       const signer = [...this.#verified].some((join) => join.startsWith(`${opened.authorId} `));
       if (state && signer && !isAgentId(opened.authorId) && sameKeys(opened, this.#opened)) {
@@ -3939,14 +3955,15 @@ export class LiveParticipant {
     const run = (async () => {
       let from: RevisionId | null;
       try {
-        from = (await ports.published?.()) ?? null;
+        // One that never answers lets the next be asked.
+        from = (await withTimeout(ports.published?.() ?? Promise.resolve(null), LOOKUP_MS)) ?? null;
       } catch {
         return;
       }
       if (!from || asked !== this.#publicationAsked || from === this.#publishedFrom) return;
       let published: Pick<SessionDraft, 'state' | 'with'> | null;
       try {
-        published = await this.#publishedAs(from);
+        published = await withTimeout(this.#publishedAs(from), LOOKUP_MS);
       } catch {
         // Asked again later: a passing failure never stands for the publication.
         return;
@@ -3958,7 +3975,12 @@ export class LiveParticipant {
       this.#publication = null;
       if (!this.#publicationAgain) return;
       this.#publicationAgain = false;
-      void sleep(1_000, this.#abort.signal).then(() => this.#learnPublished());
+      // Saves wait for that one too, from now.
+      const next: Promise<void> = sleep(1_000, this.#abort.signal).then(() => {
+        if (this.#publication === next) this.#publication = null;
+        return this.#learnPublished();
+      });
+      this.#publication = next;
     });
     this.#publication = tracked;
     return tracked;
