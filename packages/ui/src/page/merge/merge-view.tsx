@@ -25,14 +25,18 @@ import {
   overlapPlace,
   summaryOf,
   theirsWords,
+  yoursWords,
   type Choice,
   type Choices,
   type Theirs,
+  type Yours,
 } from './merge-model';
 
 type Merge = pageMerge.Merge;
 type Overlap = pageMerge.Overlap;
 type Review = pageMerge.Review;
+
+const YOU: Yours = { kind: 'you' };
 
 const MONO = 'font-mono text-[13px] leading-relaxed whitespace-pre-wrap wrap-anywhere';
 
@@ -59,10 +63,12 @@ export type ReviewMode = {
  * what saving changes in theirs. Nothing is saved before **Save merged
  * draft**, which hands the payload to `onSave`; **Cancel** leaves
  * everything as it was. With `review`, Review of a live session's note.
+ * `yours` names the side merged in, by default the person's own.
  */
 export function MergeView({
   merge: merged,
   theirs,
+  yours = YOU,
   pictures,
   onSave,
   onCancel,
@@ -70,12 +76,14 @@ export function MergeView({
 }: {
   merge: Merge;
   theirs: Theirs;
+  yours?: Yours;
   pictures: MergePictures;
   onSave: (payload: PagePayload) => void;
   onCancel: () => void;
   review?: ReviewMode;
 }) {
   const words = theirsWords(theirs);
+  const mine = yoursWords(yours);
   // With nothing to choose, straight to the review.
   const [state, setState] = useState(() => {
     const resolved = merged.overlaps.length === 0 ? pageMerge.resolve(merged, {}) : null;
@@ -121,7 +129,9 @@ export function MergeView({
           tabIndex={-1}
           className="text-xl font-extrabold outline-none"
         >
-          {reviewMode ? `Review ${words.whose} changes` : `Merge your changes with ${words.with}`}
+          {reviewMode
+            ? `Review ${words.whose} changes`
+            : `Merge ${mine.changes} with ${words.with}`}
         </h2>
         <ol aria-label="Steps" className={cn('flex gap-2 text-sm', reviewMode && 'hidden')}>
           {(['choose', 'review'] as const).map((name, index) => (
@@ -141,7 +151,7 @@ export function MergeView({
       {review ? (
         <ReviewStep
           review={review.review}
-          summary={merge.overlaps.length === 0 ? summaryOf(merge, theirs) : null}
+          summary={merge.overlaps.length === 0 ? summaryOf(merge, theirs, yours) : null}
           draft={words.draft}
           onBack={merge.overlaps.length > 0 ? () => setState({ ...state, review: null }) : null}
           onCancel={onCancel}
@@ -154,7 +164,7 @@ export function MergeView({
               ? 'Some changes didn’t fit where they went. Choose what each should say.'
               : reviewMode
                 ? `These changes overlapped yours, and the live page kept yours. Choose what each part should say.`
-                : summaryOf(merge, theirs)}
+                : summaryOf(merge, theirs, yours)}
           </p>
           <ol className="grid gap-3">
             {merge.overlaps.map((overlap, index) => (
@@ -163,6 +173,7 @@ export function MergeView({
                 overlap={overlap}
                 number={`${index + 1} of ${merge.overlaps.length}`}
                 theirs={theirs}
+                yours={yours}
                 pictures={pictures}
                 live={reviewMode !== undefined}
                 choice={choices[overlap.id]}
@@ -194,6 +205,7 @@ function OverlapCard({
   overlap,
   number,
   theirs,
+  yours,
   pictures,
   live = false,
   choice,
@@ -202,6 +214,7 @@ function OverlapCard({
   overlap: Overlap;
   number: string;
   theirs: Theirs;
+  yours: Yours;
   pictures: MergePictures;
   /** Ours is the live page, as Review shows it. */
   live?: boolean;
@@ -209,6 +222,7 @@ function OverlapCard({
   onChoose: (choice: Choice) => void;
 }) {
   const words = theirsWords(theirs);
+  const mine = yoursWords(yours);
   // What was typed in Edit…, kept while another choice is tried.
   const [edited, setEdited] = useState<string | null>(null);
   const place = overlapPlace(overlap);
@@ -235,7 +249,7 @@ function OverlapCard({
         <p className={cn(MONO, 'text-muted-foreground')}>{overlap.before}</p>
       )}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Side title={live ? 'The live page' : 'Yours'}>
+        <Side title={live ? 'The live page' : mine.side}>
           <Value overlap={overlap} side="yours" pictures={pictures} />
         </Side>
         <Side title={words.side}>
@@ -258,7 +272,7 @@ function OverlapCard({
         />
       )}
       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        {button('yours', live ? 'Keep the live page’s' : 'Use yours', () => 'yours')}
+        {button('yours', live ? 'Keep the live page’s' : mine.use, () => 'yours')}
         {button('theirs', words.use, () => 'theirs')}
         {button('both', 'Use both', () => 'both')}
         {button('edit', editing ? 'Edited' : 'Edit…', () => ({ edit: edited ?? draft }))}

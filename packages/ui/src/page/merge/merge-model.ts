@@ -11,13 +11,25 @@ export type Choices = Readonly<Record<string, Choice>>;
 /**
  * Whose the other version is: a person by name, the person's own (saved in
  * another tab, on another device, or as a chat edit they approved), this
- * device's other window, or one the app can't tell.
+ * device's other window, a live session's draft (ADR 0015, **Naming the
+ * other side**), or one the app can't tell.
  */
 export type Theirs =
   | { kind: 'person'; name: string }
   | { kind: 'self' }
   | { kind: 'window' }
+  | { kind: 'live' }
   | { kind: 'unknown' };
+
+/** Whose the side being merged in is: the person's own, or a chat assistant's edit they approved. */
+export type Yours = { kind: 'you' } | { kind: 'assistant'; name: string };
+
+/** How the merge view names yours, in each place it does. */
+export function yoursWords(yours: Yours) {
+  if (yours.kind === 'you') return { changes: 'your changes', side: 'Yours', use: 'Use yours' };
+  const whose = `${yours.name}’s`;
+  return { changes: `${whose} changes`, side: whose, use: `Use ${whose}` };
+}
 
 /** How the merge view names theirs, in each place it does. */
 export function theirsWords(theirs: Theirs) {
@@ -33,6 +45,14 @@ export function theirsWords(theirs: Theirs) {
         side: 'Other version',
         use: 'Use other version',
         draft: 'your other version',
+      };
+    case 'live':
+      return {
+        with: 'the live page',
+        whose: 'the live page’s',
+        side: 'The live page',
+        use: 'Use the live page’s',
+        draft: 'the live page',
       };
     case 'window':
       return {
@@ -56,16 +76,18 @@ export function theirsWords(theirs: Theirs) {
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /** "4 of your changes and 3 of Sam’s combined. You both changed 2 places." */
-export function summaryOf(merge: Merge, theirs: Theirs): string {
+export function summaryOf(merge: Merge, theirs: Theirs, mine: Yours = { kind: 'you' }): string {
   const { yours, theirs: other } = merge.combined;
   const { whose } = theirsWords(theirs);
+  const { changes } = yoursWords(mine);
   const parts: string[] = [];
   if (yours > 0 && other > 0)
-    parts.push(`${yours} of your changes and ${other} of ${whose} combined.`);
-  else if (yours > 0) parts.push(`${yours} of your changes combined.`);
+    parts.push(`${yours} of ${changes} and ${other} of ${whose} combined.`);
+  else if (yours > 0) parts.push(`${yours} of ${changes} combined.`);
   else if (other > 0) parts.push(`${other} of ${whose} changes combined.`);
   const places = merge.overlaps.length;
-  if (places > 0) parts.push(`You both changed ${plural(places, 'place', 'places')}.`);
+  const both = mine.kind === 'you' ? 'You both' : 'Both';
+  if (places > 0) parts.push(`${both} changed ${plural(places, 'place', 'places')}.`);
   return parts.join(' ');
 }
 

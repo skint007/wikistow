@@ -2,7 +2,12 @@
 // saved from outside while people edit is folded into the session by its
 // saver, through the server's fold grant, with the session's text kept
 // where both changed one part and a note for Review.
-import { agentTools, pageOperations as pages } from '@wikistow/client';
+import {
+  agentTools,
+  moveOperations as moves,
+  pageMerge,
+  pageOperations as pages,
+} from '@wikistow/client';
 import {
   changeText,
   joinLive,
@@ -10,7 +15,7 @@ import {
   sessionState,
   type LiveParticipant,
 } from '@wikistow/client/live';
-import type { PageId, SpaceId } from '@wikistow/contracts';
+import { pageRoutes, type PageId, type SpaceId } from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { listenForTreeChanges } from '@wikistow/server';
 import { personWithVault } from './support/content.ts';
@@ -402,5 +407,160 @@ describe('an approved chat edit', () => {
     const applied = await agentTools.applyProposal(owner.ctx, edit);
     expect(applied.status).toBe('stale');
     expect((await draftOf(owner, page)).payload.markdown).toBe('One, typed meanwhile.\n');
+  });
+
+  /** The person's choice at every overlap, as Merge… settles it. */
+  const settle = (opened: agentTools.ProposalMerge, choice: 'yours' | 'theirs') => {
+    const choices = Object.fromEntries(opened.merge.overlaps.map((o) => [o.id, choice]));
+    const resolved = pageMerge.resolve(opened.merge, choices);
+    if (!resolved.ok) throw new Error('not settled');
+    return resolved.payload;
+  };
+
+  it('opens Merge… where it overlaps, and saves what the person settled', async () => {
+    const { owner, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n\nTwo.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n\nTwo.\n');
+    const typed = await saveOutside(owner, page, () => 'One, typed meanwhile.\n\nTwo, too.\n');
+    const asked: agentTools.ProposalMerge[] = [];
+    const applied = await agentTools.applyProposal(owner.ctx, edit, {
+      merge: async (opened) => {
+        asked.push(opened);
+        return settle(opened, 'yours');
+      },
+    });
+    expect(applied.status).toBe('done');
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.head).toBe(typed);
+    expect(asked[0]?.theirs).toEqual({ authorId: owner.ctx.identity.public.id, live: false });
+    expect(asked[0]?.merge.overlaps.map((o) => [o.part, 'yours' in o && o.yours])).toEqual([
+      ['body', 'One, edited.\n'],
+    ]);
+    const head = await draftOf(owner, page);
+    expect(head.payload.markdown).toBe('One, edited.\n\nTwo, too.\n');
+    expect((await pages.loadPage(owner.ctx, page.pageId)).heads.draftHead).not.toBe(typed);
+  });
+
+  it('writes nothing when the person cancels Merge…', async () => {
+    const { owner, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n');
+    const typed = await saveOutside(owner, page, () => 'One, typed meanwhile.\n');
+    const applied = await agentTools.applyProposal(owner.ctx, edit, { merge: async () => null });
+    expect(applied.status).toBe('cancelled');
+    expect((await draftOf(owner, page)).revisionId).toBe(typed);
+  });
+
+  it('keeps the choice made when the head moves on while Merge… is open', async () => {
+    const { owner, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n\nTwo.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n\nTwo.\n');
+    await saveOutside(owner, page, (now) => now.replace('One.', 'One, typed meanwhile.'));
+    let asked = 0;
+    const applied = await agentTools.applyProposal(owner.ctx, edit, {
+      merge: async (opened) => {
+        asked++;
+        // Someone saves elsewhere in the page before the person is done.
+        await saveOutside(owner, page, (now) => now.replace('Two.', 'Two, typed later.'));
+        return settle(opened, 'yours');
+      },
+    });
+    expect(applied.status).toBe('done');
+    expect(asked).toBe(1);
+    expect((await draftOf(owner, page)).payload.markdown).toBe(
+      'One, edited.\n\nTwo, typed later.\n',
+    );
+  });
+
+  it('opens Merge… again only for a new overlap on the newer head', async () => {
+    const { owner, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n\nTwo.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n\nTwo, edited.\n');
+    await saveOutside(owner, page, (now) => now.replace('One.', 'One, typed meanwhile.'));
+    const asked: string[][] = [];
+    const applied = await agentTools.applyProposal(owner.ctx, edit, {
+      merge: async (opened) => {
+        asked.push(opened.merge.overlaps.map((o) => (o.part === 'body' ? o.yours : o.part)));
+        if (asked.length === 1) {
+          await saveOutside(owner, page, (now) => now.replace('Two.', 'Two, typed later.'));
+          return settle(opened, 'yours');
+        }
+        return settle(opened, 'theirs');
+      },
+    });
+    expect(applied.status).toBe('done');
+    // Only the second block the second time: the first was settled already.
+    expect(asked).toEqual([['One, edited.\n'], ['Two, edited.\n']]);
+    expect((await draftOf(owner, page)).payload.markdown).toBe(
+      'One, edited.\n\nTwo, typed later.\n',
+    );
+  });
+
+  it('is refused when the page leaves its share while Merge… is open', async () => {
+    const { owner, lib, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n');
+    const typed = await saveOutside(owner, page, () => 'One, typed meanwhile.\n');
+    const applied = await agentTools.applyProposal(owner.ctx, edit, {
+      merge: async (opened) => {
+        // Moved out of the shared folder: other people read it there.
+        const preview = await moves.previewMove(owner.ctx, {
+          spaceId: page.spaceId,
+          nodeId: page.pageId,
+          parentId: lib.above,
+        });
+        await moves.moveNode(owner.ctx, { preview });
+        return settle(opened, 'yours');
+      },
+    });
+    expect(applied.status).toBe('stale');
+    expect((await draftOf(owner, page)).revisionId).toBe(typed);
+  });
+
+  it('is refused when the page leaves its share just before it is saved', async () => {
+    const { owner, lib, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n');
+    const before = (await draftOf(owner, page)).revisionId;
+    // The page moves out of the shared folder after the checks, as the draft it revises opens.
+    const send = owner.ctx.api.call.bind(owner.ctx.api);
+    let moved = false;
+    const call = (async (route: unknown, input: unknown) => {
+      if (route === pageRoutes.fetchRevisions && !moved) {
+        moved = true;
+        const preview = await moves.previewMove(owner.ctx, {
+          spaceId: page.spaceId,
+          nodeId: page.pageId,
+          parentId: lib.above,
+        });
+        await moves.moveNode(owner.ctx, { preview });
+      }
+      return (send as (r: unknown, i: unknown) => Promise<unknown>)(route, input);
+    }) as typeof owner.ctx.api.call;
+    const ctx = { ...owner.ctx, api: { ...owner.ctx.api, call } };
+    const applied = await agentTools.applyProposal(ctx, edit);
+    expect(moved).toBe(true);
+    expect(applied.status).toBe('stale');
+    expect((await draftOf(owner, page)).revisionId).toBe(before);
+  });
+
+  it('names a live session’s draft as the live page, and the session folds in the merge', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const mine = await join(owner, page);
+    setBody(mine, 'One.\n\nTwo.\n');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    const edit = await proposal(editor, page, () => 'One, edited.\n\nTwo.\n');
+    setBody(mine, 'One, typed live.\n\nTwo.\n');
+    await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    const asked: agentTools.ProposalMerge[] = [];
+    const applied = await agentTools.applyProposal(editor.ctx, edit, {
+      merge: async (opened) => {
+        asked.push(opened);
+        return settle(opened, 'yours');
+      },
+    });
+    expect(applied.status).toBe('done');
+    expect(asked.map((opened) => opened.theirs.live)).toEqual([true]);
+    await expect.poll(() => body(mine), { timeout: 30_000 }).toBe('One, edited.\n\nTwo.\n');
   });
 });

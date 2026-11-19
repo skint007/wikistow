@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Visual editor: an image whose alt needs `==` escaped no longer makes the other `==` in its table row, list or paragraph escaped too, and a U+E003 in an image's alt, title or address stays as written rather than turning into `\=`. (#657)
 - Text in a colour just inside a link is underlined in its colour, in the reader and on public pages, as the visual editor shows it, rather than in the link's colour. The highlight and text colour marks refuse a colour the theme doesn't have. (#655)
+- The assistant's approved edit that overlaps what changed on the page since it was proposed, as in a live session, opens **Merge…** over the chat, with the assistant's edit on one side and the live page on the other, rather than being refused as stale. A choice made there is kept if the page moves on again before it saves, and Cancel leaves the proposal waiting. An approved edit to a page that left its share since is refused, even just before it saves. (#660)
 - Live editing: a keystroke typed just as a session ends stays on screen and is saved, in split mode too. The source editor's work for each keystroke is now that of the change, not of the whole page, and others' carets are found in the text only when they move or a change is at them. Someone who typed nothing in a session is no longer asked before leaving while others type. (#662)
 
 #### Development
