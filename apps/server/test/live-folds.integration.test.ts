@@ -2,7 +2,12 @@
 // saved from outside while people edit is folded into the session by its
 // saver, through the server's fold grant, with the session's text kept
 // where both changed one part and a note for Review.
-import { agentTools, pageMerge, pageOperations as pages } from '@wikistow/client';
+import {
+  agentTools,
+  moveOperations as moves,
+  pageMerge,
+  pageOperations as pages,
+} from '@wikistow/client';
 import {
   changeText,
   joinLive,
@@ -489,6 +494,27 @@ describe('an approved chat edit', () => {
     expect((await draftOf(owner, page)).payload.markdown).toBe(
       'One, edited.\n\nTwo, typed later.\n',
     );
+  });
+
+  it('is refused when the page leaves its share while Merge… is open', async () => {
+    const { owner, lib, page } = await sharedPage();
+    await saveOutside(owner, page, () => 'One.\n');
+    const edit = await proposal(owner, page, () => 'One, edited.\n');
+    const typed = await saveOutside(owner, page, () => 'One, typed meanwhile.\n');
+    const applied = await agentTools.applyProposal(owner.ctx, edit, {
+      merge: async (opened) => {
+        // Moved out of the shared folder: other people read it there.
+        const preview = await moves.previewMove(owner.ctx, {
+          spaceId: page.spaceId,
+          nodeId: page.pageId,
+          parentId: lib.above,
+        });
+        await moves.moveNode(owner.ctx, { preview });
+        return settle(opened, 'yours');
+      },
+    });
+    expect(applied.status).toBe('stale');
+    expect((await draftOf(owner, page)).revisionId).toBe(typed);
   });
 
   it('names a live session’s draft as the live page, and the session folds in the merge', async () => {

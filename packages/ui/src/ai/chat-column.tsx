@@ -5,6 +5,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { chatStore, useChatStore } from './chat';
+import { ChatMerges } from './chat-merge';
 import { ChatPanel } from './chat-panel';
 import { aiStatusQuery } from './session';
 import { useNeedsConnection } from '../shell/availability';
@@ -29,8 +30,20 @@ export function useChatColumn(): boolean {
   return useWide() && open;
 }
 
-/** The chat while it's open: a column beside the page on wide screens, else a sheet over it. */
+/**
+ * The chat while it's open: a column beside the page on wide screens, else
+ * a sheet over it. Its Merge… stays put while the chat closes or moves.
+ */
 export function ChatColumn() {
+  return (
+    <>
+      <ChatMerges />
+      <ChatShown />
+    </>
+  );
+}
+
+function ChatShown() {
   const { open } = useChatStore();
   const wide = useWide();
   if (!open) return null;

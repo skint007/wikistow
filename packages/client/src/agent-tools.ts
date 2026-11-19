@@ -544,11 +544,20 @@ export async function applyProposal(
         // While people edit the page live its head moves every few seconds: the
         // edit is merged onto the head from the draft it was made on, and onto
         // each newer head from the last, as the person settled it, so Merge…
-        // opens again only for a new overlap (ADR 0015 decision 8).
-        for (let tries = 0; tries < 5 && head; tries++) {
+        // opens again only for a new overlap (ADR 0015 decision 8). Five tries
+        // each time, counted afresh once the person settles one: they can cancel.
+        for (let tries = 0, asked = 0; tries < 5 && asked < MAX_ASKED && head; tries++) {
           const onto = head === from ? null : await mergedOnto(ctx, page, from, edit, head, merge);
           if (onto === 'changed') return CHANGED;
           if (onto === 'cancelled') return { status: 'cancelled' };
+          if (onto?.asked) {
+            // The page may have moved to another share while Merge… was open.
+            const now = await pages.loadPage(ctx, pageId);
+            const moved = await placeChanged(ctx, { ...proposal, parentId: now.parentId });
+            if (moved) return moved;
+            tries = 0;
+            asked++;
+          }
           try {
             await pages.saveDraft(ctx, {
               page,
@@ -600,10 +609,11 @@ async function mergedOnto(
   edit: PagePayload,
   head: RevisionId,
   ask: ApplyOptions['merge'],
-): Promise<{ payload: PagePayload } | 'changed' | 'cancelled'> {
+): Promise<{ payload: PagePayload; asked?: true } | 'changed' | 'cancelled'> {
   let at: RevisionId | null = head;
   let theirs: { payload: PagePayload; authorId: string } | null = null;
-  for (let steps = 0; at && at !== from && steps < 64; steps++) {
+  // As far back as a live session saves in a few minutes, the time Merge… may stay open.
+  for (let steps = 0; at && at !== from && steps < 256; steps++) {
     const opened = await pages.openRevisionOf(ctx, page, 'draft', at);
     if (opened.opened.kind !== 'current') return 'changed';
     theirs ??= { payload: opened.opened.payload, authorId: opened.record.authorId };
@@ -638,8 +648,11 @@ async function mergedOnto(
     },
     attachments: [...edit.attachments, ...onto.attachments],
   });
-  return settled ? { payload: settled } : 'cancelled';
+  return settled ? { payload: settled, asked: true } : 'cancelled';
 }
+
+/** How many times **Merge…** opens for one approval before it is proposed again. */
+const MAX_ASKED = 10;
 
 const CHANGED: Applied = {
   status: 'stale',

@@ -24,7 +24,6 @@ import {
   type PageRef,
   type ProposalItem,
 } from './chat';
-import { ChatMerge } from './chat-merge';
 import { toolActivity, toolResults } from './chat-model';
 import { LineDiff, Text } from './line-diff';
 import { aiStatusQuery } from './session';
@@ -146,18 +145,8 @@ type Provider = { host: string; model: string };
 function Conversation({ chat, provider }: { chat: AgentChat; provider: Provider }) {
   const state = useSyncExternalStore(chat.subscribe, chat.state);
   const session = chat.session();
-  // Closing the chat cancels a merge open over it: nothing is saved.
-  useEffect(() => () => chat.settleMerge(null), [chat]);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {state.merging && (
-        <ChatMerge
-          key={state.merging.proposalId}
-          merging={state.merging}
-          agentName={state.agent.name}
-          onSettle={(payload) => chat.settleMerge(payload)}
-        />
-      )}
       <About state={state} provider={provider} />
       {state.phase === 'opening' && (
         <p role="status" className="p-4 text-sm text-muted-foreground">

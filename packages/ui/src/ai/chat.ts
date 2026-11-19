@@ -42,7 +42,12 @@ export type ProposalItem = {
 };
 
 /** An approved edit that overlaps what changed since, open in **Merge…** (ADR 0015 decision 8). */
-export type Merging = { proposalId: number; opened: agentTools.ProposalMerge };
+export type Merging = {
+  proposalId: number;
+  /** Counts each time Merge… opens, as a proposal's may open again for a new overlap. */
+  ask: number;
+  opened: agentTools.ProposalMerge;
+};
 
 /** Something the agent changed, once the person approved it. */
 export type Changed = {
@@ -95,6 +100,9 @@ export class AgentChat {
   #call: string | null = null;
   // Answers the merge open now: the payload the person settled, or null.
   #settle: ((payload: PagePayload | null) => void) | null = null;
+  #asks = 0;
+  // Places on screen that show Merge… (`holdMerges`): with none, it can't open.
+  #mergeHosts = 0;
   readonly #listeners = new Set<() => void>();
   readonly #onChanged: (changed: Changed) => void;
 
@@ -354,9 +362,10 @@ export class AgentChat {
               },
             });
         if (applied.status === 'cancelled') {
-          // Nothing was written: it waits to be approved again, unless the agent went meanwhile.
+          // Nothing was written: it waits to be approved again, unless the agent went
+          // meanwhile. The rest of the batch waits too, as Stop is out of reach behind Merge….
           this.#update(id, { state: this.#state.phase === 'revoked' ? 'dropped' : 'pending' });
-          continue;
+          break;
         }
         if (applied.status === 'revoked' || (applied.status === 'refused' && !this.#live())) {
           this.#update(id, { state: 'pending' });
@@ -390,10 +399,12 @@ export class AgentChat {
 
   // Open Merge… for the approved proposal `id`, until the person saves or cancels it.
   #askMerge(id: number, opened: agentTools.ProposalMerge): Promise<PagePayload | null> {
-    if (this.#stopping || this.#state.phase !== 'ready') return Promise.resolve(null);
+    if (this.#stopping || this.#state.phase !== 'ready' || this.#mergeHosts === 0) {
+      return Promise.resolve(null);
+    }
     this.settleMerge(null);
     this.#update(id, { state: 'merging' });
-    this.#set({ merging: { proposalId: id, opened } });
+    this.#set({ merging: { proposalId: id, ask: ++this.#asks, opened } });
     return new Promise((resolve) => {
       this.#settle = (payload) => {
         this.#settle = null;
@@ -402,6 +413,17 @@ export class AgentChat {
         resolve(payload);
       };
     });
+  }
+
+  /**
+   * A place on screen shows Merge… while this holds; once none does, a merge
+   * open is cancelled, and one asked for then is too.
+   */
+  holdMerges(): () => void {
+    this.#mergeHosts++;
+    return () => {
+      if (--this.#mergeHosts === 0) this.settleMerge(null);
+    };
   }
 
   /** The person saved the merge open now (`payload`), or cancelled it (null): nothing is saved then. */
