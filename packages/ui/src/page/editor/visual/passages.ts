@@ -138,11 +138,14 @@ function positionsOf({ pieces }: OwnText, from: number, to: number) {
   };
 }
 
+/** Whether text is selected in `state`: a wikilink or math chosen as a whole, as by an arrow key onto it, isn't. */
+export const textSelected = ({ selection }: EditorState) =>
+  !selection.empty && !(selection instanceof NodeSelection);
+
 /** What the selection in `state` quotes, or null with no text selected. */
 export function quoteIn(state: EditorState): QuoteAt | null {
+  if (!textSelected(state)) return null;
   const { selection } = state;
-  // A wikilink or math chosen as a whole, as by an arrow key onto it, isn't text selected.
-  if (selection.empty || selection instanceof NodeSelection) return null;
   const own = ownTextOf(state.doc);
   const offsets = offsetsOf(own, selection.from, selection.to);
   return offsets ? quoteAt(own.text, offsets.from, offsets.to) : null;

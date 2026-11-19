@@ -75,10 +75,13 @@ import {
 } from './links';
 import { TOO_LONG_TO_QUOTE } from '../../../comments/passages';
 import { colorAt, setColor, type ColorShown } from './highlight-marks';
-import { quoteIn } from './passages';
+import { quoteIn, textSelected } from './passages';
 import type { Upload } from './plugins';
 
 let bars = 0;
+
+// How long the selection rests before Comment reads what it quotes.
+const READ_MS = 120;
 
 const headingLabel = (level: number) => (level === 0 ? 'Text' : `Heading ${level}`);
 const LEVELS = HEADINGS.map((level) => ({ level, format: heading(level) }));
@@ -107,7 +110,7 @@ type Status = {
   passage: 'text' | 'too-long' | 'none';
 };
 
-function statusOf(state: EditorState, quoting: boolean): Status {
+function statusOf(state: EditorState, passage: Status['passage']): Status {
   const block = state.selection.$from.parent;
   const style =
     block.type.name === 'heading'
@@ -131,8 +134,6 @@ function statusOf(state: EditorState, quoting: boolean): Status {
     highlights: setColor('highlight', 'plain')(state),
     texts: setColor('text', 'red')(state),
   };
-  const quoted = quoting ? quoteIn(state)?.kind : undefined;
-  const passage = quoted === 'quote' ? 'text' : quoted === 'too-long' ? quoted : 'none';
   return {
     style,
     level,
@@ -183,8 +184,11 @@ export class FormatWatch {
   #status: Status | null = null;
   #shown = '';
   // Whether the status says what the selection quotes, for Comment, which
-  // reads the page's whole text: only while the toolbar shows it.
+  // reads the page's whole text: only while the toolbar shows it, and once
+  // the selection rests (`#reading`), not on each update as it's dragged.
   #quoting = false;
+  #passage: Status['passage'] = 'none';
+  #reading: ReturnType<typeof setTimeout> | undefined;
   readonly #listeners = new Set<() => void>();
   // The selection shown while a form of the toolbar's has the focus (`hold`).
   readonly #held = new PluginKey<DecorationSet>();
@@ -196,8 +200,33 @@ export class FormatWatch {
 
   status = () => this.#status;
 
-  #update(state: EditorState | null) {
-    const status = state && statusOf(state, this.#quoting);
+  // A selection counts for Comment while it shows: the focus (`focused`)
+  // is in the editor, or in the toolbar, reached from it. The editor keeps
+  // a selection it's left, as the title or the source beside it takes one.
+  #shows(focused: Element | null) {
+    return (
+      focused !== null &&
+      (this.#view?.dom.contains(focused) || document.getElementById(this.id)?.contains(focused))
+    );
+  }
+
+  #update(state: EditorState | null, focused = document.activeElement) {
+    clearTimeout(this.#reading);
+    if (!state || !this.#quoting || !this.#shows(focused) || !textSelected(state))
+      this.#passage = 'none';
+    else
+      this.#reading = setTimeout(() => {
+        const view = this.#view;
+        if (!view) return;
+        const quoted = quoteIn(view.state)?.kind;
+        this.#passage = quoted === 'quote' ? 'text' : quoted === 'too-long' ? quoted : 'none';
+        this.#show(view.state);
+      }, READ_MS);
+    this.#show(state);
+  }
+
+  #show(state: EditorState | null) {
+    const status = state && statusOf(state, this.#passage);
     const shown = JSON.stringify(status);
     if (shown === this.#shown) return;
     [this.#status, this.#shown] = [status, shown];
@@ -238,9 +267,10 @@ export class FormatWatch {
     return this.#view && linkTargetOf(this.#view.state);
   }
 
-  /** What the selection quotes for a comment now, if it's text it can quote. */
+  /** What the selection quotes for a comment now, if it shows and is text it can quote. */
   quote(): QuoteText | null {
-    const quoted = this.#view && quoteIn(this.#view.state);
+    const view = this.#view;
+    const quoted = view && this.#shows(document.activeElement) ? quoteIn(view.state) : null;
     return quoted?.kind === 'quote' ? quoted.quote : null;
   }
 
@@ -279,6 +309,15 @@ export class FormatWatch {
         view: (view) => {
           this.#view = view;
           this.#update(view.state);
+          // Where the focus goes next, which `focusout` names before it's there.
+          const moved = (event: FocusEvent) =>
+            this.#view === view &&
+            this.#update(
+              view.state,
+              (event.type === 'focusin' ? event.target : event.relatedTarget) as Element | null,
+            );
+          document.addEventListener('focusin', moved);
+          document.addEventListener('focusout', moved);
           return {
             update: (view, previous) => {
               const { doc, selection, storedMarks } = view.state;
@@ -289,7 +328,10 @@ export class FormatWatch {
               if (!same) this.#update(view.state);
             },
             destroy: () => {
+              document.removeEventListener('focusin', moved);
+              document.removeEventListener('focusout', moved);
               if (this.#view !== view) return;
+              clearTimeout(this.#reading);
               this.#view = null;
               this.#update(null);
             },
@@ -760,8 +802,9 @@ const CommentControl = memo(function CommentControl({
       aria-disabled={!applies}
       // The editor keeps the focus and its selection.
       onMouseDown={(event) => event.preventDefault()}
+      // What it quotes is read again as it's pressed, as the status may lag the selection.
       onClick={() => {
-        const quote = applies && watch.quote();
+        const quote = !busy && watch.quote();
         if (!quote) return;
         setBusy(true);
         void onComment(quote).finally(() => setBusy(false));
@@ -888,7 +931,9 @@ export function FormatToolbar({
   }, [watch, commenting]);
   const bar = useRef<HTMLDivElement>(null);
   // The control Tab reaches, the last one focused.
-  const [current, setCurrent] = useState('heading');
+  const [last, setCurrent] = useState('heading');
+  // Comment, gone as the page stops taking comments, leaves the tab stop at the start.
+  const current = last === 'comment' && !onComment ? 'heading' : last;
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // Keys in the heading menu, which is elsewhere in the page, are its own.

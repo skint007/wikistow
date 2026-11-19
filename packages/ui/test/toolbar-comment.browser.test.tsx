@@ -20,37 +20,42 @@ afterEach(() => {
   for (const unmount of unmounts.splice(0)) unmount();
 });
 
+type OnComment = ((quote: QuoteText) => Promise<void>) | null;
+
+/** The editor's element on `initial`, and a way to give it another `onComment`. */
 async function mount(
   initial: string,
-  onComment: ((quote: QuoteText) => Promise<void>) | null,
-): Promise<HTMLElement> {
+  onComment: OnComment,
+): Promise<{ dom: HTMLElement; rerender: (onComment: OnComment) => Promise<void> }> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
   await loadSyntaxNodes();
-  await act(async () =>
-    root.render(
-      <VisualSurface
-        initial={initial}
-        onChange={() => {}}
-        links={{
-          pages: [],
-          targets: () => null,
-          selfId: 'self',
-          table: new Map(),
-          headings: async () => [],
-          ownHeadings: async () => [],
-          create: () => {},
-          pick: () => {},
-          choose: () => {},
-        }}
-        attachments={{ list: [], url: async () => '' }}
-        onFiles={() => {}}
-        onUnfaithful={() => {}}
-        onComment={onComment}
-      />,
-    ),
-  );
+  const render = (onComment: OnComment) =>
+    act(async () =>
+      root.render(
+        <VisualSurface
+          initial={initial}
+          onChange={() => {}}
+          links={{
+            pages: [],
+            targets: () => null,
+            selfId: 'self',
+            table: new Map(),
+            headings: async () => [],
+            ownHeadings: async () => [],
+            create: () => {},
+            pick: () => {},
+            choose: () => {},
+          }}
+          attachments={{ list: [], url: async () => '' }}
+          onFiles={() => {}}
+          onUnfaithful={() => {}}
+          onComment={onComment}
+        />,
+      ),
+    );
+  await render(onComment);
   await act(() => expect.poll(() => container.querySelectorAll('.ProseMirror').length).toBe(1));
   const dom = container.querySelector<HTMLElement>('#page-visual');
   if (!dom) throw new Error('The editor did not mount');
@@ -58,7 +63,7 @@ async function mount(
     act(() => root.unmount());
     container.remove();
   });
-  return dom;
+  return { dom, rerender: render };
 }
 
 /** Select from the first `start` to the end of the first `end` after it, or put the cursor at `start`. */
@@ -89,9 +94,12 @@ const comment = () =>
 it('gives what the selection quotes, dimmed with nothing or too much selected', async () => {
   const quotes: QuoteText[] = [];
   const long = 'word '.repeat(120).trim();
-  const dom = await mount(`Brown the mince with the onion.\n\n${long} last\n`, async (quote) => {
-    quotes.push(quote);
-  });
+  const { dom } = await mount(
+    `Brown the mince with the onion.\n\n${long} last\n`,
+    async (quote) => {
+      quotes.push(quote);
+    },
+  );
   const button = comment();
   expect(button).not.toBeNull();
   // In the toolbar, not over the text.
@@ -127,4 +135,42 @@ it('shows no Comment where the page takes no comments on passages', async () => 
   await mount('Brown the mince.\n', null);
   expect(document.querySelector('[role="toolbar"][aria-label="Formatting"]')).not.toBeNull();
   expect(comment()).toBeNull();
+});
+
+it('counts a selection only while it shows', async () => {
+  const quotes: QuoteText[] = [];
+  const { dom } = await mount('Brown the mince with the onion.\n', async (quote) => {
+    quotes.push(quote);
+  });
+  const title = document.createElement('input');
+  document.body.append(title);
+  unmounts.push(() => title.remove());
+  select(dom, 'Brown', 'onion');
+  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('false');
+  // Another field takes the focus; the editor keeps a selection nobody sees.
+  act(() => title.focus());
+  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('true');
+  act(() => comment()!.click());
+  expect(quotes).toEqual([]);
+  // Back in the editor, it counts again.
+  act(() => dom.focus());
+  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('false');
+  // From the editor to the toolbar by keyboard, it still counts.
+  act(() => comment()!.focus());
+  await expect.poll(() => document.activeElement).toBe(comment());
+  await new Promise((done) => setTimeout(done, 200));
+  expect(comment()?.getAttribute('aria-disabled')).toBe('false');
+  await userEvent.keyboard('{Enter}');
+  await expect.poll(() => quotes.length).toBe(1);
+});
+
+it('leaves the toolbar a tab stop when Comment, the last one focused, goes', async () => {
+  const { rerender } = await mount('Brown the mince.\n', async () => {});
+  act(() => comment()!.focus());
+  expect(comment()?.tabIndex).toBe(0);
+  await rerender(null);
+  expect(comment()).toBeNull();
+  const bar = document.querySelector('[role="toolbar"][aria-label="Formatting"]')!;
+  expect(bar.querySelectorAll('[tabindex="0"]')).toHaveLength(1);
+  expect(bar.querySelector('[tabindex="0"]')?.getAttribute('aria-label')).toMatch(/^Text style/);
 });
