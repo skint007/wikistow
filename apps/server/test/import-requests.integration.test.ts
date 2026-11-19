@@ -572,14 +572,16 @@ describe('an import', () => {
             throw error;
           },
         );
-    const waitingOnLocks = async () =>
-      Number(
-        (
-          await t.db.execute<{ n: string }>(sql`select count(*) as n from pg_locks l
-            join pg_database d on d.oid = l.database
-            where l.locktype = 'advisory' and not l.granted and d.datname = current_database()`)
-        )[0]?.n,
-      );
+    // Whether a transaction waits on the account's storage (`lockQuota`).
+    const quotaKey = `wikistow:quota:${person.id}`;
+    const waitingOnStorage = async () =>
+      (
+        await t.db.execute(sql`select 1 from pg_locks l
+          join pg_database d on d.oid = l.database
+          where l.locktype = 'advisory' and not l.granted and d.datname = current_database()
+            and l.objsubid = 1
+            and (l.classid::bigint << 32 | l.objid::bigint) = hashtext(${quotaKey})::bigint`)
+      ).length > 0;
 
     // Run again with a new note: its batch makes it, and, by hand, makes A
     // again and saves on top, then saves B again, after it (#479). Held up
@@ -601,10 +603,10 @@ describe('an import', () => {
         taken();
         await new Promise<void>((resolve) => (release = resolve));
       });
-      await storage;
+      await Promise.race([storage, holder]);
       const answer = send();
       try {
-        for (const deadline = Date.now() + 15_000; (await waitingOnLocks()) === 0;) {
+        for (const deadline = Date.now() + 15_000; !(await waitingOnStorage());) {
           if (Date.now() > deadline) throw new Error('the batch never waited on the storage');
           await new Promise((resolve) => setTimeout(resolve, 20));
         }
