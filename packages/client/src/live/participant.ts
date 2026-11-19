@@ -1616,7 +1616,10 @@ export class LiveParticipant {
         // One copy at a time: the main join waits for each to be placed.
         !this.#placing &&
         head !== undefined &&
-        holdsState(this.document.state(), head.state);
+        // One worked out on a draft, on exactly the text that draft holds.
+        (on
+          ? sameState(this.document.state(), head.state)
+          : holdsState(this.document.state(), head.state));
       return headId && head && now ? { headId, head } : null;
     };
     const onHead = async (waits: number) => {
@@ -3456,7 +3459,12 @@ export class LiveParticipant {
       payload: draft.payload,
       state,
       compared: false,
-      with: revision === this.#publishedFrom ? [] : this.#carried(base, draft.authorId),
+      with:
+        revision === this.#publishedFrom
+          ? []
+          : this.#publishedBetween(revision, base.revisionId)
+            ? [draft.authorId]
+            : this.#carried(base, draft.authorId),
       openedAt: Date.now(),
       foldedBy: key(grant.holder),
     });
@@ -4334,10 +4342,16 @@ export class LiveParticipant {
   // Until this app's presence as it is now has gone out, for a second at most.
   async #presenceOut(): Promise<void> {
     const until = Date.now() + 1_000;
-    while (this.#presenceDirty && this.#keyed() && this.#joined && Date.now() < until) {
-      if (this.#sending) await this.#sending.catch(() => {});
-      else if (this.#placing) await sleep(SEND_MS, this.#abort.signal);
-      else await this.#send();
+    while (this.#presenceDirty && this.#keyed() && this.#joined) {
+      const left = until - Date.now();
+      if (left <= 0) return;
+      // Sent as sends are spaced; a request already on its way is waited for first.
+      this.#schedule();
+      const step = this.#sending ?? sleep(Math.min(SEND_MS, left), this.#abort.signal);
+      await withTimeout(
+        step.catch(() => {}),
+        left,
+      ).catch(() => {});
     }
   }
 
@@ -4413,6 +4427,8 @@ export class LiveParticipant {
           content: presenceContent(this.#presenceNow()),
         }),
       });
+      // What changes from here goes in the next one.
+      this.#presenceDirty = false;
     }
     // A fold grant asked for, with whatever else goes (section 5.10, **Saving**).
     let ask = this.#foldAsk;
@@ -4463,10 +4479,7 @@ export class LiveParticipant {
     }
     this.#queue = this.#queue.slice(batch.length);
     this.#sentSeq = last;
-    if (presence) {
-      this.#presenceDirty = false;
-      this.#presenceAt = Date.now();
-    }
+    if (presence) this.#presenceAt = Date.now();
   }
 
   #sentSeq = 0;
