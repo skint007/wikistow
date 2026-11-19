@@ -1769,6 +1769,10 @@ export class LiveParticipant {
           span.remove === 0
             ? from
             : Y.createRelativePositionFromTypeIndex(text, span.from + span.remove, -1);
+        // The same place, held by the text before it: the two part where anyone
+        // inserted there since, as an app making this same insertion would.
+        const left =
+          span.remove === 0 ? Y.createRelativePositionFromTypeIndex(text, span.from, -1) : null;
         const now = text.toJSON();
         const was = now.slice(span.from, span.from + span.remove);
         // The whole lines it changes, as they read now, and how far they reach on each side.
@@ -1780,7 +1784,7 @@ export class LiveParticipant {
           before: span.from - first,
           after: last - (span.from + span.remove),
         };
-        return { name, span, from, to, was, lines };
+        return { name, span, from, to, left, was, lines };
       });
     });
     // Each entry as it is now: one someone else set since stays theirs.
@@ -1788,23 +1792,28 @@ export class LiveParticipant {
     return (document, again) => {
       // Where each was can't be found: those texts whole, as given.
       const whole = new Set<TextRoot>();
-      const placed = spans.map(({ name, span, from, to }) => {
+      const placed = spans.map(({ name, span, from, to, left }) => {
         const text = document.text(name);
         const start = Y.createAbsolutePositionFromRelativePosition(from, document.doc);
         const end = Y.createAbsolutePositionFromRelativePosition(to, document.doc);
         if (!start || !end || start.type !== text || end.type !== text || end.index < start.index) {
           whole.add(name);
         }
-        return { name, span, start: start?.index ?? 0, end: end?.index ?? 0 };
+        const after = left && Y.createAbsolutePositionFromRelativePosition(left, document.doc);
+        // Text inserted at an insertion's own place since, between its two holds.
+        const between =
+          left !== null && (!after || after.type !== text || after.index !== start?.index);
+        return { name, span, start: start?.index ?? 0, end: end?.index ?? 0, between };
       });
       // Made again, on a head that moved on, only where every line it changes
       // reads as it did: so never twice, where someone made the same change,
       // nor where they changed anything else on those lines.
       const touched =
         again &&
-        placed.some(({ name, start, end }, at) => {
+        placed.some(({ name, start, end, between }, at) => {
           const lines = spans[at]?.lines;
-          if (!lines || whole.has(name)) return true;
+          // A line inserted where this one goes leaves the lines beside it as they were.
+          if (!lines || whole.has(name) || between) return true;
           const now = document.text(name).toJSON();
           const first = start - lines.before;
           const last = end + lines.after;

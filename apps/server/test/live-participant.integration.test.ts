@@ -238,6 +238,62 @@ describe('a file’s change while another app saves (#492)', () => {
     await expect.poll(() => body(mine)).toBe('draft wordss');
     expect(body(theirs)).toBe('draft wordss');
   });
+  it('never makes again a change another app made meanwhile beside an edit of its own', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const theirs = await join(editor, page);
+    let raced = false;
+    const mine = await join(owner, page, (ports) => {
+      const save = ports.saveDraft.bind(ports);
+      ports.saveDraft = async (input) => {
+        if (!raced) {
+          // Another app makes the same insertion first, beside a change of its own, and saves it.
+          raced = true;
+          theirs.edit((document) => {
+            const text = document.text('body');
+            text.insert(text.length, 'Xs');
+            text.delete(0, 1);
+            text.insert(0, 'D');
+          });
+          expect(await theirs.saveNow()).toBe(true);
+        }
+        return save(input);
+      };
+    });
+    await expect.poll(() => theirs.status().people.length).toBe(1);
+    expect(await mine.commitOwn({ texts: { body: 'draft wordss' } })).toBe(false);
+    expect(raced).toBe(true);
+    await expect.poll(() => body(mine)).toBe('Draft wordsXs');
+    expect(body(theirs)).toBe('Draft wordsXs');
+  });
+
+  it('never makes again a line another app inserted at its place meanwhile', async () => {
+    const { owner, editor, page } = await sharedPage();
+    const theirs = await join(editor, page);
+    const line = '![photo](attachment:photo)\n';
+    let armed = false;
+    let raced = false;
+    const mine = await join(owner, page, (ports) => {
+      const save = ports.saveDraft.bind(ports);
+      ports.saveDraft = async (input) => {
+        if (armed && !raced) {
+          // Another app inserts the same line first, where this one goes, and saves it.
+          raced = true;
+          theirs.edit((document) => document.text('body').insert('draft words\n'.length, line));
+          expect(await theirs.saveNow()).toBe(true);
+        }
+        return save(input);
+      };
+    });
+    await expect.poll(() => theirs.status().people.length).toBe(1);
+    type(theirs, '\nlast line');
+    await expect.poll(() => body(mine)).toBe('draft words\nlast line');
+    const target = `draft words\n${line}last line`;
+    armed = true;
+    expect(await mine.commitOwn({ texts: { body: target } })).toBe(false);
+    expect(raced).toBe(true);
+    await expect.poll(() => body(mine)).toBe(target);
+    expect(body(theirs)).toBe(target);
+  });
 });
 
 describe('a newer format (#504)', () => {
