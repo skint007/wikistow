@@ -230,13 +230,13 @@ function fakeWriter({
   const revisionId = newId(RevisionId);
   let n = 0;
   const writer = {
-    async newPageDraft(input: { pageId?: PageId }) {
+    async newPageDraft(input: { ids?: { pageId: PageId; revisionId: RevisionId } }) {
       calls.push({ call: 'newPageDraft', input });
       if (refuse === 'page') throw new ApiError(403, 'forbidden', 'No');
-      if (input.pageId && made.includes(input.pageId)) {
+      if (input.ids && made.includes(input.ids.pageId)) {
         throw new ApiError(409, 'duplicate', 'That page ID is taken');
       }
-      return { pageId: input.pageId ?? newId(PageId), revisionId };
+      return { pageId: input.ids?.pageId ?? newId(PageId), revisionId };
     },
     async attach(_page: unknown, file: { name: string; mediaType: string; bytes: Uint8Array }) {
       calls.push({ call: 'attach', input: file.name });
@@ -316,7 +316,11 @@ describe('saving a clip', () => {
       title: 'A story',
       markdown:
         '---\nsource: https://news.example/story?id=1\nclipped: 2026-11-13\n---\nHi[](https://cdn.test/a.png)[](https://cdn.test/broken.png)\n',
-      pageId: (saved.outcome as { pageId: PageId }).pageId,
+      ids: {
+        pageId: (saved.outcome as { pageId: PageId }).pageId,
+        revisionId: expect.any(String),
+        sent: false,
+      },
     });
     expect(calls[1]?.input).toBe('a.png');
     const save = calls[2]?.input as DraftSave;
@@ -425,29 +429,33 @@ describe('saving a clip', () => {
         },
       }),
     );
-    const { pageId } = calls[0]!.input as { pageId: PageId };
+    const { ids } = calls[0]!.input as { ids: { pageId: PageId; revisionId: RevisionId } };
+    const { pageId, revisionId } = ids;
+    expect(ids).toEqual({ pageId, revisionId, sent: false });
     expect(told).toEqual([
-      { spaceId, pageId, path: 'Home / News', making: true },
+      { spaceId, pageId, revisionId, path: 'Home / News', making: true },
       { spaceId, pageId, path: 'Home / News' },
     ]);
     expect(when).toEqual(['', 'newPageDraft']);
     expect(saved.outcome).toMatchObject({ ok: true, pageId });
   });
 
-  it('makes a page a reload cut short before it was made under the ID kept', async () => {
+  it('makes a page a reload cut short before it was made under the IDs kept', async () => {
     const { writer, calls } = fakeWriter();
     const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
     const told: ClipMade[] = [];
     const saved = await saveClip(
       clip({
         html: '<p>Hi<img src="https://cdn.test/a.png"></p>',
-        made: { spaceId, pageId, path: 'Home / News', making: true },
+        made: { spaceId, pageId, revisionId, path: 'Home / News', making: true },
       }),
       deps({ writer, made: async (page) => void told.push(page) }),
     );
     expect(saved.outcome).toMatchObject({ ok: true, pageId, images: { saved: 1, skipped: 0 } });
     expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'save']);
-    expect(calls[0]?.input).toMatchObject({ pageId });
+    // As sent: the server, or this device, may have it under them.
+    expect(calls[0]?.input).toMatchObject({ ids: { pageId, revisionId, sent: true } });
     expect(told).toEqual([{ spaceId, pageId, path: 'Home / News' }]);
   });
 
@@ -457,7 +465,7 @@ describe('saving a clip', () => {
     const saved = await saveClip(
       clip({
         html: '<p>Hi<img src="https://cdn.test/a.png"></p>',
-        made: { spaceId, pageId, path: 'Home / News', making: true },
+        made: { spaceId, pageId, revisionId: newId(RevisionId), path: 'Home / News', making: true },
       }),
       deps({ writer }),
     );
@@ -597,13 +605,14 @@ describe('saving a screenshot', () => {
   it('makes a page a reload cut short before it was made under the ID kept, with the screenshot', async () => {
     const { writer, calls } = fakeWriter();
     const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
     const saved = await saveClip(
-      shot({ made: { spaceId, pageId, path: 'Home / News', making: true } }),
+      shot({ made: { spaceId, pageId, revisionId, path: 'Home / News', making: true } }),
       deps({ writer }),
     );
     expect(saved.outcome).toMatchObject({ ok: true, pageId, images: { saved: 1, skipped: 0 } });
     expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'save']);
-    expect(calls[0]?.input).toMatchObject({ pageId });
+    expect(calls[0]?.input).toMatchObject({ ids: { pageId, revisionId, sent: true } });
   });
 
   it('puts a page a reload cut short just after it was made in the trash, and saves the screenshot again', async () => {
@@ -625,8 +634,18 @@ describe('saving a screenshot', () => {
     ]);
     expect(calls[1]?.input).toMatchObject({ spaceId, nodeId: pageId, dropChanges: true });
     // The new page's ID is kept before it's made, as any.
-    const { pageId: again } = calls[2]!.input as { pageId: PageId };
-    expect(told[0]).toEqual({ spaceId, pageId: again, path: 'Home / News', making: true });
+    const { ids: again } = calls[2]!.input as {
+      ids: { pageId: PageId; revisionId: RevisionId; sent: boolean };
+    };
+    expect(again.pageId).not.toBe(pageId);
+    expect(again.sent).toBe(false);
+    expect(told[0]).toEqual({
+      spaceId,
+      pageId: again.pageId,
+      revisionId: again.revisionId,
+      path: 'Home / News',
+      making: true,
+    });
   });
 
   it('saves the screenshot again if the page a reload cut short is in the trash already', async () => {

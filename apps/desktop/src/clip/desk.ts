@@ -9,6 +9,7 @@ import {
   DESKTOP_CHANNELS,
   FolderId,
   PageId,
+  RevisionId,
   SpaceId,
   type ClipFolders,
   type ClipImage,
@@ -111,6 +112,7 @@ const Made = z.strictObject({
   pageId: PageId,
   path: z.string().max(100_000),
   making: z.boolean().optional(),
+  revisionId: RevisionId.optional(),
   partial: z.boolean().optional(),
 });
 export const PageState = z.strictObject({

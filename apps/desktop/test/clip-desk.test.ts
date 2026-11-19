@@ -267,9 +267,12 @@ describe('a clip', () => {
     ).toThrow();
     // The ID it's about to be made under, then made (#486).
     const page = { spaceId: 'space1', pageId: 'page1', path: 'Home' };
-    desk.made(request.clip.id, { ...page, making: true });
-    expect(desk.waiting()[0]?.made).toEqual({ ...page, making: true });
+    desk.made(request.clip.id, { ...page, revisionId: 'rev1', making: true });
+    expect(desk.waiting()[0]?.made).toEqual({ ...page, revisionId: 'rev1', making: true });
     expect(() => desk.made(request.clip.id, { ...page, making: 'yes' })).toThrow();
+    expect(() =>
+      desk.made(request.clip.id, { ...page, revisionId: '../r', making: true }),
+    ).toThrow();
     desk.made(request.clip.id, page);
     expect(desk.waiting()[0]?.made).toEqual(page);
   });

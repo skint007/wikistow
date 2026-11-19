@@ -3,7 +3,7 @@ import type { Manifest, PageAccess, TrustLevel } from '@wikistow/plugin-sdk/mani
 // Types only: the preload bundles this file and may load nothing but electron.
 // The package's index exports `PluginScope`.
 import type { PluginScope } from './plugin-installs.ts';
-import type { FolderId, PageId, SpaceId } from './records/ids.ts';
+import type { FolderId, PageId, RevisionId, SpaceId } from './records/ids.ts';
 
 /**
  * A plugin installed on this computer or loaded from a development folder,
@@ -211,18 +211,19 @@ export type DesktopClip = {
 };
 
 /**
- * A clip's page, made. `making`: the ID it's about to be made under, which
- * a page that loads again makes it under, so it finds it if it was made
- * and makes no second (#486). `partial`: a screenshot's, made with its
- * note and link but not the screenshot yet, which a page that loads again
- * puts in the trash and makes again, rather than finish without its
- * screenshot.
+ * A clip's page, made. `making`: the IDs it's about to be made under, its
+ * own and its first draft's (`revisionId`), which a page that loads again
+ * makes it under, so it finds it if it was made and makes no second
+ * (#486). `partial`: a screenshot's, made with its note and link but not
+ * the screenshot yet, which a page that loads again puts in the trash and
+ * makes again, rather than finish without its screenshot.
  */
 export type ClipMade = {
   spaceId: SpaceId;
   pageId: PageId;
   path: string;
   making?: boolean | undefined;
+  revisionId?: RevisionId | undefined;
   partial?: boolean | undefined;
 };
 

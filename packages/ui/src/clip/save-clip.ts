@@ -12,11 +12,11 @@ import {
   newPayload,
   PageId,
   PageTooLarge,
+  RevisionId,
   linkSpans,
   type AttachmentRef,
   type LinkSpans,
   type PageWriter,
-  type RevisionId,
 } from '@wikistow/client';
 import type { ClipImage, ClipMade, ClipOutcome, DesktopClip } from '@wikistow/contracts';
 import {
@@ -165,12 +165,18 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   if (shot && !fitsPage(shown('x'.repeat(22)))) return failed('too-large', TOO_LONG);
 
   const { spaceId, folderId } = place;
-  // Its ID, kept with main before the page is made, so a reload makes it
-  // under the same one: the writer then finds it, if it was made (#486).
+  // Its IDs, kept with main before the page is made, so a reload makes it
+  // under the same ones: the writer then finds it, if it was made (#486).
   const making = clip.made?.making ? clip.made : null;
-  const pageId = making?.pageId ?? newId(PageId);
+  const ids = {
+    pageId: making?.pageId ?? newId(PageId),
+    revisionId: making?.revisionId ?? newId(RevisionId),
+    sent: making !== null,
+  };
   if (!making) {
-    await deps.made?.({ spaceId, pageId, path: savedTo(place.path), making: true }).catch(() => {});
+    const { pageId, revisionId } = ids;
+    const path = savedTo(place.path);
+    await deps.made?.({ spaceId, pageId, revisionId, path, making: true }).catch(() => {});
   }
   let made: { pageId: PageId; revisionId: RevisionId };
   try {
@@ -179,14 +185,15 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       parentId: folderId,
       title,
       markdown: first,
-      pageId,
+      ids,
     });
   } catch (error) {
     // Made before the reload, its text in: done, or, without its
     // screenshot, made only partly.
     if (making && error instanceof ApiError && error.code === 'duplicate') {
-      const { making: _making, ...was } = making;
-      return saveClip({ ...clip, made: shot ? { ...was, partial: true } : was }, deps);
+      const { spaceId: was, pageId, path } = making;
+      const found = { spaceId: was, pageId, path };
+      return saveClip({ ...clip, made: shot ? { ...found, partial: true } : found }, deps);
     }
     if (error instanceof PageTooLarge) return failed('too-large', TOO_LONG);
     if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {

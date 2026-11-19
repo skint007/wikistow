@@ -160,17 +160,19 @@ export type PageWriter = {
    * draft's revision, for a save on top of it (`draft`), as a clip from the
    * browser is saved once its images are attached (ADR 0017).
    *
-   * `pageId`, if given, is the page's ID, which the caller kept before
-   * making it, so making it again after a reload makes no second: a page
-   * this device or the server has under it already is refused as
-   * `duplicate` (an `ApiError`).
+   * `ids`, if given, are the page's and its first draft's, which the
+   * caller kept before making it, so making it again after a reload makes
+   * no second: a page this device or the server has under that ID already
+   * is refused as `duplicate` (an `ApiError`). `sent`: a request under
+   * them may have gone already, as before a reload, so one kept on this
+   * device is kept as sent, to be taken as made if the server has it.
    */
   newPageDraft(input: {
     spaceId: SpaceId;
     parentId: FolderId | null;
     title: string;
     markdown: string;
-    pageId?: PageId;
+    ids?: { pageId: PageId; revisionId: RevisionId; sent: boolean };
   }): Promise<{ pageId: PageId; revisionId: RevisionId }>;
   /** A new folder, made where `newPage` would make a page. */
   newFolder(input: {
@@ -261,25 +263,20 @@ export function createPageWriter({
   const writer: PageWriter = {
     newPage: async (input) => (await writer.newPageDraft({ ...input, markdown: '' })).pageId,
 
-    async newPageDraft({ spaceId, parentId, title, markdown, pageId: chosen }) {
+    async newPageDraft({ spaceId, parentId, title, markdown, ids }) {
       const payload = newPayload({ title, markdown });
       // Made on this device already, to be sent or being sent: as the
       // server says of one it has, so it isn't written over.
-      if (chosen && (await queue?.entry(chosen))) {
+      if (ids && (await queue?.entry(ids.pageId))) {
         throw new ApiError(409, 'duplicate', 'That page ID is taken');
       }
       const device = await onDevice(parentId);
       if (device) {
-        const entry = await device.newPage({
-          spaceId,
-          parentId,
-          payload,
-          ...(chosen && { pageId: chosen }),
-        });
+        const entry = await device.newPage({ spaceId, parentId, payload, ...ids });
         return { pageId: entry.id, revisionId: entry.newPage!.revisionId };
       }
-      const pageId = chosen ?? newId(PageId);
-      const revisionId = newId(RevisionId);
+      const pageId = ids?.pageId ?? newId(PageId);
+      const revisionId = ids?.revisionId ?? newId(RevisionId);
       try {
         await server.createPage({
           spaceId,

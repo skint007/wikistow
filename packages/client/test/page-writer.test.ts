@@ -235,39 +235,54 @@ describe('the page writer', () => {
       }
     });
 
-    it('makes a page under the ID its caller kept, once', async () => {
-      const { writer, queue, sent, calls } = await writerOn(row.connection);
-      const spaceId = newId(SpaceId);
-      const parentId = row.waiting
-        ? (await queue.newFolder({ spaceId, parentId: null, metadata: newFolderMetadata('Trips') }))
-            .id
-        : newId(FolderId);
-      const kept = newId(PageId);
-      const input = { spaceId, parentId, title: 'Lisbon', markdown: 'Hi', pageId: kept };
+    it.each([false, true])(
+      'makes a page under the IDs its caller kept, once, sent before: %s',
+      async (before) => {
+        const { writer, queue, sent, calls } = await writerOn(row.connection);
+        const spaceId = newId(SpaceId);
+        const parentId = row.waiting
+          ? (
+              await queue.newFolder({
+                spaceId,
+                parentId: null,
+                metadata: newFolderMetadata('Trips'),
+              })
+            ).id
+          : newId(FolderId);
+        const ids = { pageId: newId(PageId), revisionId: newId(RevisionId), sent: before };
+        const input = { spaceId, parentId, title: 'Lisbon', markdown: 'Hi', ids };
 
-      const making = writer.newPageDraft(input);
+        const making = writer.newPageDraft(input);
 
-      if (expected === 'refused') {
-        await expect(making).rejects.toMatchObject({ code: 'not-found' });
-        return;
-      }
-      const { pageId, revisionId } = await making;
-      expect(pageId).toBe(kept);
-      if (expected === 'server') {
-        expect(sent).toMatchObject({ pageId: kept, revisionId });
-        return;
-      }
-      const entry = await queue.entry(kept);
-      expect(entry).toMatchObject({ newPage: { revisionId }, payload: { markdown: 'Hi' } });
-      // Made again, as after a reload: refused, the page waiting as it was.
-      const asked = calls().length;
-      await expect(writer.newPageDraft({ ...input, markdown: 'Other' })).rejects.toMatchObject({
-        status: 409,
-        code: 'duplicate',
-      });
-      expect(calls()).toHaveLength(asked);
-      expect(await queue.entry(kept)).toEqual(entry);
-    });
+        if (expected === 'refused') {
+          await expect(making).rejects.toMatchObject({ code: 'not-found' });
+          return;
+        }
+        expect(await making).toEqual({ pageId: ids.pageId, revisionId: ids.revisionId });
+        if (expected === 'server') {
+          expect(sent).toMatchObject({ pageId: ids.pageId, revisionId: ids.revisionId });
+          return;
+        }
+        const entry = await queue.entry(ids.pageId);
+        expect(entry).toMatchObject({
+          newPage: { revisionId: ids.revisionId },
+          payload: { markdown: 'Hi' },
+        });
+        // Kept as sent if a request under them got no answer, or may have
+        // gone before (a reload): the server may have it, under them.
+        const asSent = expected === 'lost' || before;
+        expect(entry).toMatchObject({
+          sending: asSent ? { revisionId: ids.revisionId } : null,
+        });
+        // Made again, as after a reload: refused, the page waiting as it was.
+        const asked = calls().length;
+        await expect(
+          writer.newPageDraft({ ...input, markdown: 'Other', ids: { ...ids, sent: true } }),
+        ).rejects.toMatchObject({ status: 409, code: 'duplicate' });
+        expect(calls()).toHaveLength(asked);
+        expect(await queue.entry(ids.pageId)).toEqual(entry);
+      },
+    );
 
     it('makes a folder', async () => {
       const { writer, queue, sent, calls } = await writerOn(row.connection);
