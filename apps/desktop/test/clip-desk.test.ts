@@ -265,8 +265,13 @@ describe('a clip', () => {
     expect(() =>
       desk.made(request.clip.id, { spaceId: 'space1', pageId: '../x', path: '' }),
     ).toThrow();
-    desk.made(request.clip.id, { spaceId: 'space1', pageId: 'page1', path: 'Home' });
-    expect(desk.waiting()[0]?.made).toEqual({ spaceId: 'space1', pageId: 'page1', path: 'Home' });
+    // The ID it's about to be made under, then made (#486).
+    const page = { spaceId: 'space1', pageId: 'page1', path: 'Home' };
+    desk.made(request.clip.id, { ...page, making: true });
+    expect(desk.waiting()[0]?.made).toEqual({ ...page, making: true });
+    expect(() => desk.made(request.clip.id, { ...page, making: 'yes' })).toThrow();
+    desk.made(request.clip.id, page);
+    expect(desk.waiting()[0]?.made).toEqual(page);
   });
 
   it('is saved and listed when the extension left meanwhile', () => {

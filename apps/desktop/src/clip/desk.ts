@@ -110,6 +110,7 @@ const Made = z.strictObject({
   spaceId: SpaceId,
   pageId: PageId,
   path: z.string().max(100_000),
+  making: z.boolean().optional(),
   partial: z.boolean().optional(),
 });
 export const PageState = z.strictObject({
@@ -398,7 +399,10 @@ export function clipDesk(options: DeskOptions) {
       });
     },
 
-    /** The page made the held clip `clipId`'s page, which a reload then doesn't make again. */
+    /**
+     * The page is making the held clip `clipId`'s page, under this ID, or
+     * made it: a reload then makes it under the same, or not again.
+     */
     made(clipId: unknown, input: unknown) {
       const one = typeof clipId === 'string' ? held.get(clipId) : undefined;
       if (one) one.clip = { ...one.clip, made: Made.parse(input) };

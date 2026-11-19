@@ -159,12 +159,18 @@ export type PageWriter = {
    * As `newPage`, its first draft holding `markdown`: the page, and that
    * draft's revision, for a save on top of it (`draft`), as a clip from the
    * browser is saved once its images are attached (ADR 0017).
+   *
+   * `pageId`, if given, is the page's ID, which the caller kept before
+   * making it, so making it again after a reload makes no second: a page
+   * this device or the server has under it already is refused as
+   * `duplicate` (an `ApiError`).
    */
   newPageDraft(input: {
     spaceId: SpaceId;
     parentId: FolderId | null;
     title: string;
     markdown: string;
+    pageId?: PageId;
   }): Promise<{ pageId: PageId; revisionId: RevisionId }>;
   /** A new folder, made where `newPage` would make a page. */
   newFolder(input: {
@@ -255,14 +261,24 @@ export function createPageWriter({
   const writer: PageWriter = {
     newPage: async (input) => (await writer.newPageDraft({ ...input, markdown: '' })).pageId,
 
-    async newPageDraft({ spaceId, parentId, title, markdown }) {
+    async newPageDraft({ spaceId, parentId, title, markdown, pageId: chosen }) {
       const payload = newPayload({ title, markdown });
+      // Made on this device already, to be sent or being sent: as the
+      // server says of one it has, so it isn't written over.
+      if (chosen && (await queue?.entry(chosen))) {
+        throw new ApiError(409, 'duplicate', 'That page ID is taken');
+      }
       const device = await onDevice(parentId);
       if (device) {
-        const entry = await device.newPage({ spaceId, parentId, payload });
+        const entry = await device.newPage({
+          spaceId,
+          parentId,
+          payload,
+          ...(chosen && { pageId: chosen }),
+        });
         return { pageId: entry.id, revisionId: entry.newPage!.revisionId };
       }
-      const pageId = newId(PageId);
+      const pageId = chosen ?? newId(PageId);
       const revisionId = newId(RevisionId);
       try {
         await server.createPage({
