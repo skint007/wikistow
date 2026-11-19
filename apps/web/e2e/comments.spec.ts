@@ -224,7 +224,10 @@ test('a comment on a passage, then the passage edited away', async ({ page, fres
     await page.getByRole('button', { name: 'Edit' }).click();
     await showIn(page, 'Visual');
     await select(visual(page), 'Brown', 'onion');
-    await page.getByRole('button', { name: 'Comment on the selection' }).click();
+    // Comment is in the toolbar, with none over the text (#667).
+    const comment = { name: 'Comment on the selection' };
+    await page.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', comment).click();
+    await expect(page.getByRole('button', comment)).toHaveCount(1);
     await expect(panel.locator('form blockquote')).toHaveText(PASSAGE.browning);
     await send(panel, 'Comment for editors', 'Beef or lamb?');
     await visual(page).getByText('Rest for').click();

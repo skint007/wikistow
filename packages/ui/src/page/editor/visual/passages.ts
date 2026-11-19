@@ -3,11 +3,12 @@ import {
   ownSource,
   parsePropertyReference,
   quoteAt,
+  type QuoteAt,
   type QuoteText,
 } from '@wikistow/client';
 import { claimedInline } from '@wikistow/plugin-sdk';
 import type { Node } from '@milkdown/kit/prose/model';
-import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
+import { NodeSelection, TextSelection, type EditorState } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { fencedAsSource, type Passages } from '../../../comments/passages';
 import { alertIn } from './alerts';
@@ -137,6 +138,16 @@ function positionsOf({ pieces }: OwnText, from: number, to: number) {
   };
 }
 
+/** What the selection in `state` quotes, or null with no text selected. */
+export function quoteIn(state: EditorState): QuoteAt | null {
+  const { selection } = state;
+  // A wikilink or math chosen as a whole, as by an arrow key onto it, isn't text selected.
+  if (selection.empty || selection instanceof NodeSelection) return null;
+  const own = ownTextOf(state.doc);
+  const offsets = offsetsOf(own, selection.from, selection.to);
+  return offsets ? quoteAt(own.text, offsets.from, offsets.to) : null;
+}
+
 /** Passages in the visual editor `view()`, while it's there. */
 export function visualPassages(view: () => EditorView | null): Passages {
   const found = (quote: QuoteText) => {
@@ -150,14 +161,7 @@ export function visualPassages(view: () => EditorView | null): Passages {
     root: () => view()?.dom ?? null,
     quote() {
       const editor = view();
-      if (!editor) return null;
-      const { selection } = editor.state;
-      // A wikilink or math chosen as a whole, as by an arrow key onto it, isn't text selected.
-      if (selection.empty || selection instanceof NodeSelection) return null;
-      const { from, to } = selection;
-      const own = ownTextOf(editor.state.doc);
-      const offsets = offsetsOf(own, from, to);
-      return offsets ? quoteAt(own.text, offsets.from, offsets.to) : null;
+      return editor && quoteIn(editor.state);
     },
     find: (quote) => {
       const passage = found(quote);

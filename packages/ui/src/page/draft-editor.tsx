@@ -8,6 +8,7 @@ import {
   pageOperations,
   type PagePayload,
   type PayloadChanges,
+  type QuoteText,
   type Region,
   type RevisionId,
 } from '@wikistow/client';
@@ -156,6 +157,7 @@ export function DraftEditor({
   onMerged,
   hiddenAttachments = NONE,
   toolbar,
+  onComment,
   ref,
 }: {
   ctx: ClientContext;
@@ -180,6 +182,8 @@ export function DraftEditor({
   hiddenAttachments?: readonly string[];
   /** Plugins' buttons for the editor's format toolbar (`editor.toolbar`). */
   toolbar?: ReactNode;
+  /** Comment on the selection in the visual editor, where the page takes comments on passages. */
+  onComment?: ((quote: QuoteText) => Promise<void>) | null | undefined;
   ref?: Ref<DraftEditorHandle>;
 }) {
   const surface = useRef<EditorSurfaceHandle>(null);
@@ -416,6 +420,7 @@ export function DraftEditor({
           otherPages={others}
           queryTable={queryTable}
           toolbar={toolbar}
+          onComment={onComment}
           live={live}
           onFiles={(files, place) => session.attach(files, (made) => place(made.join('\n')))}
           status={

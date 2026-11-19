@@ -1,4 +1,4 @@
-import { COLORS, type AttachmentRef, type ColorName } from '@wikistow/client';
+import { COLORS, type AttachmentRef, type ColorName, type QuoteText } from '@wikistow/client';
 import { Plugin, PluginKey, type Command, type EditorState } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
@@ -15,6 +15,7 @@ import {
   List,
   ListChecks,
   ListOrdered,
+  MessageSquare,
   Paperclip,
   SquareCode,
   TextQuote,
@@ -23,6 +24,7 @@ import {
 import {
   Fragment,
   memo,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -71,7 +73,9 @@ import {
   removeLink,
   setLink,
 } from './links';
+import { TOO_LONG_TO_QUOTE } from '../../../comments/passages';
 import { colorAt, setColor, type ColorShown } from './highlight-marks';
+import { quoteIn } from './passages';
 import type { Upload } from './plugins';
 
 let bars = 0;
@@ -99,9 +103,11 @@ type Status = {
   link: { active: boolean; applies: boolean };
   /** Whether an attachment can go in at the selection. */
   attachment: boolean;
+  /** What the selection quotes for a comment: text, too much of it, or none. */
+  passage: 'text' | 'too-long' | 'none';
 };
 
-function statusOf(state: EditorState): Status {
+function statusOf(state: EditorState, quoting: boolean): Status {
   const block = state.selection.$from.parent;
   const style =
     block.type.name === 'heading'
@@ -125,7 +131,19 @@ function statusOf(state: EditorState): Status {
     highlights: setColor('highlight', 'plain')(state),
     texts: setColor('text', 'red')(state),
   };
-  return { style, level, formats, headings, quote, colors, link, attachment: attachable(state) };
+  const quoted = quoting ? quoteIn(state)?.kind : undefined;
+  const passage = quoted === 'quote' ? 'text' : quoted === 'too-long' ? quoted : 'none';
+  return {
+    style,
+    level,
+    formats,
+    headings,
+    quote,
+    colors,
+    link,
+    attachment: attachable(state),
+    passage,
+  };
 }
 
 type Range = { from: number; to: number };
@@ -164,6 +182,9 @@ export class FormatWatch {
   #view: EditorView | null = null;
   #status: Status | null = null;
   #shown = '';
+  // Whether the status says what the selection quotes, for Comment, which
+  // reads the page's whole text: only while the toolbar shows it.
+  #quoting = false;
   readonly #listeners = new Set<() => void>();
   // The selection shown while a form of the toolbar's has the focus (`hold`).
   readonly #held = new PluginKey<DecorationSet>();
@@ -176,11 +197,18 @@ export class FormatWatch {
   status = () => this.#status;
 
   #update(state: EditorState | null) {
-    const status = state && statusOf(state);
+    const status = state && statusOf(state, this.#quoting);
     const shown = JSON.stringify(status);
     if (shown === this.#shown) return;
     [this.#status, this.#shown] = [status, shown];
     for (const listener of this.#listeners) listener();
+  }
+
+  /** Say in the status what the selection quotes (`on`), as Comment needs, or stop. */
+  quoting(on: boolean) {
+    if (on === this.#quoting) return;
+    this.#quoting = on;
+    this.#update(this.#view?.state ?? null);
   }
 
   /** Run `command` on the editor, which then has the focus again. */
@@ -208,6 +236,12 @@ export class FormatWatch {
   /** What the link control would edit now, or null if it doesn't apply. */
   linkTarget(): LinkTarget | null {
     return this.#view && linkTargetOf(this.#view.state);
+  }
+
+  /** What the selection quotes for a comment now, if it's text it can quote. */
+  quote(): QuoteText | null {
+    const quoted = this.#view && quoteIn(this.#view.state);
+    return quoted?.kind === 'quote' ? quoted.quote : null;
   }
 
   /** The selection now, or null without an editor. */
@@ -691,6 +725,55 @@ const ColorMenu = memo(function ColorMenu({
   );
 });
 
+const PASSAGE_HINT = {
+  text: 'Comment on the selection',
+  'too-long': TOO_LONG_TO_QUOTE,
+  none: 'Select text to comment on it',
+} as const;
+
+/**
+ * **Comment** (ADR 0014, decision 13): it opens the comments panel with
+ * what the selection quotes (`onComment`). Dimmed, it says why: nothing
+ * selected, or too much.
+ */
+const CommentControl = memo(function CommentControl({
+  watch,
+  passage,
+  onComment,
+  ...focus
+}: Roving & {
+  watch: FormatWatch;
+  passage: Status['passage'];
+  onComment: (quote: QuoteText) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const applies = passage === 'text' && !busy;
+  const hint = PASSAGE_HINT[passage];
+  return (
+    <button
+      type="button"
+      {...roving('comment', focus)}
+      aria-label="Comment on the selection"
+      data-hint={hint}
+      {...(passage !== 'text' && { 'aria-description': hint })}
+      // Not `disabled`, which would drop the focus as the selection moves.
+      aria-disabled={!applies}
+      // The editor keeps the focus and its selection.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => {
+        const quote = applies && watch.quote();
+        if (!quote) return;
+        setBusy(true);
+        void onComment(quote).finally(() => setBusy(false));
+      }}
+      className={cn(CONTROL, 'px-2 text-sm')}
+    >
+      <MessageSquare className="size-4" strokeWidth={1.75} />
+      <span className="max-sm:sr-only">Comment</span>
+    </button>
+  );
+});
+
 // What tells attachments apart in the picker, beside their names: their
 // kind and size.
 function described(ref: AttachmentRef) {
@@ -781,19 +864,28 @@ const AttachmentControl = memo(function AttachmentControl({
  * selection has it and taking it off then, a link and an attachment
  * picker (`attachments`, the page's). One stop in the tab order:
  * arrow keys, Home and End move along it, Escape goes back to the text.
- * Plugins' buttons (`plugins`) come last, each a tab stop of its own. It
- * stays above the text as that scrolls, and wraps on a narrow window.
+ * **Comment** follows, where the page takes comments on passages
+ * (`onComment`). Plugins' buttons (`plugins`) come last, each a tab stop
+ * of its own. It stays above the text as that scrolls, and wraps on a
+ * narrow window.
  */
 export function FormatToolbar({
   watch,
   attachments,
+  onComment,
   plugins,
 }: {
   watch: FormatWatch;
   attachments: readonly AttachmentRef[];
+  onComment?: ((quote: QuoteText) => Promise<void>) | null | undefined;
   plugins?: ReactNode;
 }) {
   const status = useSyncExternalStore(watch.subscribe, watch.status);
+  const commenting = Boolean(onComment);
+  useLayoutEffect(() => {
+    watch.quoting(commenting);
+    return () => watch.quoting(false);
+  }, [watch, commenting]);
   const bar = useRef<HTMLDivElement>(null);
   // The control Tab reaches, the last one focused.
   const [current, setCurrent] = useState('heading');
@@ -907,6 +999,18 @@ export function FormatToolbar({
         tabbable={current === 'attachment'}
         onFocus={setCurrent}
       />
+      {onComment && (
+        <>
+          <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-5" />
+          <CommentControl
+            watch={watch}
+            passage={status?.passage ?? 'none'}
+            onComment={onComment}
+            tabbable={current === 'comment'}
+            onFocus={setCurrent}
+          />
+        </>
+      )}
       {plugins}
     </div>
   );

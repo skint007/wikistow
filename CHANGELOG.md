@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- The visual editor's **Comment** is in its format toolbar, after the attachment button, rather than floating above the selection, where it covered the toolbar's buttons over the page's first lines. It is dimmed while no text, or more than 500 characters, is selected. The page as read keeps its floating button. (#PR)
+
 ## 0.29.0-beta.1 - 2026-11-19
 
 ### Highlights
