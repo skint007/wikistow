@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - **Import…** and `wikistow import` finish when the batch sent to make room for a folder is refused, as when the folder they fill is shared meanwhile, rather than failing with `not-found` on the folders inside it. The server's import batch holds a page that a create sent again already made, when the batch saves or publishes it, before the account's storage, as a single save does. (#669)
 
+#### Desktop
+
+- Web clipper, **Choose an area**: the screenshot is taken as the drag starts, so the area shows the page as the person saw it, not as it changed once the overlay went, and the overlay's backdrop is never in it. The overlay no longer closes the page's open menus and popovers or takes its focus, and keys do nothing in the page while choosing. A page that takes the overlay off or hides it makes the popup say so, rather than asking for an area for 5 minutes. An area let go just inside the 5 minutes is kept. (#674)
+
 ## 0.29.0-beta.1 - 2026-11-19
 
 ### Highlights
