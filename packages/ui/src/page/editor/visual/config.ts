@@ -503,14 +503,15 @@ const holdsSpaces = (mark: Mark) =>
 
 /**
  * `doc` without the marks Markdown can't hold. None on the spaces and line
- * breaks a mark's run starts or ends with, but code, a colour's HTML on
- * spaces (`holdsSpaces`) and spaces in code, which a code span holds
- * between its backticks: delimiters can't sit beside them, and Milkdown,
- * which moves spaces out of a mark, wrote some around nothing (`~~~~`,
- * `[](…)`) and others differently each time. And none an atom can't hold
- * (`holds`). A space at the edge of text in a mark that goes on past it
- * where Milkdown closes it to open it again, or in a colour's HTML, is held
- * for Milkdown, which would otherwise move it out (`HELD_SPACE`).
+ * breaks a mark's run starts or ends with: delimiters can't sit beside
+ * them, and Milkdown, which moves spaces out of a mark, wrote some around
+ * nothing (`~~~~`, `[](…)`) and others differently each time. Code keeps
+ * them, as does a colour's HTML on spaces (`holdsSpaces`), and so does any
+ * mark on spaces in code, which a code span holds between its backticks.
+ * And none an atom can't hold (`holds`). A space at the edge of text in a
+ * mark that goes on past it where Milkdown closes it to open it again, or
+ * in a colour's HTML, is held for Milkdown, which would otherwise move it
+ * out (`HELD_SPACE`).
  */
 function writable(doc: Node): Node {
   const tr = new Transform(doc);
