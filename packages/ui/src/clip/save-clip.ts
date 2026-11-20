@@ -3,10 +3,9 @@
 // its images as any new page does: the page with its text first, its
 // images' links pointing at their sites (`newPageDraft`), then each image
 // main fetched attached to it (`attach`), then the text pointing at them
-// (`draft`). A clip that stops partway still leaves its text, unless a
-// lock stopped it: then it waits for the unlock, to be saved again whole.
-// Main hears the page's ID before it's made, and again once it is
-// (`made`), so a clip a reload cut short makes no second page.
+// (`draft`). A clip that stops partway still leaves its text. Main hears
+// the page's ID before it's made, and again once it is (`made`), so a
+// clip a reload cut short makes no second page.
 import {
   ApiError,
   newId,
@@ -241,17 +240,11 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         payload: { ...newPayload({ title, markdown: shown(ref.id) }), attachments: [ref] },
       });
     } catch (error) {
-      if (!(error instanceof QueueClosed)) {
-        await deps.writer
-          .deleteNode({
-            spaceId,
-            nodeId: made.pageId,
-            node: 'page',
-            name: title,
-            dropChanges: true,
-          })
-          .catch(() => {});
-      }
+      // Locked meanwhile: as above, the page waits for the unlock.
+      if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
+      await deps.writer
+        .deleteNode({ spaceId, nodeId: made.pageId, node: 'page', name: title, dropChanges: true })
+        .catch(() => {});
       return failed('failed', SHOT_FAILED);
     }
     await deps.made?.({ ...madeAs, partial: false }).catch(() => {});
@@ -269,13 +262,6 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
     };
   }
 
-  // Locked while its images go in, offline: the page, made without them,
-  // is made only partly, so the unlock puts it in the trash and saves the
-  // clip again, images and all, rather than finish it without them (#670).
-  const lockedOut = async (): Promise<Saved> => {
-    await deps.made?.({ ...madeAs, partial: true }).catch(() => {});
-    return failed('failed', 'The vault locked before the clip’s images were saved.');
-  };
   // Images, one at a time, each kept only once attached.
   const attached = new Map<string, string>();
   const refs: AttachmentRef[] = [];
@@ -290,8 +276,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       });
       attached.set(url, ref.id);
       refs.push(ref);
-    } catch (error) {
-      if (error instanceof QueueClosed) return lockedOut();
+    } catch {
       // Over the server's upload limit, say: it stays a link.
     }
   }
@@ -303,9 +288,10 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         basedOn,
         payload: { ...newPayload({ title, markdown: plan.written(attached) }), attachments: refs },
       });
-    } catch (error) {
-      if (error instanceof QueueClosed) return lockedOut();
-      // The page keeps its text, its images as links.
+    } catch {
+      // The page keeps its text, its images as links, as when a lock
+      // closed the queue first (#670): main's fetches of them wouldn't
+      // last until the unlock, so the clip isn't saved again for them.
       attached.clear();
       refs.length = 0;
     }

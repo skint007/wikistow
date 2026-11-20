@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Desktop
 
-- Browser clipping, offline: a clip whose screenshot or images went in just as the vault locked, before the draft showing them saved, waits for the unlock and is saved again whole, rather than being said saved without them. Any change written into this device's queue after a lock now fails rather than being said kept. (#PR)
+- Browser clipping, offline: a screenshot clip whose screenshot went in just as the vault locked, before the draft showing it saved, waits for the unlock and is saved again with it, rather than being said saved without it. A text clip's images a lock stopped are said skipped, and stay links. Any change written into this device's queue after a lock now fails rather than being said kept. (#PR)
 
 ## 0.29.0 - 2026-11-20
 

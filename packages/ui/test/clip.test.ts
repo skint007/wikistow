@@ -796,19 +796,19 @@ describe('a lock while an offline clip saves', () => {
     expect((await kept.queue.entries()).filter((entry) => entry.kind === 'delete')).toEqual([]);
   });
 
-  it('keeps a text clip with images for the unlock, and saves it with its images then', async () => {
-    const { before, after, kept } = await saveAcrossLock(
+  it('says a text clip’s images a lock stopped weren’t saved, keeping them as links', async () => {
+    const store = memoryKeptStore();
+    const { kept, writer } = await unlock(store, { lockAfterAttach: true });
+    const saved = await saveClip(
       clip({ html: '<p>Hi<img src="https://cdn.test/a.png"></p>' }),
+      deps({ writer }),
     );
-    expect(before.outcome).toMatchObject({ ok: false, code: 'failed' });
-    expect(after.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
-    const [page, ...others] = await pages(kept);
+    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 0, skipped: 1 } });
+    const after = await unlock(store);
+    const [page, ...others] = await pages(after.kept);
     expect(others).toEqual([]);
-    expect(page).toMatchObject({ id: (after.outcome as { pageId: PageId }).pageId });
-    const { payload } = page as QueuedPage;
-    expect(payload.attachments).toHaveLength(1);
-    expect(payload.markdown).toContain(`Hi![](attachment:${payload.attachments[0]!.id})`);
-    expect(await kept.queue.blob(payload.attachments[0]!.blobHash)).not.toBeNull();
-    expect((await kept.queue.entries()).filter((entry) => entry.kind === 'delete')).toEqual([]);
+    expect(page).toMatchObject({ id: (saved.outcome as { pageId: PageId }).pageId });
+    expect((page as QueuedPage).payload.markdown).toContain('Hi[](https://cdn.test/a.png)');
+    expect(kept.closed).toBe(true);
   });
 });
