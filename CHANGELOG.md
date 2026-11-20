@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Live editing: typing done while the app leaves a session is saved once, rather than as two identical drafts, and so is typing done while a draft’s first save waits to start. Typing done while leaving that overlaps the latest draft waits for **Merge…** rather than being saved first, and **Publish** pressed while leaving waits for what the session held to be saved. (#PR)
+- Live editing: typing done while the app leaves a session is saved once, rather than as two identical drafts, and so is typing done while a draft’s first save waits to start. Typing done while leaving that overlaps the latest draft waits for **Merge…** rather than being saved first, and **Publish** pressed while leaving waits for what the session held to be saved. (#686)
 - Visual editor: a mark that starts or ends at a space inside code, such as bold over `` ` e` `` in the code `` ` e ` ``, keeps that space, so the code is no longer written as a code span of only the space beside the rest, and the page no longer reopens in source mode once it's saved. (#683)
 
 #### Desktop
