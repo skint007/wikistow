@@ -61,7 +61,9 @@ export class Autosave<T> {
     this.#running = this.#save(next.value).then(
       (sent) => {
         if (sent !== false) return this.#set(this.#pending ? 'pending' : 'saved');
+        // Unsaved again: told, so what shows the stop can offer what it holds.
         this.#pending ??= next;
+        this.#set(this.#status);
       },
       (error: unknown) => {
         // Keep the unsaved edit, so "save mine" can still use it.

@@ -44,13 +44,14 @@ describe('a save stopped before it sends', () => {
     let go = () => {};
     const waiting = new Promise<void>((resolve) => (go = resolve));
     const sent: string[] = [];
+    const told: [SaveStatus, string | null][] = [];
     const saving: Autosave<string> = new Autosave<string>(
       async (text) => {
         await waiting;
         if (saving.isStopped()) return false;
         sent.push(text);
       },
-      () => {},
+      (status) => told.push([status, saving.unsaved()]),
       { debounceMs: 0, maxWaitMs: 0 },
     );
     saving.schedule('typed');
@@ -59,6 +60,8 @@ describe('a save stopped before it sends', () => {
     go();
     await saving.flush();
     expect(sent).toEqual([]);
+    // Told once the edit is unsaved again, as for Merge….
+    expect(told.at(-1)).toEqual(['conflict', 'typed']);
     expect(saving.status).toBe('conflict');
     expect(saving.unsaved()).toBe('typed');
     saving.resume();

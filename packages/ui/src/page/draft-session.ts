@@ -711,8 +711,13 @@ export class DraftSession {
     // saved meanwhile. So for a view showing a change kept for a session,
     // another tab's maybe, that nothing was typed into: the join puts it in.
     if (this.#participant || this.#rejoinHold) return;
-    // A session left says, once it settles, which drafts are this draft's own.
-    if (this.#settling) return void this.#settling.then(() => this.noticeHead(head));
+    // A session left says, once it settles, which drafts are this draft's own
+    // and reads the head itself: a head heard meanwhile may be older than that
+    // one, so what counts is the head as the server has it then.
+    if (this.#settling) {
+      if (head && !this.#known.has(head)) this.#headAfterSettling();
+      return;
+    }
     // A save in flight may already be the head before its answer arrives.
     if (!head || this.#known.has(head) || this.#saving) return;
     if (this.#keptLive && !this.#keptLive.putIn && this.#untouched() && this.#ports.live) {
@@ -723,6 +728,18 @@ export class DraftSession {
       return;
     }
     this.#conflictAt(head);
+  }
+
+  #headAfter: Promise<void> | null = null;
+
+  #headAfterSettling() {
+    const settling = this.#settling;
+    if (!settling || this.#headAfter) return;
+    this.#headAfter = settling.then(async () => {
+      const now = await this.#ports.draftHead().catch(() => null);
+      this.#headAfter = null;
+      this.noticeHead(now);
+    });
   }
 
   #conflictAt(head: RevisionId) {

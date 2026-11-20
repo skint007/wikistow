@@ -263,6 +263,7 @@ function session(
   let joinable = true;
   let saving: Promise<void> | null = null;
   let reading: Promise<void> | null = null;
+  let draftHead = R0;
   const ports: DraftPorts = {
     async saveDraft(input) {
       saves.push(input);
@@ -288,7 +289,7 @@ function session(
         blobHash: 'A'.repeat(43),
       } as AttachmentRef;
     },
-    draftHead: async () => R0,
+    draftHead: async () => draftHead,
     generation: () => 0,
     epoch: () => 0,
     tree: () => undefined,
@@ -360,6 +361,8 @@ function session(
     marked,
     held: () => held,
     noJoining: () => (joinable = false),
+    /** The page's draft head as the server has it now. */
+    headNow: (head: RevisionId) => (draftHead = head),
     /** Reading the draft's links waits until the function this returns lets it go. */
     holdLinks: () => {
       let release = () => {};
@@ -584,6 +587,26 @@ describe('a draft session in a live session', () => {
     expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words.']);
   });
 
+  it('meets a draft saved elsewhere while it left once it has settled (#661)', async () => {
+    const { draft, saves, joins, type, headNow } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    await settle();
+    const theirs = RevisionId.parse('r-theirs');
+    headNow(theirs);
+    draft.noticeHead(theirs);
+    release();
+    await settle();
+    expect(draft.snapshot().status).toBe('conflict');
+    expect((await draft.mergeVersions())?.theirs).toBe('r-theirs');
+    expect(saves.map((save) => save.basedOn)).not.toContain('r-theirs');
+  });
+
   it('saves its document over a session draft that differed from what it showed', async () => {
     const { draft, saves, joins, type } = session();
     await draft.joinLive();
@@ -732,7 +755,8 @@ describe('putting typing back from a live session', () => {
     live.end({ kind: 'stopped', why: 'it can’t catch up', saveOver: null, rejoin: false });
     await settle();
     type('A\n\nB\n\nMine\n\nMore');
-    // The page hears of the head the put-back goes onto before it does.
+    // The page hears of an older head, then of the one the put-back goes onto, before it does.
+    draft.noticeHead(RevisionId.parse('r-older'));
     draft.noticeHead(head);
     await settle();
     release();
@@ -794,6 +818,8 @@ describe('putting typing back from a live session', () => {
     // Long enough for the autosave's save to wait on leaving.
     type('A\n\nB, mine, more');
     await settle();
+    // An older head heard meanwhile isn't what Merge… compares against.
+    draft.noticeHead(RevisionId.parse('r-older'));
     release();
     await settle();
     expect(saves).toHaveLength(0);
