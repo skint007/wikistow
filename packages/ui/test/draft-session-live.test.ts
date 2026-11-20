@@ -64,6 +64,8 @@ class FakeParticipant {
   closed = false;
   typed = false;
   settled: Awaited<ReturnType<LiveParticipant['settle']>> | null = null;
+  /** Settling waits for this, as it waits on the server. */
+  settling: Promise<void> | null = null;
   readonly sessionId = LiveSessionId.parse('session-1');
   /** The base a put-back merges from: what others typed that this app took in, and its own the session saved. */
   outside: PagePayload | null = null;
@@ -146,6 +148,7 @@ class FakeParticipant {
     return publish(R0, () => {});
   }
   async settle() {
+    await this.settling;
     return (
       this.settled ?? {
         base: { revisionId: R0, payload: this.base },
@@ -480,6 +483,55 @@ describe('a draft session in a live session', () => {
     expect(joins[1]?.left).toBe(true);
   });
 
+  it('saves typing done while a session is left once, in the save that waited for it (#661)', async () => {
+    const { draft, saves, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    await settle();
+    // Typed while it settles, long enough for the autosave's save to wait on it.
+    type('Start. Last words. More.');
+    await settle();
+    expect(saves).toHaveLength(0);
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words. More.']);
+    expect(draft.snapshot().status).toBe('saved');
+    // Typing after it is saved on its own.
+    type('Start. Last words. More. Again.');
+    await draft.saveOrThrow();
+    expect(saves.map((save) => save.payload.markdown)).toEqual([
+      'Start. Last words. More.',
+      'Start. Last words. More. Again.',
+    ]);
+  });
+
+  it('keeps typing done while a lost join settles in one save, for the next join (#661)', async () => {
+    const { draft, saves, joins, kept, type, noJoining } = session(page('A'));
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.outside = page('A');
+    type('A, typed');
+    noJoining();
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+    await settle();
+    type('A, typed more');
+    await settle();
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(kept.at(-1)?.payload.markdown).toBe('A, typed');
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['A, typed more']);
+  });
+
   it('saves its document over a session draft that differed from what it showed', async () => {
     const { draft, saves, joins, type } = session();
     await draft.joinLive();
@@ -574,6 +626,36 @@ describe('putting typing back from a live session', () => {
     expect(saves.at(-1)?.payload.markdown).toBe('A, saved\n\nB\n\nMine');
     // Its text grows from the head now: no session base goes with it.
     expect(saves.at(-1)?.live ?? null).toBeNull();
+  });
+
+  it('puts typing done while leaving back with the rest, in one save (#661)', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, type } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('A\n\nB\n\nMine');
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: page('A, saved\n\nB') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: false,
+      atHead: false,
+    };
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'it can’t catch up', saveOver: null, rejoin: false });
+    await settle();
+    type('A\n\nB\n\nMine\n\nMore');
+    await settle();
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(saves).toHaveLength(1);
+    expect(saves[0]).toMatchObject({ basedOn: 'r-head' });
+    expect(saves[0]?.payload.markdown).toBe('A, saved\n\nB\n\nMine\n\nMore');
   });
 
   it('offers Merge… from the kept base where the person’s typing overlaps the head', async () => {

@@ -267,6 +267,10 @@ export class DraftSession {
   readonly #known: Set<RevisionId>;
   #theirs: RevisionId | null = null;
   #saving = false;
+  // A save under way that hasn't built its payload yet, as one waiting for
+  // a session left to settle, and whether anything was edited since it
+  // started: that edit goes in it, not in a save of its own (#661).
+  #building: { edited: boolean } | null = null;
   #region: { region: Region; generation: number } | null = null;
   // The version the next save revises, the region its link table was worked
   // out for, and what this session changes in it.
@@ -323,9 +327,16 @@ export class DraftSession {
     this.#content = { title, markdown, attachments };
     this.#autosave = new Autosave(
       async (build) => {
-        if (this.#settling) await this.#settling;
-        const trimming = this.#trim();
-        if (trimming) await trimming;
+        // Built only once what it waits for is done, it takes what's typed meanwhile.
+        const building = { edited: false };
+        this.#building = building;
+        try {
+          if (this.#settling) await this.#settling;
+          const trimming = this.#trim();
+          if (trimming) await trimming;
+        } finally {
+          if (this.#building === building) this.#building = null;
+        }
         return this.#save(build());
       },
       (status, saveError) => {
@@ -411,7 +422,17 @@ export class DraftSession {
   // landing before it may change the table and the region it was worked out
   // for, and the two must go together.
   #schedule() {
+    if (this.#building) {
+      this.#building.edited = true;
+      return;
+    }
     this.#autosave.schedule(() => this.#current());
+  }
+
+  // An edit not saved yet, outside a live session: waiting for its save, or
+  // for a save under way to build its payload.
+  #unsavedEdit(): boolean {
+    return this.#autosave.unsaved() !== null || this.#building?.edited === true;
   }
 
   #change(changes: Partial<Content>) {
@@ -737,7 +758,7 @@ export class DraftSession {
       // this device as it is now, it is put back on the next join.
       return this.#unreported || (this.#ownUnsaved() && !this.#keptFresh);
     }
-    return this.#unreported || this.#autosave.unsaved() !== null;
+    return this.#unreported || this.#unsavedEdit();
   }
 
   /**
@@ -757,7 +778,7 @@ export class DraftSession {
     this.#base = revisionId;
     // What comes next grows from what landed, not from a session's base; a
     // change kept from a session was what the view shows, which landed.
-    if (this.#keptLive && !this.#participant && this.#autosave.unsaved() === null) {
+    if (this.#keptLive && !this.#participant && !this.#unsavedEdit()) {
       this.#payload = this.#current();
     }
     this.#keptLive = null;
@@ -1670,7 +1691,7 @@ export class DraftSession {
   #untouched(): boolean {
     const { title, markdown, attachments } = this.#payload;
     return (
-      this.#autosave.unsaved() === null &&
+      !this.#unsavedEdit() &&
       !this.#unreported &&
       this.#content.title === title &&
       this.#content.markdown === markdown &&

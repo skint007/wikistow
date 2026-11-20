@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Live editing: typing done while the app leaves a session is saved once, rather than as two identical drafts, and so is typing done while a draft’s first save waits to start. (#PR)
+
 ## 0.29.0 - 2026-11-20
 
 ### Highlights
