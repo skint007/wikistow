@@ -575,10 +575,14 @@ describe('a draft session in a live session', () => {
     type('A, typed more');
     await settle();
     const answer = holdSaves();
+    const shown: string[] = [];
+    const unsubscribe = draft.subscribe(() => shown.push(draft.snapshot().status));
     release();
     await settle();
+    unsubscribe();
     // Kept, but the typing since isn't saved yet: never shown as saved meanwhile.
     expect(saves).toHaveLength(1);
+    expect(shown).not.toContain('saved');
     expect(draft.snapshot().status).toBe('saving');
     expect(draft.isBusy()).toBe(true);
     // Typed once it sent: a save of its own.
