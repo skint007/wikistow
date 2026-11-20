@@ -10,6 +10,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Browser clipping, offline: a screenshot clip whose screenshot went in just as the vault locked, before the draft showing it saved, waits for the unlock and is saved again with it, rather than being said saved without it. A text clip's images a lock stopped are said skipped, and stay links. Any change written into this device's queue after a lock now fails rather than being said kept. (#684)
 
+#### Server
+
+- Unpublishing a page no longer fails, or makes someone's save, publish or public link on that page fail, when they happen at the same moment. (#680)
+
 ## 0.29.0 - 2026-11-20
 
 ### Highlights
