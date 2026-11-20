@@ -714,10 +714,12 @@ export class DraftSession {
     // saved meanwhile. So for a view showing a change kept for a session,
     // another tab's maybe, that nothing was typed into: the join puts it in.
     if (this.#participant || this.#rejoinHold) return;
-    // A session left reads the head itself as it settles, and says which
-    // drafts are this draft's own: one heard meanwhile is the page's to
-    // tell again once it has, as it does when the status changes.
-    if (this.#settling) return;
+    // A session left says, as it settles, which drafts are this draft's own:
+    // the page's head heard meanwhile is judged once it has.
+    if (this.#settling) {
+      this.#headHeard = { head };
+      return;
+    }
     // A save in flight may already be the head before its answer arrives.
     if (!head || this.#known.has(head) || this.#saving) return;
     if (this.#keptLive && !this.#keptLive.putIn && this.#untouched() && this.#ports.live) {
@@ -1904,6 +1906,8 @@ export class DraftSession {
 
   // While a session left is settled: saves wait for it, and nothing shows as saved.
   #settling: Promise<void> | null = null;
+  // The page's draft head, as it last told of it while the session settled.
+  #headHeard: { head: RevisionId | null } | null = null;
 
   // Go on from what the session held, as a writer outside it. Whether the
   // draft went back to what it opened, holding nothing of the person's.
@@ -2056,6 +2060,9 @@ export class DraftSession {
     } finally {
       this.#settling = null;
       release();
+      const heard = this.#headHeard;
+      this.#headHeard = null;
+      if (heard) this.noticeHead(heard.head);
     }
   }
 

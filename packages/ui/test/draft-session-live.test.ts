@@ -542,6 +542,24 @@ describe('a draft session in a live session', () => {
     ]);
   });
 
+  it('saves typing done just before a session left settles once, with no save waiting yet (#661)', async () => {
+    const { draft, saves, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    await settle();
+    // Settled before the autosave's timer goes off.
+    type('Start. Last words. More.');
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words. More.']);
+  });
+
   it('keeps typing done while a lost join settles in one save, for the next join (#661)', async () => {
     const { draft, saves, joins, kept, type, noJoining, holdSaves } = session(page('A'));
     await draft.joinLive();
@@ -595,26 +613,24 @@ describe('a draft session in a live session', () => {
     expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words.']);
   });
 
-  it('leaves a head heard while it settles for the page to tell again (#661)', async () => {
-    const { draft, saves, joins, type } = session();
+  it('meets a draft saved elsewhere while a saved session settled, once it has (#661)', async () => {
+    const { draft, saves, joins } = session();
     await draft.joinLive();
     const live = joins[0];
     if (!live) throw new Error('not joined');
-    type('Start. Last words.');
     let release = () => {};
     live.settling = new Promise((resolve) => (release = resolve));
     live.end({ kind: 'ended', reason: 'access' });
     await settle();
-    const theirs = RevisionId.parse('r-theirs');
-    draft.noticeHead(theirs);
+    // Told once: the status doesn't change, so the page doesn't tell it again.
+    draft.noticeHead(RevisionId.parse('r-theirs'));
+    expect(draft.snapshot().status).not.toBe('conflict');
     release();
     await settle();
-    expect(draft.snapshot().status).not.toBe('conflict');
-    // The page tells it the head again as the status changes.
-    draft.noticeHead(theirs);
     expect(draft.snapshot().status).toBe('conflict');
     expect((await draft.mergeVersions())?.theirs).toBe('r-theirs');
-    expect(saves.map((save) => save.basedOn)).not.toContain('r-theirs');
+    await expect(draft.saveOrThrow()).rejects.toThrow();
+    expect(saves).toHaveLength(0);
   });
 
   it('waits for a flush begun in the session to be saved from outside once it ends meanwhile', async () => {
@@ -851,8 +867,8 @@ describe('putting typing back from a live session', () => {
     // Long enough for the autosave's save to wait on leaving.
     type('A\n\nB, mine, more');
     await settle();
-    // An older head heard meanwhile isn't what Merge… compares against.
-    draft.noticeHead(RevisionId.parse('r-older'));
+    // The page hears of the head the put-back reads too: Merge… compares against it.
+    draft.noticeHead(RevisionId.parse('r-head'));
     release();
     await settle();
     expect(saves).toHaveLength(0);
