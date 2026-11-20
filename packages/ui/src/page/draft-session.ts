@@ -337,6 +337,8 @@ export class DraftSession {
         } finally {
           if (this.#building === building) this.#building = null;
         }
+        // Stopped meanwhile, as for Merge… once the session settled: nothing goes.
+        if (this.#autosave.isStopped()) return false;
         return this.#save(build());
       },
       (status, saveError) => {
@@ -424,6 +426,9 @@ export class DraftSession {
   #schedule() {
     if (this.#building) {
       this.#building.edited = true;
+      // Unsaved until that save lands, though what settled showed as saved.
+      const status = this.#autosave.status;
+      if (!this.#participant && this.#snapshot.status !== status) this.#set({ status });
       return;
     }
     this.#autosave.schedule(() => this.#current());

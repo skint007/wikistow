@@ -38,3 +38,32 @@ describe('an edit too large to save', () => {
     expect(a.saving.unsaved()).toBeNull();
   });
 });
+
+describe('a save stopped before it sends', () => {
+  it('keeps its edit unsaved and the status the stop set, until resumed', async () => {
+    let go = () => {};
+    const waiting = new Promise<void>((resolve) => (go = resolve));
+    const sent: string[] = [];
+    const saving: Autosave<string> = new Autosave<string>(
+      async (text) => {
+        await waiting;
+        if (saving.isStopped()) return false;
+        sent.push(text);
+      },
+      () => {},
+      { debounceMs: 0, maxWaitMs: 0 },
+    );
+    saving.schedule('typed');
+    await turn();
+    saving.conflict();
+    go();
+    await saving.flush();
+    expect(sent).toEqual([]);
+    expect(saving.status).toBe('conflict');
+    expect(saving.unsaved()).toBe('typed');
+    saving.resume();
+    await saving.flush();
+    expect(sent).toEqual(['typed']);
+    expect(saving.status).toBe('saved');
+  });
+});

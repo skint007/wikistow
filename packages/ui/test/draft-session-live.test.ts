@@ -260,9 +260,11 @@ function session(
   const marked: { version: number; putIn: KeptLive['putIn'] }[] = [];
   let held = 0;
   let joinable = true;
+  let saving: Promise<void> | null = null;
   const ports: DraftPorts = {
     async saveDraft(input) {
       saves.push(input);
+      await saving;
       return {
         revisionId: RevisionId.parse(`r${saves.length}`),
         repaired: false,
@@ -353,6 +355,15 @@ function session(
     marked,
     held: () => held,
     noJoining: () => (joinable = false),
+    /** Saves wait for the answer until the function this returns lets them go. */
+    holdSaves: () => {
+      let release = () => {};
+      saving = new Promise((resolve) => (release = resolve));
+      return () => {
+        saving = null;
+        release();
+      };
+    },
     /** The person types: the surface holds it, and reports it. */
     type: (markdown: string) => {
       surface.text = markdown;
@@ -512,7 +523,7 @@ describe('a draft session in a live session', () => {
   });
 
   it('keeps typing done while a lost join settles in one save, for the next join (#661)', async () => {
-    const { draft, saves, joins, kept, type, noJoining } = session(page('A'));
+    const { draft, saves, joins, kept, type, noJoining, holdSaves } = session(page('A'));
     await draft.joinLive();
     const live = joins[0];
     if (!live) throw new Error('not joined');
@@ -525,9 +536,16 @@ describe('a draft session in a live session', () => {
     await settle();
     type('A, typed more');
     await settle();
+    const answer = holdSaves();
     release();
     await settle();
+    // Kept, but the typing since isn't saved yet: never shown as saved meanwhile.
+    expect(saves).toHaveLength(1);
+    expect(draft.snapshot().status).toBe('saving');
+    expect(draft.isBusy()).toBe(true);
+    answer();
     await draft.saveOrThrow();
+    expect(draft.snapshot().status).toBe('saved');
     expect(kept.at(-1)?.payload.markdown).toBe('A, typed');
     expect(saves.map((save) => save.payload.markdown)).toEqual(['A, typed more']);
   });
@@ -683,6 +701,39 @@ describe('putting typing back from a live session', () => {
     expect(versions?.theirs).toBe('r-head');
     expect(versions?.basePayload?.markdown).toBe('A\n\nB');
     expect(versions?.yours.markdown).toBe('A\n\nB, mine');
+  });
+
+  it('sends nothing for typing done while leaving, where it overlaps the head: Merge… instead', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, type } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('A\n\nB, mine');
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: page('A\n\nB, theirs') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: true,
+      atHead: false,
+    };
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'it can’t take part', saveOver: null, rejoin: false });
+    await settle();
+    // Long enough for the autosave's save to wait on leaving.
+    type('A\n\nB, mine, more');
+    await settle();
+    release();
+    await settle();
+    expect(saves).toHaveLength(0);
+    expect(draft.snapshot().status).toBe('conflict');
+    expect(draft.hasUnsaved()).toBe(true);
+    const versions = await draft.mergeVersions();
+    expect(versions?.theirs).toBe('r-head');
+    expect(versions?.yours.markdown).toBe('A\n\nB, mine, more');
   });
 
   it('joins with a change waiting here, puts it in by block, and withdraws it once saved', async () => {

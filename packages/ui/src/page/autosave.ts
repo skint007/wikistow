@@ -11,7 +11,9 @@ export type SaveStatus = 'saved' | 'pending' | 'saving' | 'conflict' | 'too-larg
  * `conflict()`) stops autosave until the person decides what to keep. An
  * edit too large to save (`PageTooLarge`) waits for the next, which is tried
  * as usual. Any other refusal stops autosave too, and `onStatus` gets it
- * with the `'error'` status, so the person can be told why.
+ * with the `'error'` status, so the person can be told why. A save that
+ * finds saving stopped before it sends, as one that waited, returns false:
+ * its edit stays unsaved, and the status stays as the stop set it.
  */
 export class Autosave<T> {
   #status: SaveStatus = 'saved';
@@ -20,12 +22,12 @@ export class Autosave<T> {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #running: Promise<void> | null = null;
   #stopped = false;
-  readonly #save: (value: T) => Promise<void>;
+  readonly #save: (value: T) => Promise<void | false>;
   readonly #onStatus: (status: SaveStatus, error?: unknown) => void;
   readonly #timing: { debounceMs: number; maxWaitMs: number };
 
   constructor(
-    save: (value: T) => Promise<void>,
+    save: (value: T) => Promise<void | false>,
     onStatus: (status: SaveStatus, error?: unknown) => void,
     timing = { debounceMs: 1000, maxWaitMs: 10_000 },
   ) {
@@ -57,7 +59,10 @@ export class Autosave<T> {
     this.#set('saving');
     let tooLarge = false;
     this.#running = this.#save(next.value).then(
-      () => this.#set(this.#pending ? 'pending' : 'saved'),
+      (sent) => {
+        if (sent !== false) return this.#set(this.#pending ? 'pending' : 'saved');
+        this.#pending ??= next;
+      },
       (error: unknown) => {
         // Keep the unsaved edit, so "save mine" can still use it.
         this.#pending ??= next;

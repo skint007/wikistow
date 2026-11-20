@@ -228,6 +228,31 @@ describe('a draft session', () => {
     );
   });
 
+  it('saves typing done while its first save works out the table once, in that save (#661)', async () => {
+    let release = () => {};
+    const reading = new Promise<void>((resolve) => (release = resolve));
+    const s = session(
+      opened('[[Plan]]', { plan: 'p-plan' }),
+      undefined,
+      OWNER_REGION,
+      async (md) => {
+        await reading;
+        return placedWikilinks(md);
+      },
+    );
+    type(s, '[[Plan]] one');
+    const flushed = s.draft.flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    type(s, '[[Plan]] one two');
+    expect(s.draft.hasUnsaved()).toBe(true);
+    release();
+    await flushed;
+    await s.draft.flush();
+    expect(s.saves.map((save) => save.payload.markdown)).toEqual(['[[Plan]] one two']);
+    expect(s.draft.hasUnsaved()).toBe(false);
+    expect(s.draft.snapshot().status).toBe('saved');
+  });
+
   describe('a save that renames a link', () => {
     const rename = (input: SaveInput) => ({
       ...input.payload,
