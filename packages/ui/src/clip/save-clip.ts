@@ -3,15 +3,17 @@
 // its images as any new page does: the page with its text first, its
 // images' links pointing at their sites (`newPageDraft`), then each image
 // main fetched attached to it (`attach`), then the text pointing at them
-// (`draft`). A clip that stops partway still leaves its text. Main hears
-// the page's ID before it's made, and again once it is (`made`), so a
-// clip a reload cut short makes no second page.
+// (`draft`). A clip that stops partway still leaves its text, unless a
+// lock stopped it: then it waits for the unlock, to be saved again whole.
+// Main hears the page's ID before it's made, and again once it is
+// (`made`), so a clip a reload cut short makes no second page.
 import {
   ApiError,
   newId,
   newPayload,
   PageId,
   PageTooLarge,
+  QueueClosed,
   RevisionId,
   linkSpans,
   type AttachmentRef,
@@ -74,6 +76,8 @@ const TOO_LONG =
   'This is too long for one page. Try Article, or select part of it and clip the selection.';
 
 const savedTo = (path: readonly string[]) => path.join(' / ');
+
+const SHOT_FAILED = 'WikiStow couldn’t save the screenshot. Try again.';
 
 /** Save `clip` as a new draft. Never throws: a failure is an outcome, said in the app's words. */
 export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<Saved> {
@@ -214,6 +218,9 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         bytes: shot.bytes,
       });
     } catch (error) {
+      // Locked meanwhile, offline: the page, made partly, waits for the
+      // unlock to put it in the trash and save the clip again (#670).
+      if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
       // A page that was to show a screenshot, without it, isn't the clip:
       // it goes in the trash, and the extension says why.
       await deps.writer
@@ -224,7 +231,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
             'too-large',
             'This screenshot is larger than your WikiStow server takes. Choose a smaller area.',
           )
-        : failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
+        : failed('failed', SHOT_FAILED);
     }
     try {
       const drafts = deps.writer.draft(page, { seen: null });
@@ -233,11 +240,19 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         basedOn,
         payload: { ...newPayload({ title, markdown: shown(ref.id) }), attachments: [ref] },
       });
-    } catch {
-      await deps.writer
-        .deleteNode({ spaceId, nodeId: made.pageId, node: 'page', name: title, dropChanges: true })
-        .catch(() => {});
-      return failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
+    } catch (error) {
+      if (!(error instanceof QueueClosed)) {
+        await deps.writer
+          .deleteNode({
+            spaceId,
+            nodeId: made.pageId,
+            node: 'page',
+            name: title,
+            dropChanges: true,
+          })
+          .catch(() => {});
+      }
+      return failed('failed', SHOT_FAILED);
     }
     await deps.made?.({ ...madeAs, partial: false }).catch(() => {});
     return {
@@ -254,6 +269,13 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
     };
   }
 
+  // Locked while its images go in, offline: the page, made without them,
+  // is made only partly, so the unlock puts it in the trash and saves the
+  // clip again, images and all, rather than finish it without them (#670).
+  const lockedOut = async (): Promise<Saved> => {
+    await deps.made?.({ ...madeAs, partial: true }).catch(() => {});
+    return failed('failed', 'The vault locked before the clip’s images were saved.');
+  };
   // Images, one at a time, each kept only once attached.
   const attached = new Map<string, string>();
   const refs: AttachmentRef[] = [];
@@ -268,7 +290,8 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       });
       attached.set(url, ref.id);
       refs.push(ref);
-    } catch {
+    } catch (error) {
+      if (error instanceof QueueClosed) return lockedOut();
       // Over the server's upload limit, say: it stays a link.
     }
   }
@@ -280,7 +303,8 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         basedOn,
         payload: { ...newPayload({ title, markdown: plan.written(attached) }), attachments: refs },
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof QueueClosed) return lockedOut();
       // The page keeps its text, its images as links.
       attached.clear();
       refs.length = 0;
