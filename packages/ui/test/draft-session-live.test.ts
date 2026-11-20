@@ -67,6 +67,8 @@ class FakeParticipant {
   settled: Awaited<ReturnType<LiveParticipant['settle']>> | null = null;
   /** Settling waits for this, as it waits on the server. */
   settling: Promise<void> | null = null;
+  /** Saving now waits for this, and then fails, as when the session ends meanwhile. */
+  savingNow: Promise<void> | null = null;
   readonly sessionId = LiveSessionId.parse('session-1');
   /** The base a put-back merges from: what others typed that this app took in, and its own the session saved. */
   outside: PagePayload | null = null;
@@ -135,6 +137,10 @@ class FakeParticipant {
     for (const listener of this.#changes) listener(false);
   }
   async saveNow() {
+    if (this.savingNow) {
+      await this.savingNow;
+      return false;
+    }
     this.set({ saved: true });
     return true;
   }
@@ -263,7 +269,6 @@ function session(
   let joinable = true;
   let saving: Promise<void> | null = null;
   let reading: Promise<void> | null = null;
-  let draftHead = R0;
   const ports: DraftPorts = {
     async saveDraft(input) {
       saves.push(input);
@@ -289,7 +294,7 @@ function session(
         blobHash: 'A'.repeat(43),
       } as AttachmentRef;
     },
-    draftHead: async () => draftHead,
+    draftHead: async () => R0,
     generation: () => 0,
     epoch: () => 0,
     tree: () => undefined,
@@ -361,8 +366,6 @@ function session(
     marked,
     held: () => held,
     noJoining: () => (joinable = false),
-    /** The page's draft head as the server has it now. */
-    headNow: (head: RevisionId) => (draftHead = head),
     /** Reading the draft's links waits until the function this returns lets it go. */
     holdLinks: () => {
       let release = () => {};
@@ -560,11 +563,16 @@ describe('a draft session in a live session', () => {
     expect(saves).toHaveLength(1);
     expect(draft.snapshot().status).toBe('saving');
     expect(draft.isBusy()).toBe(true);
+    // Typed once it sent: a save of its own.
+    type('A, typed more, again');
     answer();
     await draft.saveOrThrow();
     expect(draft.snapshot().status).toBe('saved');
     expect(kept.at(-1)?.payload.markdown).toBe('A, typed');
-    expect(saves.map((save) => save.payload.markdown)).toEqual(['A, typed more']);
+    expect(saves.map((save) => save.payload.markdown)).toEqual([
+      'A, typed more',
+      'A, typed more, again',
+    ]);
   });
 
   it('saves what a session left held before a flush resolves (#661)', async () => {
@@ -587,8 +595,8 @@ describe('a draft session in a live session', () => {
     expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words.']);
   });
 
-  it('meets a draft saved elsewhere while it left once it has settled (#661)', async () => {
-    const { draft, saves, joins, type, headNow } = session();
+  it('leaves a head heard while it settles for the page to tell again (#661)', async () => {
+    const { draft, saves, joins, type } = session();
     await draft.joinLive();
     const live = joins[0];
     if (!live) throw new Error('not joined');
@@ -598,13 +606,38 @@ describe('a draft session in a live session', () => {
     live.end({ kind: 'ended', reason: 'access' });
     await settle();
     const theirs = RevisionId.parse('r-theirs');
-    headNow(theirs);
     draft.noticeHead(theirs);
     release();
     await settle();
+    expect(draft.snapshot().status).not.toBe('conflict');
+    // The page tells it the head again as the status changes.
+    draft.noticeHead(theirs);
     expect(draft.snapshot().status).toBe('conflict');
     expect((await draft.mergeVersions())?.theirs).toBe('r-theirs');
     expect(saves.map((save) => save.basedOn)).not.toContain('r-theirs');
+  });
+
+  it('waits for a flush begun in the session to be saved from outside once it ends meanwhile', async () => {
+    const { draft, saves, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let ended = () => {};
+    live.savingNow = new Promise((resolve) => (ended = resolve));
+    let flushed = false;
+    const flushing = draft.saveOrThrow().then(() => (flushed = true));
+    // The session's saver is saving it when the session ends.
+    await settle();
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    ended();
+    await settle();
+    expect(flushed).toBe(false);
+    release();
+    await flushing;
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words.']);
   });
 
   it('saves its document over a session draft that differed from what it showed', async () => {

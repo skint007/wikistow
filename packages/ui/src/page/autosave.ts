@@ -6,7 +6,8 @@ export type SaveStatus = 'saved' | 'pending' | 'saving' | 'conflict' | 'too-larg
 /**
  * Save edits shortly after typing stops: one second after the last change,
  * and at least every ten seconds while typing continues. One save runs at a
- * time; edits made during it wait for their own timer, or for `flush()`. A
+ * time; edits made during it wait for their own timer, or for `flush()`,
+ * unless it reads its edit only as it sends (`takeWaiting()`). A
  * conflict (someone else saved first, found by a save or reported with
  * `conflict()`) stops autosave until the person decides what to keep. An
  * edit too large to save (`PageTooLarge`) waits for the next, which is tried
