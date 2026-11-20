@@ -503,13 +503,15 @@ const holdsSpaces = (mark: Mark) =>
 
 /**
  * `doc` without the marks Markdown can't hold. None on the spaces and line
- * breaks a mark's run starts or ends with, but code, and a colour's HTML on
- * spaces (`holdsSpaces`): delimiters can't sit beside them, and Milkdown,
- * which moves spaces out of a mark, wrote some around nothing (`~~~~`,
- * `[](…)`) and others differently each time. And none an atom can't hold
- * (`holds`). A space at the edge of text in a mark that goes on past it
- * where Milkdown closes it to open it again, or in a colour's HTML, is held
- * for Milkdown, which would otherwise move it out (`HELD_SPACE`).
+ * breaks a mark's run starts or ends with: delimiters can't sit beside
+ * them, and Milkdown, which moves spaces out of a mark, wrote some around
+ * nothing (`~~~~`, `[](…)`) and others differently each time. Code keeps
+ * them, as does a colour's HTML on spaces (`holdsSpaces`), and so does any
+ * mark on spaces in code, which a code span holds between its backticks.
+ * And none an atom can't hold (`holds`). A space at the edge of text in a
+ * mark that goes on past it where Milkdown closes it to open it again, or
+ * in a colour's HTML, is held for Milkdown, which would otherwise move it
+ * out (`HELD_SPACE`).
  */
 function writable(doc: Node): Node {
   const tr = new Transform(doc);
@@ -529,7 +531,15 @@ function writable(doc: Node): Node {
         else runs.push({ mark, from: offset, to: end });
       }
     });
-    const text = block.textBetween(0, block.content.size, undefined, leafText);
+    // Code as other than spaces: Milkdown writes each piece of code in its
+    // own code span, so a mark taken off a space in it would part the span,
+    // and the delimiters beside it sit beside its backticks, not the space.
+    // Only text holds code; a line break loses it above.
+    let text = '';
+    block.forEach((node) => {
+      const code = node.isText && node.marks.some((mark) => mark.type.spec.code);
+      text += code ? '\uFFFC'.repeat(node.nodeSize) : node.isText ? node.text : leafText(node);
+    });
     for (const { mark, from, to } of runs) {
       const inside = text.slice(from, to);
       // A colour's HTML keeps spaces at its ends, but not a line break.
