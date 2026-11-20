@@ -6,12 +6,15 @@ export type SaveStatus = 'saved' | 'pending' | 'saving' | 'conflict' | 'too-larg
 /**
  * Save edits shortly after typing stops: one second after the last change,
  * and at least every ten seconds while typing continues. One save runs at a
- * time; edits made during it wait for their own timer, or for `flush()`. A
+ * time; edits made during it wait for their own timer, or for `flush()`,
+ * unless it reads its edit only as it sends (`takeWaiting()`). A
  * conflict (someone else saved first, found by a save or reported with
  * `conflict()`) stops autosave until the person decides what to keep. An
  * edit too large to save (`PageTooLarge`) waits for the next, which is tried
  * as usual. Any other refusal stops autosave too, and `onStatus` gets it
- * with the `'error'` status, so the person can be told why.
+ * with the `'error'` status, so the person can be told why. A save that
+ * finds saving stopped before it sends, as one that waited, returns false:
+ * its edit stays unsaved, and the status stays as the stop set it.
  */
 export class Autosave<T> {
   #status: SaveStatus = 'saved';
@@ -20,12 +23,12 @@ export class Autosave<T> {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #running: Promise<void> | null = null;
   #stopped = false;
-  readonly #save: (value: T) => Promise<void>;
+  readonly #save: (value: T) => Promise<void | false>;
   readonly #onStatus: (status: SaveStatus, error?: unknown) => void;
   readonly #timing: { debounceMs: number; maxWaitMs: number };
 
   constructor(
-    save: (value: T) => Promise<void>,
+    save: (value: T) => Promise<void | false>,
     onStatus: (status: SaveStatus, error?: unknown) => void,
     timing = { debounceMs: 1000, maxWaitMs: 10_000 },
   ) {
@@ -57,7 +60,12 @@ export class Autosave<T> {
     this.#set('saving');
     let tooLarge = false;
     this.#running = this.#save(next.value).then(
-      () => this.#set(this.#pending ? 'pending' : 'saved'),
+      (sent) => {
+        if (sent !== false) return this.#set(this.#pending ? 'pending' : 'saved');
+        // Unsaved again: told, so what shows the stop can offer what it holds.
+        this.#pending ??= next;
+        this.#set(this.#status);
+      },
       (error: unknown) => {
         // Keep the unsaved edit, so "save mine" can still use it.
         this.#pending ??= next;
@@ -124,7 +132,18 @@ export class Autosave<T> {
   /** After a conflict is resolved: forget the stop, optionally with the edit still to save. */
   resume() {
     this.#stopped = false;
-    this.#set(this.#pending ? 'pending' : 'saved');
+    this.#set(this.#pending ? 'pending' : this.#running ? 'saving' : 'saved');
+  }
+
+  /**
+   * The save under way reads its edit only now, as one that waited before
+   * sending: the edits made meanwhile are in it, so none waits after it.
+   */
+  takeWaiting() {
+    this.#clearTimer();
+    this.#pending = null;
+    this.#firstPendingAt = null;
+    if (this.#status === 'pending') this.#set('saving');
   }
 
   /**

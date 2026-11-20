@@ -2,6 +2,7 @@
 // document holds what's typed, the session's saver saves, and when the
 // session ends the draft goes on as before and joins the next one.
 import {
+  LINKS_NAMESPACE,
   linksInUse,
   newPayload,
   OWNER_REGION,
@@ -64,6 +65,10 @@ class FakeParticipant {
   closed = false;
   typed = false;
   settled: Awaited<ReturnType<LiveParticipant['settle']>> | null = null;
+  /** Settling waits for this, as it waits on the server. */
+  settling: Promise<void> | null = null;
+  /** Saving now waits for this, and then fails, as when the session ends meanwhile. */
+  savingNow: Promise<void> | null = null;
   readonly sessionId = LiveSessionId.parse('session-1');
   /** The base a put-back merges from: what others typed that this app took in, and its own the session saved. */
   outside: PagePayload | null = null;
@@ -132,6 +137,10 @@ class FakeParticipant {
     for (const listener of this.#changes) listener(false);
   }
   async saveNow() {
+    if (this.savingNow) {
+      await this.savingNow;
+      return false;
+    }
     this.set({ saved: true });
     return true;
   }
@@ -146,6 +155,7 @@ class FakeParticipant {
     return publish(R0, () => {});
   }
   async settle() {
+    await this.settling;
     return (
       this.settled ?? {
         base: { revisionId: R0, payload: this.base },
@@ -257,9 +267,12 @@ function session(
   const marked: { version: number; putIn: KeptLive['putIn'] }[] = [];
   let held = 0;
   let joinable = true;
+  let saving: Promise<void> | null = null;
+  let reading: Promise<void> | null = null;
   const ports: DraftPorts = {
     async saveDraft(input) {
       saves.push(input);
+      await saving;
       return {
         revisionId: RevisionId.parse(`r${saves.length}`),
         repaired: false,
@@ -288,7 +301,10 @@ function session(
     linkTargets: () => null,
     saved: async () => {},
     overtaken: () => undefined,
-    readLinks: async () => [],
+    readLinks: async () => {
+      await reading;
+      return [];
+    },
     waitingChange: async () =>
       waiting || entry ? { version: entry?.version ?? 1, head: R0, payload } : null,
     ...(entry && {
@@ -350,6 +366,24 @@ function session(
     marked,
     held: () => held,
     noJoining: () => (joinable = false),
+    /** Reading the draft's links waits until the function this returns lets it go. */
+    holdLinks: () => {
+      let release = () => {};
+      reading = new Promise((resolve) => (release = resolve));
+      return () => {
+        reading = null;
+        release();
+      };
+    },
+    /** Saves wait for the answer until the function this returns lets them go. */
+    holdSaves: () => {
+      let release = () => {};
+      saving = new Promise((resolve) => (release = resolve));
+      return () => {
+        saving = null;
+        release();
+      };
+    },
     /** The person types: the surface holds it, and reports it. */
     type: (markdown: string) => {
       surface.text = markdown;
@@ -480,6 +514,152 @@ describe('a draft session in a live session', () => {
     expect(joins[1]?.left).toBe(true);
   });
 
+  it('saves typing done while a session is left once, in the save that waited for it (#661)', async () => {
+    const { draft, saves, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    await settle();
+    // Typed while it settles, long enough for the autosave's save to wait on it.
+    type('Start. Last words. More.');
+    await settle();
+    expect(saves).toHaveLength(0);
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words. More.']);
+    expect(draft.snapshot().status).toBe('saved');
+    // Typing after it is saved on its own.
+    type('Start. Last words. More. Again.');
+    await draft.saveOrThrow();
+    expect(saves.map((save) => save.payload.markdown)).toEqual([
+      'Start. Last words. More.',
+      'Start. Last words. More. Again.',
+    ]);
+  });
+
+  it('saves typing done just before a session left settles once, with no save waiting yet (#661)', async () => {
+    const { draft, saves, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    await settle();
+    // Settled before the autosave's timer goes off.
+    type('Start. Last words. More.');
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words. More.']);
+  });
+
+  it('keeps typing done while a lost join settles in one save, for the next join (#661)', async () => {
+    const { draft, saves, joins, kept, type, noJoining, holdSaves } = session(page('A'));
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.outside = page('A');
+    type('A, typed');
+    noJoining();
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+    await settle();
+    type('A, typed more');
+    await settle();
+    const answer = holdSaves();
+    const shown: string[] = [];
+    const unsubscribe = draft.subscribe(() => shown.push(draft.snapshot().status));
+    release();
+    await settle();
+    unsubscribe();
+    // Kept, but the typing since isn't saved yet: never shown as saved meanwhile.
+    expect(saves).toHaveLength(1);
+    expect(shown).not.toContain('saved');
+    expect(draft.snapshot().status).toBe('saving');
+    expect(draft.isBusy()).toBe(true);
+    // Typed once it sent: a save of its own.
+    type('A, typed more, again');
+    answer();
+    await draft.saveOrThrow();
+    expect(draft.snapshot().status).toBe('saved');
+    expect(kept.at(-1)?.payload.markdown).toBe('A, typed');
+    expect(saves.map((save) => save.payload.markdown)).toEqual([
+      'A, typed more',
+      'A, typed more, again',
+    ]);
+  });
+
+  it('saves what a session left held before a flush resolves (#661)', async () => {
+    const { draft, saves, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    await settle();
+    // As Publish does, while it settles.
+    let flushed = false;
+    const flushing = draft.saveOrThrow().then(() => (flushed = true));
+    await settle();
+    expect(flushed).toBe(false);
+    release();
+    await flushing;
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words.']);
+  });
+
+  it('meets a draft saved elsewhere while a saved session settled, once it has (#661)', async () => {
+    const { draft, saves, joins } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    await settle();
+    // Told once: the status doesn't change, so the page doesn't tell it again.
+    draft.noticeHead(RevisionId.parse('r-theirs'));
+    expect(draft.snapshot().status).not.toBe('conflict');
+    release();
+    await settle();
+    expect(draft.snapshot().status).toBe('conflict');
+    expect((await draft.mergeVersions())?.theirs).toBe('r-theirs');
+    await expect(draft.saveOrThrow()).rejects.toThrow();
+    expect(saves).toHaveLength(0);
+  });
+
+  it('waits for a flush begun in the session to be saved from outside once it ends meanwhile', async () => {
+    const { draft, saves, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let ended = () => {};
+    live.savingNow = new Promise((resolve) => (ended = resolve));
+    let flushed = false;
+    const flushing = draft.saveOrThrow().then(() => (flushed = true));
+    // The session's saver is saving it when the session ends.
+    await settle();
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    ended();
+    await settle();
+    expect(flushed).toBe(false);
+    release();
+    await flushing;
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words.']);
+  });
+
   it('saves its document over a session draft that differed from what it showed', async () => {
     const { draft, saves, joins, type } = session();
     await draft.joinLive();
@@ -576,6 +756,71 @@ describe('putting typing back from a live session', () => {
     expect(saves.at(-1)?.live ?? null).toBeNull();
   });
 
+  it('puts typing done while leaving back with the rest, in one save (#661)', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, type } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('A\n\nB\n\nMine');
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: page('A, saved\n\nB') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: false,
+      atHead: false,
+    };
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'it can’t catch up', saveOver: null, rejoin: false });
+    await settle();
+    type('A\n\nB\n\nMine\n\nMore');
+    await settle();
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(saves).toHaveLength(1);
+    expect(saves[0]).toMatchObject({ basedOn: 'r-head' });
+    expect(saves[0]?.payload.markdown).toBe('A, saved\n\nB\n\nMine\n\nMore');
+  });
+
+  it('takes a head heard while leaving as its own once the put-back lands on it (#661)', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, type } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('A\n\nB\n\nMine');
+    const head = RevisionId.parse('r-head');
+    live.head = { revisionId: head, payload: page('A, saved\n\nB') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: false,
+      atHead: false,
+    };
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'it can’t catch up', saveOver: null, rejoin: false });
+    await settle();
+    type('A\n\nB\n\nMine\n\nMore');
+    // The page hears of an older head, then of the one the put-back goes onto, before it does.
+    draft.noticeHead(RevisionId.parse('r-older'));
+    draft.noticeHead(head);
+    await settle();
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(draft.snapshot().status).toBe('saved');
+    expect(saves).toHaveLength(1);
+    expect(saves[0]).toMatchObject({ basedOn: 'r-head' });
+    expect(saves[0]?.payload.markdown).toBe('A, saved\n\nB\n\nMine\n\nMore');
+  });
+
   it('offers Merge… from the kept base where the person’s typing overlaps the head', async () => {
     const opened = page('A\n\nB');
     const { draft, saves, joins, surface } = session(opened);
@@ -601,6 +846,81 @@ describe('putting typing back from a live session', () => {
     expect(versions?.theirs).toBe('r-head');
     expect(versions?.basePayload?.markdown).toBe('A\n\nB');
     expect(versions?.yours.markdown).toBe('A\n\nB, mine');
+  });
+
+  it('sends nothing for typing done while leaving, where it overlaps the head: Merge… instead', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, type } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('A\n\nB, mine');
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: page('A\n\nB, theirs') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: true,
+      atHead: false,
+    };
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'it can’t take part', saveOver: null, rejoin: false });
+    await settle();
+    // Long enough for the autosave's save to wait on leaving.
+    type('A\n\nB, mine, more');
+    await settle();
+    // The page hears of the head the put-back reads too: Merge… compares against it.
+    draft.noticeHead(RevisionId.parse('r-head'));
+    release();
+    await settle();
+    expect(saves).toHaveLength(0);
+    expect(draft.snapshot().status).toBe('conflict');
+    expect(draft.hasUnsaved()).toBe(true);
+    const versions = await draft.mergeVersions();
+    expect(versions?.theirs).toBe('r-head');
+    expect(versions?.yours.markdown).toBe('A\n\nB, mine, more');
+  });
+
+  it('saves the person’s text once when Save mine on top comes before the save that waited sends (#661)', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, type, holdLinks } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('A\n\nB, mine');
+    // With a link table, which the save that waited reads first.
+    const table = { format: 1, links: [{ key: 'plan', pageId: 'p-plan' }] };
+    const theirs = { ...page('A\n\nB, theirs'), extensions: { [LINKS_NAMESPACE]: table } };
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: theirs };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: true,
+      atHead: false,
+    };
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'it can’t take part', saveOver: null, rejoin: false });
+    await settle();
+    type('A\n\nB, mine, more');
+    await settle();
+    // The save that waited reads the draft's links next, slowly.
+    const read = holdLinks();
+    release();
+    await settle();
+    expect(draft.snapshot().status).toBe('conflict');
+    const onTop = draft.saveMineOnTop();
+    expect(draft.snapshot().status).not.toBe('saved');
+    read();
+    await onTop;
+    expect(saves.map((save) => [save.basedOn, save.payload.markdown])).toEqual([
+      ['r-head', 'A\n\nB, mine, more'],
+    ]);
+    expect(draft.snapshot().status).toBe('saved');
   });
 
   it('joins with a change waiting here, puts it in by block, and withdraws it once saved', async () => {

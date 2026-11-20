@@ -326,6 +326,10 @@ export class DraftSession {
         if (this.#settling) await this.#settling;
         const trimming = this.#trim();
         if (trimming) await trimming;
+        // Stopped meanwhile, as for Merge… once a session left settled: nothing goes.
+        if (this.#autosave.isStopped()) return false;
+        // Built only now, it takes what was typed while it waited (#661).
+        this.#autosave.takeWaiting();
         return this.#save(build());
       },
       (status, saveError) => {
@@ -655,11 +659,19 @@ export class DraftSession {
   }
 
   /** Save what's typed now, without waiting for files still uploading. */
-  async flushSaves() {
+  async flushSaves(): Promise<void> {
     this.#pull();
-    if (this.#participant) {
-      await this.#participant.saveNow();
+    const participant = this.#participant;
+    if (participant) {
+      await participant.saveNow();
+      // Left meanwhile: what it held is saved from outside, once it settles.
+      if (this.#participant !== participant) return this.flushSaves();
       return;
+    }
+    // A session left saves what it held once it settles.
+    if (this.#settling) {
+      await this.#settling;
+      return this.flushSaves();
     }
     await this.#autosave.flush();
   }
@@ -702,6 +714,12 @@ export class DraftSession {
     // saved meanwhile. So for a view showing a change kept for a session,
     // another tab's maybe, that nothing was typed into: the join puts it in.
     if (this.#participant || this.#rejoinHold) return;
+    // A session left says, as it settles, which drafts are this draft's own:
+    // the page's head heard meanwhile is judged once it has.
+    if (this.#settling) {
+      this.#headHeard = { head };
+      return;
+    }
     // A save in flight may already be the head before its answer arrives.
     if (!head || this.#known.has(head) || this.#saving) return;
     if (this.#keptLive && !this.#keptLive.putIn && this.#untouched() && this.#ports.live) {
@@ -1888,6 +1906,8 @@ export class DraftSession {
 
   // While a session left is settled: saves wait for it, and nothing shows as saved.
   #settling: Promise<void> | null = null;
+  // The page's draft head, as it last told of it while the session settled.
+  #headHeard: { head: RevisionId | null } | null = null;
 
   // Go on from what the session held, as a writer outside it. Whether the
   // draft went back to what it opened, holding nothing of the person's.
@@ -2040,6 +2060,9 @@ export class DraftSession {
     } finally {
       this.#settling = null;
       release();
+      const heard = this.#headHeard;
+      this.#headHeard = null;
+      if (heard) this.noticeHead(heard.head);
     }
   }
 
@@ -2185,7 +2208,12 @@ export class DraftSession {
       this.#content = { title, markdown, attachments };
       this.#extensions = over(this.#payload.extensions, held(settled.payload.extensions));
     }
-    this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
+    // Kept, it shows as saved, unless typing since waits for its save.
+    this.#set({
+      ...this.#content,
+      links: this.#table(),
+      ...(!typedMeanwhile && { status: 'saved' }),
+    });
     // Typed in the editor since it left: into the kept change too, what the
     // document deleted deleted there too.
     if (typedMeanwhile) {
