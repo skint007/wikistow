@@ -38,9 +38,11 @@ const PAGES = [
   'one two three four\n',
   'x y\n',
   'ab cd ef gh ij\n',
+  'a b\\\nc d e\n',
+  'a ` b ` c d\n',
+  'ab  cd ef\n',
 ];
-// Not code: a mark starting at a space in it parts the code span as written (#658).
-const MARKS = ['strong', 'emphasis', 'strike_through', 'link'];
+const MARKS = ['strong', 'emphasis', 'strike_through', 'link', 'inlineCode'];
 const COLOURED = [...MARKS, 'highlight', 'highlight', 'text_color'];
 
 const attrsFor = (name: string, rng: ReturnType<typeof random>) =>
@@ -109,6 +111,72 @@ describe('marks that overlap partly', () => {
       'one ==<span data-color="blue">th</span>==<span data-color="blue">ree</span> four\n',
     ])
       expect(fidelityOf(page, t), page).toEqual({ visual: true });
+  });
+
+  it('keep the marks on spaces in code, as written', async () => {
+    await loadSyntaxNodes();
+    const t = await transformer();
+    type Edit = readonly [string, number, number, Record<string, string>?];
+    const edit = (page: string, marks: readonly Edit[]) => {
+      let doc: Node = t.parse(page);
+      for (const [name, from, to, attrs] of marks) {
+        const type = doc.type.schema.marks[name];
+        if (!type) throw new Error(`No mark ${name}`);
+        doc = new Transform(doc).addMark(from, to, type.create(attrs)).doc;
+      }
+      return doc;
+    };
+    for (const [page, marks, wrote] of [
+      // Code from a space on, which bold took off before, parting the code (#658).
+      [
+        'a b c d e f\n',
+        [
+          ['inlineCode', 8, 12],
+          ['strong', 6, 9],
+          ['emphasis', 5, 8],
+          ['emphasis', 10, 12],
+          ['strong', 9, 12],
+        ],
+        'a b *c **d***__` e`*` f`*__\n',
+      ],
+      // Bold over ` e` in the code ` e `. Remark writes the letter before as a
+      // reference, so the `**` before a backtick opens bold, as for any code.
+      [
+        'x e f\n',
+        [
+          ['inlineCode', 2, 5],
+          ['strong', 2, 4],
+        ],
+        '&#x78;**` e`**` `f\n',
+      ],
+      // Spaces before code still go out of the mark.
+      [
+        'x a  b\n',
+        [
+          ['inlineCode', 5, 7],
+          ['strong', 4, 7],
+        ],
+        'x a **` b`**\n',
+      ],
+      // A line break code was put on, which code can't hold, so it leaves the link.
+      [
+        'x\\\ny\n',
+        [
+          ['link', 2, 3, { href: 'u' }],
+          ['inlineCode', 2, 3],
+        ],
+        'x\\\ny\n',
+      ],
+    ] as const) {
+      const doc = edit(page, marks);
+      const written = t.serialize(doc);
+      expect(written, page).toBe(wrote);
+      expect(writesAsShown(doc, written, t.parse), written).toBe(true);
+      expect(t.serialize(t.parse(written)), written).toBe(written);
+      expect(fidelityOf(written, t), written).toEqual({ visual: true });
+    }
+    // As the editor wrote the first before, which it parted again on writing it.
+    expect(fidelityOf('a b *c **d***__`  e  `*`f`*__\n', t)).toEqual({ visual: true });
   });
 
   it('read the same however the marks nest', () => {
