@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Server
+
+- Unpublishing a page no longer fails, or makes someone's save, publish or public link on that page fail, when they happen at the same moment. (#680)
+
 ## 0.29.0 - 2026-11-20
 
 ### Highlights
