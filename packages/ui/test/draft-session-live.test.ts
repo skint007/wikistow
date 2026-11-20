@@ -2,6 +2,7 @@
 // document holds what's typed, the session's saver saves, and when the
 // session ends the draft goes on as before and joins the next one.
 import {
+  LINKS_NAMESPACE,
   linksInUse,
   newPayload,
   OWNER_REGION,
@@ -261,6 +262,7 @@ function session(
   let held = 0;
   let joinable = true;
   let saving: Promise<void> | null = null;
+  let reading: Promise<void> | null = null;
   const ports: DraftPorts = {
     async saveDraft(input) {
       saves.push(input);
@@ -293,7 +295,10 @@ function session(
     linkTargets: () => null,
     saved: async () => {},
     overtaken: () => undefined,
-    readLinks: async () => [],
+    readLinks: async () => {
+      await reading;
+      return [];
+    },
     waitingChange: async () =>
       waiting || entry ? { version: entry?.version ?? 1, head: R0, payload } : null,
     ...(entry && {
@@ -355,6 +360,15 @@ function session(
     marked,
     held: () => held,
     noJoining: () => (joinable = false),
+    /** Reading the draft's links waits until the function this returns lets it go. */
+    holdLinks: () => {
+      let release = () => {};
+      reading = new Promise((resolve) => (release = resolve));
+      return () => {
+        reading = null;
+        release();
+      };
+    },
     /** Saves wait for the answer until the function this returns lets them go. */
     holdSaves: () => {
       let release = () => {};
@@ -550,6 +564,26 @@ describe('a draft session in a live session', () => {
     expect(saves.map((save) => save.payload.markdown)).toEqual(['A, typed more']);
   });
 
+  it('saves what a session left held before a flush resolves (#661)', async () => {
+    const { draft, saves, joins, type } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('Start. Last words.');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'ended', reason: 'access' });
+    await settle();
+    // As Publish does, while it settles.
+    let flushed = false;
+    const flushing = draft.saveOrThrow().then(() => (flushed = true));
+    await settle();
+    expect(flushed).toBe(false);
+    release();
+    await flushing;
+    expect(saves.map((save) => save.payload.markdown)).toEqual(['Start. Last words.']);
+  });
+
   it('saves its document over a session draft that differed from what it showed', async () => {
     const { draft, saves, joins, type } = session();
     await draft.joinLive();
@@ -676,6 +710,40 @@ describe('putting typing back from a live session', () => {
     expect(saves[0]?.payload.markdown).toBe('A, saved\n\nB\n\nMine\n\nMore');
   });
 
+  it('takes a head heard while leaving as its own once the put-back lands on it (#661)', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, type } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('A\n\nB\n\nMine');
+    const head = RevisionId.parse('r-head');
+    live.head = { revisionId: head, payload: page('A, saved\n\nB') };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: false,
+      atHead: false,
+    };
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'it can’t catch up', saveOver: null, rejoin: false });
+    await settle();
+    type('A\n\nB\n\nMine\n\nMore');
+    // The page hears of the head the put-back goes onto before it does.
+    draft.noticeHead(head);
+    await settle();
+    release();
+    await settle();
+    await draft.saveOrThrow();
+    expect(draft.snapshot().status).toBe('saved');
+    expect(saves).toHaveLength(1);
+    expect(saves[0]).toMatchObject({ basedOn: 'r-head' });
+    expect(saves[0]?.payload.markdown).toBe('A, saved\n\nB\n\nMine\n\nMore');
+  });
+
   it('offers Merge… from the kept base where the person’s typing overlaps the head', async () => {
     const opened = page('A\n\nB');
     const { draft, saves, joins, surface } = session(opened);
@@ -734,6 +802,46 @@ describe('putting typing back from a live session', () => {
     const versions = await draft.mergeVersions();
     expect(versions?.theirs).toBe('r-head');
     expect(versions?.yours.markdown).toBe('A\n\nB, mine, more');
+  });
+
+  it('saves the person’s text once when Save mine on top comes before the save that waited sends (#661)', async () => {
+    const opened = page('A\n\nB');
+    const { draft, saves, joins, type, holdLinks } = session(opened);
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    type('A\n\nB, mine');
+    // With a link table, which the save that waited reads first.
+    const table = { format: 1, links: [{ key: 'plan', pageId: 'p-plan' }] };
+    const theirs = { ...page('A\n\nB, theirs'), extensions: { [LINKS_NAMESPACE]: table } };
+    live.head = { revisionId: RevisionId.parse('r-head'), payload: theirs };
+    live.settled = {
+      base: { revisionId: R0, payload: opened },
+      payload: live.currentPayload(),
+      saved: false,
+      mine: true,
+      provisional: true,
+      atHead: false,
+    };
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'it can’t take part', saveOver: null, rejoin: false });
+    await settle();
+    type('A\n\nB, mine, more');
+    await settle();
+    // The save that waited reads the draft's links next, slowly.
+    const read = holdLinks();
+    release();
+    await settle();
+    expect(draft.snapshot().status).toBe('conflict');
+    const onTop = draft.saveMineOnTop();
+    expect(draft.snapshot().status).not.toBe('saved');
+    read();
+    await onTop;
+    expect(saves.map((save) => [save.basedOn, save.payload.markdown])).toEqual([
+      ['r-head', 'A\n\nB, mine, more'],
+    ]);
+    expect(draft.snapshot().status).toBe('saved');
   });
 
   it('joins with a change waiting here, puts it in by block, and withdraws it once saved', async () => {

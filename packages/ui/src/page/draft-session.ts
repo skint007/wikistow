@@ -267,10 +267,6 @@ export class DraftSession {
   readonly #known: Set<RevisionId>;
   #theirs: RevisionId | null = null;
   #saving = false;
-  // A save under way that hasn't built its payload yet, as one waiting for
-  // a session left to settle, and whether anything was edited since it
-  // started: that edit goes in it, not in a save of its own (#661).
-  #building: { edited: boolean } | null = null;
   #region: { region: Region; generation: number } | null = null;
   // The version the next save revises, the region its link table was worked
   // out for, and what this session changes in it.
@@ -327,18 +323,13 @@ export class DraftSession {
     this.#content = { title, markdown, attachments };
     this.#autosave = new Autosave(
       async (build) => {
-        // Built only once what it waits for is done, it takes what's typed meanwhile.
-        const building = { edited: false };
-        this.#building = building;
-        try {
-          if (this.#settling) await this.#settling;
-          const trimming = this.#trim();
-          if (trimming) await trimming;
-        } finally {
-          if (this.#building === building) this.#building = null;
-        }
-        // Stopped meanwhile, as for Merge… once the session settled: nothing goes.
+        if (this.#settling) await this.#settling;
+        const trimming = this.#trim();
+        if (trimming) await trimming;
+        // Stopped meanwhile, as for Merge… once a session left settled: nothing goes.
         if (this.#autosave.isStopped()) return false;
+        // Built only now, it takes what was typed while it waited (#661).
+        this.#autosave.takeWaiting();
         return this.#save(build());
       },
       (status, saveError) => {
@@ -424,20 +415,7 @@ export class DraftSession {
   // landing before it may change the table and the region it was worked out
   // for, and the two must go together.
   #schedule() {
-    if (this.#building) {
-      this.#building.edited = true;
-      // Unsaved until that save lands, though what settled showed as saved.
-      const status = this.#autosave.status;
-      if (!this.#participant && this.#snapshot.status !== status) this.#set({ status });
-      return;
-    }
     this.#autosave.schedule(() => this.#current());
-  }
-
-  // An edit not saved yet, outside a live session: waiting for its save, or
-  // for a save under way to build its payload.
-  #unsavedEdit(): boolean {
-    return this.#autosave.unsaved() !== null || this.#building?.edited === true;
   }
 
   #change(changes: Partial<Content>) {
@@ -681,11 +659,16 @@ export class DraftSession {
   }
 
   /** Save what's typed now, without waiting for files still uploading. */
-  async flushSaves() {
+  async flushSaves(): Promise<void> {
     this.#pull();
     if (this.#participant) {
       await this.#participant.saveNow();
       return;
+    }
+    // A session left saves what it held once it settles.
+    if (this.#settling) {
+      await this.#settling;
+      return this.flushSaves();
     }
     await this.#autosave.flush();
   }
@@ -728,6 +711,8 @@ export class DraftSession {
     // saved meanwhile. So for a view showing a change kept for a session,
     // another tab's maybe, that nothing was typed into: the join puts it in.
     if (this.#participant || this.#rejoinHold) return;
+    // A session left says, once it settles, which drafts are this draft's own.
+    if (this.#settling) return void this.#settling.then(() => this.noticeHead(head));
     // A save in flight may already be the head before its answer arrives.
     if (!head || this.#known.has(head) || this.#saving) return;
     if (this.#keptLive && !this.#keptLive.putIn && this.#untouched() && this.#ports.live) {
@@ -763,7 +748,7 @@ export class DraftSession {
       // this device as it is now, it is put back on the next join.
       return this.#unreported || (this.#ownUnsaved() && !this.#keptFresh);
     }
-    return this.#unreported || this.#unsavedEdit();
+    return this.#unreported || this.#autosave.unsaved() !== null;
   }
 
   /**
@@ -783,7 +768,7 @@ export class DraftSession {
     this.#base = revisionId;
     // What comes next grows from what landed, not from a session's base; a
     // change kept from a session was what the view shows, which landed.
-    if (this.#keptLive && !this.#participant && !this.#unsavedEdit()) {
+    if (this.#keptLive && !this.#participant && this.#autosave.unsaved() === null) {
       this.#payload = this.#current();
     }
     this.#keptLive = null;
@@ -1696,7 +1681,7 @@ export class DraftSession {
   #untouched(): boolean {
     const { title, markdown, attachments } = this.#payload;
     return (
-      !this.#unsavedEdit() &&
+      this.#autosave.unsaved() === null &&
       !this.#unreported &&
       this.#content.title === title &&
       this.#content.markdown === markdown &&
@@ -2211,7 +2196,12 @@ export class DraftSession {
       this.#content = { title, markdown, attachments };
       this.#extensions = over(this.#payload.extensions, held(settled.payload.extensions));
     }
-    this.#set({ ...this.#content, links: this.#table(), status: 'saved' });
+    // Kept, it shows as saved, unless typing since waits for its save.
+    this.#set({
+      ...this.#content,
+      links: this.#table(),
+      ...(!typedMeanwhile && { status: 'saved' }),
+    });
     // Typed in the editor since it left: into the kept change too, what the
     // document deleted deleted there too.
     if (typedMeanwhile) {

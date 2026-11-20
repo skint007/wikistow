@@ -253,6 +253,35 @@ describe('a draft session', () => {
     expect(s.draft.snapshot().status).toBe('saved');
   });
 
+  it('saves once on top of a newer draft heard of while its first save waited (#661)', async () => {
+    let release = () => {};
+    const reading = new Promise<void>((resolve) => (release = resolve));
+    const s = session(
+      opened('[[Plan]]', { plan: 'p-plan' }),
+      undefined,
+      OWNER_REGION,
+      async (md) => {
+        await reading;
+        return placedWikilinks(md);
+      },
+    );
+    type(s, '[[Plan]] one');
+    const flushed = s.draft.flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    s.draft.noticeHead(RevisionId.parse('r-other'));
+    expect(s.draft.snapshot().status).toBe('conflict');
+    const onTop = s.draft.saveMineOnTop();
+    // Not saved until it sends.
+    expect(s.draft.snapshot().status).not.toBe('saved');
+    expect(s.draft.savedRevision()).toBeNull();
+    release();
+    await Promise.all([flushed, onTop]);
+    expect(s.saves.map((save) => [save.basedOn, save.payload.markdown])).toEqual([
+      ['r-other', '[[Plan]] one'],
+    ]);
+    expect(s.draft.snapshot().status).toBe('saved');
+  });
+
   describe('a save that renames a link', () => {
     const rename = (input: SaveInput) => ({
       ...input.payload,

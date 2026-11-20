@@ -129,7 +129,18 @@ export class Autosave<T> {
   /** After a conflict is resolved: forget the stop, optionally with the edit still to save. */
   resume() {
     this.#stopped = false;
-    this.#set(this.#pending ? 'pending' : 'saved');
+    this.#set(this.#pending ? 'pending' : this.#running ? 'saving' : 'saved');
+  }
+
+  /**
+   * The save under way reads its edit only now, as one that waited before
+   * sending: the edits made meanwhile are in it, so none waits after it.
+   */
+  takeWaiting() {
+    this.#clearTimer();
+    this.#pending = null;
+    this.#firstPendingAt = null;
+    if (this.#status === 'pending') this.#set('saving');
   }
 
   /**

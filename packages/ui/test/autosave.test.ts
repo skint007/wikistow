@@ -67,3 +67,50 @@ describe('a save stopped before it sends', () => {
     expect(saving.status).toBe('saved');
   });
 });
+
+describe('a save that reads its edit as it sends', () => {
+  it('takes the edits made while it waited, so none is saved again after it', async () => {
+    let go = () => {};
+    const waiting = new Promise<void>((resolve) => (go = resolve));
+    let latest = 'one';
+    const sent: string[] = [];
+    const saving: Autosave<() => string> = new Autosave<() => string>(
+      async (read) => {
+        await waiting;
+        saving.takeWaiting();
+        sent.push(read());
+      },
+      () => {},
+      { debounceMs: 0, maxWaitMs: 0 },
+    );
+    saving.schedule(() => latest);
+    await turn();
+    latest = 'one two';
+    saving.schedule(() => latest);
+    expect(saving.status).toBe('pending');
+    go();
+    await saving.flush();
+    expect(sent).toEqual(['one two']);
+    expect(saving.status).toBe('saved');
+  });
+
+  it('shows as saving when resumed while it runs with nothing else waiting', async () => {
+    let go = () => {};
+    const waiting = new Promise<void>((resolve) => (go = resolve));
+    const saving = new Autosave<string>(
+      async () => {
+        await waiting;
+      },
+      () => {},
+      { debounceMs: 0, maxWaitMs: 0 },
+    );
+    saving.schedule('typed');
+    await turn();
+    saving.conflict();
+    saving.resume();
+    expect(saving.status).toBe('saving');
+    go();
+    await saving.flush();
+    expect(saving.status).toBe('saved');
+  });
+});
