@@ -373,6 +373,18 @@ function withoutFiles(payload: PagePayload): PagePayload {
 }
 
 /**
+ * A write into a queue whose session ended (`OfflineQueue.close`), as the
+ * vault locked: nothing was kept, so the caller says it wasn't saved, or
+ * tries again in the next session (#670).
+ */
+export class QueueClosed extends Error {
+  constructor() {
+    super('The vault locked before this change was kept on this device');
+    this.name = 'QueueClosed';
+  }
+}
+
+/**
  * Changes made offline, waiting on the device for the account it keeps
  * for (ADR 0009, decision 7): new folders, new pages and drafts, one entry
  * per page, and folders renamed and pages and folders deleted, one entry
@@ -415,10 +427,21 @@ export class OfflineQueue {
     for (const listener of this.#listeners) listener(event);
   }
 
-  /** The session ended: nothing more is sent or written. What's queued stays, sealed. */
+  /**
+   * The session ended: nothing more is sent or written. What's queued
+   * stays, sealed. A write asked for after this throws `QueueClosed`.
+   */
   close(): void {
     this.#closed = true;
     this.#listeners.clear();
+  }
+
+  // The store's queue items, to write into: none once closed, so a change
+  // after a lock is never said kept (#670). What is removed is gone either
+  // way, so removing still works, as a session's last clean-up does.
+  #writable() {
+    if (this.#closed) throw new QueueClosed();
+    return this.#store.queue;
   }
 
   // An item's own entry keeps the name it always had, so queues kept before
@@ -454,9 +477,9 @@ export class OfflineQueue {
   }
 
   async #write(entry: QueueEntry) {
-    if (this.#closed) return;
+    const items = this.#writable();
     const name = this.#entryName(entry);
-    await this.#store.queue.write(name, this.#sealer.seal(name, utf8(JSON.stringify(entry))));
+    await items.write(name, this.#sealer.seal(name, utf8(JSON.stringify(entry))));
   }
 
   /** Every entry, in the order made. One that doesn't open counts as none. */
@@ -1047,9 +1070,9 @@ export class OfflineQueue {
   }
 
   async #keepBlob(blobHash: string, blob: Uint8Array) {
-    if (this.#closed) return;
+    const items = this.#writable();
     const name = this.#blobName(blobHash);
-    await this.#store.queue.write(name, this.#sealer.seal(name, blob));
+    await items.write(name, this.#sealer.seal(name, blob));
   }
 
   /** A file added offline, as the server will serve it, or null if the queue doesn't hold it. */
@@ -1219,7 +1242,8 @@ export class OfflineQueue {
    * answer goes under them again, and `duplicate` then means it landed. An
    * entry the server refuses stops, with why (`failure`), and the rest go
    * on, unless they go in a folder that stopped. No answer stops sending
-   * (`'offline'`), to go on when the server answers. One sender at a time
+   * (`'offline'`), to go on when the server answers, as does a lock: what
+   * is left goes from the next session. One sender at a time
    * (`KeptStore.sending`): `'busy'` if another is sending. `read` reads a
    * draft's links, as for `saveDraft`.
    */
@@ -1240,7 +1264,14 @@ export class OfflineQueue {
   ): Promise<'sent' | 'offline' | 'busy'> {
     let outcome: 'sent' | 'offline' = 'sent';
     const ran = await this.#store.sending(async () => {
-      outcome = await this.#sendAll(ctx, read, held);
+      try {
+        outcome = await this.#sendAll(ctx, read, held);
+      } catch (error) {
+        // Locked partway: what it couldn't record waits as it was, for the
+        // next session to send.
+        if (!(error instanceof QueueClosed)) throw error;
+        outcome = 'offline';
+      }
     });
     return ran ? outcome : 'busy';
   }

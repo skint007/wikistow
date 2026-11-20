@@ -9,6 +9,15 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### App
 
 - Live editing: typing done while the app leaves a session is saved once, rather than as two identical drafts, and so is typing done while a draft’s first save waits to start. Typing done while leaving that overlaps the latest draft waits for **Merge…** rather than being saved first, and **Publish** pressed while leaving waits for what the session held to be saved. (#PR)
+- Visual editor: a mark that starts or ends at a space inside code, such as bold over `` ` e` `` in the code `` ` e ` ``, keeps that space, so the code is no longer written as a code span of only the space beside the rest, and the page no longer reopens in source mode once it's saved. (#683)
+
+#### Desktop
+
+- Browser clipping, offline: a screenshot clip whose screenshot went in just as the vault locked, before the draft showing it saved, waits for the unlock and is saved again with it, rather than being said saved without it. A text clip's images a lock stopped are said skipped, and stay links. Any change written into this device's queue after a lock now fails rather than being said kept. (#684)
+
+#### Server
+
+- Unpublishing a page no longer fails, or makes someone's save, publish or public link on that page fail, when they happen at the same moment. (#680)
 
 ## 0.29.0 - 2026-11-20
 

@@ -113,7 +113,7 @@ function inline(block: Node): Shown[] {
     const link = held.find((mark) => mark.type.name === 'link');
     const going = !!link && !!previous && link.eq(previous);
     // Spaces and line breaks start no link, as none is written on them at
-    // its ends (`writable`), but they part one from another.
+    // its ends (`writable`) outside code, but they part one from another.
     const blank = child.type.name === 'hardbreak' || (child.isText && !child.text?.trim());
     if (link && !blank && !going) links++;
     previous = blank && !going ? undefined : link;
