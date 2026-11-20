@@ -4,6 +4,17 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.30.0-beta.1 - 2026-11-20
+
+### Highlights
+
+#### Fixes
+
+- In live editing, typing done as you leave a session is saved once rather than twice, and **Publish** pressed while leaving publishes what you typed.
+- A mark such as bold that starts or ends at a space inside code no longer makes the page reopen in source mode after the visual editor saves it.
+- Offline, a screenshot clip cut short by locking the vault is saved again with its screenshot once you unlock, rather than without it.
+- Unpublishing a page no longer fails, or makes someone’s save or publish of it fail, when both happen at the same moment.
+
 ### Changes
 
 #### App
