@@ -86,14 +86,20 @@ export type RevisionCommit = {
 /**
  * The page's node row. Writers hold it `FOR SHARE` for their transaction, so
  * a delete or a change of access (which bumps its permission version) waits
- * for them, or they wait for it and see the result.
+ * for them, or they wait for it and see the result. One that updates the
+ * row itself takes it `'no key update'` instead, before any lock a writer
+ * takes after this one, so it never waits on a writer that waits on it.
  */
-export async function requirePage(db: Database, pageId: string, { lock = false } = {}) {
+export async function requirePage(
+  db: Database,
+  pageId: string,
+  { lock = false }: { lock?: boolean | 'no key update' } = {},
+) {
   const query = db
     .select()
     .from(nodes)
     .where(and(eq(nodes.id, pageId), eq(nodes.kind, 'page')));
-  const [page] = lock ? await query.for('share') : await query;
+  const [page] = lock ? await query.for(lock === true ? 'share' : lock) : await query;
   if (!page) throw new ContentError('not-found');
   return page;
 }
@@ -596,9 +602,12 @@ export async function unpublish(
     // As for publishing, which it undoes.
     if (!canEdit(access)) throw new ContentError('not-found');
     if (!access.canPublish) throw new ContentError('forbidden');
-    // Publishing's locks, in its order, which turning a public link on takes too.
+    // Publishing's locks, in its order, which turning a public link on takes too,
+    // but the node as its update below needs it. Under a share lock, a save
+    // or publish that took the node beside it and waits on the heads would
+    // hold the lock that update waits on: a deadlock (#668).
     await lockShare(tx, access.share);
-    const page = await requirePage(tx, input.pageId, { lock: true });
+    const page = await requirePage(tx, input.pageId, { lock: 'no key update' });
     const [heads] = await tx
       .select()
       .from(pageHeads)

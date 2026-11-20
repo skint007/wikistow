@@ -1,5 +1,11 @@
-import { pageOperations as pages, type PageId, type RevisionId } from '@wikistow/client';
+import {
+  pageOperations as pages,
+  publicLinkOperations as links,
+  type PageId,
+  type RevisionId,
+} from '@wikistow/client';
 import { pageRoutes, structureRoutes } from '@wikistow/contracts';
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
@@ -175,5 +181,65 @@ describe('unpublishing a page', () => {
       code: 'stale-head',
       detail: { publishedHead: await publishedHead(alice, page.pageId) },
     });
+  });
+});
+
+/** How many in the test database wait for a lock. */
+const lockWaits = async () => {
+  const [row] = [
+    ...(await t.db.execute<{ count: string }>(sql`
+      select count(*) from pg_stat_activity
+      where datname = current_database() and wait_event_type = 'Lock'`)),
+  ];
+  return Number(row?.count ?? 0);
+};
+
+/** Until `count` wait for a lock, or `action` settles, whichever is first. */
+async function waitingOrSettled(action: Promise<unknown>, count: number) {
+  let settled = false;
+  void action.finally(() => (settled = true));
+  for (let i = 0; !settled && (await lockWaits()) < count; i++) {
+    if (i > 500) throw new Error(`never ${count} waiting for a lock`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+describe('unpublishing beside another write to the page', () => {
+  type World = Awaited<ReturnType<typeof world>>;
+  // Each writer locks the page's node for share, then its heads.
+  const writers: [string, (w: World) => Promise<unknown>, string][] = [
+    [
+      'a save',
+      (w) => pages.editDraft(w.editor.ctx, w.page, { markdown: 'saved beside' }),
+      'no error',
+    ],
+    // It publishes first, so the unpublish is of a publication that is gone.
+    ['a publish', (w) => pages.publishPage(w.publisher.ctx, w.page), 'stale-head'],
+    ['turning its link on', (w) => links.turnOn(w.publisher.ctx, w.page.pageId), 'no error'],
+  ];
+
+  it.each(writers)('waits for %s instead of deadlocking (#668)', async (_, write, unpublished) => {
+    const w = await world();
+    const { alice, page } = w;
+    const before = await seen(alice, page.pageId);
+    let unpublish: Promise<string | undefined> | undefined;
+    let written: Promise<string | undefined> | undefined;
+    // This transaction stands in for any writer already on the page, holding
+    // its node for share, so the unpublish stops at the node. Another writer
+    // then comes. Under a share lock of its own, the unpublish would hold the
+    // heads that writer waits on, while waiting on that writer's node lock.
+    await t.db.transaction(async (tx) => {
+      await tx.execute(sql`select id from nodes where id = ${page.pageId} for share`);
+      unpublish = rejection(pages.unpublishPage(alice.ctx, page, before));
+      await waitingOrSettled(unpublish, 1);
+      written = rejection(write(w));
+      await waitingOrSettled(written, 2);
+    });
+    expect({ written: await written, unpublish: await unpublish }).toEqual({
+      written: 'no error',
+      unpublish: unpublished,
+    });
+    const { heads } = await pages.loadPage(alice.ctx, page.pageId);
+    expect(heads.publishedHead === null).toBe(unpublished === 'no error');
   });
 });
