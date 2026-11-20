@@ -533,9 +533,10 @@ function writable(doc: Node): Node {
     // Code as other than spaces: Milkdown writes each piece of code in its
     // own code span, so a mark taken off a space in it would part the span,
     // and the delimiters beside it sit beside its backticks, not the space.
+    // Only text holds code; a line break loses it above.
     let text = '';
     block.forEach((node) => {
-      const code = node.marks.some((mark) => mark.type.spec.code);
+      const code = node.isText && node.marks.some((mark) => mark.type.spec.code);
       text += code ? '\uFFFC'.repeat(node.nodeSize) : node.isText ? node.text : leafText(node);
     });
     for (const { mark, from, to } of runs) {

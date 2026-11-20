@@ -38,6 +38,9 @@ const PAGES = [
   'one two three four\n',
   'x y\n',
   'ab cd ef gh ij\n',
+  'a b\\\nc d e\n',
+  'a ` b ` c d\n',
+  'ab  cd ef\n',
 ];
 const MARKS = ['strong', 'emphasis', 'strike_through', 'link', 'inlineCode'];
 const COLOURED = [...MARKS, 'highlight', 'highlight', 'text_color'];
@@ -113,12 +116,13 @@ describe('marks that overlap partly', () => {
   it('keep the marks on spaces in code, as written', async () => {
     await loadSyntaxNodes();
     const t = await transformer();
-    const edit = (page: string, marks: readonly (readonly [string, number, number])[]) => {
+    type Edit = readonly [string, number, number, Record<string, string>?];
+    const edit = (page: string, marks: readonly Edit[]) => {
       let doc: Node = t.parse(page);
-      for (const [name, from, to] of marks) {
+      for (const [name, from, to, attrs] of marks) {
         const type = doc.type.schema.marks[name];
         if (!type) throw new Error(`No mark ${name}`);
-        doc = new Transform(doc).addMark(from, to, type.create()).doc;
+        doc = new Transform(doc).addMark(from, to, type.create(attrs)).doc;
       }
       return doc;
     };
@@ -153,6 +157,15 @@ describe('marks that overlap partly', () => {
           ['strong', 4, 7],
         ],
         'x a **` b`**\n',
+      ],
+      // A line break code was put on, which code can't hold, so it leaves the link.
+      [
+        'x\\\ny\n',
+        [
+          ['link', 2, 3, { href: 'u' }],
+          ['inlineCode', 2, 3],
+        ],
+        'x\\\ny\n',
       ],
     ] as const) {
       const doc = edit(page, marks);
