@@ -4,6 +4,60 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.29.0 - 2026-11-19
+
+### Highlights
+
+#### Features
+
+- The web clipper can clip text you select inside an embedded frame on the page, such as an embedded document or a comments box.
+- When an edit you approve in the assistant overlaps changes made since it was proposed, as in a live session, **Merge…** opens over the chat instead of the edit being refused.
+
+#### Fixes
+
+- The web clipper’s **Choose an area** no longer closes the page’s open menus and popovers, and its screenshot shows the page as it was when you started dragging.
+- When a page stops **Choose an area** from working, the clipper’s popup says so rather than waiting five minutes for an area.
+- A clip cut short by a reload, or by locking the vault while its screenshot uploads, is no longer saved as two pages.
+- **Import…** no longer fails when a folder it fills is shared while it runs.
+- A page whose bold, italic, strikethrough, highlight or colour overlap only partly no longer reopens in source mode after the visual editor saves it.
+- An image whose alt text has `==` no longer adds backslashes to the other `==` beside it.
+- Coloured text inside a link is underlined in its own colour.
+- In live editing, a keystroke typed just as the session ends stays on screen and is saved.
+- In live editing, someone who typed nothing is no longer asked before leaving while others type.
+- In live editing, adding a file while someone else’s app saves goes in rather than failing.
+- A page saved by a newer version of WikiStow during a live session asks you to update the app, and leaves the session open for the others.
+
+#### Optimizations
+
+- In live editing, each keystroke in the source editor no longer does work for the whole page.
+
+#### UI polish
+
+- The visual editor’s **Comment** button is in the format toolbar, rather than floating over the page’s first lines.
+
+### Changes
+
+#### App
+
+- **Import…** and `wikistow import` finish when the batch sent to make room for a folder is refused, as when the folder they fill is shared meanwhile, rather than failing with `not-found` on the folders inside it. The server's import batch holds a page that a create sent again already made, when the batch saves or publishes it, before the account's storage, as a single save does. (#669)
+- The visual editor's **Comment** is in its format toolbar, after the attachment button, rather than floating above the selection, where it covered the toolbar's buttons over the page's first lines. It is dimmed while no text, or more than 500 characters, is selected, or while the focus is outside the editor and its toolbar. The page as read keeps its floating button. (#673)
+- The visual editor's fidelity check reads each run of text by the marks on it, not by how they nest, as the editor's guard on each edit does: a page whose marks overlap only partly, such as `~~*a* b~~`, no longer stays in source mode once the editor writes them nested another way, or moves a mark off a space between them. Links still count one by one, so one written as two still differs. (#659)
+- Visual editor: an image whose alt needs `==` escaped no longer makes the other `==` in its table row, list or paragraph escaped too, and a U+E003 in an image's alt, title or address stays as written rather than turning into `\=`. (#657)
+- Text in a colour just inside a link is underlined in its colour, in the reader and on public pages, as the visual editor shows it, rather than in the link's colour. The highlight and text colour marks refuse a colour the theme doesn't have. (#655)
+- The assistant's approved edit that overlaps what changed on the page since it was proposed, as in a live session, opens **Merge…** over the chat, with the assistant's edit on one side and the live page on the other, rather than being refused as stale. A choice made there is kept if the page moves on again before it saves, and Cancel leaves the proposal waiting. An approved edit to a page that left its share since is refused, even just before it saves. (#660)
+- Live editing: a keystroke typed just as a session ends stays on screen and is saved, in split mode too. The source editor's work for each keystroke is now that of the change, not of the whole page, and others' carets are found in the text only when they move or a change is at them. Someone who typed nothing in a session is no longer asked before leaving while others type. (#662)
+- Live editing: adding a file while another app saves goes in on the newer draft rather than failing, and never over typing that went in meanwhile. A session's drafts name, as who edited, only those who edited since the page's latest publication. Something saved by a newer version of WikiStow says to update the app and edits outside the session, leaving it open for the others. (#663, #664)
+
+#### Desktop
+
+- Web clipper, **Choose an area**: the screenshot is taken as the drag starts, so the area shows the page as the person saw it, not as it changed once the overlay went, and the overlay's backdrop is never in it. The overlay no longer closes the page's open menus and popovers or takes its focus, and keys do nothing in the page while choosing. A page that takes the overlay off or hides it makes the popup say so, rather than asking for an area for 5 minutes. An area let go just inside the 5 minutes is kept. (#674)
+- Web clipper: text selected inside an embedded frame, such as an embedded document or comments, can be clipped from the popup's Selection, the context menu's **Send selection** and the shortcut, with the tab's address and title. Of several frames with a selection, the one the focus is in is taken. In Chrome, `activeTab` doesn't reach a frame from another site, so text selected there still can't be clipped: **Send selection** says so rather than sending the link. (#675)
+- Browser clipping: a clip whose saving a reload or a crash cut short, just as its page was made, finishes that page rather than making a second, as the app keeps the page's ID before making it. A screenshot clip a lock cut short during its upload puts the page made without the screenshot in the trash once unlocked, rather than leaving it beside the one with it. (#671)
+
+#### Development
+
+- The browser tests start the live project's HTTPS server, which needs `openssl` and a second database, only when the live project runs, so `--project chromium` leaves it out. (#656)
+
 ## 0.29.0-beta.2 - 2026-11-19
 
 ### Highlights
