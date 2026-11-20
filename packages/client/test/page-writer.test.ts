@@ -356,6 +356,30 @@ describe('the page writer', () => {
     await expect.poll(() => queue.held([ref])).toEqual([]);
   });
 
+  it('refuses a write once the session ended, rather than say it kept it (#670)', async () => {
+    const { writer, queue } = await writerOn('offline');
+    const spaceId = newId(SpaceId);
+    const pageId = await writer.newPage({ spaceId, parentId: null, title: 'Lisbon' });
+    const page = { spaceId, pageId };
+    const ref = await writer.attach(page, file);
+    const before = await queue.entries();
+    queue.close();
+
+    const drafts = writer.draft(page, {
+      seen: before[0]!.kind === 'page' ? before[0]!.version : null,
+    });
+    const basedOn = (await drafts.waitingHead())!;
+    const payload = { ...newPayload({ title: 'Lisbon', markdown: 'Hi' }), attachments: [ref] };
+    const closed = { name: 'QueueClosed' };
+    await expect(drafts.save({ basedOn, payload })).rejects.toMatchObject(closed);
+    await expect(writer.attach(page, file)).rejects.toMatchObject(closed);
+    await expect(writer.newPage({ spaceId, parentId: null, title: 'Porto' })).rejects.toMatchObject(
+      closed,
+    );
+    expect(await queue.entries()).toEqual(before);
+    expect(await queue.held([ref])).toEqual([ref]);
+  });
+
   it('tells a conflict with another window’s change from one with the server', async () => {
     const { writer, queue } = await writerOn('online');
     const { page, basedOn, payload } = pageOnServer();

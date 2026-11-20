@@ -12,6 +12,7 @@ import {
   newPayload,
   PageId,
   PageTooLarge,
+  QueueClosed,
   RevisionId,
   linkSpans,
   type AttachmentRef,
@@ -74,6 +75,8 @@ const TOO_LONG =
   'This is too long for one page. Try Article, or select part of it and clip the selection.';
 
 const savedTo = (path: readonly string[]) => path.join(' / ');
+
+const SHOT_FAILED = 'WikiStow couldn’t save the screenshot. Try again.';
 
 /** Save `clip` as a new draft. Never throws: a failure is an outcome, said in the app's words. */
 export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<Saved> {
@@ -214,6 +217,9 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         bytes: shot.bytes,
       });
     } catch (error) {
+      // Locked meanwhile, offline: the page, made partly, waits for the
+      // unlock to put it in the trash and save the clip again (#670).
+      if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
       // A page that was to show a screenshot, without it, isn't the clip:
       // it goes in the trash, and the extension says why.
       await deps.writer
@@ -224,7 +230,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
             'too-large',
             'This screenshot is larger than your WikiStow server takes. Choose a smaller area.',
           )
-        : failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
+        : failed('failed', SHOT_FAILED);
     }
     try {
       const drafts = deps.writer.draft(page, { seen: null });
@@ -233,11 +239,13 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         basedOn,
         payload: { ...newPayload({ title, markdown: shown(ref.id) }), attachments: [ref] },
       });
-    } catch {
+    } catch (error) {
+      // Locked meanwhile: as above, the page waits for the unlock.
+      if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
       await deps.writer
         .deleteNode({ spaceId, nodeId: made.pageId, node: 'page', name: title, dropChanges: true })
         .catch(() => {});
-      return failed('failed', 'WikiStow couldn’t save the screenshot. Try again.');
+      return failed('failed', SHOT_FAILED);
     }
     await deps.made?.({ ...madeAs, partial: false }).catch(() => {});
     return {
@@ -281,7 +289,9 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
         payload: { ...newPayload({ title, markdown: plan.written(attached) }), attachments: refs },
       });
     } catch {
-      // The page keeps its text, its images as links.
+      // The page keeps its text, its images as links, as when a lock
+      // closed the queue first (#670): main's fetches of them wouldn't
+      // last until the unlock, so the clip isn't saved again for them.
       attached.clear();
       refs.length = 0;
     }

@@ -948,3 +948,69 @@ describe('moves and publishes made offline', () => {
     expect(position(page.pageId)! > position(second)!).toBe(true);
   });
 });
+
+describe('a lock while changes made offline are sent', () => {
+  it('stops sending without a failure, and the next session lands what went, once', async () => {
+    const person = await personWithVault(t);
+    const store = memoryKeptStore();
+    const ctx = await openSession(person.api, person.vault, { content: store });
+    const queue = ctx.keptContent?.queue;
+    if (!queue) throw new Error('The session keeps nothing');
+    const spaceId = await spaces.createSpace(ctx, { name: 'Notes' });
+    const pageId = await pages.createPage(ctx, { spaceId, parentId: null, title: 'Plan' });
+    const page: pages.PageRef = { spaceId, pageId };
+    const head = async () => (await pages.loadPage(ctx, pageId)).heads.draftHead;
+    const based = await head();
+    if (!based) throw new Error('No draft');
+    const payload = (markdown: string) => newPayload({ title: 'Plan', markdown });
+    const first = await queue.saveDraft({
+      page,
+      basedOn: based,
+      region: null,
+      payload: payload('offline words'),
+      seen: null,
+    });
+    // While the save is on its way, the person types more, and the vault
+    // locks: the save lands, and its answer can't be recorded.
+    const path = pageRoutes.saveDraft.path.replace(':pageId', pageId);
+    const locking: ClientContext = {
+      ...ctx,
+      api: createApiClient({
+        fetch: async (url, init) => {
+          const answer = await person.browser.fetch(url, init);
+          if (init?.method !== 'GET' && new URL(url, 'http://app').pathname === path) {
+            const more = payload('and more');
+            await queue.saveDraft({
+              page,
+              basedOn: based,
+              region: null,
+              payload: more,
+              seen: first,
+            });
+            ctx.keptContent?.close();
+          }
+          return answer;
+        },
+      }),
+    };
+
+    expect(await queue.send(locking)).toBe('offline');
+    const [waiting, ...others] = await queue.entries();
+    expect(others).toEqual([]);
+    const recorded = waiting?.kind === 'page' ? waiting.sending?.revisionId : undefined;
+    expect(recorded).toBeDefined();
+    expect(await head()).toBe(recorded);
+
+    // Unlocked again: the recorded version goes again, `duplicate` says it
+    // landed, and what was typed after goes on top of it.
+    const next = await openSession(person.api, person.vault, { content: store });
+    const again = next.keptContent?.queue;
+    expect(await again?.send(next)).toBe('sent');
+    expect(await again?.entries()).toEqual([]);
+    const now = await head();
+    if (!now) throw new Error('No draft');
+    const opened = await pages.openRevisionOf(next, page, 'draft', now, { fresh: true });
+    expect(opened.opened.kind === 'current' && opened.opened.payload.markdown).toBe('and more');
+    expect(opened.record.basedOn).toBe(recorded);
+  });
+});

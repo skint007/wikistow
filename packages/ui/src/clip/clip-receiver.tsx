@@ -269,8 +269,9 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
       const { place } = saved;
       let { outcome } = saved;
       const locked = vaultStore.epoch() !== started;
-      // Locked meanwhile, it couldn't save: it waits for the next unlock.
-      if (!outcome.ok && locked) return;
+      // Locked meanwhile, or its session ended as another took its place,
+      // it couldn't save: it waits for the next unlock, or that session.
+      if (!outcome.ok && (locked || ctx.keptContent?.closed)) return;
       // Saved, though the vault locked since: no folder's name leaves it now.
       if (outcome.ok && locked) outcome = { ...outcome, path: '' };
       await bridge.clipDone(next.id, outcome).catch(() => {});

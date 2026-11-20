@@ -1,6 +1,12 @@
 import {
   ApiError,
+  createPageWriter,
   FolderId,
+  generateIdentity,
+  IdentityId,
+  InstallationId,
+  keptOperations,
+  memoryKeptStore,
   newId,
   PageId,
   RevisionId,
@@ -8,7 +14,10 @@ import {
   splitFrontmatter,
   type AttachmentRef,
   type DraftSave,
+  type KeptStore,
   type PageWriter,
+  type QueuedPage,
+  type ServerWrites,
 } from '@wikistow/client';
 import type { ClipImage, ClipMade, DesktopClip } from '@wikistow/contracts';
 import { describe, expect, it } from 'vite-plus/test';
@@ -703,5 +712,103 @@ describe('saving a screenshot', () => {
     const saved = await saveClip(shot({ screenshot: null }), deps({ writer }));
     expect(saved.outcome).toMatchObject({ ok: false, code: 'failed' });
     expect(calls).toEqual([]);
+  });
+});
+
+// Offline, a clip waits in this device's queue. A lock closes the queue: a
+// write after it keeps nothing, so the clip waits for the next unlock, and
+// is saved whole then, rather than said saved without its images (#670).
+describe('a lock while an offline clip saves', () => {
+  const who = {
+    identity: generateIdentity({ id: newId(IdentityId), kind: 'human' }),
+    installationId: newId(InstallationId),
+  };
+  const offline = new ApiError(0, 'network', 'No answer');
+  const server: ServerWrites = {
+    createPage: () => Promise.reject(offline),
+    createFolder: () => Promise.reject(offline),
+    saveDraft: () => Promise.reject(offline),
+    uploadAttachment: () => Promise.reject(offline),
+    uploadBlob: () => Promise.reject(offline),
+    updateMetadata: () => Promise.reject(offline),
+    deleteNode: () => Promise.reject(offline),
+  };
+  // A session over `store`, offline; `lockAfterAttach` locks it as soon as a file is attached.
+  async function unlock(store: KeptStore, { lockAfterAttach = false } = {}) {
+    const kept = await keptOperations.KeptContent.open(store, who);
+    const writer = createPageWriter({ queue: kept.queue, server, isOnline: () => false });
+    const locking: PageWriter = {
+      ...writer,
+      attach: async (page, file) => {
+        const ref = await writer.attach(page, file);
+        if (lockAfterAttach) kept.close();
+        return ref;
+      },
+    };
+    return { kept, writer: locking };
+  }
+  // Main's copy of the clip, as `clipMade` keeps it.
+  const mainCopy = () => {
+    let made: ClipMade | null = null;
+    return { made: async (page: ClipMade) => void (made = page), copy: () => made };
+  };
+  const pages = async (kept: keptOperations.KeptContent) =>
+    (await kept.queue.entries()).filter((entry) => entry.kind === 'page');
+
+  async function saveAcrossLock(first: DesktopClip, convert?: SaveClipDeps['convert']) {
+    const store = memoryKeptStore();
+    const main = mainCopy();
+    const locked = await unlock(store, { lockAfterAttach: true });
+    const before = await saveClip(
+      first,
+      deps({ writer: locked.writer, made: main.made, ...(convert && { convert }) }),
+    );
+    // Unlocked again: the clip, as main holds it, is saved again.
+    const again = await unlock(store);
+    const after = await saveClip(
+      { ...first, made: main.copy() },
+      deps({ writer: again.writer, made: main.made, ...(convert && { convert }) }),
+    );
+    return { before, after, kept: again.kept };
+  }
+
+  it('keeps a screenshot clip for the unlock, and saves it with its screenshot then', async () => {
+    const { before, after, kept } = await saveAcrossLock(
+      clip({
+        mode: 'screenshot',
+        html: '',
+        note: 'Look at this',
+        screenshot: { bytes: PNG, mediaType: 'image/png' },
+      }),
+      async (html) => ({ markdown: `${html.replace(/<[^>]+>/g, '')}\n`, faithful: true }),
+    );
+    expect(before.outcome).toMatchObject({ ok: false, code: 'failed' });
+    expect(after.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    // One page, the one said saved, showing its screenshot, whose file waits with it.
+    const [page, ...others] = await pages(kept);
+    expect(others).toEqual([]);
+    expect(page).toMatchObject({ id: (after.outcome as { pageId: PageId }).pageId });
+    const { payload } = page as QueuedPage;
+    expect(payload.attachments).toHaveLength(1);
+    expect(payload.markdown).toContain(`![Screenshot](attachment:${payload.attachments[0]!.id})`);
+    expect(await kept.queue.blob(payload.attachments[0]!.blobHash)).not.toBeNull();
+    // Nothing waits to go to the trash: the page left behind was never sent.
+    expect((await kept.queue.entries()).filter((entry) => entry.kind === 'delete')).toEqual([]);
+  });
+
+  it('says a text clip’s images a lock stopped weren’t saved, keeping them as links', async () => {
+    const store = memoryKeptStore();
+    const { kept, writer } = await unlock(store, { lockAfterAttach: true });
+    const saved = await saveClip(
+      clip({ html: '<p>Hi<img src="https://cdn.test/a.png"></p>' }),
+      deps({ writer }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 0, skipped: 1 } });
+    const after = await unlock(store);
+    const [page, ...others] = await pages(after.kept);
+    expect(others).toEqual([]);
+    expect(page).toMatchObject({ id: (saved.outcome as { pageId: PageId }).pageId });
+    expect((page as QueuedPage).payload.markdown).toContain('Hi[](https://cdn.test/a.png)');
+    expect(kept.closed).toBe(true);
   });
 });
