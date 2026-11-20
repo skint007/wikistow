@@ -16,7 +16,7 @@ GitHub Actions checks every change and publishes the server image and the deskto
 | `build` | The server, CLI, web and desktop bundles, the desktop `app.asar`, the clipper's helper for every system, and the [browser extension](#the-browser-extension). The committed route tree must not change |
 | `clipper` | Mozilla's `web-ext lint` on the extension's Firefox build, and its tests in Chromium against a fake native host |
 | `smoke` | The server and CLI bundles, run outside the workspace as the image runs them |
-| `e2e` | The web app's browser tests against the built pages |
+| `e2e` | The web app's browser tests against the built pages, split across four runners: the live tests, and the rest in three shards |
 | `e2e-desktop` | The desktop app's tests under a virtual display, with GNOME Keyring |
 | `macos-app` | Builds the [Mac app](#the-mac-app) for Apple silicon on a `macos-15` runner and for Intel on `macos-15-intel`, and starts each |
 | `CI passed` | Passes only when every job above passed. Require this one check on `main` |
