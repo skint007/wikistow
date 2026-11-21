@@ -69,6 +69,12 @@ declare const __APP_VERSION__: string;
 
 type RailProps = {
   onNavigate?: () => void;
+  /**
+   * Opens a space for its tile, in place of the tile's own link and
+   * `onNavigate`, so the phone drawer can stay open on that space's
+   * sidebar (#694).
+   */
+  onSpace?: (spaceId: SpaceId) => void;
   onSignOut: () => Promise<void>;
   onSearch: () => void;
 };
@@ -76,7 +82,9 @@ type RailProps = {
 /**
  * Space tiles, then navigation, then the account. Labels stay visible.
  * `onSignOut` and `onSearch` come from the shell (see `useSignOut`), which
- * outlives the phone drawer this may be in. A plugin can draw the rail
+ * outlives the phone drawer this may be in. Offline, the rail shows the
+ * Offline pill only in a wide browser: the desktop app's titlebar has it,
+ * and on phones the top bar, outside the drawer (#693). A plugin can draw the rail
  * instead (`rail`), at every size: then safe mode is the way back to
  * Settings (its keys, `?safe-mode` in a browser, or Open without plugins
  * as the vault is unlocked), whose banner links there.
@@ -91,7 +99,7 @@ export function Rail(props: RailProps) {
 
 const NO_INPUTS = {};
 
-function OwnRail({ onNavigate, onSignOut, onSearch }: RailProps) {
+function OwnRail({ onNavigate, onSpace, onSignOut, onSearch }: RailProps) {
   const vault = useVault();
   const needs = useNeedsConnection();
   return (
@@ -101,10 +109,11 @@ function OwnRail({ onNavigate, onSignOut, onSearch }: RailProps) {
       // Scrolls itself when the window is too short for every item.
       className="flex h-full flex-col items-center gap-2 overflow-y-auto py-3.5"
     >
-      <OfflinePill />
+      {/* Only the drawer's rail has `onNavigate`, to close it. */}
+      {!desktop && !onNavigate && <OfflinePill />}
       {vault.status === 'unlocked' ? (
         <>
-          <SpaceTiles vault={vault} onNavigate={onNavigate} />
+          <SpaceTiles vault={vault} onNavigate={onNavigate} onSpace={onSpace} />
           <button
             type="button"
             onClick={() => {
@@ -243,9 +252,11 @@ function moved<T>(ids: T[], from: number, to: number) {
 function SpaceTiles({
   vault,
   onNavigate,
+  onSpace,
 }: {
   vault: Extract<VaultState, { status: 'unlocked' }>;
   onNavigate: (() => void) | undefined;
+  onSpace: ((spaceId: SpaceId) => void) | undefined;
 }) {
   const queryClient = useQueryClient();
   const query = spacesQuery(vault.ctx);
@@ -398,7 +409,22 @@ function SpaceTiles({
             <Link
               to="/s/$spaceId"
               params={{ spaceId: space.id }}
-              onClick={onNavigate}
+              // A click that opens a new tab or window leaves this one, and its drawer, as they are.
+              onClick={(event) => {
+                if (!onSpace) {
+                  onNavigate?.();
+                  return;
+                }
+                const plain =
+                  event.button === 0 &&
+                  !event.metaKey &&
+                  !event.ctrlKey &&
+                  !event.shiftKey &&
+                  !event.altKey;
+                if (!plain) return;
+                event.preventDefault();
+                onSpace(space.id);
+              }}
               aria-label={plainText(name)}
               aria-current={active ? 'page' : undefined}
               data-hint={plainText(name)}

@@ -8,12 +8,13 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { onSignedOutElsewhere } from '../data/kept-store';
-import { OfflinePill } from './offline-pill';
+import { OfflinePill, useShellShown } from './offline-pill';
 import { useOfflineChanges } from '../data/offline-changes';
 import { useTreeChanges } from '../data/tree-changes';
 import { useMeaningIndex } from '../meaning/background';
@@ -45,6 +46,13 @@ import { isApple, isSearchKey } from './search-model';
 import { Sidebar } from './sidebar';
 import { SpaceMoves } from './space-moves';
 
+declare module '@tanstack/react-router' {
+  interface HistoryState {
+    /** Set by a space tile tapped in the phone drawer, which stays open on that move. */
+    drawerTap?: number;
+  }
+}
+
 type Slot = { setSpace: (spaceId: SpaceId | null) => void; closeDrawer: () => void };
 const SlotContext = createContext<Slot | null>(null);
 
@@ -66,6 +74,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const closeDrawer = slot.closeDrawer;
   const vault = useVault();
   const ctx = vault.status === 'unlocked' ? vault.ctx : null;
+  // The titlebar's Offline pill shows only with the shell, not over sign-in or an error.
+  useShellShown();
   // A session opened offline is confirmed first once the server answers.
   useConfirmSession();
   const confirmed = useSessionConfirmed(ctx);
@@ -135,9 +145,25 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [search]);
   // Anything that moves to another page closes the drawer: links, menus, and
-  // the redirect after locking.
+  // the redirect after locking. A space tile in the drawer leaves it open on
+  // that space's sidebar, so a page in it can be picked (#694).
+  // Only the history entry the latest tap made keeps it, so no other move does: not one
+  // after a tap a draft's prompt kept from moving, nor going back to an older tap's.
   const href = useRouterState({ select: (state) => state.location.href });
-  useEffect(() => closeDrawer(), [href, closeDrawer]);
+  const tapped = useRouterState({ select: (state) => state.location.state.drawerTap });
+  const lastTap = useRef<number | null>(null);
+  const openSpace = useCallback(
+    (spaceId: SpaceId) => {
+      const tap = (lastTap.current = Math.random());
+      void navigate({ to: '/s/$spaceId', params: { spaceId }, state: { drawerTap: tap } });
+    },
+    [navigate],
+  );
+  useEffect(() => {
+    const kept = tapped !== undefined && tapped === lastTap.current;
+    lastTap.current = null;
+    if (!kept) closeDrawer();
+  }, [href, tapped, closeDrawer]);
   const [offers] = useState(() => new PaletteOffers());
   return (
     <SlotContext value={slot}>
@@ -196,12 +222,18 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <DialogTitle className="sr-only">Navigation</DialogTitle>
                 <div className="w-[70px] shrink-0">
-                  <Rail onNavigate={closeDrawer} onSignOut={signOut} onSearch={() => search()} />
+                  <Rail
+                    onNavigate={closeDrawer}
+                    onSpace={openSpace}
+                    onSignOut={signOut}
+                    onSearch={() => search()}
+                  />
                 </div>
                 <div className="min-w-0 flex-1">
                   {/* Locking re-renders this before the space page lets go of its space. */}
                   {spaceId && vault.status === 'unlocked' && (
-                    <Sidebar spaceId={spaceId} onNavigate={closeDrawer} />
+                    // Its own for each space, so a filter typed in one doesn't hide another's pages.
+                    <Sidebar key={spaceId} spaceId={spaceId} onNavigate={closeDrawer} />
                   )}
                 </div>
               </DialogContent>

@@ -92,6 +92,9 @@ test('starts offline, unlocks and reads what it kept', async ({
   await window.reload();
   const offline = window.getByRole('status').filter({ hasText: 'Offline' });
   await expect(offline).toBeVisible();
+  // Once, in the titlebar by the name, not on the rail (#693).
+  await expect(offline).toHaveCount(1);
+  await expect(window.getByRole('group', { name: 'Window' }).getByRole('status')).toBeVisible();
   await expect(window.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
   // Work for owners waits for the server, rather than finding every space unchecked.
   await expect(window.getByRole('complementary', { name: 'Waiting for you' })).toHaveCount(0);
