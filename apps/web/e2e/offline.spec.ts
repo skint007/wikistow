@@ -418,6 +418,16 @@ test('tasks ticked offline wait on this device and publish once back online', as
     );
   });
 
+  await test.step('the draft, asked for by its address, waits for them too', async () => {
+    const at = new URL(page.url()).pathname;
+    await page.goto(`${at}?view=draft`);
+    await expect(offline).toBeVisible();
+    await expect(page.getByText('The draft opens once what you ticked is sent.')).toBeVisible();
+    await expect(box('milk')).toBeChecked();
+    await expect(page.locator('#page-source')).toHaveCount(0);
+    await page.goto(at);
+  });
+
   await test.step('loaded again offline, they are still ticked, and more can be', async () => {
     await page.reload();
     await expect(offline).toBeVisible();
@@ -445,4 +455,7 @@ test('tasks ticked offline wait on this device and publish once back online', as
   await expect(box('bread')).toBeChecked();
   await expect(box('eggs')).not.toBeChecked();
   await expect(page.getByRole('button', { name: 'Edit' })).not.toHaveAttribute('aria-disabled');
+  // Asked for while they waited, the draft opens once they are sent.
+  await page.goto(`${new URL(page.url()).pathname}?view=draft`);
+  await expect(page.locator('#page-source')).toBeVisible();
 });

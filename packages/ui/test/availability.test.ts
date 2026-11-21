@@ -83,10 +83,10 @@ describe('what can run now', () => {
     expect(waitingOf([{ kind: 'page', newPage: made }])).toBe('made');
     expect(waitingOf([{ kind: 'folder' }])).toBe('made');
     expect(waitingOf([{ kind: 'rename' }])).toBe('changed');
-    // What was ticked while reading, still to be sent, is ticked (#695); stopped, it's a change.
+    // Only what was ticked while reading, still to be sent, is ticked (#695); stopped, it's a change.
     expect(waitingOf([{ kind: 'reading', failure: null }])).toBe('ticked');
     expect(waitingOf([{ kind: 'reading', failure: { kind: 'gone' } }])).toBe('changed');
-    expect(waitingOf([{ kind: 'reading', failure: null }, { kind: 'move' }])).toBe('ticked');
+    expect(waitingOf([{ kind: 'reading', failure: null }, { kind: 'move' }])).toBe('changed');
     expect(waitingOf([{ kind: 'page', newPage: null }, { kind: 'delete' }])).toBe('changed');
     expect(waitingOf([{ kind: 'move' }, { kind: 'publish' }])).toBe('changed');
   });

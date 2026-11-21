@@ -129,6 +129,18 @@ describe('ticking a task', () => {
     });
   });
 
+  it('never changes a box in code where its task was, as text that isn’t a task (#698)', () => {
+    const before = '- [ ] milk\n';
+    const after = '```md\n- [ ] milk\n```\n';
+    // Where the task started, a fence now starts; its box is the example's.
+    const change = { offset: 0, line: 'milk', checked: true };
+    expect(setTask(after, { ...change, offset: after.indexOf('- [ ]') })).toEqual({
+      ok: false,
+      reason: 'The task “milk” isn’t on the page any more.',
+    });
+    expect(setTask(before, change)).toEqual({ ok: true, markdown: '- [x] milk\n' });
+  });
+
   it('is refused when the task is gone, or its line is on more than one task', () => {
     const change = { offset: 11, line: 'bread', checked: true };
     expect(setTask('- [ ] milk\n- [ ] toast\n', change)).toEqual({

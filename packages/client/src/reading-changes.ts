@@ -55,18 +55,19 @@ export function applyChange(
 
 /**
  * `markdown` with each of `changes` made, in order, and those that no
- * longer apply. `strict`, for text that may have moved since the changes
- * were made, a task is changed only where no other task reads the same, as
- * its place may now be another's.
+ * longer apply. `strict`, for text that may have moved since a change was
+ * made (all of them, or those it says by their index), a task is changed
+ * only where no other task reads the same, as its place may now be another's.
  */
 export function applyChanges(
   markdown: string,
   changes: readonly ReadingChange[],
-  { strict = false }: { strict?: boolean } = {},
+  { strict = false }: { strict?: boolean | ((index: number) => boolean) } = {},
 ): { markdown: string; dropped: Dropped[] } {
   const dropped: Dropped[] = [];
-  for (const change of changes) {
-    if (strict && change.kind === 'task') {
+  for (const [index, change] of changes.entries()) {
+    const strictHere = typeof strict === 'function' ? strict(index) : strict;
+    if (strictHere && change.kind === 'task') {
       const { line } = change;
       if (taskItems(markdown).filter((item) => item.line === line).length > 1) {
         dropped.push({
@@ -83,6 +84,21 @@ export function applyChanges(
   return { markdown, dropped };
 }
 
+/**
+ * `markdown` with every task's box empty: two texts that read the same this
+ * way differ only in what is ticked, so a task's place in one is its place
+ * in the other.
+ */
+export const marksIgnored = (markdown: string): string =>
+  markdown.replace(/^([ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[[xX]\]/gm, '$1[ ]');
+
+/** Whether `a` and `b` are the same change: the same thing, set the same way. */
+export const sameChange = (a: ReadingChange, b: ReadingChange): boolean =>
+  sameTarget(a, b) &&
+  (a.kind === 'task'
+    ? b.kind === 'task' && a.checked === b.checked
+    : b.kind === 'property' && JSON.stringify(a.value) === JSON.stringify(b.value));
+
 /** Whether `a` and `b` set the same task or property, so the later one takes the earlier's place. */
 export const sameTarget = (a: ReadingChange, b: ReadingChange): boolean =>
   a.kind === 'task'
@@ -94,3 +110,12 @@ export const withChange = (
   changes: readonly ReadingChange[],
   change: ReadingChange,
 ): ReadingChange[] => [...changes.filter((other) => !sameTarget(other, change)), change];
+
+/** A change as the queue keeps it: with the publication it was made on, if known (#698). */
+export type MadeOn = { change: ReadingChange; on: string | null };
+
+/** `items` with `item` after them, in place of an earlier one setting the same thing. */
+export const withMadeOn = <T extends MadeOn>(items: readonly T[], item: T): T[] => [
+  ...items.filter((other) => !sameTarget(other.change, item.change)),
+  item,
+];

@@ -87,17 +87,20 @@ export function taskItems(markdown: string): TaskItem[] {
 
 /**
  * `markdown` with the task `change` names ticked (`checked`) or not. It is
- * the one at `change.offset` if that task's line is still `change.line`;
+ * the one at `change.offset` if a task the reader reads starts there and
+ * its line is still `change.line`;
  * otherwise the only task item with that line. A task already as asked is
  * left as it is, `[X]` included, so a change made twice changes nothing
  * more. A task that is gone, or whose line more than one task has, is
  * refused with why.
  */
 export function setTask(markdown: string, change: TaskChange): TaskEdit {
-  const there = taskAt(markdown, change.offset);
+  const items = taskItems(markdown);
+  // Only a task the reader reads: text that looks like one, in code say, isn't (#698).
+  const there = items.find((item) => item.offset === change.offset);
   let task = there?.line === change.line ? there : null;
   if (!task) {
-    const same = taskItems(markdown).filter((item) => item.line === change.line);
+    const same = items.filter((item) => item.line === change.line);
     if (same.length !== 1) {
       const named = change.line === '' ? 'That task' : `The task “${change.line}”`;
       return {

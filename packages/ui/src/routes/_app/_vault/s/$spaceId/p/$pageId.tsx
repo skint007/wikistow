@@ -107,6 +107,7 @@ import {
 } from '../../../../../../page/reading-changes';
 import {
   applyChanges,
+  type ReadingChange,
   originOf,
   ticksNotShown,
   pageFlushing,
@@ -129,6 +130,7 @@ import { mayDelete, useOwnerStanding } from '../../../../../../sharing/owner-sta
 import { ShareDialog } from '../../../../../../sharing/share-dialog';
 import {
   availability as availabilityOf,
+  controls,
   NEEDS_CONNECTION,
   useAvailability,
   useNeedsConnection,
@@ -162,8 +164,23 @@ export const Route = createFileRoute('/_app/_vault/s/$spaceId/p/$pageId')({
 
 function PageView() {
   const { spaceId, pageId } = Route.useParams();
-  const search = Route.useSearch();
+  const asked = Route.useSearch();
   const ctx = useClient();
+  // While what was ticked while reading waits to be sent, the draft doesn't
+  // open, however it is asked for: it would be saved around them (#698). It
+  // opens once they are. A draft open already stays open.
+  const { data: queuedHere } = useQuery(queueQuery(ctx));
+  const ticksWait =
+    queuedHere?.some(
+      (entry) => entry.kind === 'reading' && entry.id === pageId && entry.failure === null,
+    ) ?? false;
+  const [draftOpen, setDraftOpen] = useState<string | null>(null);
+  const holdsDraft = ticksWait && asked.view === 'draft' && draftOpen !== pageId;
+  const search = useMemo((): typeof asked => {
+    if (!holdsDraft) return asked;
+    const { view: _, ...published } = asked;
+    return published;
+  }, [asked, holdsDraft]);
   const queryClient = useQueryClient();
   const page = { spaceId, pageId };
   const { data: info, error } = useQuery(pageQuery(ctx, pageId));
@@ -193,6 +210,12 @@ function PageView() {
       requested: search,
     });
   const draftOpening = shown?.found && shown.view === 'draft' ? `${pageId}:${opening}` : null;
+  const draftShown =
+    asked.view === 'draft' &&
+    queuedHere !== undefined &&
+    shown?.found === true &&
+    shown.view === 'draft';
+  useEffect(() => setDraftOpen(draftShown ? pageId : null), [draftShown, pageId]);
   const [draftOpened, setDraftOpened] = useState<string | null>(null);
   useEffect(() => {
     if (draftOpening === null) {
@@ -274,7 +297,10 @@ function PageView() {
         />
       </PageCard>
     );
-  if (!info || (unpublishedCopy && !history) || draftWaits) return <PageCard>{null}</PageCard>;
+  // A draft asked for waits to know whether what was ticked waits (`holdsDraft`).
+  const queueUnknown = asked.view === 'draft' && queuedHere === undefined;
+  if (!info || (unpublishedCopy && !history) || draftWaits || queueUnknown)
+    return <PageCard>{null}</PageCard>;
   const model = pageViewModel({
     viewer: { role: info.role, canPublish: info.canPublish },
     heads: info.heads,
@@ -400,7 +426,11 @@ function PageBody({
   // The page's change waiting on this device, if any (ADR 0009, decision 7).
   const { data: entries, isSuccess: queueRead } = useQuery(queueQuery(ctx));
   const change = pageChange(entries, page.pageId);
-  const { data: revision, error } = useQuery({
+  const {
+    data: revision,
+    error,
+    isPlaceholderData,
+  } = useQuery({
     ...revisionQuery(ctx, page, model.view, revisionId),
     // Opened before the page loads again, it shows at once; else the one before stays meanwhile.
     placeholderData: keepPreviousData,
@@ -476,6 +506,8 @@ function PageBody({
   const contents = model.view === 'published' && headings.length > 1;
   // The latest publication as shown, with the changes made while reading it.
   const queued = useSyncExternalStore(reading.subscribe, reading.get);
+  // The draft, asked for while what was ticked waits to be sent (`PageView`).
+  const draftAsked = Route.useSearch({ select: (search) => search.view === 'draft' });
   // A version the address names stays that one, so it isn't changed while it's read.
   const pinned = Route.useSearch({ select: (search) => search.rev !== undefined });
   // A page with a public link isn't changed while it's read, nor before its links are known.
@@ -734,19 +766,28 @@ function PageBody({
     (entry): entry is queueOperations.QueuedReading =>
       entry.kind === 'reading' && entry.id === page.pageId && entry.failure === null,
   );
-  // Sent, they show until the publication they made does.
-  const sentTicks = latest ? ticksNotShown(page.pageId, revisionId) : [];
+  const waitingTicks = useMemo(() => ticked?.changes.map(({ change }) => change) ?? [], [ticked]);
+  // What this page last showed waiting, for ticks another tab sent.
+  const [lastWaiting, setLastWaiting] = useState<readonly ReadingChange[]>([]);
+  if (waitingTicks.length > 0 && waitingTicks !== lastWaiting) setLastWaiting(waitingTicks);
+  // Sent, they show until the text of the publication they made does, not
+  // while it loads (#698).
+  const sentTicks = latest
+    ? (ticksNotShown(page.pageId, isPlaceholderData ? null : revisionId) ?? lastWaiting)
+    : [];
   const shownMarkdown = useMemo(
     () =>
       readMarkdown !== null && latest
         ? applyChanges(readMarkdown, [
             ...sentTicks,
-            ...(ticked?.changes ?? []),
+            ...waitingTicks,
             ...queued.changes.map(({ change }) => change),
           ]).markdown
         : readMarkdown,
-    [readMarkdown, latest, sentTicks, ticked, queued.changes],
+    [readMarkdown, latest, sentTicks, waitingTicks, queued.changes],
   );
+  // What was ticked holds Edit whatever else waits: the draft would be saved around it (#698).
+  const editing = ticked ? controls(availability.offline, 'ticked') : here;
   // An older version can't change, but its boxes say why to editors.
   const readingHere = useMemo(
     () =>
@@ -878,7 +919,7 @@ function PageBody({
     model.actions.edit && {
       command: editPage,
       title: 'Edit page',
-      waiting: waitsFor('edit'),
+      waiting: editing.hint('edit'),
       run: () => void act(() => runCommand(editPage, page, commandEnv)),
     },
     model.actions.done && { command: finishEditing, title: 'Done editing', run: () => void done() },
@@ -994,7 +1035,7 @@ function PageBody({
                   size="sm"
                   // Drafts are saved on this device offline (ADR 0009, decision 7), once
                   // what was ticked while reading is sent (#695).
-                  {...here.click(
+                  {...editing.click(
                     'edit',
                     () => void act(() => runCommand(editPage, page, commandEnv)),
                   )}
@@ -1328,6 +1369,11 @@ function PageBody({
           )}
         </Pills>
         <ReadingNotices state={queued} />
+        {ticked && draftAsked && model.view === 'published' && (
+          <p role="note" className="text-sm text-muted-foreground">
+            The draft opens once what you ticked is sent.
+          </p>
+        )}
         {movedTo !== null && (
           <p role="note" className="text-sm text-muted-foreground">
             This page moved to {movedTo ? <Name>{movedTo}</Name> : 'another space'}.

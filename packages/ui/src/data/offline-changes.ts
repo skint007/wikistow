@@ -19,8 +19,15 @@ import { PLAIN } from '../vault/store';
 import { connection, useConnection } from './connection';
 import { contentChanged } from './content-changed';
 import { keepChanged, pageOpened } from './keeper';
-import { pageQuery, queueOf, searchIndexChanged, trashQuery, treeQuery } from './queries';
-import { notePublished, noteTicksPublished } from '../page/reading-origins';
+import {
+  pageQuery,
+  queueOf,
+  revisionQuery,
+  searchIndexChanged,
+  trashQuery,
+  treeQuery,
+} from './queries';
+import { noteTicksPublished } from '../page/reading-origins';
 
 // Changes made offline (ADR 0009, decision 7), as the app makes, follows and sends them.
 
@@ -126,10 +133,12 @@ function persist() {
 export function followQueue(queryClient: QueryClient, ctx: ClientContext, event: Told) {
   void queryClient.invalidateQueries({ queryKey: queueQuery(ctx).queryKey });
   if (event.kind === 'saved') return;
-  // Before their entry goes, so the page keeps its one view (#695); this tab's
-  // own pages keep showing them meanwhile too (`noteTicksPublished`, as sent).
+  // Before their entry goes, so the page keeps its one view and shows them
+  // until it shows that publication, loaded meanwhile (#695, #698).
   if (event.kind === 'ticks-published') {
-    notePublished(event.pageId, event.revisionId, event.replaced);
+    noteTicksPublished(event.pageId, event.revisionId, event.replaced, null);
+    const page = { spaceId: event.spaceId, pageId: event.pageId };
+    void queryClient.prefetchQuery(revisionQuery(ctx, page, 'published', event.revisionId));
     return;
   }
   if (event.kind === 'recorded') {

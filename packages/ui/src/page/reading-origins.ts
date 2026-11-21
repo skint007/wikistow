@@ -33,32 +33,56 @@ export function originOf(pageId: string, revision: string): string {
 // What the queue's sender published of changes made while reading, by
 // page, until the page shows that publication: their entry goes first, so
 // the page shows them over the one before meanwhile, rather than unticked.
-const sent = new Map<string, { revision: string; changes: readonly ReadingChange[]; at: number }>();
+// Null changes: sent from another tab, which says what was published, not
+// what was ticked; the page keeps what it last showed waiting.
+const sent = new Map<
+  string,
+  { revision: string; changes: readonly ReadingChange[] | null; at: number }
+>();
 
 // How long the page waits to show the publication, at most, before it shows what it has.
 const SHOWN_WITHIN_MS = 30_000;
 
-/** The queue's sender published `changes` of `pageId` as `revision`, in place of `before`. */
+/**
+ * The queue's sender published `changes` of `pageId` as `revision`, in
+ * place of `before`: null when another tab sent them, unless this one
+ * already knows them.
+ */
 export function noteTicksPublished(
   pageId: string,
   revision: string,
   before: string | null,
-  changes: readonly ReadingChange[],
+  changes: readonly ReadingChange[] | null,
 ) {
   notePublished(pageId, revision, before);
+  const known = sent.get(pageId);
+  if (changes === null && known?.revision === revision) return;
   sent.set(pageId, { revision, changes, at: Date.now() });
+}
+
+/** Whether `shown` is `revision`, or a publication made after it by flushes or the sender. */
+function shows(pageId: string, shown: string, revision: string): boolean {
+  const page = replaced.get(pageId);
+  for (let at: string | undefined = shown; at; at = page?.get(at)) if (at === revision) return true;
+  return false;
 }
 
 /**
  * The changes the queue's sender published of `pageId` that the page
- * doesn't show yet, while it shows the publication `shown`; forgotten once
- * it shows the one they made or one after it, or after `SHOWN_WITHIN_MS`.
+ * doesn't show yet, while its text is the publication `shown` (null while
+ * it loads another): none once it shows the one they made or one after
+ * it, or after `SHOWN_WITHIN_MS`; null for those the page last showed waiting.
  */
-export function ticksNotShown(pageId: string, shown: string | null): readonly ReadingChange[] {
+export function ticksNotShown(
+  pageId: string,
+  shown: string | null,
+): readonly ReadingChange[] | null {
   const now = sent.get(pageId);
   if (!now) return [];
-  const after = shown !== null && originOf(pageId, shown) !== shown;
-  if (shown === now.revision || after || Date.now() - now.at > SHOWN_WITHIN_MS) {
+  if (
+    (shown !== null && shows(pageId, shown, now.revision)) ||
+    Date.now() - now.at > SHOWN_WITHIN_MS
+  ) {
     sent.delete(pageId);
     return [];
   }

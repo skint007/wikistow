@@ -21,6 +21,7 @@ import {
   type ReadingChange,
 } from '../src/page/reading-changes-model.ts';
 import { SENDS_FIRST } from '../src/shell/availability.ts';
+import { noteTicksPublished, ticksNotShown } from '../src/page/reading-origins.ts';
 
 const LIST = '---\nservings: 4\n---\n- [ ] milk\n- [ ] bread\n- [x] eggs\n';
 
@@ -631,5 +632,34 @@ describe('what the queue says', () => {
       'A change was left out. The task “a” isn’t on the page any more.',
     ]);
     expect(readingNotices({ ...state, last: null })).toEqual([]);
+  });
+});
+
+describe('ticks the queue sent, shown until their publication is (#698)', () => {
+  const milk = { kind: 'task' as const, offset: 0, line: 'milk', checked: true };
+  const eggs = { kind: 'task' as const, offset: 12, line: 'eggs', checked: true };
+
+  it('show while the page shows what was before, and go once it shows theirs or one after', () => {
+    noteTicksPublished('page-a', 'p1', 'p0', [milk]);
+    expect(ticksNotShown('page-a', 'p0')).toEqual([milk]);
+    // Loading the next one, the page still shows what it had.
+    expect(ticksNotShown('page-a', null)).toEqual([milk]);
+    expect(ticksNotShown('page-a', 'p1')).toEqual([]);
+    expect(ticksNotShown('page-a', 'p0')).toEqual([]);
+  });
+
+  it('show a second send’s over the first’s publication, still shown', () => {
+    noteTicksPublished('page-b', 'p1', 'p0', [milk]);
+    noteTicksPublished('page-b', 'p2', 'p1', [eggs]);
+    expect(ticksNotShown('page-b', 'p1')).toEqual([eggs]);
+    expect(ticksNotShown('page-b', 'p2')).toEqual([]);
+  });
+
+  it('say to keep what the page last showed for another tab’s send, unless this one knows them', () => {
+    noteTicksPublished('page-c', 'p1', 'p0', null);
+    expect(ticksNotShown('page-c', 'p0')).toBeNull();
+    noteTicksPublished('page-d', 'p1', 'p0', [milk]);
+    noteTicksPublished('page-d', 'p1', 'p0', null);
+    expect(ticksNotShown('page-d', 'p0')).toEqual([milk]);
   });
 });

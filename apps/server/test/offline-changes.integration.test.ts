@@ -80,7 +80,24 @@ async function device() {
     return { ...opened.opened.payload, basedOn: opened.record.basedOn };
   };
   const payload = (markdown: string) => newPayload({ title: 'Plan', markdown });
-  return { person, ctx, queue, spaceId, page, based, head, draft, losing, payload };
+  // The same session, which runs `meanwhile` as its first request to `path` lands, before its answer.
+  const during = (path: string, meanwhile: () => Promise<unknown>): ClientContext => {
+    let ran = false;
+    return {
+      ...ctx,
+      api: createApiClient({
+        fetch: async (url, init) => {
+          const answer = await person.browser.fetch(url, init);
+          if (!ran && init?.method && new URL(url, 'http://app').pathname === path) {
+            ran = true;
+            await meanwhile();
+          }
+          return answer;
+        },
+      }),
+    };
+  };
+  return { person, ctx, queue, spaceId, page, based, head, draft, losing, during, payload };
 }
 
 describe('changes made offline', () => {
@@ -997,7 +1014,10 @@ describe('changes made while reading offline', () => {
     const [entry] = await queue.entries();
     expect(entry).toMatchObject({
       kind: 'reading',
-      changes: [tick('beans'), tick('salt', false), tick('rice')],
+      changes: [tick('beans'), tick('salt', false), tick('rice')].map((change) => ({
+        change,
+        on: expect.any(String),
+      })),
     });
     expect(await queue.send(ctx)).toBe('sent');
     expect(await queue.entries()).toEqual([]);
@@ -1119,26 +1139,6 @@ describe('changes made while reading offline', () => {
     expect((await publication(ctx, page)).markdown).toBe('- [ ] beans\n- [x] rice\n');
   });
 
-  it('go into the draft, saved again, when someone saved over one whose answer was lost', async () => {
-    const { ctx, queue, page, losing, draft } = await reading();
-    const save = pageRoutes.saveDraft.path.replace(':pageId', page.pageId);
-    await queue.tick({
-      page,
-      title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('rice')],
-    });
-    expect(await queue.send(losing(save))).toBe('offline');
-    // Someone saves over it, unticking rice.
-    await pages.editDraft(ctx, page, { markdown: LIST + '- [ ] tea\n' });
-    expect(await queue.send(ctx)).toBe('sent');
-    expect((await draft()).markdown).toBe('- [ ] beans\n- [x] rice\n- [ ] salt\n- [ ] tea\n');
-    expect((await queue.entries())[0]?.failure).toMatchObject({
-      message: expect.stringContaining('went into the draft'),
-    });
-    expect((await publication(ctx, page)).count).toBe(1);
-  });
-
   it('never publish a page unpublished meanwhile', async () => {
     const { ctx, queue, page, losing } = await reading();
     await queue.tick({
@@ -1191,6 +1191,145 @@ describe('changes made while reading offline', () => {
       message: expect.stringContaining('More than one task reads “Call”'),
     });
     expect((await draft()).markdown).toBe('## Home\n- [ ] Call\n## Work\n- [ ] Call\n');
+  });
+
+  it('never tick again what someone unticked after a publication whose answer was lost (#698)', async () => {
+    const { ctx, queue, page, losing } = await reading();
+    const publish = pageRoutes.publish.path.replace(':pageId', page.pageId);
+    await queue.tick({
+      page,
+      title: 'Plan',
+      publishedOn: await on(ctx, page),
+      changes: [tick('beans')],
+    });
+    expect(await queue.send(losing(publish))).toBe('offline');
+    // From another device: beans unticked, and published.
+    await pages.editDraft(ctx, page, { markdown: LIST });
+    await pages.publishPage(ctx, page);
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect((await publication(ctx, page)).markdown).toBe(LIST);
+    expect((await pages.loadPage(ctx, page.pageId)).heads.draftChanges).toBe(false);
+  });
+
+  it('say so, rather than save again, when someone saved over a draft whose answer was lost', async () => {
+    const { ctx, queue, page, losing, draft } = await reading();
+    const save = pageRoutes.saveDraft.path.replace(':pageId', page.pageId);
+    await queue.tick({
+      page,
+      title: 'Plan',
+      publishedOn: await on(ctx, page),
+      changes: [tick('rice')],
+    });
+    expect(await queue.send(losing(save))).toBe('offline');
+    await pages.editDraft(ctx, page, { markdown: LIST });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await draft()).markdown).toBe(LIST);
+    expect((await queue.entries())[0]?.failure).toMatchObject({
+      message: expect.stringContaining('Someone saved the draft after'),
+    });
+  });
+
+  it('send only what was ticked during a send next, and its repeated lines where nothing moved', async () => {
+    const { ctx, queue, page, during } = await reading();
+    const week = '## Mon\n- [ ] milk\n## Tue\n- [ ] milk\n- [ ] eggs\n';
+    await pages.editDraft(ctx, page, { markdown: week });
+    await pages.publishPage(ctx, page);
+    const p0 = await on(ctx, page);
+    const milk = (from: number) => ({
+      kind: 'task' as const,
+      offset: week.indexOf('- [ ] milk', from),
+      line: 'milk',
+      checked: true,
+    });
+    await queue.tick({ page, title: 'Plan', publishedOn: p0, changes: [milk(0)] });
+    const publish = pageRoutes.publish.path.replace(':pageId', page.pageId);
+    const tue = milk(week.indexOf('## Tue'));
+    const eggs = {
+      kind: 'task' as const,
+      offset: week.indexOf('- [ ] eggs'),
+      line: 'eggs',
+      checked: true,
+    };
+    // Ticked while the first goes.
+    const sending = during(publish, () =>
+      queue.tick({ page, title: 'Plan', publishedOn: p0, changes: [tue, eggs] }),
+    );
+    expect(await queue.send(sending)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect((await publication(ctx, page)).markdown).toBe(
+      '## Mon\n- [x] milk\n## Tue\n- [x] milk\n- [x] eggs\n',
+    );
+
+    // Mon's milk, published, is unticked by someone while eggs is ticked again and unticked here.
+    await queue.tick({ page, title: 'Plan', publishedOn: await on(ctx, page), changes: [milk(0)] });
+    await queue.send(
+      during(publish, async () => {
+        await queue.tick({
+          page,
+          title: 'Plan',
+          publishedOn: null,
+          changes: [{ ...eggs, checked: false }],
+        });
+      }),
+    );
+    await pages.editDraft(ctx, page, {
+      markdown: '## Mon\n- [ ] milk\n## Tue\n- [x] milk\n- [ ] eggs\n',
+    });
+    await pages.publishPage(ctx, page);
+    await queue.send(ctx);
+    expect((await publication(ctx, page)).markdown).toBe(
+      '## Mon\n- [ ] milk\n## Tue\n- [x] milk\n- [ ] eggs\n',
+    );
+  });
+
+  it('take each change’s place on the publication it was made on', async () => {
+    const { ctx, queue, page } = await reading();
+    const week = '## Mon\n- [ ] milk\n## Tue\n- [ ] milk\n- [ ] eggs\n';
+    await pages.editDraft(ctx, page, { markdown: week });
+    await pages.publishPage(ctx, page);
+    const tue = {
+      kind: 'task' as const,
+      offset: week.indexOf('- [ ] milk', 10),
+      line: 'milk',
+      checked: true,
+    };
+    await queue.tick({ page, title: 'Plan', publishedOn: await on(ctx, page), changes: [tue] });
+    // Someone adds Sunday at the top and publishes; this device then ticks eggs on that.
+    const sunday = '## Sun\n- [ ] milk\n' + week;
+    await pages.editDraft(ctx, page, { markdown: sunday });
+    await pages.publishPage(ctx, page);
+    const eggs = {
+      kind: 'task' as const,
+      offset: sunday.indexOf('- [ ] eggs'),
+      line: 'eggs',
+      checked: true,
+    };
+    await queue.tick({ page, title: 'Plan', publishedOn: await on(ctx, page), changes: [eggs] });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await publication(ctx, page)).markdown).toBe(
+      sunday.replace('- [ ] eggs', '- [x] eggs'),
+    );
+    expect((await queue.entries())[0]?.failure).toMatchObject({
+      message: expect.stringContaining('More than one task reads “milk”'),
+    });
+  });
+
+  it('wait for a live session a tab joins as the page loads, before saving', async () => {
+    const { ctx, queue, page } = await reading();
+    await queue.tick({
+      page,
+      title: 'Plan',
+      publishedOn: await on(ctx, page),
+      changes: [tick('rice')],
+    });
+    let asked = 0;
+    // Not in the session as the IDs are recorded; in it by the time the draft would be saved.
+    expect(await queue.send(ctx, { held: async () => asked++ > 0 })).toBe('sent');
+    expect((await publication(ctx, page)).count).toBe(1);
+    expect((await queue.entries())[0]).toMatchObject({ kind: 'reading', failure: null });
+    expect(await queue.send(ctx, { held: async () => false })).toBe('sent');
+    expect((await publication(ctx, page)).markdown).toBe('- [ ] beans\n- [x] rice\n- [ ] salt\n');
   });
 
   it('go with the page when it is deleted on this device', async () => {
