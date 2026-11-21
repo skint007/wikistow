@@ -5,7 +5,8 @@ import { adminTab, memberWithVault, newPage } from './vault';
 /**
  * On a phone, the drawer holds the rail and the open space's sidebar.
  * Picking a space there opens its sidebar in the drawer, which stays open
- * so a page in it can be picked; picking that page closes it (#694).
+ * so a page in it can be picked, with no filter typed in the space before;
+ * picking that page closes it (#694).
  */
 test('on a phone, picking a space keeps the drawer open for its pages', async ({
   page,
@@ -22,6 +23,8 @@ test('on a phone, picking a space keeps the drawer open for its pages', async ({
   const drawer = page.getByRole('dialog', { name: 'Navigation' });
   await page.getByRole('button', { name: 'Open navigation' }).click();
   await expect(drawer.getByRole('heading', { name: 'Kitchen', level: 2 })).toBeVisible();
+  // A filter typed in one space's sidebar doesn't carry over to the next.
+  await drawer.getByRole('textbox', { name: 'Filter pages' }).fill('Bean');
 
   await drawer.getByRole('link', { name: 'Garden', exact: true }).click();
   await expect(drawer.getByRole('heading', { name: 'Garden', level: 2 })).toBeVisible();

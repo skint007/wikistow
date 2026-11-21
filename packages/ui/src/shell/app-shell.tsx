@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useLocation, useNavigate, useRouterState } from '@tanstack/react-router';
+import { useLocation, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { Menu, Search } from 'lucide-react';
 import type { ClientContext, SpaceId } from '@wikistow/client';
 import {
@@ -14,7 +14,7 @@ import {
 } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { onSignedOutElsewhere } from '../data/kept-store';
-import { OfflinePill } from './offline-pill';
+import { OfflinePill, useShellShown } from './offline-pill';
 import { useOfflineChanges } from '../data/offline-changes';
 import { useTreeChanges } from '../data/tree-changes';
 import { useMeaningIndex } from '../meaning/background';
@@ -67,6 +67,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const closeDrawer = slot.closeDrawer;
   const vault = useVault();
   const ctx = vault.status === 'unlocked' ? vault.ctx : null;
+  // The titlebar's Offline pill shows only with the shell, not over sign-in or an error.
+  useShellShown();
   // A session opened offline is confirmed first once the server answers.
   useConfirmSession();
   const confirmed = useSessionConfirmed(ctx);
@@ -141,6 +143,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const href = useRouterState({ select: (state) => state.location.href });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const keepOpenFor = useRef<SpaceId | null>(null);
+  // Only the tile's own move keeps it: Back, Forward or a replace comes from elsewhere,
+  // after a tap a draft's prompt kept from moving, say.
+  const router = useRouter();
+  useEffect(
+    () =>
+      router.history.subscribe(({ action }) => {
+        if (action.type !== 'PUSH') keepOpenFor.current = null;
+      }),
+    [router],
+  );
   useEffect(() => {
     const space = keepOpenFor.current;
     keepOpenFor.current = null;
@@ -220,7 +232,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div className="min-w-0 flex-1">
                   {/* Locking re-renders this before the space page lets go of its space. */}
                   {spaceId && vault.status === 'unlocked' && (
-                    <Sidebar spaceId={spaceId} onNavigate={closeDrawer} />
+                    // Its own for each space, so a filter typed in one doesn't hide another's pages.
+                    <Sidebar key={spaceId} spaceId={spaceId} onNavigate={closeDrawer} />
                   )}
                 </div>
               </DialogContent>

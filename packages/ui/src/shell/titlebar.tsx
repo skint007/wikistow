@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils';
 import { desktop } from '../desktop';
 import { Place } from '../plugins/places';
-import { OfflinePill } from './offline-pill';
+import { ShellOfflinePill } from './offline-pill';
 import { isApple } from './search-model';
 
 /**
@@ -21,8 +21,8 @@ import { isApple } from './search-model';
  * double-clicking it maximizes, as the system's would. It holds plugins'
  * buttons (`app.titlebar`), a menu for what the old menu bar did, and the
  * window's buttons. On a Mac the system draws its window buttons at the
- * left end, and the menu bar does what the menu does. Offline, the Offline
- * pill follows the name while the window is wide: a narrow one has it in
+ * left end, and the menu bar does what the menu does. Offline, with the app
+ * shell up, the Offline pill follows the name while the window is wide: a narrow one has it in
  * its top bar, by the name there (#693). A Mac's goes at the right end, as
  * its window buttons keep their size as the page zooms out, and the room
  * left for them doesn't.
@@ -64,9 +64,9 @@ function DesktopTitlebar({ desktop }: { desktop: DesktopBridge }) {
       >
         Wiki<span className="text-primary">Stow</span>
       </span>
-      {!mac && <OfflinePill className={PILL} />}
+      {!mac && <ShellOfflinePill className={PILL} />}
       <div className="ml-auto flex h-full items-center gap-1 pr-1">
-        {mac && <OfflinePill className={PILL} />}
+        {mac && <ShellOfflinePill className={PILL} />}
         <Place name="app.titlebar" />
       </div>
       {!mac && <WindowButtons state={state} act={act} />}
