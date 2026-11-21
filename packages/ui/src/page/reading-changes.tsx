@@ -8,8 +8,10 @@ import {
 } from '@wikistow/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
-import { createContext, useCallback, useEffect, useMemo } from 'react';
+import { createContext, useCallback, useEffect, useMemo, useRef } from 'react';
 import { contentChanged } from '../data/content-changed';
+import { useOffline } from '../data/connection';
+import { pageWriter, queueQuery } from '../data/offline-changes';
 import { pageQuery, publicLinksQuery, revisionQuery } from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { readWikilinks } from './page-reader';
@@ -70,10 +72,18 @@ window.addEventListener('beforeunload', (event) => {
  * again, so who may change it is worked out afresh. Leaving the page, for
  * another page or another app, saves what waits at once; closing or
  * reloading it with changes waiting asks first, as the browser lets it,
- * and so does locking the vault if they can't be saved.
+ * and so does locking the vault if they can't be saved. Offline, or while a
+ * change to the page waits on this device, a flush puts them there
+ * instead, named `title`, to be sent after it (#695).
  */
-export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef): ReadingQueue {
+export function useReadingQueue(
+  ctx: ClientContext,
+  page: pageOperations.PageRef,
+  title: string,
+): ReadingQueue {
   const queryClient = useQueryClient();
+  const named = useRef(title);
+  named.current = title;
   const { spaceId, pageId } = page;
   const { queue, shownHere } = useMemo(() => {
     const page = { spaceId, pageId };
@@ -137,7 +147,12 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
         queryKey: pageQuery(ctx, pageId).queryKey,
         refetchType: 'all',
       });
-    const flush = async (changes: readonly ReadingChange[]) => {
+    const flush = async (changes: readonly ReadingChange[]): Promise<Flushed> => {
+      if (await pageWriter(ctx).tick({ page, title: named.current, changes })) {
+        // Shown from the queue before they leave this one, so no box flickers back.
+        await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
+        return { outcome: 'on-device', dropped: [] };
+      }
       published = null;
       opened.clear();
       let flushed: Flushed;
@@ -176,6 +191,8 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
         left = !shown;
       },
     };
+    // `named` is read as each flush starts, so a rename doesn't make a new queue.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctx, queryClient, spaceId, pageId]);
   useEffect(() => {
     shownHere(true);
@@ -221,7 +238,7 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
 
 /** The queue's notices, said as they change, in the page's quiet note style. */
 export function ReadingNotices({ state }: { state: ReadingState }) {
-  const notices = readingNotices(state);
+  const notices = readingNotices(state, useOffline());
   return (
     <div role="status" className="grid gap-1 text-sm text-muted-foreground empty:hidden">
       {notices.map((notice) => (

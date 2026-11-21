@@ -37,6 +37,7 @@ function nameOf(entry: Entry): string {
     case 'order':
       return entry.name || 'Untitled';
     case 'publish':
+    case 'reading':
       return entry.title || 'Untitled';
   }
 }
@@ -60,6 +61,8 @@ function goneText(entry: Entry): string {
       return 'This page was deleted, or you can no longer publish it, so it wasn’t published.';
     case 'order':
       return 'This folder was deleted, or you lost access to it, while you were offline, so it wasn’t put in order.';
+    case 'reading':
+      return 'This page was deleted, or you can no longer publish it, so what you ticked while reading it offline wasn’t saved.';
   }
 }
 
@@ -72,6 +75,7 @@ const REFUSED: Record<Entry['kind'], string> = {
   move: 'Couldn’t be moved.',
   publish: 'Wasn’t published.',
   order: 'Wasn’t put in order.',
+  reading: 'What you ticked while reading it offline:',
 };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -84,7 +88,9 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
  * gone or out of reach, with Try again, Save as a new page in my space,
  * Copy text and Discard, or for a rename or delete, which has nothing left
  * to save, only OK; and changes the server refused, with its reason, only
- * OK for a move or publish, which the person makes again once they've looked.
+ * OK for a move or publish, which the person makes again once they've looked,
+ * and for what was ticked while reading, said to have gone into the draft,
+ * or been left out (#695).
  */
 export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
   const { data: entries } = useQuery(queueQuery(ctx));
@@ -106,8 +112,11 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
   // Nothing is left to save of a rename or delete of what's gone: the
   // person is told, and it goes. Nor of a move or publish: sent again, it
   // would stop again, so the person moves or publishes it again, online.
+  // Nor of what was ticked while reading: it went into the draft, or the
+  // note says why not.
   const nothingLeft = (entry: Entry) =>
     entry.kind === 'publish' ||
+    entry.kind === 'reading' ||
     entry.kind === 'move' ||
     entry.kind === 'order' ||
     ((entry.kind === 'rename' || entry.kind === 'delete') && entry.failure?.kind === 'gone');

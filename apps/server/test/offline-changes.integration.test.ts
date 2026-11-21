@@ -949,6 +949,107 @@ describe('moves and publishes made offline', () => {
   });
 });
 
+describe('changes made while reading offline', () => {
+  const LIST = '- [ ] beans\n- [ ] rice\n- [ ] salt\n';
+  /** A device with the page published as a list of tasks, its draft as published. */
+  async function reading() {
+    const device_ = await device();
+    const { ctx, page } = device_;
+    await pages.editDraft(ctx, page, { markdown: LIST });
+    await pages.publishPage(ctx, page);
+    return device_;
+  }
+  const publication = async (ctx: ClientContext, page: pages.PageRef) => {
+    const { heads } = await pages.loadPage(ctx, page.pageId);
+    if (!heads.publishedHead) throw new Error('Not published');
+    const opened = await pages.openRevisionOf(ctx, page, 'published', heads.publishedHead);
+    if (opened.opened.kind !== 'current') throw new Error('Not readable');
+    return { markdown: opened.opened.payload.markdown, count: heads.publishedCount };
+  };
+  const tick = (line: string, checked = true) => ({
+    kind: 'task' as const,
+    offset: LIST.indexOf(`- [ ] ${line}`),
+    line,
+    checked,
+  });
+
+  it('publish as one version, the last change to a task taking the place of the first', async () => {
+    const { ctx, queue, page } = await reading();
+    await queue.tick({ page, title: 'Plan', changes: [tick('beans'), tick('salt')] });
+    await queue.tick({ page, title: 'Plan', changes: [tick('salt', false), tick('rice')] });
+    const [entry] = await queue.entries();
+    expect(entry).toMatchObject({
+      kind: 'reading',
+      changes: [tick('beans'), tick('salt', false), tick('rice')],
+    });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(await publication(ctx, page)).toEqual({
+      markdown: '- [x] beans\n- [x] rice\n- [ ] salt\n',
+      count: 2,
+    });
+  });
+
+  it('land once when the draft’s answer, or the publication’s, was lost', async () => {
+    const { ctx, queue, page, losing } = await reading();
+    const save = pageRoutes.saveDraft.path.replace(':pageId', page.pageId);
+    const publish = pageRoutes.publish.path.replace(':pageId', page.pageId);
+    await queue.tick({ page, title: 'Plan', changes: [tick('beans')] });
+    expect(await queue.send(losing(save))).toBe('offline');
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await publication(ctx, page)).toEqual({
+      markdown: '- [x] beans\n- [ ] rice\n- [ ] salt\n',
+      count: 2,
+    });
+
+    await queue.tick({ page, title: 'Plan', changes: [tick('rice')] });
+    expect(await queue.send(losing(publish))).toBe('offline');
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect(await publication(ctx, page)).toEqual({
+      markdown: '- [x] beans\n- [x] rice\n- [ ] salt\n',
+      count: 3,
+    });
+  });
+
+  it('go into the draft when it changed meanwhile, saying so, and leave out a task gone', async () => {
+    const { ctx, queue, page, draft } = await reading();
+    await queue.tick({ page, title: 'Plan', changes: [tick('beans'), tick('salt')] });
+    // Meanwhile, from another device: salt is taken out of the draft.
+    await pages.editDraft(ctx, page, { markdown: '- [ ] beans\n- [ ] rice\n' });
+    expect(await queue.send(ctx)).toBe('sent');
+    const [entry] = await queue.entries();
+    expect(entry?.failure).toMatchObject({
+      kind: 'refused',
+      message: expect.stringMatching(/went into the draft.*left out/s),
+    });
+    expect((await draft()).markdown).toBe('- [x] beans\n- [ ] rice\n');
+    expect((await publication(ctx, page)).count).toBe(1);
+    // Pressing OK lets it go.
+    await queue.discard({ kind: 'reading', id: page.pageId });
+    expect(await queue.entries()).toEqual([]);
+  });
+
+  it('go into the draft of a page given a public link meanwhile', async () => {
+    const { ctx, queue, page, draft } = await reading();
+    await queue.tick({ page, title: 'Plan', changes: [tick('rice')] });
+    await links.turnOn(ctx, page.pageId);
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await queue.entries())[0]?.failure).toMatchObject({
+      message: expect.stringContaining('public link'),
+    });
+    expect((await draft()).markdown).toBe('- [ ] beans\n- [x] rice\n- [ ] salt\n');
+    expect((await publication(ctx, page)).count).toBe(1);
+  });
+
+  it('go with the page when it is deleted on this device', async () => {
+    const { queue, page, spaceId } = await reading();
+    await queue.tick({ page, title: 'Plan', changes: [tick('rice')] });
+    await queue.delete({ spaceId, id: page.pageId, node: 'page', name: 'Plan' });
+    expect((await queue.entries()).map((entry) => entry.kind)).toEqual(['delete']);
+  });
+});
+
 describe('a lock while changes made offline are sent', () => {
   it('stops sending without a failure, and the next session lands what went, once', async () => {
     const person = await personWithVault(t);

@@ -20,6 +20,9 @@ export const NEEDS_CONNECTION = 'Needs the connection';
  */
 export const SENDS_FIRST = 'Waits until your change made offline is sent';
 
+/** What Edit says while what was ticked while reading waits to be sent (#695). */
+export const TICKS_FIRST = 'Waits until what you ticked is sent';
+
 /** What a dialog whose change waits on this device offline adds to what it says. */
 export const SAVED_HERE = 'Offline, it’s saved on this device and sent when you’re back online.';
 
@@ -54,8 +57,13 @@ export type ActionKind =
    * is about the folder only. A move into it goes by `moveAvailability`.
    */
   | 'into'
-  /** A task ticked or a property set while reading, which publishes. */
+  /**
+   * A task ticked or a property set while reading, which publishes; offline
+   * it waits on this device, after what was ticked before it (#695).
+   */
   | 'tick'
+  /** The draft opened to be edited, from the published view. */
+  | 'edit'
   /** The chat's edit to a page, once approved. */
   | 'chat-edit'
   /** A folder's name, emoji, colour or icon changed. */
@@ -68,10 +76,11 @@ export type ActionKind =
   | 'server';
 
 /**
- * What waits on this device for an item: nothing, a change to it, or the
- * item itself, made offline, which the server doesn't know yet.
+ * What waits on this device for an item: nothing, only what was ticked
+ * while reading it (#695), another change to it, or the item itself, made
+ * offline, which the server doesn't know yet.
  */
-export type Waiting = 'none' | 'changed' | 'made';
+export type Waiting = 'none' | 'ticked' | 'changed' | 'made';
 
 /** Whether an action can run now, or the hint its control shows. */
 export type Availability = { allowed: true } | { allowed: false; hint: string };
@@ -82,7 +91,10 @@ export type Availability = { allowed: true } | { allowed: false; hint: string };
  * doesn't have. `changed`: a change to it too, as acting on the draft the
  * server has would leave out the person's change.
  */
-const RULES: Record<ActionKind, { offline: boolean; holds: 'never' | 'made' | 'changed' }> = {
+const RULES: Record<
+  ActionKind,
+  { offline: boolean; holds: 'never' | 'made' | 'ticked' | 'changed' }
+> = {
   // Made on this device offline (decision 7).
   open: { offline: true, holds: 'never' },
   'new-page': { offline: true, holds: 'never' },
@@ -105,7 +117,11 @@ const RULES: Record<ActionKind, { offline: boolean; holds: 'never' | 'made' | 'c
   // A folder made offline isn't on the server yet, so nothing goes into it
   // there, nor into what is under it, made offline too.
   into: { offline: true, holds: 'made' },
-  tick: { offline: false, holds: 'changed' },
+  // Waits on this device, after what was ticked before it: anything else
+  // waiting holds it, as a tick online waits for the draft's changes (#695).
+  tick: { offline: true, holds: 'changed' },
+  // The draft it opens would be saved around what was ticked, which goes into it first.
+  edit: { offline: true, holds: 'ticked' },
   'chat-edit': { offline: false, holds: 'changed' },
   // Wait on this device, after the changes before them (#330). The writer
   // folds them into an item made offline, or drops it.
@@ -123,8 +139,17 @@ export function availability(
   const rule = RULES[kind];
   if (offline && !rule.offline) return { allowed: false, hint: NEEDS_CONNECTION };
   const { holds } = rule;
-  const held = holds === 'changed' ? waiting !== 'none' : holds === 'made' && waiting === 'made';
-  if (held) return { allowed: false, hint: kind === 'chat-edit' ? CHAT_SENDS_FIRST : SENDS_FIRST };
+  const held =
+    holds === 'changed'
+      ? waiting !== 'none' && !(kind === 'tick' && waiting === 'ticked')
+      : holds === 'ticked'
+        ? waiting === 'ticked'
+        : holds === 'made' && waiting === 'made';
+  if (held) {
+    const hint =
+      kind === 'chat-edit' ? CHAT_SENDS_FIRST : kind === 'edit' ? TICKS_FIRST : SENDS_FIRST;
+    return { allowed: false, hint };
+  }
   return { allowed: true };
 }
 
@@ -169,14 +194,18 @@ type Entry = queueOperations.QueueEntry;
 export const waitingOf = (
   entries: readonly (
     | Pick<queueOperations.QueuedPage, 'kind' | 'newPage'>
-    | Pick<Exclude<Entry, queueOperations.QueuedPage>, 'kind'>
+    | Pick<queueOperations.QueuedReading, 'kind' | 'failure'>
+    | Pick<Exclude<Entry, queueOperations.QueuedPage | queueOperations.QueuedReading>, 'kind'>
   )[],
 ): Waiting =>
   entries.some((entry) => entry.kind === 'folder' || (entry.kind === 'page' && entry.newPage))
     ? 'made'
-    : entries.length > 0
-      ? 'changed'
-      : 'none';
+    : entries.length === 0
+      ? 'none'
+      : // Stopped, it waits for the person, as any change does.
+        entries.every((entry) => entry.kind === 'reading' && entry.failure === null)
+        ? 'ticked'
+        : 'changed';
 
 /** A control waiting, dimmed, saying why in its hint, and doing nothing. */
 const waitingProps = (hint: string) =>

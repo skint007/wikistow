@@ -1,11 +1,9 @@
 import {
-  propertyKeyFor,
-  setPageProperty,
-  setTask,
-  splitFrontmatter,
+  applyChanges,
   summarizeChange,
   type ChangeSummary,
-  type PropertyValue,
+  type Dropped,
+  type ReadingChange,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { errorMessage } from '../errors';
@@ -26,13 +24,7 @@ import type { PageHeads, View, Viewer } from './view-model';
 // property (`setPageProperty`), so changes made meanwhile are never
 // overwritten. One that no longer applies is left out, and the page says why.
 
-/** A change made while reading: a task ticked or not, or a property set. */
-export type ReadingChange =
-  | { kind: 'task'; offset: number; line: string; checked: boolean }
-  | { kind: 'property'; key: string; value: PropertyValue };
-
-/** A change left out, as it no longer applies, and why. */
-export type Dropped = { change: ReadingChange; reason: string };
+export { applyChange, applyChanges, type Dropped, type ReadingChange } from '@wikistow/client';
 
 /**
  * Who may make changes while reading, or why not: `hint` says it beside a
@@ -52,9 +44,10 @@ export const PUBLIC_LINK_HINT = 'This page has a public link: open the draft to 
  * even when it is now, as it stays that one once a tick publishes. Each
  * publish ends a public page's copy, which Publish asks about first (ADR
  * 0005), so a tick there would end it without asking. Readers are told
- * nothing, as nothing would let them. A tick publishes, so `offline`, or
- * while a change made offline waits (`waiting`), it waits as `availability`
- * says (ADR 0009, decision 8).
+ * nothing, as nothing would let them. A tick publishes: `offline` it waits
+ * on this device, after what was ticked before it, and while another change
+ * made offline waits (`waiting`), it waits as `availability` says (ADR 0009,
+ * decisions 7 and 8; #695).
  */
 export function readingRights({
   viewer,
@@ -88,42 +81,13 @@ export function readingRights({
   if (pinned) return { allowed: false, hint: 'Open the latest version to tick this' };
   if (!viewer.canPublish)
     return { allowed: false, hint: 'Open the draft to tick this: you can’t publish this page' };
-  if (publicLink === null) return { allowed: false, hint: null };
+  // Offline, links not known are checked as the ticks are sent, which go
+  // into the draft if one was made, as a publish waiting does (#331).
+  if (publicLink === null && !offline) return { allowed: false, hint: null };
   if (publicLink) return { allowed: false, hint: PUBLIC_LINK_HINT };
   if (heads.draftChanges)
     return { allowed: false, hint: 'Open the draft to tick this: it has unpublished changes' };
   return { allowed: true };
-}
-
-/**
- * `markdown` with `change` made, or why it can't be. A property is the
- * key exactly as written, else the first whose name matches it as a
- * reference's does, else a new key (`propertyKeyFor`).
- */
-export function applyChange(
-  markdown: string,
-  change: ReadingChange,
-): { ok: true; markdown: string } | { ok: false; reason: string } {
-  if (change.kind === 'task') return setTask(markdown, change);
-  const key = propertyKeyFor(splitFrontmatter(markdown).frontmatter, change.key);
-  const edit = setPageProperty(markdown, key, change.value);
-  return edit.ok
-    ? edit
-    : { ok: false, reason: `${change.key} couldn’t be changed: ${edit.reason}` };
-}
-
-/** `markdown` with each of `changes` made, in order, and those that no longer apply. */
-export function applyChanges(
-  markdown: string,
-  changes: readonly ReadingChange[],
-): { markdown: string; dropped: Dropped[] } {
-  const dropped: Dropped[] = [];
-  for (const change of changes) {
-    const made = applyChange(markdown, change);
-    if (made.ok) markdown = made.markdown;
-    else dropped.push({ change, reason: made.reason });
-  }
-  return { markdown, dropped };
 }
 
 /** What a flush needs of the page, so it can be tried without a server. */
@@ -148,11 +112,13 @@ export type FlushOperations = {
 
 /**
  * How a flush went: `published` as one version; saved `in-draft` only, as
- * the draft had changes of its own or someone published meanwhile; or
- * `unchanged`, the page already as asked, or every change left out.
+ * the draft had changes of its own or someone published meanwhile;
+ * `unchanged`, the page already as asked, or every change left out; or
+ * put `on-device`, offline or behind a change waiting there, to be sent
+ * from there (#695), which the page says while it waits.
  */
 export type Flushed = {
-  outcome: 'published' | 'in-draft' | 'unchanged';
+  outcome: 'published' | 'in-draft' | 'unchanged' | 'on-device';
   dropped: Dropped[];
   /** Left in the draft as the page had a public link by then, which a publish would end. */
   publicLink?: true;
@@ -483,11 +449,18 @@ export function leftOutcome(pageId: string, told: Told) {
   else leftWith.set(pageId, told);
 }
 
-/** What the queue says on the page: saving, how the last flush went, or why it failed. */
-export function readingNotices({ changes, saving, last, error, before }: ReadingState): string[] {
+/**
+ * What the queue says on the page: saving, how the last flush went, or why
+ * it failed. `offline`, what waits is saved on this device (#695).
+ */
+export function readingNotices(
+  { changes, saving, last, error, before }: ReadingState,
+  offline = false,
+): string[] {
   const notices: string[] = [];
   if (error !== null) notices.push(failed(error));
-  else if (saving || changes.length > 0) notices.push('Publishing your changes…');
+  else if (saving || changes.length > 0)
+    notices.push(offline ? 'Saving your changes on this device…' : 'Publishing your changes…');
   else if (last?.outcome === 'published') notices.push('Your changes are published.');
   if (!saving) notices.push(...settled(last));
   // A flush from before this visit's, after what this visit's says, each thing once.

@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Offline: tasks ticked, and values plugin blocks set, while reading a page wait on the device, show at once and through a reload, and publish as one version once you're back online, as they do online. The page says they wait, with **Undo**, and **Edit** waits for them. If the draft changed meanwhile, or the page got a public link, they go into the draft and the note in the corner says so; one that no longer applies is left out, with why. (#PR)
+
 ## 0.30.0-beta.1 - 2026-11-20
 
 ### Highlights

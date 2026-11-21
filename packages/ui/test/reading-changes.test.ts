@@ -20,6 +20,7 @@ import {
   type Flushed,
   type ReadingChange,
 } from '../src/page/reading-changes-model.ts';
+import { SENDS_FIRST } from '../src/shell/availability.ts';
 
 const LIST = '---\nservings: 4\n---\n- [ ] milk\n- [ ] bread\n- [x] eggs\n';
 
@@ -106,6 +107,22 @@ describe('who may change a page while reading it', () => {
   it('is an editor who can publish, on the latest publication, its draft without changes', () => {
     expect(rights({})).toEqual({ allowed: true });
     expect(rights({ viewer: { role: 'owner', canPublish: true } })).toEqual({ allowed: true });
+  });
+
+  it('waits on this device offline, after what was ticked, but not behind another change (#695)', () => {
+    expect(rights({ offline: true })).toEqual({ allowed: true });
+    expect(rights({ offline: true, waiting: 'ticked' })).toEqual({ allowed: true });
+    expect(rights({ waiting: 'ticked' })).toEqual({ allowed: true });
+    expect(rights({ offline: true, waiting: 'changed' })).toEqual({
+      allowed: false,
+      hint: SENDS_FIRST,
+    });
+    // Offline, links not known yet are checked as they are sent.
+    expect(rights({ offline: true, publicLink: null })).toEqual({ allowed: true });
+    expect(rights({ offline: true, publicLink: true })).toEqual({
+      allowed: false,
+      hint: PUBLIC_LINK_HINT,
+    });
   });
 
   it('is nobody else, with a hint saying why where there is one to give', () => {

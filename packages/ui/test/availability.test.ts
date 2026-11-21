@@ -6,6 +6,7 @@ import {
   moveAvailability,
   NEEDS_CONNECTION,
   SENDS_FIRST,
+  TICKS_FIRST,
   waitingOf,
   type ActionKind,
   type Waiting,
@@ -16,31 +17,35 @@ import {
 const OK = '✓';
 const NEEDS = NEEDS_CONNECTION;
 const HELD = SENDS_FIRST;
+const TICKS = TICKS_FIRST;
+const CHAT = CHAT_SENDS_FIRST;
 
-//                              online:  none  changed made   offline: none  changed made
-const TABLE: Record<ActionKind, [string, string, string, string, string, string]> = {
-  open: /*                    */ [OK, OK, OK, OK, OK, OK],
-  'new-page': /*              */ [OK, OK, OK, OK, OK, OK],
-  'new-folder': /*            */ [OK, OK, OK, OK, OK, OK],
-  move: /*                    */ [OK, OK, OK, OK, OK, OK],
-  copy: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
-  'publish-elsewhere': /*     */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
-  publish: /*                 */ [OK, OK, HELD, OK, OK, HELD],
-  'publish-linked': /*        */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
-  restore: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
-  drag: /*                    */ [OK, OK, OK, OK, OK, OK],
-  reorder: /*                 */ [OK, OK, HELD, OK, OK, HELD],
-  into: /*                    */ [OK, OK, HELD, OK, OK, HELD],
-  tick: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
-  'chat-edit': /*             */ [OK, CHAT_SENDS_FIRST, CHAT_SENDS_FIRST, NEEDS, NEEDS, NEEDS],
-  rename: /*                  */ [OK, OK, OK, OK, OK, OK],
-  picture: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
-  delete: /*                  */ [OK, OK, OK, OK, OK, OK],
-  server: /*                  */ [OK, OK, HELD, NEEDS, NEEDS, NEEDS],
+//                         online:  none  ticked  changed  made   offline: none  ticked  changed  made
+const TABLE: Record<ActionKind, string[]> = {
+  open: /*               */ [OK, OK, OK, OK, OK, OK, OK, OK],
+  'new-page': /*         */ [OK, OK, OK, OK, OK, OK, OK, OK],
+  'new-folder': /*       */ [OK, OK, OK, OK, OK, OK, OK, OK],
+  move: /*               */ [OK, OK, OK, OK, OK, OK, OK, OK],
+  copy: /*               */ [OK, HELD, HELD, HELD, NEEDS, NEEDS, NEEDS, NEEDS],
+  'publish-elsewhere': /**/ [OK, HELD, HELD, HELD, NEEDS, NEEDS, NEEDS, NEEDS],
+  publish: /*            */ [OK, OK, OK, HELD, OK, OK, OK, HELD],
+  'publish-linked': /*   */ [OK, HELD, HELD, HELD, NEEDS, NEEDS, NEEDS, NEEDS],
+  restore: /*            */ [OK, HELD, HELD, HELD, NEEDS, NEEDS, NEEDS, NEEDS],
+  drag: /*               */ [OK, OK, OK, OK, OK, OK, OK, OK],
+  reorder: /*            */ [OK, OK, OK, HELD, OK, OK, OK, HELD],
+  into: /*               */ [OK, OK, OK, HELD, OK, OK, OK, HELD],
+  // Waits on the device offline, after what was ticked before (#695).
+  tick: /*               */ [OK, OK, HELD, HELD, OK, OK, HELD, HELD],
+  edit: /*               */ [OK, TICKS, OK, OK, OK, TICKS, OK, OK],
+  'chat-edit': /*        */ [OK, CHAT, CHAT, CHAT, NEEDS, NEEDS, NEEDS, NEEDS],
+  rename: /*             */ [OK, OK, OK, OK, OK, OK, OK, OK],
+  picture: /*            */ [OK, HELD, HELD, HELD, NEEDS, NEEDS, NEEDS, NEEDS],
+  delete: /*             */ [OK, OK, OK, OK, OK, OK, OK, OK],
+  server: /*             */ [OK, OK, OK, HELD, NEEDS, NEEDS, NEEDS, NEEDS],
 };
 
 const STATES: { offline: boolean; waiting: Waiting }[] = [false, true].flatMap((offline) =>
-  (['none', 'changed', 'made'] as const).map((waiting) => ({ offline, waiting })),
+  (['none', 'ticked', 'changed', 'made'] as const).map((waiting) => ({ offline, waiting })),
 );
 
 describe('what can run now', () => {
@@ -78,6 +83,10 @@ describe('what can run now', () => {
     expect(waitingOf([{ kind: 'page', newPage: made }])).toBe('made');
     expect(waitingOf([{ kind: 'folder' }])).toBe('made');
     expect(waitingOf([{ kind: 'rename' }])).toBe('changed');
+    // Only what was ticked while reading, still to be sent, is ticked (#695); stopped, it's a change.
+    expect(waitingOf([{ kind: 'reading', failure: null }])).toBe('ticked');
+    expect(waitingOf([{ kind: 'reading', failure: { kind: 'gone' } }])).toBe('changed');
+    expect(waitingOf([{ kind: 'reading', failure: null }, { kind: 'move' }])).toBe('changed');
     expect(waitingOf([{ kind: 'page', newPage: null }, { kind: 'delete' }])).toBe('changed');
     expect(waitingOf([{ kind: 'move' }, { kind: 'publish' }])).toBe('changed');
   });

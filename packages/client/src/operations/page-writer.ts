@@ -22,6 +22,7 @@ import {
 } from '../metadata.ts';
 import { newPayload, type AttachmentRef, type PagePayload } from '../payload.ts';
 import { OWNER_REGION, type Region } from '../regions.ts';
+import type { ReadingChange } from '../reading-changes.ts';
 import {
   createPage,
   deleteNode,
@@ -230,6 +231,16 @@ export type PageWriter = {
   }): Promise<void>;
   /** Publish a page's draft as it stands now on this device (#331), as `OfflineQueue.publish`. */
   publish(input: { page: PageRef; title: string; draftHead: RevisionId }): Promise<void>;
+  /**
+   * Changes made while reading a page (#695), on this device when offline
+   * or while a change to the page waits here, as `OfflineQueue.tick`: true
+   * then, false when the caller saves them on the server itself.
+   */
+  tick(input: {
+    page: PageRef;
+    title: string;
+    changes: readonly ReadingChange[];
+  }): Promise<boolean>;
   /** Put what is in a folder, or at the top, in order on this device (#400), as `OfflineQueue.order`. */
   order(input: {
     spaceId: SpaceId;
@@ -474,6 +485,13 @@ export function createPageWriter({
     async order(input) {
       if (!queue) throw new Error('This device keeps no changes');
       await queue.order(input);
+    },
+
+    async tick(input) {
+      const device = await onDevice(input.page.pageId);
+      if (!device) return false;
+      await device.tick(input);
+      return true;
     },
   };
   return writer;

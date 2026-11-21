@@ -217,7 +217,9 @@ function PageView() {
   useEffect(() => setSharingLinkFor(null), [pageId]);
   const sharingLink = sharingLinkFor === pageId;
   // Changes made while reading, kept across the publications they make.
-  const reading = useReadingQueue(ctx, page);
+  // The page's name, for what was ticked while reading it offline (#695).
+  const readingTitle = tree?.pages.find((p) => p.id === pageId)?.title ?? '';
+  const reading = useReadingQueue(ctx, page, readingTitle);
   const queued = useSyncExternalStore(reading.subscribe, reading.get);
   // Turning to the draft or an older version saves what waits first, at
   // once, saying only how that went; the draft opens once it's done, on
@@ -726,15 +728,20 @@ function PageBody({
   const title = pageTitle(payload?.title ?? null);
   const latest = model.view === 'published' && revisionId === publishedHead;
   const readMarkdown = payload?.markdown ?? null;
+  // What was ticked while reading, waiting on this device to be sent (#695), comes first.
+  const ticked = entries?.find(
+    (entry): entry is queueOperations.QueuedReading =>
+      entry.kind === 'reading' && entry.id === page.pageId && entry.failure === null,
+  );
   const shownMarkdown = useMemo(
     () =>
       readMarkdown !== null && latest
-        ? applyChanges(
-            readMarkdown,
-            queued.changes.map(({ change }) => change),
-          ).markdown
+        ? applyChanges(readMarkdown, [
+            ...(ticked?.changes ?? []),
+            ...queued.changes.map(({ change }) => change),
+          ]).markdown
         : readMarkdown,
-    [readMarkdown, latest, queued.changes],
+    [readMarkdown, latest, ticked, queued.changes],
   );
   // An older version can't change, but its boxes say why to editors.
   const readingHere = useMemo(
@@ -980,8 +987,12 @@ function PageBody({
               {model.actions.edit && (
                 <Button
                   size="sm"
-                  // Drafts are saved on this device offline (ADR 0009, decision 7).
-                  onClick={() => void act(() => runCommand(editPage, page, commandEnv))}
+                  // Drafts are saved on this device offline (ADR 0009, decision 7), once
+                  // what was ticked while reading is sent (#695).
+                  {...here.click(
+                    'edit',
+                    () => void act(() => runCommand(editPage, page, commandEnv)),
+                  )}
                 >
                   <Pencil strokeWidth={1.75} /> Edit
                 </Button>
@@ -1192,6 +1203,22 @@ function PageBody({
                 }
               >
                 Cancel
+              </button>
+            </span>
+          )}
+          {ticked && model.view === 'published' && (
+            <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
+              What you ticked waits to be sent
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() =>
+                  void act(async () => {
+                    await queueChoices(ctx)?.discard(ticked);
+                  })
+                }
+              >
+                Undo
               </button>
             </span>
           )}

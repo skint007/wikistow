@@ -21,7 +21,15 @@ import { CryptoError } from '../errors.ts';
 import { newId } from '../ids.ts';
 import type { KeptSealer, KeptStore } from '../kept-store.ts';
 import { NodeMetadata, reviseMetadata } from '../metadata.ts';
-import { parsePayload, type AttachmentRef, type PagePayload } from '../payload.ts';
+import { parsePayload, revisePayload, type AttachmentRef, type PagePayload } from '../payload.ts';
+import { summarizeChange, type ChangeSummary } from '../change.ts';
+import {
+  applyChanges,
+  ReadingChangeJson,
+  withChange,
+  type Dropped,
+  type ReadingChange,
+} from '../reading-changes.ts';
 import { OWNER_REGION, RegionJson, regionInTree, type Region } from '../regions.ts';
 import { resealAttachment, sealAttachment } from '../revision.ts';
 import type { ReadWikilinks } from '../link-table.ts';
@@ -34,6 +42,7 @@ import {
   deleteNode,
   labelCover,
   loadPage,
+  openRevisionOf,
   publishPage,
   saveDraft,
   uploadBlob,
@@ -258,6 +267,44 @@ const QueuedOrderJson = z.strictObject({
 });
 export type QueuedOrder = z.output<typeof QueuedOrderJson>;
 
+/**
+ * Changes made while reading a page (#695): tasks ticked and values set,
+ * in the order made, a later one setting the same thing in place of an
+ * earlier. Sent as a flush online is: each made in the newest draft, saved,
+ * and published if the draft had no changes of its own and the page has
+ * no public link. `version` counts up with each change. `sending` is what
+ * the next requests use, recorded before them: the draft's and the
+ * publication's IDs, and once worked out, whether the draft was clean and
+ * what the publication says it changed.
+ */
+const QueuedReadingJson = z.strictObject({
+  kind: z.literal('reading'),
+  id: PageId,
+  spaceId: SpaceId,
+  title: z.string(),
+  changes: z.array(ReadingChangeJson),
+  version: z.number().int(),
+  sending: z
+    .strictObject({
+      draftId: RevisionId,
+      publicationId: RevisionId,
+      prepared: z
+        .strictObject({
+          clean: z.boolean(),
+          change: z.strictObject({
+            ticked: z.number().int().nonnegative(),
+            unticked: z.number().int().nonnegative(),
+            properties: z.array(z.string()),
+          }),
+        })
+        .nullable(),
+    })
+    .nullable(),
+  failure: Failure.nullable(),
+  at: z.number(),
+});
+export type QueuedReading = z.output<typeof QueuedReadingJson>;
+
 const QueueEntryJson = z.discriminatedUnion('kind', [
   QueuedPageJson,
   QueuedFolderJson,
@@ -266,6 +313,7 @@ const QueueEntryJson = z.discriminatedUnion('kind', [
   QueuedMoveJson,
   QueuedPublishJson,
   QueuedOrderJson,
+  QueuedReadingJson,
 ]);
 export type QueueEntry =
   | QueuedPage
@@ -274,7 +322,8 @@ export type QueueEntry =
   | QueuedDelete
   | QueuedMove
   | QueuedPublish
-  | QueuedOrder;
+  | QueuedOrder
+  | QueuedReading;
 
 /**
  * Which entry: a page or folder has at most one of each kind. Its own
@@ -290,6 +339,7 @@ const CHANGE_KINDS = [
   'move',
   'publish',
   'order',
+  'reading',
 ] as const satisfies readonly QueueEntry['kind'][];
 
 /** Whether `entry` is the item itself made offline, which the server doesn't have yet. */
@@ -525,6 +575,45 @@ export class OfflineQueue {
   async #publish(pageId: PageId): Promise<QueuedPublish | null> {
     const entry = await this.#keyed({ kind: 'publish', id: pageId });
     return entry?.kind === 'publish' ? entry : null;
+  }
+
+  async #reading(pageId: PageId): Promise<QueuedReading | null> {
+    const entry = await this.#keyed({ kind: 'reading', id: pageId });
+    return entry?.kind === 'reading' ? entry : null;
+  }
+
+  /**
+   * Changes made while reading `page`, on this device (#695): after those
+   * waiting for it, in place of one setting the same thing. Sent after the
+   * changes made before them. One stopped waits for the person, so none is
+   * added to it.
+   */
+  async tick({
+    page,
+    title,
+    changes,
+  }: {
+    page: PageRef;
+    title: string;
+    changes: readonly ReadingChange[];
+  }): Promise<void> {
+    if (changes.length === 0) return;
+    await this.#store.queueExclusive(async () => {
+      const before = await this.#reading(page.pageId);
+      if (before?.failure) throw new Error('Your earlier changes to this page wait for you');
+      await this.#write({
+        kind: 'reading',
+        id: page.pageId,
+        spaceId: page.spaceId,
+        title,
+        changes: changes.reduce(withChange, before?.changes ?? []),
+        version: (before?.version ?? this.#firstVersion()) + 1,
+        sending: before?.sending ?? null,
+        failure: null,
+        at: before?.at ?? this.#at(),
+      });
+    });
+    this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
   }
 
   /**
@@ -923,6 +1012,9 @@ export class OfflineQueue {
       const publish = node === 'page' ? await this.#keyed({ kind: 'publish', id }) : null;
       if (publish?.kind === 'publish') await this.#handOver(publish);
       if (publish) await this.#remove(publish);
+      // Nor are the changes made while reading it made.
+      const reading = node === 'page' ? await this.#keyed({ kind: 'reading', id }) : null;
+      if (reading) await this.#remove(reading);
       return { outcome: 'waiting' as const, gone: [] };
     });
     for (const entry of gone) this.#emit({ kind: 'changed', spaceId, id: entry.id });
@@ -1318,6 +1410,8 @@ export class OfflineQueue {
         // person, as its draft goes first, and a publish while the page's draft does.
         const held = entries.some((other) => other.id === entry.id && other.failure);
         if (entry.kind === 'delete' && held) continue;
+        // Changes made while reading go on the page as the person left it, after what stopped.
+        if (entry.kind === 'reading' && held) continue;
         // A delete waits for the moves waiting too: one made again goes in
         // its new order, and may take its item out of what is deleted.
         if (entry.kind === 'delete' && moving) continue;
@@ -1335,7 +1429,8 @@ export class OfflineQueue {
       // A page's draft change, or its publish, which would send a draft of it too.
       const holdable =
         (next.kind === 'page' && !next.newPage && !next.sending) ||
-        (next.kind === 'publish' && next.draft !== null && !next.sending);
+        (next.kind === 'publish' && next.draft !== null && !next.sending) ||
+        (next.kind === 'reading' && !next.sending);
       if (holdable && held) {
         const isHeld = await held(next.id as PageId).catch(() => false);
         if (isHeld) {
@@ -1378,7 +1473,145 @@ export class OfflineQueue {
         return this.#sendPublish(ctx, entry, entries, read);
       case 'order':
         return this.#sendOrder(ctx, entry);
+      case 'reading':
+        return this.#sendReading(ctx, entry, read);
     }
+  }
+
+  // Changes made while reading, sent as a flush online is (#695). Whatever
+  // the flush can't do as asked, publishing them all, stops the entry,
+  // saying so: changes that went into the draft only, or were left out.
+  async #sendReading(
+    ctx: ClientContext,
+    entry: QueuedReading,
+    read: ReadWikilinks | undefined,
+  ): Promise<'offline' | void> {
+    const sending = entry.sending ?? (await this.#recordReading(entry));
+    if (!sending) return;
+    let flushed: ReadingFlushed;
+    try {
+      flushed = await this.#flushReading(ctx, entry, sending, read);
+    } catch (error) {
+      const failure = failureOf(error);
+      if (!failure) return 'offline';
+      return this.#stop(entry, failure.kind === 'conflict' ? READING_BUSY : failure);
+    }
+    const told = readingTold(flushed);
+    await this.#store.queueExclusive(async () => {
+      const current = await this.#reading(entry.id);
+      if (!current) return;
+      // Changes made while it went: sent next, the ones already made changing nothing more.
+      if (current.version !== entry.version) {
+        await this.#write({ ...current, sending: null });
+        return;
+      }
+      if (told) await this.#write({ ...current, sending: null, failure: told });
+      else await this.#remove(current);
+    });
+    this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
+    this.#emit({ kind: 'sent', spaceId: entry.spaceId });
+  }
+
+  // Made in the newest draft, saved under the recorded ID, and published
+  // under the other if the draft had no changes of its own. Someone saving
+  // meanwhile starts it again, up to `READING_TRIES` times. A recorded ID
+  // already the draft's or the publication's landed, its answer lost.
+  async #flushReading(
+    ctx: ClientContext,
+    entry: QueuedReading,
+    sending: NonNullable<QueuedReading['sending']>,
+    read: ReadWikilinks | undefined,
+  ): Promise<ReadingFlushed> {
+    const page = { spaceId: entry.spaceId, pageId: entry.id };
+    for (let tries = 1; ; tries++) {
+      const { heads } = await loadPage(ctx, entry.id);
+      if (heads.publishedHead === sending.publicationId)
+        return { outcome: 'published', dropped: [] };
+      // Refused with why, as the server would.
+      if (heads.draftHead === null) throw new Error(COPY_MESSAGE);
+      let prepared = sending.prepared;
+      let dropped: Dropped[] = [];
+      if (heads.draftHead !== sending.draftId || !prepared) {
+        const draft = await openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true });
+        const payload = revisePayload(draft.opened, {});
+        const made = applyChanges(payload.markdown, entry.changes);
+        dropped = made.dropped;
+        if (made.markdown === payload.markdown) {
+          const kept = dropped.length < entry.changes.length;
+          return { outcome: heads.draftChanges && kept ? 'in-draft' : 'unchanged', dropped };
+        }
+        prepared = {
+          clean: !heads.draftChanges,
+          change: summarizeChange(payload.markdown, made.markdown),
+        };
+        await this.#prepareReading(entry, prepared);
+        try {
+          await saveDraft(ctx, {
+            page,
+            basedOn: heads.draftHead,
+            basedOnRegion: draft.region,
+            payload: { ...payload, markdown: made.markdown },
+            revisionId: sending.draftId,
+            ...(read && { read }),
+          });
+        } catch (error) {
+          if (stale(error) && tries < READING_TRIES) continue;
+          if (!(error instanceof ApiError && error.code === 'duplicate')) throw error;
+        }
+      }
+      if (!prepared.clean) return { outcome: 'in-draft', dropped };
+      // A link made meanwhile: publishing would end its copy without asking (ADR 0005).
+      const { links } = await ctx.api.call(publicLinkRoutes.list, {
+        params: { spaceId: entry.spaceId },
+      });
+      if (links.some((link) => link.pageId === entry.id)) {
+        return { outcome: 'in-draft', dropped, publicLink: true };
+      }
+      try {
+        await publishPage(ctx, page, {
+          expected: { draftHead: sending.draftId, publishedHead: heads.publishedHead },
+          revisionId: sending.publicationId,
+          change: prepared.change,
+          ...(read && { read }),
+        });
+      } catch (error) {
+        if (stale(error)) return { outcome: 'in-draft', dropped };
+        if (!(error instanceof ApiError && error.code === 'duplicate')) throw error;
+      }
+      return { outcome: 'published', dropped };
+    }
+  }
+
+  // Record the IDs the next requests use, before they are sent; none while a
+  // tab is in the page's live session, which its draft would go around.
+  async #recordReading(entry: QueuedReading): Promise<QueuedReading['sending']> {
+    const held = this.#held;
+    return this.#store.queueExclusive(async () => {
+      const current = await this.#reading(entry.id);
+      if (!current || current.failure) return null;
+      if (current.sending) return current.sending;
+      if (held && (await held(current.id).catch(() => false))) return null;
+      const sending = {
+        draftId: newId(RevisionId),
+        publicationId: newId(RevisionId),
+        prepared: null,
+      };
+      await this.#write({ ...current, sending });
+      return sending;
+    });
+  }
+
+  // Record what the save is about to make, before it is sent, so a resend
+  // after its answer was lost publishes it, or not, as it would have.
+  async #prepareReading(
+    entry: QueuedReading,
+    prepared: { clean: boolean; change: ChangeSummary },
+  ): Promise<void> {
+    await this.#store.queueExclusive(async () => {
+      const current = await this.#reading(entry.id);
+      if (!current?.sending) return;
+      await this.#write({ ...current, sending: { ...current.sending, prepared } });
+    });
   }
 
   async #sendOrder(ctx: ClientContext, entry: QueuedOrder): Promise<'offline' | void> {
@@ -1889,7 +2122,7 @@ export class OfflineQueue {
       ) {
         return this.#write({ ...current, failure });
       }
-      if (current.kind === 'rename' || current.kind === 'publish') {
+      if (current.kind === 'rename' || current.kind === 'publish' || current.kind === 'reading') {
         return this.#write({ ...current, failure, sending: null });
       }
       // Put on top of theirs meanwhile (Save mine on top): sent next, on that.
@@ -1988,6 +2221,44 @@ const PUBLISH_CHANGED: QueueFailure = {
   kind: 'refused',
   message: 'The page changed after you pressed Publish. Look it over, then publish it again.',
 };
+const COPY_MESSAGE = 'This page is a copy of another page, so it can’t be changed here.';
+const READING_BUSY: QueueFailure = {
+  kind: 'refused',
+  message:
+    'The page kept changing while your changes were sent, so they weren’t made. Tick them again.',
+};
+
+/** How many times changes made while reading start again when someone saves meanwhile. */
+const READING_TRIES = 3;
+
+const stale = (error: unknown) => error instanceof ApiError && error.code === 'stale-head';
+
+/**
+ * How sending changes made while reading went: published, saved only into
+ * the draft (it had changes of its own, someone published meanwhile, or
+ * the page has a public link now), or `unchanged`, the page already as
+ * asked; and those left out.
+ */
+type ReadingFlushed = {
+  outcome: 'published' | 'in-draft' | 'unchanged';
+  dropped: Dropped[];
+  publicLink?: true;
+};
+
+/** What the person is told of a send that didn't publish every change, or null. */
+function readingTold({ outcome, dropped, publicLink }: ReadingFlushed): QueueFailure | null {
+  const said: string[] = [];
+  if (outcome === 'in-draft')
+    said.push(
+      publicLink
+        ? 'It has a public link now, so your changes went into the draft: publish it from there.'
+        : 'Your changes went into the draft, which had changes of its own: publish it to show them.',
+    );
+  if (dropped.length > 0)
+    said.push(`Some were left out. ${[...new Set(dropped.map(({ reason }) => reason))].join(' ')}`);
+  return said.length > 0 ? { kind: 'refused', message: said.join(' ') } : null;
+}
+
 const LINKED: QueueFailure = {
   kind: 'refused',
   message:
