@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Offline: the **Offline** pill shows in the desktop app's titlebar, by the name, rather than on the rail, and on phones only in the top bar, no longer over the spaces in the navigation drawer. A wide browser keeps it at the top of the rail. On phones, picking a space in the navigation drawer keeps the drawer open on that space's pages, rather than closing it before one can be picked. (#696)
+
 ## 0.30.0-beta.1 - 2026-11-20
 
 ### Highlights
