@@ -22,8 +22,10 @@ import { isApple } from './search-model';
  * buttons (`app.titlebar`), a menu for what the old menu bar did, and the
  * window's buttons. On a Mac the system draws its window buttons at the
  * left end, and the menu bar does what the menu does. Offline, the Offline
- * pill follows the name, or a Mac's window buttons, while the window is
- * wide: a narrow one has it in its top bar, by the name there (#693).
+ * pill follows the name while the window is wide: a narrow one has it in
+ * its top bar, by the name there (#693). A Mac's goes at the right end, as
+ * its window buttons keep their size as the page zooms out, and the room
+ * left for them doesn't.
  * Nothing in a browser.
  */
 export function Titlebar() {
@@ -32,6 +34,9 @@ export function Titlebar() {
 
 const BUTTON =
   'grid h-full w-11 place-items-center text-muted-foreground [app-region:no-drag] hover:tint hover:text-foreground active:tint-strong focus-visible:-outline-offset-2';
+
+// Hidden exactly where the top bar shows (`min-[900px]:hidden` there), which has its own.
+const PILL = '[app-region:no-drag] max-[900px]:hidden';
 
 function DesktopTitlebar({ desktop }: { desktop: DesktopBridge }) {
   const state = useWindowState(desktop);
@@ -54,13 +59,14 @@ function DesktopTitlebar({ desktop }: { desktop: DesktopBridge }) {
         aria-hidden
         className={cn(
           'w-[70px] text-center text-[13px] font-extrabold',
-          mac ? 'invisible' : 'max-[899px]:invisible',
+          mac ? 'invisible' : 'max-[900px]:invisible',
         )}
       >
         Wiki<span className="text-primary">Stow</span>
       </span>
-      <OfflinePill className="[app-region:no-drag] max-[899px]:hidden" />
+      {!mac && <OfflinePill className={PILL} />}
       <div className="ml-auto flex h-full items-center gap-1 pr-1">
+        {mac && <OfflinePill className={PILL} />}
         <Place name="app.titlebar" />
       </div>
       {!mac && <WindowButtons state={state} act={act} />}

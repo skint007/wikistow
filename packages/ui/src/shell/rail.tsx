@@ -406,7 +406,16 @@ function SpaceTiles({
             <Link
               to="/s/$spaceId"
               params={{ spaceId: space.id }}
-              onClick={() => onNavigate?.(space.id)}
+              // A click that opens a new tab or window leaves this one, and its drawer, as they are.
+              onClick={(event) => {
+                const plain =
+                  event.button === 0 &&
+                  !event.metaKey &&
+                  !event.ctrlKey &&
+                  !event.shiftKey &&
+                  !event.altKey;
+                if (plain) onNavigate?.(space.id);
+              }}
               aria-label={plainText(name)}
               aria-current={active ? 'page' : undefined}
               data-hint={plainText(name)}

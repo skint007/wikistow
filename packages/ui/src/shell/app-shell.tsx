@@ -148,6 +148,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     closeDrawer();
     // Each move closes it, not only one to another pathname.
   }, [href, pathname, closeDrawer]);
+  // A tile tapped that didn't move, as one a draft's prompt kept, holds nothing once it closes.
+  useEffect(() => {
+    if (!drawer) keepOpenFor.current = null;
+  }, [drawer]);
   const [offers] = useState(() => new PaletteOffers());
   return (
     <SlotContext value={slot}>
