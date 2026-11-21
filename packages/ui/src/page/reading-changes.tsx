@@ -148,7 +148,10 @@ export function useReadingQueue(
         refetchType: 'all',
       });
     const flush = async (changes: readonly ReadingChange[]): Promise<Flushed> => {
-      if (await pageWriter(ctx).tick({ page, title: named.current, changes })) {
+      // The publication they were made on, as this device last heard of it.
+      const shown = queryClient.getQueryData(pageQuery(ctx, pageId).queryKey);
+      const publishedOn = shown ? (shown.heads.publishedHead ?? null) : null;
+      if (await pageWriter(ctx).tick({ page, title: named.current, changes, publishedOn })) {
         // Shown from the queue before they leave this one, so no box flickers back.
         await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
         return { outcome: 'on-device', dropped: [] };

@@ -20,6 +20,7 @@ import { connection, useConnection } from './connection';
 import { contentChanged } from './content-changed';
 import { keepChanged, pageOpened } from './keeper';
 import { pageQuery, queueOf, searchIndexChanged, trashQuery, treeQuery } from './queries';
+import { notePublished, noteTicksPublished } from '../page/reading-origins';
 
 // Changes made offline (ADR 0009, decision 7), as the app makes, follows and sends them.
 
@@ -91,11 +92,23 @@ const Told = z.discriminatedUnion('kind', [
     pageId: PageId,
     revisionId: RevisionId,
   }),
+  // What was ticked goes only to this tab's own pages: other tabs hear of the publication.
+  z.object({
+    kind: z.literal('ticks-published'),
+    spaceId: SpaceId,
+    pageId: PageId,
+    revisionId: RevisionId,
+    replaced: RevisionId.nullable(),
+  }),
 ]);
 type Told = z.output<typeof Told>;
 
-const told = (event: queueOperations.QueueEvent): Told =>
-  event.kind === 'saved' ? { kind: 'saved' } : event;
+const told = (event: queueOperations.QueueEvent): Told => {
+  if (event.kind === 'saved') return { kind: 'saved' };
+  if (event.kind !== 'ticks-published') return event;
+  const { changes: _, ...sent } = event;
+  return sent;
+};
 
 let persisting = false;
 
@@ -113,6 +126,12 @@ function persist() {
 export function followQueue(queryClient: QueryClient, ctx: ClientContext, event: Told) {
   void queryClient.invalidateQueries({ queryKey: queueQuery(ctx).queryKey });
   if (event.kind === 'saved') return;
+  // Before their entry goes, so the page keeps its one view (#695); this tab's
+  // own pages keep showing them meanwhile too (`noteTicksPublished`, as sent).
+  if (event.kind === 'ticks-published') {
+    notePublished(event.pageId, event.revisionId, event.replaced);
+    return;
+  }
   if (event.kind === 'recorded') {
     for (const session of sessions) session(event);
     return;
@@ -174,6 +193,9 @@ export function useOfflineChanges(ctx: ClientContext | null, confirmed: boolean)
     const stop = queue.subscribe((event) => {
       if (event.kind === 'changed' || event.kind === 'saved') persist();
       const sent = told(event);
+      if (event.kind === 'ticks-published') {
+        noteTicksPublished(event.pageId, event.revisionId, event.replaced, event.changes);
+      }
       followQueue(queryClient, ctx, sent);
       channel?.postMessage(sent);
     });

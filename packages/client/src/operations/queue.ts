@@ -22,12 +22,11 @@ import { newId } from '../ids.ts';
 import type { KeptSealer, KeptStore } from '../kept-store.ts';
 import { NodeMetadata, reviseMetadata } from '../metadata.ts';
 import { parsePayload, revisePayload, type AttachmentRef, type PagePayload } from '../payload.ts';
-import { summarizeChange, type ChangeSummary } from '../change.ts';
+import { summarizeChange } from '../change.ts';
 import {
   applyChanges,
   ReadingChangeJson,
   withChange,
-  type Dropped,
   type ReadingChange,
 } from '../reading-changes.ts';
 import { OWNER_REGION, RegionJson, regionInTree, type Region } from '../regions.ts';
@@ -272,10 +271,12 @@ export type QueuedOrder = z.output<typeof QueuedOrderJson>;
  * in the order made, a later one setting the same thing in place of an
  * earlier. Sent as a flush online is: each made in the newest draft, saved,
  * and published if the draft had no changes of its own and the page has
- * no public link. `version` counts up with each change. `sending` is what
- * the next requests use, recorded before them: the draft's and the
- * publication's IDs, and once worked out, whether the draft was clean and
- * what the publication says it changed.
+ * no public link. `publishedOn` is the publication they were made on,
+ * against which their places in the text were taken. `version` counts up
+ * with each change. `sending` is what the next requests use, recorded
+ * before them: the draft's and the publication's IDs, and once the draft is
+ * worked out, the version it holds, whether it was clean, what the
+ * publication says it changed, and why any change was left out.
  */
 const QueuedReadingJson = z.strictObject({
   kind: z.literal('reading'),
@@ -283,6 +284,7 @@ const QueuedReadingJson = z.strictObject({
   spaceId: SpaceId,
   title: z.string(),
   changes: z.array(ReadingChangeJson),
+  publishedOn: RevisionId.nullable(),
   version: z.number().int(),
   sending: z
     .strictObject({
@@ -290,7 +292,9 @@ const QueuedReadingJson = z.strictObject({
       publicationId: RevisionId,
       prepared: z
         .strictObject({
+          version: z.number().int(),
           clean: z.boolean(),
+          dropped: z.array(z.string()),
           change: z.strictObject({
             ticked: z.number().int().nonnegative(),
             unticked: z.number().int().nonnegative(),
@@ -364,7 +368,10 @@ export const droppedOnDelete = (entry: QueueEntry): boolean =>
  * about to be sent under its ID (`recorded`), which every session with the
  * page counts as its own, one that landed (`landed`), which they take
  * as their base, and a rename or delete that landed (`sent`), after which
- * what reads the space, its search and the trash, reads it again. A page's
+ * what reads the space, its search and the trash, reads it again; changes
+ * made while reading that were published (`ticks-published`), as the
+ * publication they made and the one it replaced, before their entry goes,
+ * so the page shows them until it shows that publication. A page's
  * change the person discarded (`discarded`, after `changed`) is gone with
  * what was typed in it, so what read that, such as search, reads the space again.
  */
@@ -374,7 +381,15 @@ export type QueueEvent =
   | { kind: 'sent'; spaceId: SpaceId }
   | { kind: 'discarded'; spaceId: SpaceId; pageId: PageId }
   | { kind: 'recorded'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId }
-  | { kind: 'landed'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId };
+  | { kind: 'landed'; spaceId: SpaceId; pageId: PageId; revisionId: RevisionId }
+  | {
+      kind: 'ticks-published';
+      spaceId: SpaceId;
+      pageId: PageId;
+      revisionId: RevisionId;
+      replaced: RevisionId | null;
+      changes: readonly ReadingChange[];
+    };
 
 // How long after a change landed a save on its base still goes on top of it.
 const LANDING_MS = 10_000;
@@ -592,10 +607,13 @@ export class OfflineQueue {
     page,
     title,
     changes,
+    publishedOn,
   }: {
     page: PageRef;
     title: string;
     changes: readonly ReadingChange[];
+    /** The publication they were made on, if known. */
+    publishedOn: RevisionId | null;
   }): Promise<void> {
     if (changes.length === 0) return;
     await this.#store.queueExclusive(async () => {
@@ -607,6 +625,7 @@ export class OfflineQueue {
         spaceId: page.spaceId,
         title,
         changes: changes.reduce(withChange, before?.changes ?? []),
+        publishedOn: publishedOn ?? before?.publishedOn ?? null,
         version: (before?.version ?? this.#firstVersion()) + 1,
         sending: before?.sending ?? null,
         failure: null,
@@ -1226,10 +1245,16 @@ export class OfflineQueue {
     });
   }
 
-  /** Forget a change, as the person chose. */
+  /**
+   * Forget a change, as the person chose. What was ticked while reading
+   * can't be once it is being sent: its draft may have landed already.
+   */
   async discard(key: QueueKey): Promise<void> {
     const entry = await this.#store.queueExclusive(async () => {
       const entry = await this.#keyed(key);
+      if (entry?.kind === 'reading' && entry.sending) {
+        throw new Error('What you ticked is being sent already');
+      }
       if (entry?.kind === 'publish') await this.#handOver(entry);
       if (entry) await this.#remove(entry);
       return entry;
@@ -1496,12 +1521,23 @@ export class OfflineQueue {
       if (!failure) return 'offline';
       return this.#stop(entry, failure.kind === 'conflict' ? READING_BUSY : failure);
     }
+    // Deleted meanwhile: nothing is left to send.
+    if (flushed.outcome === 'gone-here') return;
+    if (flushed.published) {
+      this.#emit({
+        kind: 'ticks-published',
+        spaceId: entry.spaceId,
+        pageId: entry.id,
+        ...flushed.published,
+        changes: entry.changes,
+      });
+    }
     const told = readingTold(flushed);
     await this.#store.queueExclusive(async () => {
       const current = await this.#reading(entry.id);
       if (!current) return;
-      // Changes made while it went: sent next, the ones already made changing nothing more.
-      if (current.version !== entry.version) {
+      // Changes made since the version sent: sent next, the ones already made changing nothing more.
+      if (current.version !== flushed.version) {
         await this.#write({ ...current, sending: null });
         return;
       }
@@ -1512,10 +1548,13 @@ export class OfflineQueue {
     this.#emit({ kind: 'sent', spaceId: entry.spaceId });
   }
 
-  // Made in the newest draft, saved under the recorded ID, and published
+  // Made in the newest draft, saved under a new recorded ID, and published
   // under the other if the draft had no changes of its own. Someone saving
   // meanwhile starts it again, up to `READING_TRIES` times. A recorded ID
-  // already the draft's or the publication's landed, its answer lost.
+  // already the draft's or the publication's landed, its answer lost: what
+  // was recorded with it says what it held. Where the draft no longer reads
+  // as the publication they were made on, a task is ticked only where no
+  // other task reads the same (`strict`), as their places may have moved.
   async #flushReading(
     ctx: ClientContext,
     entry: QueuedReading,
@@ -1523,62 +1562,92 @@ export class OfflineQueue {
     read: ReadWikilinks | undefined,
   ): Promise<ReadingFlushed> {
     const page = { spaceId: entry.spaceId, pageId: entry.id };
+    let { draftId, prepared } = sending;
+    const told = (
+      outcome: ReadingFlushed['outcome'],
+      more: Partial<ReadingFlushed> = {},
+    ): ReadingFlushed => ({
+      outcome,
+      version: prepared?.version ?? entry.version,
+      dropped: prepared?.dropped ?? [],
+      ...more,
+    });
     for (let tries = 1; ; tries++) {
       const { heads } = await loadPage(ctx, entry.id);
-      if (heads.publishedHead === sending.publicationId)
-        return { outcome: 'published', dropped: [] };
+      if (heads.publishedHead === sending.publicationId) return told('published');
       // Refused with why, as the server would.
       if (heads.draftHead === null) throw new Error(COPY_MESSAGE);
-      let prepared = sending.prepared;
-      let dropped: Dropped[] = [];
-      if (heads.draftHead !== sending.draftId || !prepared) {
+      const landed = prepared !== null && heads.draftHead === draftId;
+      // Unpublished meanwhile: publishing them would publish it again.
+      if (heads.publishedHead === null) return told('unpublished', landed ? { saved: true } : {});
+      if (!landed) {
         const draft = await openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true });
         const payload = revisePayload(draft.opened, {});
-        const made = applyChanges(payload.markdown, entry.changes);
-        dropped = made.dropped;
+        const source =
+          entry.publishedOn === null
+            ? null
+            : await openRevisionOf(ctx, page, 'published', entry.publishedOn).then(
+                (opened) => revisePayload(opened.opened, {}).markdown,
+                () => null,
+              );
+        const made = applyChanges(payload.markdown, entry.changes, {
+          strict: source !== payload.markdown,
+        });
+        const dropped = made.dropped.map(({ reason }) => reason);
         if (made.markdown === payload.markdown) {
-          const kept = dropped.length < entry.changes.length;
-          return { outcome: heads.draftChanges && kept ? 'in-draft' : 'unchanged', dropped };
+          const kept = made.dropped.length < entry.changes.length;
+          return {
+            outcome: heads.draftChanges && kept ? 'in-draft' : 'unchanged',
+            version: entry.version,
+            dropped,
+          };
         }
+        // A new ID each time: one a save landed under, then saved over by
+        // someone, would come back as `duplicate` though this didn't land.
+        draftId = newId(RevisionId);
         prepared = {
+          version: entry.version,
           clean: !heads.draftChanges,
           change: summarizeChange(payload.markdown, made.markdown),
+          dropped,
         };
-        await this.#prepareReading(entry, prepared);
+        if (!(await this.#prepareReading(entry, draftId, prepared))) return told('gone-here');
         try {
           await saveDraft(ctx, {
             page,
             basedOn: heads.draftHead,
             basedOnRegion: draft.region,
             payload: { ...payload, markdown: made.markdown },
-            revisionId: sending.draftId,
+            revisionId: draftId,
             ...(read && { read }),
           });
         } catch (error) {
           if (stale(error) && tries < READING_TRIES) continue;
-          if (!(error instanceof ApiError && error.code === 'duplicate')) throw error;
+          throw error;
         }
       }
-      if (!prepared.clean) return { outcome: 'in-draft', dropped };
+      if (!prepared?.clean) return told('in-draft');
       // A link made meanwhile: publishing would end its copy without asking (ADR 0005).
       const { links } = await ctx.api.call(publicLinkRoutes.list, {
         params: { spaceId: entry.spaceId },
       });
       if (links.some((link) => link.pageId === entry.id)) {
-        return { outcome: 'in-draft', dropped, publicLink: true };
+        return told('in-draft', { publicLink: true });
       }
       try {
         await publishPage(ctx, page, {
-          expected: { draftHead: sending.draftId, publishedHead: heads.publishedHead },
+          expected: { draftHead: draftId, publishedHead: heads.publishedHead },
           revisionId: sending.publicationId,
           change: prepared.change,
           ...(read && { read }),
         });
       } catch (error) {
-        if (stale(error)) return { outcome: 'in-draft', dropped };
+        if (stale(error)) return told('in-draft');
         if (!(error instanceof ApiError && error.code === 'duplicate')) throw error;
       }
-      return { outcome: 'published', dropped };
+      return told('published', {
+        published: { revisionId: sending.publicationId, replaced: heads.publishedHead },
+      });
     }
   }
 
@@ -1601,16 +1670,19 @@ export class OfflineQueue {
     });
   }
 
-  // Record what the save is about to make, before it is sent, so a resend
-  // after its answer was lost publishes it, or not, as it would have.
+  // Record the draft's ID and what it holds, before it is sent, so a resend
+  // after its answer was lost publishes it, or not, as it would have. False
+  // when the entry went meanwhile, as when its page was deleted.
   async #prepareReading(
     entry: QueuedReading,
-    prepared: { clean: boolean; change: ChangeSummary },
-  ): Promise<void> {
-    await this.#store.queueExclusive(async () => {
+    draftId: RevisionId,
+    prepared: NonNullable<NonNullable<QueuedReading['sending']>['prepared']>,
+  ): Promise<boolean> {
+    return this.#store.queueExclusive(async () => {
       const current = await this.#reading(entry.id);
-      if (!current?.sending) return;
-      await this.#write({ ...current, sending: { ...current.sending, prepared } });
+      if (!current?.sending || current.failure) return false;
+      await this.#write({ ...current, sending: { ...current.sending, draftId, prepared } });
+      return true;
     });
   }
 
@@ -2240,22 +2312,35 @@ const stale = (error: unknown) => error instanceof ApiError && error.code === 's
  * asked; and those left out.
  */
 type ReadingFlushed = {
-  outcome: 'published' | 'in-draft' | 'unchanged';
-  dropped: Dropped[];
+  /** `unpublished` meanwhile, so nothing was made; `gone-here`, the entry went as it was sent. */
+  outcome: 'published' | 'in-draft' | 'unchanged' | 'unpublished' | 'gone-here';
+  /** The version of the entry's changes sent. */
+  version: number;
+  /** Why each change left out was. */
+  dropped: string[];
   publicLink?: true;
+  /** Unpublished, they were saved in the draft before it was found. */
+  saved?: true;
+  /** The publication made, and the one it replaced. */
+  published?: { revisionId: RevisionId; replaced: RevisionId | null };
 };
 
 /** What the person is told of a send that didn't publish every change, or null. */
-function readingTold({ outcome, dropped, publicLink }: ReadingFlushed): QueueFailure | null {
+function readingTold({ outcome, dropped, publicLink, saved }: ReadingFlushed): QueueFailure | null {
   const said: string[] = [];
+  if (outcome === 'unpublished')
+    said.push(
+      saved
+        ? 'It was unpublished meanwhile, so what you ticked went into the draft.'
+        : 'It was unpublished meanwhile, so what you ticked wasn’t saved.',
+    );
   if (outcome === 'in-draft')
     said.push(
       publicLink
         ? 'It has a public link now, so your changes went into the draft: publish it from there.'
         : 'Your changes went into the draft, which had changes of its own: publish it to show them.',
     );
-  if (dropped.length > 0)
-    said.push(`Some were left out. ${[...new Set(dropped.map(({ reason }) => reason))].join(' ')}`);
+  if (dropped.length > 0) said.push(`Some were left out. ${[...new Set(dropped)].join(' ')}`);
   return said.length > 0 ? { kind: 'refused', message: said.join(' ') } : null;
 }
 

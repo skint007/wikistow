@@ -9,7 +9,7 @@
 import { z } from 'zod';
 import { splitFrontmatter } from './markdown/frontmatter.ts';
 import { propertyKeyFor, setPageProperty, type PropertyValue } from './markdown/properties.ts';
-import { setTask } from './markdown/tasks.ts';
+import { setTask, taskItems } from './markdown/tasks.ts';
 
 /** A change made while reading: a task ticked or not, or a property set. */
 export type ReadingChange =
@@ -53,13 +53,29 @@ export function applyChange(
     : { ok: false, reason: `${change.key} couldn’t be changed: ${edit.reason}` };
 }
 
-/** `markdown` with each of `changes` made, in order, and those that no longer apply. */
+/**
+ * `markdown` with each of `changes` made, in order, and those that no
+ * longer apply. `strict`, for text that may have moved since the changes
+ * were made, a task is changed only where no other task reads the same, as
+ * its place may now be another's.
+ */
 export function applyChanges(
   markdown: string,
   changes: readonly ReadingChange[],
+  { strict = false }: { strict?: boolean } = {},
 ): { markdown: string; dropped: Dropped[] } {
   const dropped: Dropped[] = [];
   for (const change of changes) {
+    if (strict && change.kind === 'task') {
+      const { line } = change;
+      if (taskItems(markdown).filter((item) => item.line === line).length > 1) {
+        dropped.push({
+          change,
+          reason: `More than one task reads “${line}” now, so it’s not known which to change.`,
+        });
+        continue;
+      }
+    }
     const made = applyChange(markdown, change);
     if (made.ok) markdown = made.markdown;
     else dropped.push({ change, reason: made.reason });

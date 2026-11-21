@@ -108,6 +108,7 @@ import {
 import {
   applyChanges,
   originOf,
+  ticksNotShown,
   pageFlushing,
   readingRights,
   type ReadingQueue,
@@ -733,15 +734,18 @@ function PageBody({
     (entry): entry is queueOperations.QueuedReading =>
       entry.kind === 'reading' && entry.id === page.pageId && entry.failure === null,
   );
+  // Sent, they show until the publication they made does.
+  const sentTicks = latest ? ticksNotShown(page.pageId, revisionId) : [];
   const shownMarkdown = useMemo(
     () =>
       readMarkdown !== null && latest
         ? applyChanges(readMarkdown, [
+            ...sentTicks,
             ...(ticked?.changes ?? []),
             ...queued.changes.map(({ change }) => change),
           ]).markdown
         : readMarkdown,
-    [readMarkdown, latest, ticked, queued.changes],
+    [readMarkdown, latest, sentTicks, ticked, queued.changes],
   );
   // An older version can't change, but its boxes say why to editors.
   const readingHere = useMemo(
@@ -874,6 +878,7 @@ function PageBody({
     model.actions.edit && {
       command: editPage,
       title: 'Edit page',
+      waiting: waitsFor('edit'),
       run: () => void act(() => runCommand(editPage, page, commandEnv)),
     },
     model.actions.done && { command: finishEditing, title: 'Done editing', run: () => void done() },
@@ -1209,17 +1214,20 @@ function PageBody({
           {ticked && model.view === 'published' && (
             <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
               What you ticked waits to be sent
-              <button
-                type="button"
-                className="underline underline-offset-2 hover:text-foreground"
-                onClick={() =>
-                  void act(async () => {
-                    await queueChoices(ctx)?.discard(ticked);
-                  })
-                }
-              >
-                Undo
-              </button>
+              {/* Once it is being sent, its draft may have landed already. */}
+              {!ticked.sending && (
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() =>
+                    void act(async () => {
+                      await queueChoices(ctx)?.discard(ticked);
+                    })
+                  }
+                >
+                  Undo
+                </button>
+              )}
             </span>
           )}
           {listedAt && (

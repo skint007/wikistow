@@ -435,6 +435,8 @@ test('tasks ticked offline wait on this device and publish once back online', as
   await context.setOffline(false);
   await expect(offline).toBeHidden({ timeout: 15_000 });
   await expect(waits).toBeHidden({ timeout: 30_000 });
+  // Sent, they stay ticked until the publication they made shows, not unticked meanwhile.
+  expect(await box('milk').isChecked()).toBe(true);
   await expect(page.getByText(/Published v2$/)).toBeVisible({ timeout: 30_000 });
   // Loaded afresh, as readers see it: one version with every tick.
   await page.goto(new URL(page.url()).pathname);

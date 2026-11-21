@@ -76,9 +76,9 @@ export type ActionKind =
   | 'server';
 
 /**
- * What waits on this device for an item: nothing, only what was ticked
- * while reading it (#695), another change to it, or the item itself, made
- * offline, which the server doesn't know yet.
+ * What waits on this device for an item: nothing, what was ticked while
+ * reading it (#695) among anything else, another change to it, or the item
+ * itself, made offline, which the server doesn't know yet.
  */
 export type Waiting = 'none' | 'ticked' | 'changed' | 'made';
 
@@ -200,12 +200,13 @@ export const waitingOf = (
 ): Waiting =>
   entries.some((entry) => entry.kind === 'folder' || (entry.kind === 'page' && entry.newPage))
     ? 'made'
-    : entries.length === 0
-      ? 'none'
-      : // Stopped, it waits for the person, as any change does.
-        entries.every((entry) => entry.kind === 'reading' && entry.failure === null)
-        ? 'ticked'
-        : 'changed';
+    : // What was ticked, still to be sent, holds Edit whatever else waits. Stopped,
+      // it waits for the person, as any change does.
+      entries.some((entry) => entry.kind === 'reading' && entry.failure === null)
+      ? 'ticked'
+      : entries.length > 0
+        ? 'changed'
+        : 'none';
 
 /** A control waiting, dimmed, saying why in its hint, and doing nothing. */
 const waitingProps = (hint: string) =>

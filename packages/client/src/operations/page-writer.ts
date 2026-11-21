@@ -240,6 +240,7 @@ export type PageWriter = {
     page: PageRef;
     title: string;
     changes: readonly ReadingChange[];
+    publishedOn: RevisionId | null;
   }): Promise<boolean>;
   /** Put what is in a folder, or at the top, in order on this device (#400), as `OfflineQueue.order`. */
   order(input: {

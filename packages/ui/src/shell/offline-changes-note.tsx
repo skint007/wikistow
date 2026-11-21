@@ -190,9 +190,21 @@ export function OfflineChangesNote({ ctx }: { ctx: ClientContext }) {
       {others.map((entry) => (
         <div key={`${entry.kind} ${entry.id}`} className="grid gap-2">
           <p>
-            <span className="font-bold">
-              <Name>{nameOf(entry)}</Name>
-            </span>{' '}
+            {entry.kind === 'reading' && entry.failure?.kind !== 'gone' ? (
+              // Its draft, where what went in waits to be published (#695).
+              <Link
+                to="/s/$spaceId/p/$pageId"
+                params={{ spaceId: entry.spaceId, pageId: entry.id }}
+                search={{ view: 'draft' }}
+                className="font-bold underline underline-offset-2"
+              >
+                <Name>{nameOf(entry)}</Name>
+              </Link>
+            ) : (
+              <span className="font-bold">
+                <Name>{nameOf(entry)}</Name>
+              </span>
+            )}{' '}
             {entry.failure?.kind === 'gone'
               ? goneText(entry)
               : `${REFUSED[entry.kind]} ${entry.failure?.kind === 'refused' ? entry.failure.message : ''}`}

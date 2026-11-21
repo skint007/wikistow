@@ -191,31 +191,7 @@ const flushing = new Map<string, Promise<unknown>>();
  */
 export const pageFlushing = (pageId: string): Promise<unknown> | undefined => flushing.get(pageId);
 
-// Each page's publications its flushes made, by the one each replaced:
-// kept for the page, not the queue, as one left behind may publish while
-// the person is back on the page with another.
-const replaced = new Map<string, Map<string, string>>();
-
-/** A flush of `pageId` published `revision` in place of `before`, the publication the person was reading. */
-export function notePublished(pageId: string, revision: string, before: string | null) {
-  if (before === null) return;
-  let page = replaced.get(pageId);
-  if (!page) replaced.set(pageId, (page = new Map()));
-  page.set(revision, before);
-}
-
-/**
- * The publication the person was reading when flushes of `pageId`
- * replaced it, one after another, with `revision`; `revision` itself if
- * none made it. The page keeps one view for them all, so reading goes on
- * where it was.
- */
-export function originOf(pageId: string, revision: string): string {
-  const page = replaced.get(pageId);
-  let origin = revision;
-  for (let before = page?.get(origin); before; before = page?.get(origin)) origin = before;
-  return origin;
-}
+export { notePublished, originOf, ticksNotShown } from './reading-origins';
 
 // The flushes started as pages were left, each until every batch it
 // chains, the ones that start only once the one before has settled, is done.
