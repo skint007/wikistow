@@ -36,6 +36,15 @@ test('on a phone, picking a space keeps the drawer open for its pages', async ({
   await expect(drawer).toBeHidden();
   await expect(page.locator('#page-title')).toHaveValue('Seed list');
 
+  // Going back to where the tap went is a move of its own, which closes it.
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  await expect(drawer).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/s\/[^/]+\/?$/);
+  await expect(drawer).toBeHidden();
+  await page.goForward();
+  await expect(page.locator('#page-title')).toHaveValue('Seed list');
+
   // Its own space's tile, from a page in it, keeps it open too; Trash closes it.
   await page.getByRole('button', { name: 'Open navigation' }).click();
   await drawer.getByRole('link', { name: 'Garden', exact: true }).click();

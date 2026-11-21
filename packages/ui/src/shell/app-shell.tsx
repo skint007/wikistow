@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useLocation, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
+import { useLocation, useNavigate, useRouterState } from '@tanstack/react-router';
 import { Menu, Search } from 'lucide-react';
 import type { ClientContext, SpaceId } from '@wikistow/client';
 import {
@@ -45,6 +45,13 @@ import { linkedSearch, SearchOpener, takeHeldSearch } from './search-link';
 import { isApple, isSearchKey } from './search-model';
 import { Sidebar } from './sidebar';
 import { SpaceMoves } from './space-moves';
+
+declare module '@tanstack/react-router' {
+  interface HistoryState {
+    /** Set by a space tile tapped in the phone drawer, which stays open on that move. */
+    drawerTap?: number;
+  }
+}
 
 type Slot = { setSpace: (spaceId: SpaceId | null) => void; closeDrawer: () => void };
 const SlotContext = createContext<Slot | null>(null);
@@ -140,30 +147,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Anything that moves to another page closes the drawer: links, menus, and
   // the redirect after locking. A space tile in the drawer leaves it open on
   // that space's sidebar, so a page in it can be picked (#694).
+  // Only the history entry the latest tap made keeps it, so no other move does: not one
+  // after a tap a draft's prompt kept from moving, nor going back to an older tap's.
   const href = useRouterState({ select: (state) => state.location.href });
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const keepOpenFor = useRef<SpaceId | null>(null);
-  // Only the tile's own move keeps it: Back, Forward or a replace comes from elsewhere,
-  // after a tap a draft's prompt kept from moving, say.
-  const router = useRouter();
-  useEffect(
-    () =>
-      router.history.subscribe(({ action }) => {
-        if (action.type !== 'PUSH') keepOpenFor.current = null;
-      }),
-    [router],
+  const tapped = useRouterState({ select: (state) => state.location.state.drawerTap });
+  const lastTap = useRef<number | null>(null);
+  const openSpace = useCallback(
+    (spaceId: SpaceId) => {
+      const tap = (lastTap.current = Math.random());
+      void navigate({ to: '/s/$spaceId', params: { spaceId }, state: { drawerTap: tap } });
+    },
+    [navigate],
   );
   useEffect(() => {
-    const space = keepOpenFor.current;
-    keepOpenFor.current = null;
-    if (space !== null && pathname.replace(/\/$/, '') === `/s/${space}`) return;
-    closeDrawer();
-    // Each move closes it, not only one to another pathname.
-  }, [href, pathname, closeDrawer]);
-  // A tile tapped that didn't move, as one a draft's prompt kept, holds nothing once it closes.
-  useEffect(() => {
-    if (!drawer) keepOpenFor.current = null;
-  }, [drawer]);
+    const kept = tapped !== undefined && tapped === lastTap.current;
+    lastTap.current = null;
+    if (!kept) closeDrawer();
+  }, [href, tapped, closeDrawer]);
   const [offers] = useState(() => new PaletteOffers());
   return (
     <SlotContext value={slot}>
@@ -224,7 +224,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div className="w-[70px] shrink-0">
                   <Rail
                     onNavigate={closeDrawer}
-                    onSpace={(space) => void (keepOpenFor.current = space)}
+                    onSpace={openSpace}
                     onSignOut={signOut}
                     onSearch={() => search()}
                   />

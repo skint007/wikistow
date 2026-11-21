@@ -70,8 +70,9 @@ declare const __APP_VERSION__: string;
 type RailProps = {
   onNavigate?: () => void;
   /**
-   * Called in place of `onNavigate` when a space tile opens its space, so
-   * the phone drawer can stay open on that space's sidebar (#694).
+   * Opens a space for its tile, in place of the tile's own link and
+   * `onNavigate`, so the phone drawer can stay open on that space's
+   * sidebar (#694).
    */
   onSpace?: (spaceId: SpaceId) => void;
   onSignOut: () => Promise<void>;
@@ -112,7 +113,7 @@ function OwnRail({ onNavigate, onSpace, onSignOut, onSearch }: RailProps) {
       {!desktop && !onNavigate && <OfflinePill />}
       {vault.status === 'unlocked' ? (
         <>
-          <SpaceTiles vault={vault} onNavigate={onSpace ?? onNavigate} />
+          <SpaceTiles vault={vault} onNavigate={onNavigate} onSpace={onSpace} />
           <button
             type="button"
             onClick={() => {
@@ -251,9 +252,11 @@ function moved<T>(ids: T[], from: number, to: number) {
 function SpaceTiles({
   vault,
   onNavigate,
+  onSpace,
 }: {
   vault: Extract<VaultState, { status: 'unlocked' }>;
-  onNavigate: ((spaceId: SpaceId) => void) | undefined;
+  onNavigate: (() => void) | undefined;
+  onSpace: ((spaceId: SpaceId) => void) | undefined;
 }) {
   const queryClient = useQueryClient();
   const query = spacesQuery(vault.ctx);
@@ -408,13 +411,19 @@ function SpaceTiles({
               params={{ spaceId: space.id }}
               // A click that opens a new tab or window leaves this one, and its drawer, as they are.
               onClick={(event) => {
+                if (!onSpace) {
+                  onNavigate?.();
+                  return;
+                }
                 const plain =
                   event.button === 0 &&
                   !event.metaKey &&
                   !event.ctrlKey &&
                   !event.shiftKey &&
                   !event.altKey;
-                if (plain) onNavigate?.(space.id);
+                if (!plain) return;
+                event.preventDefault();
+                onSpace(space.id);
               }}
               aria-label={plainText(name)}
               aria-current={active ? 'page' : undefined}
