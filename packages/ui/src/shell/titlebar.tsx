@@ -12,6 +12,7 @@ import {
 import { cn } from '@/lib/utils';
 import { desktop } from '../desktop';
 import { Place } from '../plugins/places';
+import { OfflinePill } from './offline-pill';
 import { isApple } from './search-model';
 
 /**
@@ -20,7 +21,10 @@ import { isApple } from './search-model';
  * double-clicking it maximizes, as the system's would. It holds plugins'
  * buttons (`app.titlebar`), a menu for what the old menu bar did, and the
  * window's buttons. On a Mac the system draws its window buttons at the
- * left end, and the menu bar does what the menu does. Nothing in a browser.
+ * left end, and the menu bar does what the menu does. Offline, the Offline
+ * pill follows the name, or a Mac's window buttons, while the window is
+ * wide: a narrow one has it in its top bar, by the name there (#693).
+ * Nothing in a browser.
  */
 export function Titlebar() {
   return desktop && <DesktopTitlebar desktop={desktop} />;
@@ -55,6 +59,7 @@ function DesktopTitlebar({ desktop }: { desktop: DesktopBridge }) {
       >
         Wiki<span className="text-primary">Stow</span>
       </span>
+      <OfflinePill className="[app-region:no-drag] max-[899px]:hidden" />
       <div className="ml-auto flex h-full items-center gap-1 pr-1">
         <Place name="app.titlebar" />
       </div>

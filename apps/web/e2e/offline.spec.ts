@@ -88,6 +88,21 @@ test('pages opened here read, search and unlock offline', async ({
     await expect(page.getByText('Flour and rye, baked slowly.')).toBeVisible();
   });
 
+  await test.step('on a phone, it is in the top bar, not in the drawer', async () => {
+    const size = page.viewportSize();
+    await page.setViewportSize({ width: 390, height: 700 });
+    await expect(page.locator('[data-region="topbar"]').getByRole('status')).toHaveText('Offline');
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    const drawer = page.getByRole('dialog', { name: 'Navigation' });
+    await expect(drawer.getByRole('link', { name: 'Trash' })).toBeVisible();
+    await expect(drawer.getByRole('status')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden();
+    if (size) await page.setViewportSize(size);
+    // A wide browser has it on the rail (#693).
+    await expect(page.locator('[data-region="rail"]').getByRole('status')).toHaveText('Offline');
+  });
+
   await test.step('what needs the server says so', async () => {
     // Drafts are saved on this device offline, so Edit works.
     await expect(page.getByRole('button', { name: 'Edit' })).not.toHaveAttribute('aria-disabled');

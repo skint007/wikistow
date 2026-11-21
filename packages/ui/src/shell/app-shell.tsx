@@ -8,6 +8,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -135,9 +136,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [search]);
   // Anything that moves to another page closes the drawer: links, menus, and
-  // the redirect after locking.
+  // the redirect after locking. A space tile in the drawer leaves it open on
+  // that space's sidebar, so a page in it can be picked (#694).
   const href = useRouterState({ select: (state) => state.location.href });
-  useEffect(() => closeDrawer(), [href, closeDrawer]);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const keepOpenFor = useRef<SpaceId | null>(null);
+  useEffect(() => {
+    const space = keepOpenFor.current;
+    keepOpenFor.current = null;
+    if (space !== null && pathname.replace(/\/$/, '') === `/s/${space}`) return;
+    closeDrawer();
+    // Each move closes it, not only one to another pathname.
+  }, [href, pathname, closeDrawer]);
   const [offers] = useState(() => new PaletteOffers());
   return (
     <SlotContext value={slot}>
@@ -196,7 +206,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <DialogTitle className="sr-only">Navigation</DialogTitle>
                 <div className="w-[70px] shrink-0">
-                  <Rail onNavigate={closeDrawer} onSignOut={signOut} onSearch={() => search()} />
+                  <Rail
+                    onNavigate={closeDrawer}
+                    onSpace={(space) => void (keepOpenFor.current = space)}
+                    onSignOut={signOut}
+                    onSearch={() => search()}
+                  />
                 </div>
                 <div className="min-w-0 flex-1">
                   {/* Locking re-renders this before the space page lets go of its space. */}
