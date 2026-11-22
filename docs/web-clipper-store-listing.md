@@ -121,6 +121,8 @@ The first upload gives the item its ID, which the dashboard shows. It goes in `P
 
 At [the Developer Hub](https://addons.mozilla.org/developers/addon/submit/distribution), **Submit a New Add-on**, **On this site**, then upload `wikistow-clipper-<version>-firefox.zip` ([submitting](https://extensionworkshop.com/documentation/publish/submitting-an-add-on/)). Its ID is `web-clipper@wikistow.skint007.github.io`, and this first upload claims it for the account.
 
+This add-on's first uploads went in **On your own**, so it has unlisted versions only, to 0.1.2. Once an add-on has a version, the Developer Hub's **Upload New Version** never asks where to distribute it, and uploads go in unlisted. So listed versions come from the release's `mozilla-add-ons` job, which asks for the listed channel through the API and sends the license and categories in `apps/clipper/amo-metadata.json`; the first is 0.1.3. Never delete the add-on to start again: its ID can't be used again, and every desktop app trusts it.
+
 | Field | Value |
 | --- | --- |
 | Compatible platforms | Firefox only. From 0.1.1 the manifest names no `gecko_android`, so Mozilla Add-ons doesn't offer it for Firefox for Android, which can't clip, having no native messaging, and is out of scope (ADR 0017, decision 9). The unlisted 0.1.0 named it, which ticks **Firefox for Android** and locks the box |
