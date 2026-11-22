@@ -161,9 +161,20 @@ export function useReadingQueue(
       if (!queue) return null;
       if (connection.get().online && (await queue.waiting(pageId)).length === 0) return null;
       const info = queryClient.getQueryData(pageQuery(ctx, pageId).queryKey);
-      const publishedOn = info?.heads.publishedHead ?? null;
-      const entry = await queue.entry(pageId);
+      const waiting = await queue.waiting(pageId);
+      const entry = waiting.find((each) => each.kind === 'page');
       const change = entry?.kind === 'page' && entry.basedOn ? entry : null;
+      const publish = waiting.find((each) => each.kind === 'publish');
+      // Only as the page allowed them (`ticksOnly`): its draft and that draft's
+      // publish, or nothing, waiting; never the kept draft behind a change
+      // already on its way, which would leave out what it holds (#695).
+      const others = waiting.filter((each) => each !== entry && each !== publish);
+      if (others.length > 0 || (publish && !change) || change?.failure) {
+        throw new Error('Waits until your change made offline is sent');
+      }
+      // Over the publication the first of them was ticked on, not one their own publish made.
+      const publishedOn =
+        (publish?.kind === 'publish' && publish.publishedOn) || info?.heads.publishedHead;
       const head = change?.basedOn ?? info?.heads.draftHead;
       if (!head || !publishedOn) throw new Error('This page has no publication to change.');
       const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);
@@ -171,17 +182,20 @@ export function useReadingQueue(
       const now = change?.payload ?? based;
       const { markdown, dropped } = applyChanges(now.markdown, changes);
       const ticked = { ...now, markdown };
-      // Back as the draft was: what waits goes, as nothing is left to publish.
-      if (change && markdown === based.markdown && onlyTicked(based, ticked)) {
-        await queue.discard({ kind: 'publish', id: pageId });
+      // Back as the draft was: what waits goes, as nothing is left to publish,
+      // unless it is on its way, when it may have landed already.
+      const sending = change?.sending || (publish?.kind === 'publish' && publish.sending);
+      if (change && !sending && markdown === based.markdown && onlyTicked(based, ticked)) {
         await queue.discard(change, { version: change.version });
+        await queue.discard({ kind: 'publish', id: pageId });
         await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
         return { outcome: 'unchanged', dropped };
       }
       if (markdown === now.markdown) return { outcome: 'unchanged', dropped };
       const clean =
-        (change ? onlyTicked(based, change.payload) : !info?.heads.draftChanges) &&
-        changes.every((made) => made.kind === 'task');
+        (change
+          ? !change.sending && onlyTicked(based, change.payload)
+          : !info?.heads.draftChanges) && changes.every((made) => made.kind === 'task');
       const version = await queue.saveDraft({
         page,
         basedOn: head,

@@ -8,6 +8,7 @@ import {
   pageOperations,
   PageId,
   publicationOperations,
+  revisePayload,
   RevisionId,
   type FolderId,
   type OpenedPayload,
@@ -499,7 +500,16 @@ function PageBody({
     ...revisionQuery(ctx, page, 'draft', change?.basedOn ?? RevisionId.parse(model.revision)),
     enabled: !!change?.basedOn,
   });
-  const basePayload = changeBase?.opened.kind === 'current' ? changeBase.opened.payload : null;
+  // Prepared as the flush prepares it, so their formats compare alike.
+  const basePayload = useMemo(
+    () => (changeBase?.opened.kind === 'current' ? revisePayload(changeBase.opened, {}) : null),
+    [changeBase],
+  );
+  // Parsed once for each draft, not on each render: a page may be long.
+  const changeOnlyTicked = useMemo(
+    () => !!basePayload && !!change && onlyTicked(basePayload, change.payload),
+    [basePayload, change],
+  );
   const ticksOnly =
     model.view === 'published' &&
     !pinned &&
@@ -512,7 +522,7 @@ function PageBody({
     (entries ?? []).every(
       (entry) => entry.id !== page.pageId || entry === change || entry === publishWaiting,
     ) &&
-    onlyTicked(basePayload, change.payload);
+    changeOnlyTicked;
   const rights = useMemo(
     () =>
       readingRights({
