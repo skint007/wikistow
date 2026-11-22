@@ -15,6 +15,7 @@ import {
   readingNotices,
   ReadingQueue,
   onlyTicked,
+  tickedBack,
   readingRights,
   showing,
   type FlushOperations,
@@ -215,6 +216,22 @@ describe('a flush', () => {
     ]);
     expect(flushed).toEqual({ outcome: 'unchanged', dropped: [] });
     expect(page.state.saves).toBe(0);
+  });
+
+  it('saves nothing for a box written `[X]` unticked and ticked again, back as `[x]` (#700)', async () => {
+    const written = '- [X] milk\n- [ ] eggs\n';
+    const page = server(written);
+    const flushed = await flushChanges(page.operations, [
+      task(written, 'milk', false),
+      task(written, 'milk', true),
+    ]);
+    expect(flushed).toEqual({ outcome: 'unchanged', dropped: [] });
+    expect(page.state.saves).toBe(0);
+    // A property set from `X` to `x` is a change all the same.
+    const sized = '---\nsize: X\n---\n- [ ] milk\n';
+    const other = server(sized);
+    await flushChanges(other.operations, [{ kind: 'property', key: 'size', value: 'x' }]);
+    expect(other.state.saves).toBe(1);
   });
 
   it('only saves to the draft, never publishing it, when the draft has changes of its own', async () => {
@@ -651,5 +668,30 @@ describe('an offline draft made only of ticks (#695)', () => {
       false,
     );
     expect(onlyTicked(payload, { ...payload, title: 'Shops' })).toBe(false);
+  });
+
+  it('is back as it was once each box is as it was, `[X]` ticked again as `[x]` (#700)', () => {
+    const big = { ...payload, markdown: '- [X] milk\n- [ ] eggs\n' };
+    const again = applyChanges(big.markdown, [
+      { kind: 'task', offset: 0, line: 'milk', checked: false },
+      { kind: 'task', offset: 0, line: 'milk', checked: true },
+    ]).markdown;
+    expect(again).toBe('- [x] milk\n- [ ] eggs\n');
+    expect(tickedBack(big, { ...big, markdown: again })).toBe(true);
+    expect(tickedBack(big, { ...big, markdown: '- [ ] milk\n- [ ] eggs\n' })).toBe(false);
+    expect(tickedBack(big, { ...big, title: 'Shops' })).toBe(false);
+  });
+
+  // A box in code that now starts where a task was is left out (#700).
+  it('ticks only a task item, never a box in code that starts where one was', () => {
+    const bread = { kind: 'task', offset: 11, line: 'bread', checked: true } as const;
+    expect(applyChanges('- [ ] milk\n- [ ] bread\n', [bread]).markdown).toBe(
+      '- [ ] milk\n- [x] bread\n',
+    );
+    const fenced = '```\nxxxxxx\n- [ ] bread\n```\n';
+    expect(applyChanges(fenced, [bread])).toEqual({
+      markdown: fenced,
+      dropped: [{ change: bread, reason: 'The task “bread” isn’t on the page any more.' }],
+    });
   });
 });

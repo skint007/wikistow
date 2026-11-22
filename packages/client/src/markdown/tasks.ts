@@ -85,19 +85,55 @@ export function taskItems(markdown: string): TaskItem[] {
   return found;
 }
 
+// The task items of the last few texts asked for, by where each starts, as
+// a page read asks again for the same text with each tick it shows. Only
+// while the vault is open: `forgetTaskItems` lets them go as it locks.
+const itemsOf = new Map<string, ReadonlyMap<number, TaskItem>>();
+// Enough for a batch with a few properties set among its ticks, each a text of its own.
+const ITEMS_KEPT = 8;
+
+/** Every task item in `markdown` by where it starts, as `taskItems` finds them, the last few texts' kept. */
+export function taskIndex(markdown: string): ReadonlyMap<number, TaskItem> {
+  let items = itemsOf.get(markdown);
+  if (!items) {
+    items = new Map(taskItems(markdown).map((item) => [item.offset, item]));
+    itemsOf.set(markdown, items);
+    for (const old of itemsOf.keys()) {
+      if (itemsOf.size <= ITEMS_KEPT) break;
+      itemsOf.delete(old);
+    }
+  }
+  return items;
+}
+
+/** Let go of the texts `taskIndex` keeps, as the vault locks. */
+export function forgetTaskItems() {
+  itemsOf.clear();
+}
+
 /**
  * `markdown` with the task `change` names ticked (`checked`) or not. It is
- * the one at `change.offset` if that task's line is still `change.line`;
- * otherwise the only task item with that line. A task already as asked is
- * left as it is, `[X]` included, so a change made twice changes nothing
- * more. A task that is gone, or whose line more than one task has, is
- * refused with why.
+ * the task item at `change.offset` if its line is still `change.line`,
+ * never a box in code that now starts where a task did (#700); otherwise
+ * the only task item with that line. A task already as asked is left as
+ * it is, `[X]` included, so a change made twice changes nothing more. A
+ * task that is gone, or whose line more than one task has, is refused
+ * with why. `items` gives the task items, by default `taskIndex(markdown)`:
+ * those of a text this one differs from only in what is ticked hold for
+ * it too, their boxes as this text has them, as ticking moves no block,
+ * so changes made one after another parse the page once.
  */
-export function setTask(markdown: string, change: TaskChange): TaskEdit {
-  const there = taskAt(markdown, change.offset);
-  let task = there?.line === change.line ? there : null;
+export function setTask(
+  markdown: string,
+  change: TaskChange,
+  items: () => ReadonlyMap<number, TaskItem> = () => taskIndex(markdown),
+): TaskEdit {
+  // Whether its box is ticked in this text, which may have ticked it since the items were found.
+  const now = (item: TaskItem): TaskItem => ({ ...item, checked: markdown[item.mark] !== ' ' });
+  const there = items().get(change.offset);
+  let task = there?.line === change.line ? now(there) : null;
   if (!task) {
-    const same = taskItems(markdown).filter((item) => item.line === change.line);
+    const same = [...items().values()].filter((item) => item.line === change.line);
     if (same.length !== 1) {
       const named = change.line === '' ? 'That task' : `The task “${change.line}”`;
       return {
@@ -108,7 +144,7 @@ export function setTask(markdown: string, change: TaskChange): TaskEdit {
             : `${named} is on the page more than once now.`,
       };
     }
-    task = same[0] ?? null;
+    task = same[0] ? now(same[0]) : null;
   }
   if (!task || task.checked === change.checked) return { ok: true, markdown };
   const mark = change.checked ? 'x' : ' ';

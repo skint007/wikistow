@@ -1,4 +1,5 @@
 import {
+  forgetTaskItems,
   pageOperations,
   revisePayload,
   RevisionId,
@@ -7,7 +8,7 @@ import {
   type PagePayload,
   type Region,
 } from '@wikistow/client';
-import { ApiError } from '@wikistow/client/api';
+import { ApiError, noAnswer } from '@wikistow/client/api';
 import { connection, useOffline } from '../data/connection';
 import { queueQuery } from '../data/offline-changes';
 import { useQueryClient } from '@tanstack/react-query';
@@ -21,6 +22,7 @@ import {
   applyChanges,
   flushChanges,
   onlyTicked,
+  tickedBack,
   flushesUnderway,
   holding,
   inTurn,
@@ -93,6 +95,14 @@ function reaches<T>(own: Map<T | null, T | null>, from: T | null, to: T | null) 
   return false;
 }
 
+// The page text kept to find its tasks goes as the vault locks, or opens for another session.
+let keptFor: ClientContext | null = null;
+vaultStore.subscribe(() => {
+  const now = vaultStore.get();
+  const ctx = now.status === 'unlocked' ? now.ctx : null;
+  if (!ctx || ctx !== keptFor) forgetTaskItems();
+  keptFor = ctx;
+});
 vaultStore.guardLock(async () => {
   await flushesUnderway();
   return true;
@@ -132,6 +142,8 @@ export function useReadingQueue(
     // The drafts a flush opened, by revision, for saving on top of one.
     const opened = new Map<string, { payload: PagePayload; region: Region }>();
     let published: RevisionId | null = null;
+    // Whether this flush sent a save or a publish, which may have landed without an answer.
+    let wrote = false;
     const operations: FlushOperations = {
       heads: async () => (await pageOperations.loadPage(ctx, pageId)).heads,
       openDraft: async (revisionId) => {
@@ -149,6 +161,7 @@ export function useReadingQueue(
       saveDraft: async (basedOn, markdown) => {
         const draft = opened.get(basedOn);
         if (!draft) throw new Error('That draft wasn’t opened here');
+        wrote = true;
         const written = await pageOperations.saveDraft(ctx, {
           page,
           basedOn: RevisionId.parse(basedOn),
@@ -159,6 +172,7 @@ export function useReadingQueue(
         return written.revisionId;
       },
       publish: async ({ draftHead, publishedHead }, change) => {
+        wrote = true;
         const written = await pageOperations.publishPage(ctx, page, {
           expected: {
             draftHead: RevisionId.parse(draftHead),
@@ -202,10 +216,13 @@ export function useReadingQueue(
     const onDevice = async (
       changes: readonly ReadingChange[],
       on: readonly (MadeOn | null)[],
+      // The server didn't answer, though the app still took itself to be online.
+      unanswered = false,
     ): Promise<Flushed | null> => {
       const queue = ctx.keptContent?.queue;
       if (!queue) return null;
-      if (connection.get().online && (await queue.waiting(pageId)).length === 0) return null;
+      const online = connection.get().online && !unanswered;
+      if (online && (await queue.waiting(pageId)).length === 0) return null;
       const info = queryClient.getQueryData(pageQuery(ctx, pageId).queryKey);
       const waiting = await queue.waiting(pageId);
       const entry = waiting.find((each) => each.kind === 'page');
@@ -274,13 +291,9 @@ export function useReadingQueue(
       // Back as the draft was: what waits goes, as nothing is left to publish,
       // unless it is on its way, when it may have landed already.
       const sending = change?.sending || publish?.sending;
-      if (
-        change &&
-        publish &&
-        !sending &&
-        made.markdown === based.markdown &&
-        onlyTicked(based, ticked)
-      ) {
+      // Told by text only where ticks alone made it: a property set to `x` from `X` is a change.
+      const onlyTicks = kept.every((each) => each.kind === 'task');
+      if (change && publish && !sending && onlyTicks && tickedBack(based, ticked)) {
         if ((await queue.undoTicked(page, change.version).catch(refusedHere)) === null) {
           return { outcome: 'unchanged', dropped: everyChangeLeftOut };
         }
@@ -288,12 +301,15 @@ export function useReadingQueue(
         await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
         return { outcome: 'unchanged', dropped };
       }
-      if (made.markdown === now.markdown) return { outcome: 'unchanged', dropped };
+      // Nothing new, `[X]` ticked off and on again in this batch included (#700).
+      if (made.markdown === now.markdown || (onlyTicks && tickedBack(now, ticked))) {
+        return { outcome: 'unchanged', dropped };
+      }
       // Never over a draft with changes of its own, which publishing would publish too.
       const clean =
         !info?.heads.draftChanges &&
         (!change || (!change.sending && onlyTicked(based, change.payload))) &&
-        kept.every((each) => each.kind === 'task');
+        onlyTicks;
       // Saved and published at once, so another tab can't type in between (#700).
       const saved = await queue
         .saveTicked(
@@ -326,11 +342,20 @@ export function useReadingQueue(
       const device = await onDevice(changes, on);
       if (device) return device;
       published = null;
+      wrote = false;
       opened.clear();
       let flushed: Flushed;
       try {
         flushed = await flushChanges(operations, changes);
       } catch (error) {
+        // The first changes after the connection dropped, before the app knew:
+        // kept on the device, as offline, if nothing was sent that may have
+        // landed (#700). After a save or publish with no answer, they wait here for
+        // the next flush, which keeps them on the device, a save that landed then
+        // coming back as the conflict prompt.
+        const device =
+          noAnswer(error) && !wrote ? await onDevice(changes, on, true).catch(() => null) : null;
+        if (device) return device;
         await reload();
         throw error;
       } finally {

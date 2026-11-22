@@ -6,6 +6,7 @@ import {
   setTask,
   taskAt,
   taskItems,
+  taskIndex,
   type TaskItem,
 } from '../src/index.ts';
 
@@ -142,6 +143,40 @@ describe('ticking a task', () => {
     });
     // In code it isn't a task.
     expect(setTask('```\n- [ ] milk\n- [ ] bread\n```\n', change).ok).toBe(false);
+    // Nor a box in code that now starts where the task did, its line the same (#700).
+    const fenced = '```\nxxxxxx\n- [ ] bread\n```\n';
+    expect(fenced.indexOf('- [ ] bread')).toBe(change.offset);
+    expect(setTask(fenced, change)).toEqual({
+      ok: false,
+      reason: 'The task “bread” isn’t on the page any more.',
+    });
+  });
+
+  it('takes the task items found before ticking for the text after, the page parsed once', () => {
+    const before = Array.from({ length: 30 }, (_, i) => `- [ ] item ${i}\n`).join('');
+    // A heading added above since they were made: each is found by its line, in the same items.
+    const markdown = `# List\n\n${before}`;
+    const items = taskIndex(markdown);
+    // Kept: the same text asked again isn't parsed again.
+    expect(taskIndex(markdown)).toBe(items);
+    let ticked = markdown;
+    for (let i = 0; i < 30; i++) {
+      const line = `item ${i}`;
+      const change = { offset: find(before, line).offset, line, checked: i % 2 === 0 };
+      const made = setTask(ticked, change, () => items);
+      if (!made.ok) throw new Error(made.reason);
+      ticked = made.markdown;
+    }
+    expect(ticked).toBe(
+      `# List\n\n${Array.from({ length: 30 }, (_, i) => `- [${i % 2 === 0 ? 'x' : ' '}] item ${i}\n`).join('')}`,
+    );
+    // Its box as this text has it, ticked since the items were found: unticked again.
+    const made = setTask(
+      ticked,
+      { offset: find(ticked, 'item 0').offset, line: 'item 0', checked: false },
+      () => items,
+    );
+    expect(made).toEqual({ ok: true, markdown: ticked.replace('- [x] item 0', '- [ ] item 0') });
   });
 });
 

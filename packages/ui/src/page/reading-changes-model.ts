@@ -6,10 +6,13 @@ import {
   propertyKeyFor,
   setPageProperty,
   setTask,
+  taskIndex,
   splitFrontmatter,
   summarizeChange,
   type ChangeSummary,
   type PropertyValue,
+  type TaskChange,
+  type TaskItem,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { errorMessage } from '../errors';
@@ -32,7 +35,7 @@ import type { PageHeads, View, Viewer } from './view-model';
 
 /** A change made while reading: a task ticked or not, or a property set. */
 export type ReadingChange =
-  | { kind: 'task'; offset: number; line: string; checked: boolean }
+  | ({ kind: 'task' } & TaskChange)
   | { kind: 'property'; key: string; value: PropertyValue };
 
 /**
@@ -116,8 +119,10 @@ export function readingRights({
 export function applyChange(
   markdown: string,
   change: ReadingChange,
+  /** Its task items, as `setTask` takes them. */
+  items?: () => ReadonlyMap<number, TaskItem>,
 ): { ok: true; markdown: string } | { ok: false; reason: string } {
-  if (change.kind === 'task') return setTask(markdown, change);
+  if (change.kind === 'task') return setTask(markdown, change, items);
   const key = propertyKeyFor(splitFrontmatter(markdown).frontmatter, change.key);
   const edit = setPageProperty(markdown, key, change.value);
   return edit.ok
@@ -131,10 +136,17 @@ export function applyChanges(
   changes: readonly ReadingChange[],
 ): { markdown: string; dropped: Dropped[] } {
   const dropped: Dropped[] = [];
+  // Ticks move no block, so the task items found in the text before them
+  // hold after them, the page parsed once; a property changed moves them.
+  let parsed = markdown;
+  const items = () => taskIndex(parsed);
   for (const change of changes) {
-    const made = applyChange(markdown, change);
-    if (made.ok) markdown = made.markdown;
-    else dropped.push({ change, reason: made.reason });
+    const made = applyChange(markdown, change, items);
+    if (!made.ok) dropped.push({ change, reason: made.reason });
+    else {
+      markdown = made.markdown;
+      if (change.kind === 'property') parsed = markdown;
+    }
   }
   return { markdown, dropped };
 }
@@ -150,6 +162,29 @@ export function onlyTicked(before: PagePayload, after: PagePayload): boolean {
     return JSON.stringify({ ...kept, markdown: marksIgnored(kept.markdown) });
   };
   return plain(before) === plain(after);
+}
+
+/**
+ * Whether `after`, made from `before` by ticks alone, is `before` as it
+ * was: each box as `before` has it, though one written `[X]` and ticked
+ * again comes back as `[x]` (#700), and nothing else changed. Compared
+ * as text, never parsed: a tick changes only a box's mark.
+ */
+export function tickedBack(before: PagePayload, after: PagePayload): boolean {
+  const rest = (payload: PagePayload) =>
+    JSON.stringify({ ...withoutLiveState(withoutChange(payload)), markdown: '' });
+  return sameTicks(before.markdown, after.markdown) && rest(before) === rest(after);
+}
+
+/** Whether `after`, made from `before` by ticks alone, has every box as `before` has it. */
+function sameTicks(before: string, after: string): boolean {
+  if (before.length !== after.length) return false;
+  for (let i = 0; i < before.length; i++) {
+    const was = before[i];
+    const is = after[i];
+    if (was !== is && !((was === 'X' && is === 'x') || (was === 'x' && is === 'X'))) return false;
+  }
+  return true;
 }
 
 /** What a flush needs of the page, so it can be tried without a server. */
@@ -213,7 +248,9 @@ export async function flushChanges(
     if (heads.draftHead === null) throw new Error('This page has no draft to change.');
     const before = await operations.openDraft(heads.draftHead);
     const { markdown, dropped } = applyChanges(before, changes);
-    if (markdown === before) {
+    // Told by text only where ticks alone made it: a property set to `x` from `X` is a change.
+    const ticks = changes.every((change) => change.kind === 'task');
+    if (markdown === before || (ticks && sameTicks(before, markdown))) {
       const kept = dropped.length < changes.length;
       return { outcome: heads.draftChanges && kept ? 'in-draft' : 'unchanged', dropped };
     }
