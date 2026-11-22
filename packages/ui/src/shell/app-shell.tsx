@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useLocation, useNavigate, useRouterState } from '@tanstack/react-router';
+import { useLocation, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
+import { sameHref } from './same-href';
 import { Menu, Search } from 'lucide-react';
 import type { ClientContext, SpaceId } from '@wikistow/client';
 import {
@@ -67,6 +68,17 @@ const SlotContext = createContext<Slot | null>(null);
  * as the command palette, listing what is offered there
  * (`usePaletteEntries`).
  */
+/** How long after a press in the drawer's rail a plugin's move to a space counts as that press's (#697). */
+const RAIL_TAP_MS = 1000;
+
+/** Whether `spaceId`'s page is where the router is now, with or without a trailing slash. */
+function isHere(router: ReturnType<typeof useRouter>, spaceId: SpaceId) {
+  return sameHref(
+    router.buildLocation({ to: '/s/$spaceId', params: { spaceId } }).href,
+    router.state.location.href,
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [spaceId, setSpace] = useState<SpaceId | null>(null);
   const [drawer, setDrawer] = useState(false);
@@ -152,16 +164,58 @@ export function AppShell({ children }: { children: ReactNode }) {
   const href = useRouterState({ select: (state) => state.location.href });
   const tapped = useRouterState({ select: (state) => state.location.state.drawerTap });
   const lastTap = useRef<number | null>(null);
+  const router = useRouter();
   const openSpace = useCallback(
     (spaceId: SpaceId) => {
       const tap = (lastTap.current = Math.random());
-      void navigate({ to: '/s/$spaceId', params: { spaceId }, state: { drawerTap: tap } });
+      // The space shown already: its entry is marked, with none added that Back would return to.
+      const here = isHere(router, spaceId);
+      void navigate({
+        to: '/s/$spaceId',
+        params: { spaceId },
+        state: { drawerTap: tap },
+        replace: here,
+      });
     },
-    [navigate],
+    [navigate, router],
+  );
+  // A plugin drawing the rail opens a space with `host.app.navigate`, which
+  // keeps the drawer open the same way when a tap in the drawer's rail made
+  // it, rather than one in the sidebar or a script's (#697). A plugin's views
+  // share one `host`, so the call can't say where it came from: it counts
+  // only within `RAIL_TAP_MS` of a press in the drawer's rail, once, so a
+  // press that opened nothing doesn't keep the drawer open for a move long after.
+  const drawerRail = useRef<HTMLDivElement>(null);
+  const railTapAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (!drawer) return;
+    // Only in a plugin's view there: the app's own tiles mark their moves themselves.
+    const note = (event: Event) => {
+      const view = event.target instanceof Element && event.target.closest('[data-plugin-view]');
+      if (view && drawerRail.current?.contains(view)) railTapAt.current = performance.now();
+    };
+    const kinds = ['pointerdown', 'click', 'keydown'] as const;
+    for (const kind of kinds) document.addEventListener(kind, note, true);
+    return () => {
+      railTapAt.current = null;
+      for (const kind of kinds) document.removeEventListener(kind, note, true);
+    };
+  }, [drawer]);
+  useEffect(
+    () =>
+      plugins.location.onNavigate((to) => {
+        const at = railTapAt.current;
+        railTapAt.current = null;
+        if (to.kind !== 'space' || at === null || performance.now() - at > RAIL_TAP_MS) return;
+        return { drawerTap: (lastTap.current = Math.random()) };
+      }),
+    [plugins.location],
   );
   useEffect(() => {
     const kept = tapped !== undefined && tapped === lastTap.current;
     lastTap.current = null;
+    // A press before a move counts for no move after it.
+    railTapAt.current = null;
     if (!kept) closeDrawer();
   }, [href, tapped, closeDrawer]);
   const [offers] = useState(() => new PaletteOffers());
@@ -221,7 +275,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 showCloseButton={false}
               >
                 <DialogTitle className="sr-only">Navigation</DialogTitle>
-                <div className="w-[70px] shrink-0">
+                <div ref={drawerRail} className="w-[70px] shrink-0">
                   <Rail
                     onNavigate={closeDrawer}
                     onSpace={openSpace}

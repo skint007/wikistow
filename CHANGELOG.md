@@ -8,6 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- Plugins: on phones, a plugin drawing the rail that opens a space with `host.app.navigate` keeps the navigation drawer open on that space's pages, as the app's own rail does. (#702)
 - Offline: tasks ticked while reading a page show at once and wait on the device as its draft, through a reload, and publish as one version once you're back online. The page says they wait, with **Undo**, and the draft opens with them. If someone changed the page meanwhile, the usual prompt offers **Merge…**. (#701)
 - Offline: the **Offline** pill shows in the desktop app's titlebar rather than on the rail, and on phones only in the top bar, no longer over the spaces in the navigation drawer. A wide browser keeps it at the top of the rail. On phones, picking a space in the navigation drawer keeps the drawer open on that space's pages, rather than closing it before one can be picked. (#696)
 

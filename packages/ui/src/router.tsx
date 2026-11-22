@@ -7,7 +7,8 @@ import { connection } from './data/connection';
 import { vaultStore } from './vault/store';
 import { startAppPlugins, type AppPlugins } from './plugins/app-plugins';
 import type { Place } from './plugins/location';
-import { createRouter, type RouterHistory } from '@tanstack/react-router';
+import { sameHref } from './shell/same-href';
+import { createRouter, type HistoryState, type RouterHistory } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 import { z } from 'zod';
 
@@ -52,7 +53,7 @@ export function createAppRouter({ history }: { history: RouterHistory }) {
   });
   // Plugins are told where the person is from here, whatever the app draws there.
   router.subscribe('onResolved', () => plugins.location.routed(locationOf(router)));
-  plugins.location.navigateWith((to) => navigateTo(router, to));
+  plugins.location.navigateWith((to, state) => navigateTo(router, to, state));
   return router;
 }
 
@@ -80,28 +81,49 @@ function locationOf(router: AppRouter): AppLocation {
 }
 
 /** Go where a plugin asked, as a link there would. */
-async function navigateTo(router: AppRouter, to: Place): Promise<void> {
+async function navigateTo(router: AppRouter, to: Place, state: HistoryState): Promise<void> {
+  // Only state given, so a move with none keeps the router's own.
+  const given = Object.keys(state).length > 0 ? { state } : {};
   switch (to.kind) {
-    case 'space':
-      return router.navigate({ to: '/s/$spaceId', params: { spaceId: SpaceId.parse(to.spaceId) } });
+    case 'space': {
+      const params = { spaceId: SpaceId.parse(to.spaceId) };
+      // State given for where it is already marks that entry, rather than add one Back returns to.
+      const here = sameHref(
+        router.buildLocation({ to: '/s/$spaceId', params }).href,
+        router.state.location.href,
+      );
+      return router.navigate({
+        to: '/s/$spaceId',
+        params,
+        ...given,
+        replace: here && 'state' in given,
+      });
+    }
     case 'folder':
       return router.navigate({
         to: '/s/$spaceId/f/$folderId',
         params: { spaceId: SpaceId.parse(to.spaceId), folderId: FolderId.parse(to.folderId) },
+        ...given,
       });
     case 'page':
       return router.navigate({
         to: '/s/$spaceId/p/$pageId',
         params: { spaceId: SpaceId.parse(to.spaceId), pageId: PageId.parse(to.pageId) },
         search: to.version ? { view: to.version } : {},
+        ...given,
       });
     case 'plugin':
       return router.navigate({
         to: '/plugin/$pluginId/$viewId',
         params: { pluginId: to.pluginId, viewId: z.string().min(1).parse(to.viewId) },
+        ...given,
       });
     case 'settings':
-      return router.navigate({ to: '/settings/plugins', search: { plugin: to.pluginId } });
+      return router.navigate({
+        to: '/settings/plugins',
+        search: { plugin: to.pluginId },
+        ...given,
+      });
     default:
       // A plugin's code isn't checked by its types.
       throw new PluginError('invalid', 'No such place to go');
