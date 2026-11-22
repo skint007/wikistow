@@ -227,6 +227,11 @@ describe('a flush', () => {
     ]);
     expect(flushed).toEqual({ outcome: 'unchanged', dropped: [] });
     expect(page.state.saves).toBe(0);
+    // A property set from `X` to `x` is a change all the same.
+    const sized = '---\nsize: X\n---\n- [ ] milk\n';
+    const other = server(sized);
+    await flushChanges(other.operations, [{ kind: 'property', key: 'size', value: 'x' }]);
+    expect(other.state.saves).toBe(1);
   });
 
   it('only saves to the draft, never publishing it, when the draft has changes of its own', async () => {

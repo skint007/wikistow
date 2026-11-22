@@ -291,7 +291,9 @@ export function useReadingQueue(
       // Back as the draft was: what waits goes, as nothing is left to publish,
       // unless it is on its way, when it may have landed already.
       const sending = change?.sending || publish?.sending;
-      if (change && publish && !sending && tickedBack(based, ticked)) {
+      // Told by text only where ticks alone made it: a property set to `x` from `X` is a change.
+      const onlyTicks = kept.every((each) => each.kind === 'task');
+      if (change && publish && !sending && onlyTicks && tickedBack(based, ticked)) {
         if ((await queue.undoTicked(page, change.version).catch(refusedHere)) === null) {
           return { outcome: 'unchanged', dropped: everyChangeLeftOut };
         }
@@ -300,14 +302,14 @@ export function useReadingQueue(
         return { outcome: 'unchanged', dropped };
       }
       // Nothing new, `[X]` ticked off and on again in this batch included (#700).
-      if (made.markdown === now.markdown || tickedBack(now, ticked)) {
+      if (made.markdown === now.markdown || (onlyTicks && tickedBack(now, ticked))) {
         return { outcome: 'unchanged', dropped };
       }
       // Never over a draft with changes of its own, which publishing would publish too.
       const clean =
         !info?.heads.draftChanges &&
         (!change || (!change.sending && onlyTicked(based, change.payload))) &&
-        kept.every((each) => each.kind === 'task');
+        onlyTicks;
       // Saved and published at once, so another tab can't type in between (#700).
       const saved = await queue
         .saveTicked(

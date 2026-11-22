@@ -248,7 +248,9 @@ export async function flushChanges(
     if (heads.draftHead === null) throw new Error('This page has no draft to change.');
     const before = await operations.openDraft(heads.draftHead);
     const { markdown, dropped } = applyChanges(before, changes);
-    if (markdown === before || sameTicks(before, markdown)) {
+    // Told by text only where ticks alone made it: a property set to `x` from `X` is a change.
+    const ticks = changes.every((change) => change.kind === 'task');
+    if (markdown === before || (ticks && sameTicks(before, markdown))) {
       const kept = dropped.length < changes.length;
       return { outcome: heads.draftChanges && kept ? 'in-draft' : 'unchanged', dropped };
     }
