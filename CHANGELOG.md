@@ -4,6 +4,52 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.30.0 - 2026-11-22
+
+### Highlights
+
+#### Features
+
+- Tasks ticked while reading a page offline show at once, wait on the device through a reload, and publish as one version once you’re back online. The page says they wait, with **Undo**.
+
+#### Fixes
+
+- A task ticked just as the connection drops waits on the device like any other offline tick, rather than staying unsaved, and ticking a task no longer ticks a box in a code block that now sits where it was.
+- A task ticked on a page another tab changed meanwhile is left out, saying so, rather than ticking whatever task moved into its place.
+- On phones, the **Offline** pill no longer covers the spaces in the navigation drawer, and picking a space there, from the app’s rail or a plugin’s, keeps the drawer open on its pages.
+- In live editing, typing done as you leave a session is saved once rather than twice, and **Publish** pressed while leaving publishes what you typed.
+- A mark such as bold that starts or ends at a space inside code no longer makes the page reopen in source mode after the visual editor saves it.
+- Offline, a screenshot clip cut short by locking the vault is saved again with its screenshot once you unlock, rather than without it.
+- Unpublishing a page no longer fails, or makes someone’s save or publish of it fail, when both happen at the same moment.
+
+#### UI polish
+
+- In the desktop app, the **Offline** pill shows in the titlebar rather than on the rail.
+
+### Changes
+
+#### App
+
+- Plugins: on phones, a plugin drawing the rail that opens a space with `host.app.navigate` keeps the navigation drawer open on that space's pages, as the app's own rail does. (#702)
+- Offline: a task ticked just as the connection drops, before the app has noticed, waits on the device like any other offline tick, rather than staying unsaved. Ticking a task in a page no longer ticks a box in a code block that now sits where the task was, and reading a long checklist no longer parses the whole page for each tick. (#705)
+- Offline: tasks ticked while reading, then published once you're back online, show in history as ticked, as those published online do. **Undo** and a tick's save can no longer half-happen when another tab changes the page at the same moment, and a tick made on a page another tab changed meanwhile is left out, saying so, rather than ticking whatever task moved into its place. A draft you published yourself is no longer shown as ticks waiting. (#704)
+- Offline: tasks ticked while reading a page show at once and wait on the device as its draft, through a reload, and publish as one version once you're back online. The page says they wait, with **Undo**, and the draft opens with them. If someone changed the page meanwhile, the usual prompt offers **Merge…**. (#701)
+- Offline: the **Offline** pill shows in the desktop app's titlebar rather than on the rail, and on phones only in the top bar, no longer over the spaces in the navigation drawer. A wide browser keeps it at the top of the rail. On phones, picking a space in the navigation drawer keeps the drawer open on that space's pages, rather than closing it before one can be picked. (#696)
+- Live editing: typing done while the app leaves a session is saved once, rather than as two identical drafts, and so is typing done while a draft’s first save waits to start. Typing done while leaving that overlaps the latest draft waits for **Merge…** rather than being saved first, and **Publish** pressed while leaving waits for what the session held to be saved. (#686)
+- Visual editor: a mark that starts or ends at a space inside code, such as bold over `` ` e` `` in the code `` ` e ` ``, keeps that space, so the code is no longer written as a code span of only the space beside the rest, and the page no longer reopens in source mode once it's saved. (#683)
+
+#### Desktop
+
+- Browser clipping, offline: a screenshot clip whose screenshot went in just as the vault locked, before the draft showing it saved, waits for the unlock and is saved again with it, rather than being said saved without it. A text clip's images a lock stopped are said skipped, and stay links. Any change written into this device's queue after a lock now fails rather than being said kept. (#684)
+
+#### Server
+
+- Unpublishing a page no longer fails, or makes someone's save, publish or public link on that page fail, when they happen at the same moment. (#680)
+
+#### Development
+
+- CI: the web app's browser tests run on four runners rather than one, the live tests on one and the rest split across three, cutting a whole run from 16–19 minutes to about 7–11. (#690)
+
 ## 0.30.0-beta.2 - 2026-11-22
 
 ### Highlights
