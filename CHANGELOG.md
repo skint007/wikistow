@@ -4,11 +4,13 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.30.1-beta.1 - 2026-11-23
+
 ### Highlights
 
 #### Maintenance
 
-- This release sends the web clipper extension to Mozilla Add-ons as a listed add-on.
+- The web clipper extension 0.1.3, which the stable release sends to Mozilla Add-ons as a listed add-on.
 
 ### Changes
 
