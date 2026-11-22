@@ -218,6 +218,17 @@ describe('a flush', () => {
     expect(page.state.saves).toBe(0);
   });
 
+  it('saves nothing for a box written `[X]` unticked and ticked again, back as `[x]` (#700)', async () => {
+    const written = '- [X] milk\n- [ ] eggs\n';
+    const page = server(written);
+    const flushed = await flushChanges(page.operations, [
+      task(written, 'milk', false),
+      task(written, 'milk', true),
+    ]);
+    expect(flushed).toEqual({ outcome: 'unchanged', dropped: [] });
+    expect(page.state.saves).toBe(0);
+  });
+
   it('only saves to the draft, never publishing it, when the draft has changes of its own', async () => {
     const draft = `${LIST}\nMy own edit.\n`;
     const page = server(draft, { draftChanges: true });
@@ -666,11 +677,12 @@ describe('an offline draft made only of ticks (#695)', () => {
     expect(tickedBack(big, { ...big, title: 'Shops' })).toBe(false);
   });
 
-  // A box in code where a task was is left out, without the page parsed for a tick made in its own text.
-  it('ticks in the text a tick was made in without finding its tasks again, and checks them elsewhere', () => {
-    const text = '- [ ] milk\n- [ ] bread\n';
-    const bread = { kind: 'task', offset: 11, line: 'bread', checked: true, madeIn: text } as const;
-    expect(applyChanges(text, [bread]).markdown).toBe('- [ ] milk\n- [x] bread\n');
+  // A box in code that now starts where a task was is left out (#700).
+  it('ticks only a task item, never a box in code that starts where one was', () => {
+    const bread = { kind: 'task', offset: 11, line: 'bread', checked: true } as const;
+    expect(applyChanges('- [ ] milk\n- [ ] bread\n', [bread]).markdown).toBe(
+      '- [ ] milk\n- [x] bread\n',
+    );
     const fenced = '```\nxxxxxx\n- [ ] bread\n```\n';
     expect(applyChanges(fenced, [bread])).toEqual({
       markdown: fenced,

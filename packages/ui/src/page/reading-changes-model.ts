@@ -6,12 +6,13 @@ import {
   propertyKeyFor,
   setPageProperty,
   setTask,
-  taskStarts,
+  taskIndex,
   splitFrontmatter,
   summarizeChange,
   type ChangeSummary,
   type PropertyValue,
   type TaskChange,
+  type TaskItem,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { errorMessage } from '../errors';
@@ -118,10 +119,10 @@ export function readingRights({
 export function applyChange(
   markdown: string,
   change: ReadingChange,
-  /** Where its task items start, as `setTask` takes them. */
-  starts?: () => ReadonlySet<number>,
+  /** Its task items, as `setTask` takes them. */
+  items?: () => ReadonlyMap<number, TaskItem>,
 ): { ok: true; markdown: string } | { ok: false; reason: string } {
-  if (change.kind === 'task') return setTask(markdown, change, starts);
+  if (change.kind === 'task') return setTask(markdown, change, items);
   const key = propertyKeyFor(splitFrontmatter(markdown).frontmatter, change.key);
   const edit = setPageProperty(markdown, key, change.value);
   return edit.ok
@@ -138,9 +139,9 @@ export function applyChanges(
   // Ticks move no block, so the task items found in the text before them
   // hold after them, the page parsed once; a property changed moves them.
   let parsed = markdown;
-  const starts = () => taskStarts(parsed);
+  const items = () => taskIndex(parsed);
   for (const change of changes) {
-    const made = applyChange(markdown, change, starts);
+    const made = applyChange(markdown, change, items);
     if (!made.ok) dropped.push({ change, reason: made.reason });
     else {
       markdown = made.markdown;
@@ -169,9 +170,18 @@ export function onlyTicked(before: PagePayload, after: PagePayload): boolean {
  * ticked as `[X]` and ticked again comes back as `[x]`, the same (#700).
  */
 export function tickedBack(before: PagePayload, after: PagePayload): boolean {
-  if (!onlyTicked(before, after)) return false;
-  const { ticked, unticked } = summarizeChange(before.markdown, after.markdown);
-  return ticked === 0 && unticked === 0;
+  return onlyTicked(before, after) && sameTicks(before.markdown, after.markdown);
+}
+
+/** Whether `after` is `before` with every box as it was, though `[X]` may be `[x]` now (#700). */
+function sameTicks(before: string, after: string): boolean {
+  const { ticked, unticked, properties } = summarizeChange(before, after);
+  return (
+    ticked === 0 &&
+    unticked === 0 &&
+    properties.length === 0 &&
+    marksIgnored(before) === marksIgnored(after)
+  );
 }
 
 /** What a flush needs of the page, so it can be tried without a server. */
@@ -235,7 +245,7 @@ export async function flushChanges(
     if (heads.draftHead === null) throw new Error('This page has no draft to change.');
     const before = await operations.openDraft(heads.draftHead);
     const { markdown, dropped } = applyChanges(before, changes);
-    if (markdown === before) {
+    if (markdown === before || sameTicks(before, markdown)) {
       const kept = dropped.length < changes.length;
       return { outcome: heads.draftChanges && kept ? 'in-draft' : 'unchanged', dropped };
     }

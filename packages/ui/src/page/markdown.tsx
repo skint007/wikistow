@@ -326,14 +326,7 @@ const TaskBox: NonNullable<Components['input']> = ({ node, ...props }) => {
       aria-description={hint}
       data-hint={hint}
       onChange={(event) =>
-        change({
-          kind: 'task',
-          offset,
-          line: task.line,
-          checked: event.target.checked,
-          // So it is made in this text again without parsing it (#700).
-          madeIn: here.markdown,
-        })
+        change({ kind: 'task', offset, line: task.line, checked: event.target.checked })
       }
     />
   );

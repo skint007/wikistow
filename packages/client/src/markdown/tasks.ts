@@ -16,16 +16,7 @@ import { wikilinkFromMarkdown, wikilinkSyntax } from './wikilink.ts';
 // Offsets are UTF-16, into the whole Markdown.
 
 /** A task item as ticked: where its list item starts, its line's text after the box, and whether it's done. */
-export type TaskChange = {
-  offset: number;
-  line: string;
-  checked: boolean;
-  /**
-   * The text it was made in, where `offset` was a task item's as the
-   * reader found it: in that same text it needs no parsing (`setTask`).
-   */
-  madeIn?: string;
-};
+export type TaskChange = { offset: number; line: string; checked: boolean };
 
 /** A task item found in a page's Markdown. */
 export type TaskItem = TaskChange & {
@@ -94,50 +85,54 @@ export function taskItems(markdown: string): TaskItem[] {
   return found;
 }
 
-// The task items' starts of the last few texts asked for, as a page read
-// asks again for the same text with each tick it shows.
-const startsOf = new Map<string, ReadonlySet<number>>();
-const STARTS_KEPT = 4;
+// The task items of the last few texts asked for, by where each starts, as
+// a page read asks again for the same text with each tick it shows. Only
+// while the vault is open: `forgetTaskItems` lets them go as it locks.
+const itemsOf = new Map<string, ReadonlyMap<number, TaskItem>>();
+const ITEMS_KEPT = 2;
 
-/** Where each task item in `markdown` starts, as `taskItems` finds them. */
-export function taskStarts(markdown: string): ReadonlySet<number> {
-  let starts = startsOf.get(markdown);
-  if (!starts) {
-    starts = new Set(taskItems(markdown).map((item) => item.offset));
-    startsOf.set(markdown, starts);
-    for (const old of startsOf.keys()) {
-      if (startsOf.size <= STARTS_KEPT) break;
-      startsOf.delete(old);
+/** Every task item in `markdown` by where it starts, as `taskItems` finds them, the last few texts' kept. */
+export function taskIndex(markdown: string): ReadonlyMap<number, TaskItem> {
+  let items = itemsOf.get(markdown);
+  if (!items) {
+    items = new Map(taskItems(markdown).map((item) => [item.offset, item]));
+    itemsOf.set(markdown, items);
+    for (const old of itemsOf.keys()) {
+      if (itemsOf.size <= ITEMS_KEPT) break;
+      itemsOf.delete(old);
     }
   }
-  return starts;
+  return items;
+}
+
+/** Let go of the texts `taskIndex` keeps, as the vault locks. */
+export function forgetTaskItems() {
+  itemsOf.clear();
 }
 
 /**
  * `markdown` with the task `change` names ticked (`checked`) or not. It is
- * the one at `change.offset` if a task item starts there whose line is
- * still `change.line`, never a box in code that now starts where a task
- * did (#700); otherwise the only task item with that line. A task already
- * as asked is left as it is, `[X]` included, so a change made twice
- * changes nothing more. A task that is gone, or whose line more than one
- * task has, is refused with why. `starts` gives the task items' starts,
- * by default `taskStarts(markdown)`: those of a text this one differs from
- * only in what is ticked hold for it too, as ticking leaves every block
- * where it was, so changes made one after another parse the page once.
- * Applied to the very text it was made in (`madeIn`), as the reader shows
- * a tick and a flush makes it in a draft no one changed, nothing is parsed.
+ * the task item at `change.offset` if its line is still `change.line`,
+ * never a box in code that now starts where a task did (#700); otherwise
+ * the only task item with that line. A task already as asked is left as
+ * it is, `[X]` included, so a change made twice changes nothing more. A
+ * task that is gone, or whose line more than one task has, is refused
+ * with why. `items` gives the task items, by default `taskIndex(markdown)`:
+ * those of a text this one differs from only in what is ticked hold for
+ * it too, their boxes as this text has them, as ticking moves no block,
+ * so changes made one after another parse the page once.
  */
 export function setTask(
   markdown: string,
   change: TaskChange,
-  starts: () => ReadonlySet<number> = () => taskStarts(markdown),
+  items: () => ReadonlyMap<number, TaskItem> = () => taskIndex(markdown),
 ): TaskEdit {
-  const there = taskAt(markdown, change.offset);
-  // In the text it was made in, the reader found a task item there already.
-  const started = change.madeIn === markdown || starts().has(change.offset);
-  let task = there?.line === change.line && started ? there : null;
+  // Whether its box is ticked in this text, which may have ticked it since the items were found.
+  const now = (item: TaskItem): TaskItem => ({ ...item, checked: markdown[item.mark] !== ' ' });
+  const there = items().get(change.offset);
+  let task = there?.line === change.line ? now(there) : null;
   if (!task) {
-    const same = taskItems(markdown).filter((item) => item.line === change.line);
+    const same = [...items().values()].filter((item) => item.line === change.line);
     if (same.length !== 1) {
       const named = change.line === '' ? 'That task' : `The task “${change.line}”`;
       return {
@@ -148,7 +143,7 @@ export function setTask(
             : `${named} is on the page more than once now.`,
       };
     }
-    task = same[0] ?? null;
+    task = same[0] ? now(same[0]) : null;
   }
   if (!task || task.checked === change.checked) return { ok: true, markdown };
   const mark = change.checked ? 'x' : ' ';

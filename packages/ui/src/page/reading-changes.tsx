@@ -1,4 +1,5 @@
 import {
+  forgetTaskItems,
   pageOperations,
   revisePayload,
   RevisionId,
@@ -94,6 +95,10 @@ function reaches<T>(own: Map<T | null, T | null>, from: T | null, to: T | null) 
   return false;
 }
 
+// The page text kept to find its tasks goes as the vault locks.
+vaultStore.subscribe(() => {
+  if (vaultStore.get().status !== 'unlocked') forgetTaskItems();
+});
 vaultStore.guardLock(async () => {
   await flushesUnderway();
   return true;
@@ -290,7 +295,10 @@ export function useReadingQueue(
         await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
         return { outcome: 'unchanged', dropped };
       }
-      if (made.markdown === now.markdown) return { outcome: 'unchanged', dropped };
+      // Nothing new, `[X]` ticked off and on again in this batch included (#700).
+      if (made.markdown === now.markdown || tickedBack(now, ticked)) {
+        return { outcome: 'unchanged', dropped };
+      }
       // Never over a draft with changes of its own, which publishing would publish too.
       const clean =
         !info?.heads.draftChanges &&
