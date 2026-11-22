@@ -493,14 +493,18 @@ function PageBody({
   // What was ticked while reading, waiting on this device as the page's
   // draft, the publication with only tasks ticked or not, and its publish
   // (#695): more may be ticked into it, and the page shows it.
-  const shownPublication =
-    model.view === 'published' &&
-    revisionId === info.heads.publishedHead &&
-    revision?.opened.kind === 'current'
-      ? revision.opened.payload
-      : null;
+  // Compared with the draft it is based on, not the publication, whose files
+  // and links are sealed for readers (#695).
+  const { data: changeBase } = useQuery({
+    ...revisionQuery(ctx, page, 'draft', change?.basedOn ?? RevisionId.parse(model.revision)),
+    enabled: !!change?.basedOn,
+  });
+  const basePayload = changeBase?.opened.kind === 'current' ? changeBase.opened.payload : null;
   const ticksOnly =
-    shownPublication !== null &&
+    model.view === 'published' &&
+    !pinned &&
+    revisionId === info.heads.publishedHead &&
+    basePayload !== null &&
     change !== null &&
     !change.newPage &&
     change.failure === null &&
@@ -508,7 +512,7 @@ function PageBody({
     (entries ?? []).every(
       (entry) => entry.id !== page.pageId || entry === change || entry === publishWaiting,
     ) &&
-    onlyTicked(shownPublication, change.payload);
+    onlyTicked(basePayload, change.payload);
   const rights = useMemo(
     () =>
       readingRights({
@@ -1212,9 +1216,10 @@ function PageBody({
                   className="underline underline-offset-2 hover:text-foreground"
                   onClick={() =>
                     void act(async () => {
+                      // The draft first, which refuses if another tab saved into it since.
                       const choices = queueChoices(ctx);
+                      await choices?.discard(change, { version: change.version });
                       await choices?.discard(publishWaiting);
-                      await choices?.discard(change);
                     })
                   }
                 >

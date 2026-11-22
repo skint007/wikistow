@@ -7,7 +7,7 @@ import {
   type Region,
 } from '@wikistow/client';
 import { connection, useOffline } from '../data/connection';
-import { pageWriter } from '../data/offline-changes';
+import { queueQuery } from '../data/offline-changes';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
 import { createContext, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -150,42 +150,51 @@ export function useReadingQueue(
     // Offline, or while a change to the page waits on this device, they go
     // there as an ordinary offline draft of the page and its publish (#695):
     // made in the page's change waiting, or else the draft this device kept,
-    // and published as it then stands, a publish again taking the place of
-    // one waiting. Sent with the rest, someone's edit meanwhile comes back
-    // as the usual conflict, which Merge… settles.
+    // saved there, and published as just saved, over the publication they
+    // were made on, a publish again taking the place of one waiting. A draft
+    // with anything else in it takes them unpublished, as online, and so do
+    // values set by plugin blocks, which change what a draft holds besides
+    // its tasks. Sent with the rest, someone's edit meanwhile comes back as
+    // the usual conflict, which Merge… settles.
     const onDevice = async (changes: readonly ReadingChange[]): Promise<Flushed | null> => {
       const queue = ctx.keptContent?.queue;
       if (!queue) return null;
       if (connection.get().online && (await queue.waiting(pageId)).length === 0) return null;
+      const info = queryClient.getQueryData(pageQuery(ctx, pageId).queryKey);
+      const publishedOn = info?.heads.publishedHead ?? null;
       const entry = await queue.entry(pageId);
       const change = entry?.kind === 'page' && entry.basedOn ? entry : null;
-      let base: { head: RevisionId; payload: PagePayload; region?: Region };
-      if (change?.basedOn) {
-        // Only into what was ticked before: a draft typed offline publishes from the draft.
-        const from = await pageOperations.openRevisionOf(ctx, page, 'draft', change.basedOn);
-        if (!onlyTicked(revisePayload(from.opened, {}), change.payload)) {
-          throw new Error('Your draft has changes of its own: publish it from there.');
-        }
-        base = { head: change.basedOn, payload: change.payload };
-      } else {
-        const info = queryClient.getQueryData(pageQuery(ctx, pageId).queryKey);
-        const head = info?.heads.draftHead;
-        if (!head) throw new Error('This page has no draft to change.');
-        const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);
-        base = { head, payload: revisePayload(draft.opened, {}), region: draft.region };
+      const head = change?.basedOn ?? info?.heads.draftHead;
+      if (!head || !publishedOn) throw new Error('This page has no publication to change.');
+      const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);
+      const based = revisePayload(draft.opened, {});
+      const now = change?.payload ?? based;
+      const { markdown, dropped } = applyChanges(now.markdown, changes);
+      const ticked = { ...now, markdown };
+      // Back as the draft was: what waits goes, as nothing is left to publish.
+      if (change && markdown === based.markdown && onlyTicked(based, ticked)) {
+        await queue.discard({ kind: 'publish', id: pageId });
+        await queue.discard(change, { version: change.version });
+        await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
+        return { outcome: 'unchanged', dropped };
       }
-      const { markdown, dropped } = applyChanges(base.payload.markdown, changes);
-      const writer = pageWriter(ctx);
-      if (markdown !== base.payload.markdown) {
-        await writer.draft(page, { seen: change?.version ?? null }).save({
-          basedOn: base.head,
-          ...(base.region && { basedOnRegion: base.region }),
-          payload: { ...base.payload, markdown },
-          read: readWikilinks,
-        });
+      if (markdown === now.markdown) return { outcome: 'unchanged', dropped };
+      const clean =
+        (change ? onlyTicked(based, change.payload) : !info?.heads.draftChanges) &&
+        changes.every((made) => made.kind === 'task');
+      const version = await queue.saveDraft({
+        page,
+        basedOn: head,
+        region: change?.region ?? draft.region,
+        payload: ticked,
+        seen: change?.version ?? null,
+      });
+      if (clean) {
+        await queue.publish({ page, title: named.current, draftHead: head, version, publishedOn });
       }
-      await writer.publish({ page, title: named.current, draftHead: base.head });
-      return { outcome: 'on-device', dropped };
+      // Shown from the queue before they leave this one, as the draft opens from it.
+      await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
+      return { outcome: clean ? 'on-device' : 'in-draft', dropped };
     };
     const flush = async (changes: readonly ReadingChange[]) => {
       const device = await onDevice(changes);

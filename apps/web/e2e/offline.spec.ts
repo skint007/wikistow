@@ -422,6 +422,15 @@ test('tasks ticked offline wait on this device and publish once back online', as
   const waits = page.getByText('What you ticked waits to be sent');
   const saving = page.getByText('Saving your changes on this device…');
 
+  await test.step('ticked and unticked again before they pause, nothing waits', async () => {
+    await box('bread').check();
+    await box('bread').uncheck();
+    await expect(saving).toBeVisible();
+    await expect(saving).toBeHidden({ timeout: 15_000 });
+    await expect(waits).toBeHidden();
+    await expect(page.getByText('Publish waits to be sent')).toBeHidden();
+  });
+
   await test.step('ticks show at once, and wait on this device', async () => {
     await box('milk').check();
     await box('eggs').check();
