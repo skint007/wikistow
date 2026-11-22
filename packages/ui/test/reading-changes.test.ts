@@ -15,6 +15,7 @@ import {
   readingNotices,
   ReadingQueue,
   onlyTicked,
+  tickedBack,
   readingRights,
   showing,
   type FlushOperations,
@@ -651,5 +652,29 @@ describe('an offline draft made only of ticks (#695)', () => {
       false,
     );
     expect(onlyTicked(payload, { ...payload, title: 'Shops' })).toBe(false);
+  });
+
+  it('is back as it was once each box is as it was, `[X]` ticked again as `[x]` (#700)', () => {
+    const big = { ...payload, markdown: '- [X] milk\n- [ ] eggs\n' };
+    const again = applyChanges(big.markdown, [
+      { kind: 'task', offset: 0, line: 'milk', checked: false },
+      { kind: 'task', offset: 0, line: 'milk', checked: true },
+    ]).markdown;
+    expect(again).toBe('- [x] milk\n- [ ] eggs\n');
+    expect(tickedBack(big, { ...big, markdown: again })).toBe(true);
+    expect(tickedBack(big, { ...big, markdown: '- [ ] milk\n- [ ] eggs\n' })).toBe(false);
+    expect(tickedBack(big, { ...big, title: 'Shops' })).toBe(false);
+  });
+
+  // A box in code where a task was is left out, without the page parsed for a tick made in its own text.
+  it('ticks in the text a tick was made in without finding its tasks again, and checks them elsewhere', () => {
+    const text = '- [ ] milk\n- [ ] bread\n';
+    const bread = { kind: 'task', offset: 11, line: 'bread', checked: true, madeIn: text } as const;
+    expect(applyChanges(text, [bread]).markdown).toBe('- [ ] milk\n- [x] bread\n');
+    const fenced = '```\nxxxxxx\n- [ ] bread\n```\n';
+    expect(applyChanges(fenced, [bread])).toEqual({
+      markdown: fenced,
+      dropped: [{ change: bread, reason: 'The task “bread” isn’t on the page any more.' }],
+    });
   });
 });

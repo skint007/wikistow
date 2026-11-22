@@ -6,10 +6,12 @@ import {
   propertyKeyFor,
   setPageProperty,
   setTask,
+  taskStarts,
   splitFrontmatter,
   summarizeChange,
   type ChangeSummary,
   type PropertyValue,
+  type TaskChange,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { errorMessage } from '../errors';
@@ -32,7 +34,7 @@ import type { PageHeads, View, Viewer } from './view-model';
 
 /** A change made while reading: a task ticked or not, or a property set. */
 export type ReadingChange =
-  | { kind: 'task'; offset: number; line: string; checked: boolean }
+  | ({ kind: 'task' } & TaskChange)
   | { kind: 'property'; key: string; value: PropertyValue };
 
 /**
@@ -116,8 +118,10 @@ export function readingRights({
 export function applyChange(
   markdown: string,
   change: ReadingChange,
+  /** Where its task items start, as `setTask` takes them. */
+  starts?: () => ReadonlySet<number>,
 ): { ok: true; markdown: string } | { ok: false; reason: string } {
-  if (change.kind === 'task') return setTask(markdown, change);
+  if (change.kind === 'task') return setTask(markdown, change, starts);
   const key = propertyKeyFor(splitFrontmatter(markdown).frontmatter, change.key);
   const edit = setPageProperty(markdown, key, change.value);
   return edit.ok
@@ -131,10 +135,17 @@ export function applyChanges(
   changes: readonly ReadingChange[],
 ): { markdown: string; dropped: Dropped[] } {
   const dropped: Dropped[] = [];
+  // Ticks move no block, so the task items found in the text before them
+  // hold after them, the page parsed once; a property changed moves them.
+  let parsed = markdown;
+  const starts = () => taskStarts(parsed);
   for (const change of changes) {
-    const made = applyChange(markdown, change);
-    if (made.ok) markdown = made.markdown;
-    else dropped.push({ change, reason: made.reason });
+    const made = applyChange(markdown, change, starts);
+    if (!made.ok) dropped.push({ change, reason: made.reason });
+    else {
+      markdown = made.markdown;
+      if (change.kind === 'property') parsed = markdown;
+    }
   }
   return { markdown, dropped };
 }
@@ -150,6 +161,17 @@ export function onlyTicked(before: PagePayload, after: PagePayload): boolean {
     return JSON.stringify({ ...kept, markdown: marksIgnored(kept.markdown) });
   };
   return plain(before) === plain(after);
+}
+
+/**
+ * Whether `after` is `before` as it was, ticks and all: only tasks ticked
+ * or not, each as `before` has it, so nothing is left to publish. A box
+ * ticked as `[X]` and ticked again comes back as `[x]`, the same (#700).
+ */
+export function tickedBack(before: PagePayload, after: PagePayload): boolean {
+  if (!onlyTicked(before, after)) return false;
+  const { ticked, unticked } = summarizeChange(before.markdown, after.markdown);
+  return ticked === 0 && unticked === 0;
 }
 
 /** What a flush needs of the page, so it can be tried without a server. */

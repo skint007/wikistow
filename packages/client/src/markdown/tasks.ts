@@ -16,7 +16,16 @@ import { wikilinkFromMarkdown, wikilinkSyntax } from './wikilink.ts';
 // Offsets are UTF-16, into the whole Markdown.
 
 /** A task item as ticked: where its list item starts, its line's text after the box, and whether it's done. */
-export type TaskChange = { offset: number; line: string; checked: boolean };
+export type TaskChange = {
+  offset: number;
+  line: string;
+  checked: boolean;
+  /**
+   * The text it was made in, where `offset` was a task item's as the
+   * reader found it: in that same text it needs no parsing (`setTask`).
+   */
+  madeIn?: string;
+};
 
 /** A task item found in a page's Markdown. */
 export type TaskItem = TaskChange & {
@@ -85,17 +94,48 @@ export function taskItems(markdown: string): TaskItem[] {
   return found;
 }
 
+// The task items' starts of the last few texts asked for, as a page read
+// asks again for the same text with each tick it shows.
+const startsOf = new Map<string, ReadonlySet<number>>();
+const STARTS_KEPT = 4;
+
+/** Where each task item in `markdown` starts, as `taskItems` finds them. */
+export function taskStarts(markdown: string): ReadonlySet<number> {
+  let starts = startsOf.get(markdown);
+  if (!starts) {
+    starts = new Set(taskItems(markdown).map((item) => item.offset));
+    startsOf.set(markdown, starts);
+    for (const old of startsOf.keys()) {
+      if (startsOf.size <= STARTS_KEPT) break;
+      startsOf.delete(old);
+    }
+  }
+  return starts;
+}
+
 /**
  * `markdown` with the task `change` names ticked (`checked`) or not. It is
- * the one at `change.offset` if that task's line is still `change.line`;
- * otherwise the only task item with that line. A task already as asked is
- * left as it is, `[X]` included, so a change made twice changes nothing
- * more. A task that is gone, or whose line more than one task has, is
- * refused with why.
+ * the one at `change.offset` if a task item starts there whose line is
+ * still `change.line`, never a box in code that now starts where a task
+ * did (#700); otherwise the only task item with that line. A task already
+ * as asked is left as it is, `[X]` included, so a change made twice
+ * changes nothing more. A task that is gone, or whose line more than one
+ * task has, is refused with why. `starts` gives the task items' starts,
+ * by default `taskStarts(markdown)`: those of a text this one differs from
+ * only in what is ticked hold for it too, as ticking leaves every block
+ * where it was, so changes made one after another parse the page once.
+ * Applied to the very text it was made in (`madeIn`), as the reader shows
+ * a tick and a flush makes it in a draft no one changed, nothing is parsed.
  */
-export function setTask(markdown: string, change: TaskChange): TaskEdit {
+export function setTask(
+  markdown: string,
+  change: TaskChange,
+  starts: () => ReadonlySet<number> = () => taskStarts(markdown),
+): TaskEdit {
   const there = taskAt(markdown, change.offset);
-  let task = there?.line === change.line ? there : null;
+  // In the text it was made in, the reader found a task item there already.
+  const started = change.madeIn === markdown || starts().has(change.offset);
+  let task = there?.line === change.line && started ? there : null;
   if (!task) {
     const same = taskItems(markdown).filter((item) => item.line === change.line);
     if (same.length !== 1) {

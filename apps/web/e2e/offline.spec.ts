@@ -480,5 +480,22 @@ test('tasks ticked offline wait on this device and publish once back online', as
   await expect(box('eggs')).not.toBeChecked();
   // History says what was ticked, as for ticks published online (#700).
   await page.getByRole('button', { name: 'History' }).click();
-  await expect(page.getByRole('dialog', { name: 'History' }).getByText('Ticked 2')).toBeVisible();
+  const history = page.getByRole('dialog', { name: 'History' });
+  await expect(history.getByText('Ticked 2')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(history).toBeHidden();
+
+  await test.step('ticked as the connection drops, before the app knows, they wait on this device (#700)', async () => {
+    await context.setOffline(true);
+    await box('eggs').check();
+    // Saved at once, as on leaving, so its own request is the first to get no answer.
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+    await expect(waits).toBeVisible({ timeout: 15_000 });
+    await expect(offline).toBeVisible();
+    await expect(page.getByText(/Couldn’t save your change/)).toBeHidden();
+    await context.setOffline(false);
+    await expect(waits).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByText(/Published v3$/)).toBeVisible({ timeout: 30_000 });
+    await expect(box('eggs')).toBeChecked();
+  });
 });

@@ -766,15 +766,16 @@ function PageBody({
   const latest = model.view === 'published' && revisionId === publishedHead;
   // What was ticked offline, as the page's draft waiting to be published, shows over the publication.
   const readMarkdown = (ticksOnly ? change?.payload.markdown : payload?.markdown) ?? null;
+  // Only where they may be made: never on a version the address names (#700).
   const shownMarkdown = useMemo(
     () =>
-      readMarkdown !== null && latest
+      readMarkdown !== null && latest && !pinned
         ? applyChanges(
             readMarkdown,
             queued.changes.map(({ change }) => change),
           ).markdown
         : readMarkdown,
-    [readMarkdown, latest, queued.changes],
+    [readMarkdown, latest, pinned, queued.changes],
   );
   // An older version can't change, but its boxes say why to editors.
   const readingHere = useMemo(
