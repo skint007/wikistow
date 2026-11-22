@@ -89,7 +89,8 @@ export function taskItems(markdown: string): TaskItem[] {
 // a page read asks again for the same text with each tick it shows. Only
 // while the vault is open: `forgetTaskItems` lets them go as it locks.
 const itemsOf = new Map<string, ReadonlyMap<number, TaskItem>>();
-const ITEMS_KEPT = 2;
+// Enough for a batch with a few properties set among its ticks, each a text of its own.
+const ITEMS_KEPT = 8;
 
 /** Every task item in `markdown` by where it starts, as `taskItems` finds them, the last few texts' kept. */
 export function taskIndex(markdown: string): ReadonlyMap<number, TaskItem> {

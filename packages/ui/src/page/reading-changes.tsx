@@ -100,7 +100,7 @@ let keptFor: ClientContext | null = null;
 vaultStore.subscribe(() => {
   const now = vaultStore.get();
   const ctx = now.status === 'unlocked' ? now.ctx : null;
-  if (ctx !== keptFor) forgetTaskItems();
+  if (!ctx || ctx !== keptFor) forgetTaskItems();
   keptFor = ctx;
 });
 vaultStore.guardLock(async () => {
