@@ -7,6 +7,7 @@ import { connection } from './data/connection';
 import { vaultStore } from './vault/store';
 import { startAppPlugins, type AppPlugins } from './plugins/app-plugins';
 import type { Place } from './plugins/location';
+import { sameHref } from './shell/same-href';
 import { createRouter, type HistoryState, type RouterHistory } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 import { z } from 'zod';
@@ -87,8 +88,10 @@ async function navigateTo(router: AppRouter, to: Place, state: HistoryState): Pr
     case 'space': {
       const params = { spaceId: SpaceId.parse(to.spaceId) };
       // State given for where it is already marks that entry, rather than add one Back returns to.
-      const here =
-        router.buildLocation({ to: '/s/$spaceId', params }).href === router.state.location.href;
+      const here = sameHref(
+        router.buildLocation({ to: '/s/$spaceId', params }).href,
+        router.state.location.href,
+      );
       return router.navigate({
         to: '/s/$spaceId',
         params,

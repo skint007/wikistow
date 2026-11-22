@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
+import { sameHref } from './same-href';
 import { Menu, Search } from 'lucide-react';
 import type { ClientContext, SpaceId } from '@wikistow/client';
 import {
@@ -70,11 +71,11 @@ const SlotContext = createContext<Slot | null>(null);
 /** How long after a press in the drawer's rail a plugin's move to a space counts as that press's (#697). */
 const RAIL_TAP_MS = 1000;
 
-/** Whether `spaceId`'s page is where the router is now. */
+/** Whether `spaceId`'s page is where the router is now, with or without a trailing slash. */
 function isHere(router: ReturnType<typeof useRouter>, spaceId: SpaceId) {
-  return (
-    router.buildLocation({ to: '/s/$spaceId', params: { spaceId } }).href ===
-    router.state.location.href
+  return sameHref(
+    router.buildLocation({ to: '/s/$spaceId', params: { spaceId } }).href,
+    router.state.location.href,
   );
 }
 
@@ -188,10 +189,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const railTapAt = useRef<number | null>(null);
   useEffect(() => {
     if (!drawer) return;
+    // Only in a plugin's view there: the app's own tiles mark their moves themselves.
     const note = (event: Event) => {
-      if (event.target instanceof Node && drawerRail.current?.contains(event.target)) {
-        railTapAt.current = performance.now();
-      }
+      const view = event.target instanceof Element && event.target.closest('[data-plugin-view]');
+      if (view && drawerRail.current?.contains(view)) railTapAt.current = performance.now();
     };
     const kinds = ['pointerdown', 'click', 'keydown'] as const;
     for (const kind of kinds) document.addEventListener(kind, note, true);
@@ -213,6 +214,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const kept = tapped !== undefined && tapped === lastTap.current;
     lastTap.current = null;
+    // A press before a move counts for no move after it.
+    railTapAt.current = null;
     if (!kept) closeDrawer();
   }, [href, tapped, closeDrawer]);
   const [offers] = useState(() => new PaletteOffers());
