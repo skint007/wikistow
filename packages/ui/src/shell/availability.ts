@@ -105,7 +105,10 @@ const RULES: Record<ActionKind, { offline: boolean; holds: 'never' | 'made' | 'c
   // A folder made offline isn't on the server yet, so nothing goes into it
   // there, nor into what is under it, made offline too.
   into: { offline: true, holds: 'made' },
-  tick: { offline: false, holds: 'changed' },
+  // Offline it waits on this device as an offline draft and its publish (#695).
+  // Anything else waiting holds it, but the page lets more ticks through
+  // while only what was ticked waits (`ticksOnly`).
+  tick: { offline: true, holds: 'changed' },
   'chat-edit': { offline: false, holds: 'changed' },
   // Wait on this device, after the changes before them (#330). The writer
   // folds them into an item made offline, or drops it.

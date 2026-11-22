@@ -233,6 +233,12 @@ const QueuedPublishJson = z.strictObject({
   draftHead: RevisionId.nullable(),
   draft: z.strictObject({ version: z.number().int(), payload: Payload }).nullable(),
   sending: z.strictObject({ revisionId: RevisionId }).nullable(),
+  /**
+   * For what was ticked while reading (#695): the publication it was ticked
+   * on, which it publishes over only if it is still the page's, so it never
+   * publishes a page unpublished, or published by someone, meanwhile.
+   */
+  publishedOn: RevisionId.exactOptional(),
   failure: Failure.nullable(),
   at: z.number(),
 });
@@ -1027,14 +1033,23 @@ export class OfflineQueue {
     page,
     title,
     draftHead,
+    version,
+    publishedOn,
   }: {
     page: PageRef;
     title: string;
     draftHead: RevisionId;
+    /** Only the page's change at this version, as it was just saved, never one saved into since. */
+    version?: number;
+    /** Only over this publication (`QueuedPublish.publishedOn`). */
+    publishedOn?: RevisionId;
   }): Promise<void> {
     await this.#store.queueExclusive(async () => {
       const change = await this.#page(page.pageId);
       if (change?.newPage) throw new Error('A page made offline is published once it is made');
+      if (version !== undefined && change?.version !== version) {
+        throw new ApiError(409, 'stale-head', 'The draft changed on this device meanwhile');
+      }
       const before = await this.#publish(page.pageId);
       if (before) await this.#handOver(before);
       await this.#write({
@@ -1045,6 +1060,7 @@ export class OfflineQueue {
         draftHead: change ? null : draftHead,
         draft: change ? { version: change.version, payload: change.payload } : null,
         sending: null,
+        ...(publishedOn && { publishedOn }),
         failure: null,
         at: before?.at ?? this.#at(),
       });
@@ -1134,10 +1150,16 @@ export class OfflineQueue {
     });
   }
 
-  /** Forget a change, as the person chose. */
-  async discard(key: QueueKey): Promise<void> {
+  /**
+   * Forget a change, as the person chose: with `version`, only the page's
+   * change as it was then, never one saved into since, as in another tab.
+   */
+  async discard(key: QueueKey, { version }: { version?: number } = {}): Promise<void> {
     const entry = await this.#store.queueExclusive(async () => {
       const entry = await this.#keyed(key);
+      if (version !== undefined && entry?.kind === 'page' && entry.version !== version) {
+        throw new ApiError(409, 'stale-head', 'The draft changed on this device meanwhile');
+      }
       if (entry?.kind === 'publish') await this.#handOver(entry);
       if (entry) await this.#remove(entry);
       return entry;
@@ -1675,6 +1697,10 @@ export class OfflineQueue {
       const { heads } = await loadPage(ctx, entry.id);
       // Published already: by this, whose answer was lost.
       if (heads.publishedHead !== sending.revisionId) {
+        // What was ticked publishes only over what it was ticked on (#695).
+        if (entry.publishedOn && heads.publishedHead !== entry.publishedOn) {
+          return this.#stop(entry, TICKED_ON_CHANGED);
+        }
         // Its public copy changes too, which the person checks online (ADR 0005).
         const { links } = await ctx.api.call(publicLinkRoutes.list, {
           params: { spaceId: entry.spaceId },
@@ -1987,6 +2013,11 @@ const MOVES_ACROSS: QueueFailure = {
 const PUBLISH_CHANGED: QueueFailure = {
   kind: 'refused',
   message: 'The page changed after you pressed Publish. Look it over, then publish it again.',
+};
+const TICKED_ON_CHANGED: QueueFailure = {
+  kind: 'refused',
+  message:
+    'It was published or unpublished meanwhile, so what you ticked went into the draft only. Look it over, then publish it from there.',
 };
 const LINKED: QueueFailure = {
   kind: 'refused',

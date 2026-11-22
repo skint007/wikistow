@@ -892,6 +892,46 @@ describe('moves and publishes made offline', () => {
     expect((await published(ctx, page))?.count).toBe(1);
   });
 
+  it('publish what was ticked only over the publication it was ticked on, and only as saved (#695)', async () => {
+    const { ctx, queue, page, payload } = await device();
+    await pages.publishPage(ctx, page);
+    const { heads, permissionVersion } = await pages.loadPage(ctx, page.pageId);
+    if (!heads.publishedHead || !heads.draftHead) throw new Error('Not published');
+    const version = await queue.saveDraft({
+      page,
+      basedOn: heads.draftHead,
+      region: null,
+      payload: payload('- [x] milk'),
+      seen: null,
+    });
+    // Saved into since, as by another tab: neither its publish nor its undo goes.
+    const later = await queue.saveDraft({
+      page,
+      basedOn: heads.draftHead,
+      region: null,
+      payload: payload('- [x] milk\nmore'),
+      seen: version,
+    });
+    const at = {
+      page,
+      title: 'Plan',
+      draftHead: heads.draftHead,
+      publishedOn: heads.publishedHead,
+    };
+    await expect(queue.publish({ ...at, version })).rejects.toThrow(/changed on this device/);
+    await expect(queue.discard({ kind: 'page', id: page.pageId }, { version })).rejects.toThrow(
+      /changed on this device/,
+    );
+    await queue.publish({ ...at, version: later });
+    // Unpublished meanwhile: the draft goes, the publish stops rather than publish it again.
+    await pages.unpublishPage(ctx, page, { publishedHead: heads.publishedHead, permissionVersion });
+    expect(await queue.send(ctx)).toBe('sent');
+    expect((await queue.entries()).map((entry) => [entry.kind, entry.failure?.kind])).toEqual([
+      ['publish', 'refused'],
+    ]);
+    expect((await pages.loadPage(ctx, page.pageId)).heads.publishedHead).toBeNull();
+  });
+
   it('send a folder put in order offline in one request, leaving out what moved away', async () => {
     const { ctx, queue, spaceId, page } = await device();
     const second = await pages.createPage(ctx, { spaceId, parentId: null, title: 'Agenda' });

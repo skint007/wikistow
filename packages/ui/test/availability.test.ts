@@ -31,7 +31,8 @@ const TABLE: Record<ActionKind, [string, string, string, string, string, string]
   drag: /*                    */ [OK, OK, OK, OK, OK, OK],
   reorder: /*                 */ [OK, OK, HELD, OK, OK, HELD],
   into: /*                    */ [OK, OK, HELD, OK, OK, HELD],
-  tick: /*                    */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],
+  // Offline, an offline draft and its publish (#695).
+  tick: /*                    */ [OK, HELD, HELD, OK, HELD, HELD],
   'chat-edit': /*             */ [OK, CHAT_SENDS_FIRST, CHAT_SENDS_FIRST, NEEDS, NEEDS, NEEDS],
   rename: /*                  */ [OK, OK, OK, OK, OK, OK],
   picture: /*                 */ [OK, HELD, HELD, NEEDS, NEEDS, NEEDS],

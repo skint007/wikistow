@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test';
 import {
   bodyStart,
+  marksIgnored,
   setPageProperty,
   setTask,
   taskAt,
@@ -163,5 +164,14 @@ describe('a property set in a page’s whole Markdown', () => {
     const markdown = '---\nservings: 4\nnotes: |\n  Fresh.\n---\n';
     expect(setPageProperty(markdown, 'servings', 4)).toEqual({ ok: true, markdown });
     expect(setPageProperty(markdown, 'notes', 'Stale.').ok).toBe(false);
+  });
+});
+
+describe('text compared with what is ticked aside', () => {
+  it('empties every task’s box, nested ones too, and nothing that only looks like one', () => {
+    expect(marksIgnored('- - [x] milk\n- - [ ] milk\n')).toBe('- - [ ] milk\n- - [ ] milk\n');
+    expect(marksIgnored('> - [X] tea\n')).toBe('> - [ ] tea\n');
+    const code = '```\n- [x] example\n```\n';
+    expect(marksIgnored(code)).toBe(code);
   });
 });

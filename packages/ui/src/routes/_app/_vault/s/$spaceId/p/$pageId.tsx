@@ -8,6 +8,7 @@ import {
   pageOperations,
   PageId,
   publicationOperations,
+  revisePayload,
   RevisionId,
   type FolderId,
   type OpenedPayload,
@@ -107,6 +108,7 @@ import {
 } from '../../../../../../page/reading-changes';
 import {
   applyChanges,
+  onlyTicked,
   originOf,
   pageFlushing,
   readingRights,
@@ -217,7 +219,8 @@ function PageView() {
   useEffect(() => setSharingLinkFor(null), [pageId]);
   const sharingLink = sharingLinkFor === pageId;
   // Changes made while reading, kept across the publications they make.
-  const reading = useReadingQueue(ctx, page);
+  // The page's name, for the publish of what was ticked while reading it offline (#695).
+  const reading = useReadingQueue(ctx, page, tree?.pages.find((p) => p.id === pageId)?.title ?? '');
   const queued = useSyncExternalStore(reading.subscribe, reading.get);
   // Turning to the draft or an older version saves what waits first, at
   // once, saying only how that went; the draft opens once it's done, on
@@ -488,6 +491,38 @@ function PageBody({
     (entry): entry is queueOperations.QueuedPublish =>
       entry.kind === 'publish' && entry.id === page.pageId && entry.failure === null,
   );
+  // What was ticked while reading, waiting on this device as the page's
+  // draft, the publication with only tasks ticked or not, and its publish
+  // (#695): more may be ticked into it, and the page shows it.
+  // Compared with the draft it is based on, not the publication, whose files
+  // and links are sealed for readers (#695).
+  const { data: changeBase } = useQuery({
+    ...revisionQuery(ctx, page, 'draft', change?.basedOn ?? RevisionId.parse(model.revision)),
+    enabled: !!change?.basedOn,
+  });
+  // Prepared as the flush prepares it, so their formats compare alike.
+  const basePayload = useMemo(
+    () => (changeBase?.opened.kind === 'current' ? revisePayload(changeBase.opened, {}) : null),
+    [changeBase],
+  );
+  // Parsed once for each draft, not on each render: a page may be long.
+  const changeOnlyTicked = useMemo(
+    () => !!basePayload && !!change && onlyTicked(basePayload, change.payload),
+    [basePayload, change],
+  );
+  const ticksOnly =
+    model.view === 'published' &&
+    !pinned &&
+    revisionId === info.heads.publishedHead &&
+    basePayload !== null &&
+    change !== null &&
+    !change.newPage &&
+    change.failure === null &&
+    publishWaiting !== undefined &&
+    (entries ?? []).every(
+      (entry) => entry.id !== page.pageId || entry === change || entry === publishWaiting,
+    ) &&
+    changeOnlyTicked;
   const rights = useMemo(
     () =>
       readingRights({
@@ -498,7 +533,7 @@ function PageBody({
         pinned,
         publicLink: linked,
         offline: availability.offline,
-        waiting,
+        waiting: ticksOnly ? 'none' : waiting,
       }),
     [
       info.role,
@@ -510,6 +545,7 @@ function PageBody({
       linked,
       availability.offline,
       waiting,
+      ticksOnly,
     ],
   );
 
@@ -725,7 +761,8 @@ function PageBody({
   }, [showThread, navigate]);
   const title = pageTitle(payload?.title ?? null);
   const latest = model.view === 'published' && revisionId === publishedHead;
-  const readMarkdown = payload?.markdown ?? null;
+  // What was ticked offline, as the page's draft waiting to be published, shows over the publication.
+  const readMarkdown = (ticksOnly ? change?.payload.markdown : payload?.markdown) ?? null;
   const shownMarkdown = useMemo(
     () =>
       readMarkdown !== null && latest
@@ -1179,7 +1216,29 @@ function PageBody({
           </h1>
         )}
         <Pills pills={model.pills} older={model.older} onSwitch={(view) => void go(view)}>
-          {publishWaiting && (
+          {ticksOnly && change && publishWaiting && (
+            <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
+              What you ticked waits to be sent
+              {/* Once it is being sent, its draft may have landed already. */}
+              {!change.sending && !publishWaiting.sending && (
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() =>
+                    void act(async () => {
+                      // The draft first, which refuses if another tab saved into it since.
+                      const choices = queueChoices(ctx);
+                      await choices?.discard(change, { version: change.version });
+                      await choices?.discard(publishWaiting);
+                    })
+                  }
+                >
+                  Undo
+                </button>
+              )}
+            </span>
+          )}
+          {publishWaiting && !ticksOnly && (
             <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
               Publish waits to be sent
               <button

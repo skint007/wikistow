@@ -117,3 +117,14 @@ export function setTask(markdown: string, change: TaskChange): TaskEdit {
     markdown: markdown.slice(0, task.mark) + mark + markdown.slice(task.mark + 1),
   };
 }
+
+/**
+ * `markdown` with every task's box emptied, nested ones too: two texts the
+ * same this way differ only in what is ticked (#695).
+ */
+export function marksIgnored(markdown: string): string {
+  let plain = markdown;
+  for (const { mark } of taskItems(markdown))
+    plain = plain.slice(0, mark) + ' ' + plain.slice(mark + 1);
+  return plain;
+}

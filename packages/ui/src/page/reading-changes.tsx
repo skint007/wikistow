@@ -6,15 +6,19 @@ import {
   type PagePayload,
   type Region,
 } from '@wikistow/client';
+import { connection, useOffline } from '../data/connection';
+import { queueQuery } from '../data/offline-changes';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
-import { createContext, useCallback, useEffect, useMemo } from 'react';
+import { createContext, useCallback, useEffect, useMemo, useRef } from 'react';
 import { contentChanged } from '../data/content-changed';
 import { pageQuery, publicLinksQuery, revisionQuery } from '../data/queries';
 import { vaultStore } from '../vault/store';
 import { readWikilinks } from './page-reader';
 import {
+  applyChanges,
   flushChanges,
+  onlyTicked,
   flushesUnderway,
   holding,
   inTurn,
@@ -72,8 +76,14 @@ window.addEventListener('beforeunload', (event) => {
  * reloading it with changes waiting asks first, as the browser lets it,
  * and so does locking the vault if they can't be saved.
  */
-export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef): ReadingQueue {
+export function useReadingQueue(
+  ctx: ClientContext,
+  page: pageOperations.PageRef,
+  title: string,
+): ReadingQueue {
   const queryClient = useQueryClient();
+  const named = useRef(title);
+  named.current = title;
   const { spaceId, pageId } = page;
   const { queue, shownHere } = useMemo(() => {
     const page = { spaceId, pageId };
@@ -137,7 +147,72 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
         queryKey: pageQuery(ctx, pageId).queryKey,
         refetchType: 'all',
       });
+    // Offline, or while a change to the page waits on this device, they go
+    // there as an ordinary offline draft of the page and its publish (#695):
+    // made in the page's change waiting, or else the draft this device kept,
+    // saved there, and published as just saved, over the publication they
+    // were made on, a publish again taking the place of one waiting. A draft
+    // with anything else in it takes them unpublished, as online, and so do
+    // values set by plugin blocks, which change what a draft holds besides
+    // its tasks. Sent with the rest, someone's edit meanwhile comes back as
+    // the usual conflict, which Merge… settles.
+    const onDevice = async (changes: readonly ReadingChange[]): Promise<Flushed | null> => {
+      const queue = ctx.keptContent?.queue;
+      if (!queue) return null;
+      if (connection.get().online && (await queue.waiting(pageId)).length === 0) return null;
+      const info = queryClient.getQueryData(pageQuery(ctx, pageId).queryKey);
+      const waiting = await queue.waiting(pageId);
+      const entry = waiting.find((each) => each.kind === 'page');
+      const change = entry?.kind === 'page' && entry.basedOn ? entry : null;
+      const publish = waiting.find((each) => each.kind === 'publish');
+      // Only as the page allowed them (`ticksOnly`): its draft and that draft's
+      // publish, or nothing, waiting; never the kept draft behind a change
+      // already on its way, which would leave out what it holds (#695).
+      const others = waiting.filter((each) => each !== entry && each !== publish);
+      if (others.length > 0 || (publish && !change) || change?.failure) {
+        throw new Error('Waits until your change made offline is sent');
+      }
+      // Over the publication the first of them was ticked on, not one their own publish made.
+      const publishedOn =
+        (publish?.kind === 'publish' && publish.publishedOn) || info?.heads.publishedHead;
+      const head = change?.basedOn ?? info?.heads.draftHead;
+      if (!head || !publishedOn) throw new Error('This page has no publication to change.');
+      const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);
+      const based = revisePayload(draft.opened, {});
+      const now = change?.payload ?? based;
+      const { markdown, dropped } = applyChanges(now.markdown, changes);
+      const ticked = { ...now, markdown };
+      // Back as the draft was: what waits goes, as nothing is left to publish,
+      // unless it is on its way, when it may have landed already.
+      const sending = change?.sending || (publish?.kind === 'publish' && publish.sending);
+      if (change && !sending && markdown === based.markdown && onlyTicked(based, ticked)) {
+        await queue.discard(change, { version: change.version });
+        await queue.discard({ kind: 'publish', id: pageId });
+        await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
+        return { outcome: 'unchanged', dropped };
+      }
+      if (markdown === now.markdown) return { outcome: 'unchanged', dropped };
+      const clean =
+        (change
+          ? !change.sending && onlyTicked(based, change.payload)
+          : !info?.heads.draftChanges) && changes.every((made) => made.kind === 'task');
+      const version = await queue.saveDraft({
+        page,
+        basedOn: head,
+        region: change?.region ?? draft.region,
+        payload: ticked,
+        seen: change?.version ?? null,
+      });
+      if (clean) {
+        await queue.publish({ page, title: named.current, draftHead: head, version, publishedOn });
+      }
+      // Shown from the queue before they leave this one, as the draft opens from it.
+      await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
+      return { outcome: clean ? 'on-device' : 'in-draft', dropped };
+    };
     const flush = async (changes: readonly ReadingChange[]) => {
+      const device = await onDevice(changes);
+      if (device) return device;
       published = null;
       opened.clear();
       let flushed: Flushed;
@@ -176,6 +251,7 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
         left = !shown;
       },
     };
+    // `named` is read as each flush starts, so a rename doesn't make a new queue.
   }, [ctx, queryClient, spaceId, pageId]);
   useEffect(() => {
     shownHere(true);
@@ -221,7 +297,7 @@ export function useReadingQueue(ctx: ClientContext, page: pageOperations.PageRef
 
 /** The queue's notices, said as they change, in the page's quiet note style. */
 export function ReadingNotices({ state }: { state: ReadingState }) {
-  const notices = readingNotices(state);
+  const notices = readingNotices(state, useOffline());
   return (
     <div role="status" className="grid gap-1 text-sm text-muted-foreground empty:hidden">
       {notices.map((notice) => (
