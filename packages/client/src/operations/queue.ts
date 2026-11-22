@@ -626,8 +626,7 @@ export class OfflineQueue {
         const waiting = await this.#publish(save.page.pageId);
         if (
           (before?.version ?? null) !== save.seen ||
-          (waiting &&
-            (!waiting.publishedOn || (waiting.draft && waiting.draft.version !== save.seen)))
+          (waiting && (!waiting.publishedOn || waiting.draft?.version !== save.seen))
         ) {
           throw new ApiError(409, 'stale-head', 'This page was changed in another window');
         }
@@ -1780,7 +1779,9 @@ export class OfflineQueue {
     }
     const draftHead = entry.draftHead;
     if (!draftHead) return this.#stop(entry, PUBLISH_CHANGED);
-    const recorded = entry.sending ? entry : await this.#recordPublish(entry);
+    const recorded = entry.sending
+      ? entry
+      : await this.#recordPublish(entry, (now) => !now.draft && now.draftHead === draftHead);
     if (!recorded?.sending) return;
     // Published again meanwhile, with a draft of its own to save first: the next round sends it.
     if (recorded.draft || recorded.draftHead !== draftHead) return;
@@ -1830,7 +1831,9 @@ export class OfflineQueue {
     read: ReadWikilinks | undefined,
   ): Promise<'offline' | void> {
     const page = { spaceId: entry.spaceId, pageId: entry.id };
-    const recorded = entry.sending ? entry : await this.#recordPublish(entry);
+    const recorded = entry.sending
+      ? entry
+      : await this.#recordPublish(entry, (now) => now.draft?.version === draft.version);
     if (!recorded?.sending) return;
     // Published again meanwhile, of another version: the next round sends that one.
     if (recorded.draft?.version !== draft.version) return;
@@ -1874,12 +1877,17 @@ export class OfflineQueue {
   // Record what the next publish request sends, before it is sent; one that
   // saves a draft first waits while a tab is in the page's live session.
   // The entry as recorded, which may have been published again since `entry` was read.
-  async #recordPublish(entry: QueuedPublish): Promise<QueuedPublish | null> {
+  // Only one still as `same` says, so a publish pressed meanwhile is recorded by the round that sends it.
+  async #recordPublish(
+    entry: QueuedPublish,
+    same: (current: QueuedPublish) => boolean,
+  ): Promise<QueuedPublish | null> {
     const held = this.#held;
     return this.#store.queueExclusive(async () => {
       const current = await this.#publish(entry.id);
       if (!current || current.failure) return null;
       if (current.sending) return current;
+      if (!same(current)) return null;
       if (current.draft && held && (await held(current.id).catch(() => false))) return null;
       const recorded = { ...current, sending: { revisionId: newId(RevisionId) } };
       await this.#write(recorded);

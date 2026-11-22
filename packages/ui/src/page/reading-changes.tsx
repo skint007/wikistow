@@ -58,6 +58,36 @@ export const ReadingChanges = createContext<ReadingChangesHere | null>(null);
 // A flush outlives the page it was made on: leaving starts one, and its
 // queue's guards go with the page. So closing the app or locking the vault
 // waits for every page's, the pages left included.
+// For each page, the versions of its draft entry this tab's own reading
+// saves and Undo made, by the one each replaced (null for none), and the
+// publications its own online flushes made: so a change made on what this
+// tab had before it heard of its own save, in this visit to the page or
+// one before, still goes on top of it (#700).
+const ownSaves = new Map<string, Map<number | null, number | null>>();
+const ownPublications = new Map<string, Map<string | null, string | null>>();
+
+function ownMoves<T>(all: Map<string, Map<T | null, T | null>>, pageId: string) {
+  let moves = all.get(pageId);
+  if (!moves) all.set(pageId, (moves = new Map()));
+  return moves;
+}
+
+/** Whether `from`, as a change was made on it, is `to` now, or became it only through `own`. */
+function reaches<T>(own: Map<T | null, T | null>, from: T | null, to: T | null) {
+  const seen = new Set<T | null>();
+  for (let at = from; !seen.has(at); at = own.get(at) ?? null) {
+    if (at === to) return true;
+    seen.add(at);
+    if (!own.has(at)) return false;
+  }
+  return false;
+}
+
+/** The page's draft entry at `version` was dropped by the person here, as by Undo. */
+export function noteUndone(pageId: string, version: number) {
+  ownMoves(ownSaves, pageId).set(version, null);
+}
+
 vaultStore.guardLock(async () => {
   await flushesUnderway();
   return true;
@@ -162,24 +192,8 @@ export function useReadingQueue(
     // values set by plugin blocks, which change what a draft holds besides
     // its tasks. Sent with the rest, someone's edit meanwhile comes back as
     // the usual conflict, which Merge… settles.
-    // The versions of the page's draft entry this queue's own saves made,
-    // by the one each was saved over (null for none), so a change made on
-    // the entry before its flush's save was heard still goes on top of it.
-    const mine = new Map<number | null, number | null>();
-    // The publications this queue's own flushes made online, by the one each replaced.
-    const ownPublished = new Map<string | null, string | null>();
-    // Whether `from`, the entry's version or the publication a change was
-    // made on, is `to` now, or became it only through this queue's own
-    // saves or publishes (`own`).
-    const reaches = <T,>(own: Map<T | null, T | null>, from: T | null, to: T | null) => {
-      const seen = new Set<T | null>();
-      for (let at = from; !seen.has(at); at = own.get(at) ?? null) {
-        if (at === to) return true;
-        seen.add(at);
-        if (!own.has(at)) return false;
-      }
-      return false;
-    };
+    const mine = ownMoves(ownSaves, pageId);
+    const ownPublished = ownMoves(ownPublications, pageId);
     const onDevice = async (
       changes: readonly ReadingChange[],
       on: readonly (MadeOn | null)[],
@@ -201,8 +215,7 @@ export function useReadingQueue(
       // Its publish of the draft as it is: one saved over since, as from the
       // draft view, would publish the version before.
       const stalePublish =
-        publish &&
-        (!publish.publishedOn || (publish.draft && publish.draft.version !== change?.version));
+        publish && (!publish.publishedOn || publish.draft?.version !== change?.version);
       if (others.length > 0 || (publish && !change) || stalePublish || change?.failure) {
         throw new Error('Waits until your change made offline is sent');
       }

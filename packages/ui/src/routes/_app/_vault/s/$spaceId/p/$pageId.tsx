@@ -103,6 +103,7 @@ import {
 import { PublishDialog } from '../../../../../../page/publish-dialog';
 import {
   ReadingChanges,
+  noteUndone,
   ReadingNotices,
   useReadingQueue,
 } from '../../../../../../page/reading-changes';
@@ -521,7 +522,7 @@ function PageBody({
     change.failure === null &&
     // Queued by ticks, not by the person's own Publish, of the draft as it is (#700).
     publishWaiting?.publishedOn !== undefined &&
-    (!publishWaiting.draft || publishWaiting.draft.version === change.version) &&
+    publishWaiting.draft?.version === change.version &&
     (entries ?? []).every(
       (entry) => entry.id !== page.pageId || entry === change || entry === publishWaiting,
     ) &&
@@ -1238,6 +1239,7 @@ function PageBody({
                     void act(async () => {
                       // Both at once, refused if another tab saved into the draft or published since.
                       await queueChoices(ctx)?.undoTicked(page, change.version);
+                      noteUndone(page.pageId, change.version);
                       // And those still waiting for their pause, made on the draft it dropped.
                       reading.discard();
                     })
