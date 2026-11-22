@@ -616,28 +616,29 @@ export class OfflineQueue {
     save: DraftSave,
     publish: Omit<PublishOrder, 'version'> | null,
   ): Promise<number> {
-    // What was saved, told even if its publish couldn't be written after it.
-    const done: { saved?: { entry: QueuedPage; made: boolean } } = {};
-    try {
-      await this.#store.queueExclusive(async () => {
-        // Only over the entry as the caller saw it: not one another tab
-        // dropped since, nor one whose publish isn't the ticks' own (#700).
-        const before = await this.#page(save.page.pageId);
-        const waiting = await this.#publish(save.page.pageId);
-        if (
-          (before?.version ?? null) !== save.seen ||
-          (waiting && (!waiting.publishedOn || waiting.draft?.version !== save.seen))
-        ) {
-          throw new ApiError(409, 'stale-head', 'This page was changed in another window');
-        }
-        done.saved = await this.#saveDraft(save);
-        if (publish) await this.#queuePublish({ ...publish, version: done.saved.entry.version });
-      });
-    } finally {
-      if (done.saved) this.#saved(done.saved.entry, done.saved.made || publish !== null);
-    }
-    if (!done.saved) throw new Error('Nothing was saved');
-    return done.saved.entry.version;
+    const { entry, made } = await this.#store.queueExclusive(async () => {
+      // Only over the entry as the caller saw it: not one another tab
+      // dropped since, nor one whose publish isn't the ticks' own (#700).
+      const before = await this.#page(save.page.pageId);
+      const waiting = await this.#publish(save.page.pageId);
+      if (
+        (before?.version ?? null) !== save.seen ||
+        (waiting && (!waiting.publishedOn || waiting.draft?.version !== save.seen))
+      ) {
+        throw new ApiError(409, 'stale-head', 'This page was changed in another window');
+      }
+      const saved = await this.#saveDraft(save);
+      try {
+        if (publish) await this.#queuePublish({ ...publish, version: saved.entry.version });
+      } catch (error) {
+        // Its publish couldn't be written: the entry goes back as it was, never the ticks alone.
+        await (before ? this.#write(before) : this.#remove(saved.entry));
+        throw error;
+      }
+      return saved;
+    });
+    this.#saved(entry, made || publish !== null);
+    return entry.version;
   }
 
   #saved(entry: QueuedPage, made: boolean) {

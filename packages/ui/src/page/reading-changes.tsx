@@ -53,6 +53,9 @@ export type ReadingChangesHere = {
 /** Why a change made before another tab or window changed the page is left out (#700). */
 const CHANGED_ELSEWHERE = 'The page was changed in another tab or window meanwhile.';
 
+/** Why a change made while another change to the page waits on this device is left out. */
+const WAITS_ON_DEVICE = 'Another change to this page waits to be sent from this device.';
+
 export const ReadingChanges = createContext<ReadingChangesHere | null>(null);
 
 // A flush outlives the page it was made on: leaving starts one, and its
@@ -81,11 +84,6 @@ function reaches<T>(own: Map<T | null, T | null>, from: T | null, to: T | null) 
     if (!own.has(at)) return false;
   }
   return false;
-}
-
-/** The page's draft entry at `version` was dropped by the person here, as by Undo. */
-export function noteUndone(pageId: string, version: number) {
-  ownMoves(ownSaves, pageId).set(version, null);
 }
 
 vaultStore.guardLock(async () => {
@@ -216,8 +214,13 @@ export function useReadingQueue(
       // draft view, would publish the version before.
       const stalePublish =
         publish && (!publish.publishedOn || publish.draft?.version !== change?.version);
+      // Left out, not kept to try again: tried once nothing waits, they would
+      // go online over whatever the change waiting made of the page (#700).
       if (others.length > 0 || (publish && !change) || stalePublish || change?.failure) {
-        throw new Error('Waits until your change made offline is sent');
+        return {
+          outcome: 'unchanged',
+          dropped: changes.map((made) => ({ change: made, reason: WAITS_ON_DEVICE })),
+        };
       }
       // Over the publication the first of them was ticked on, not one their own publish made.
       const publishedOn = publish?.publishedOn ?? info?.heads.publishedHead;
@@ -271,10 +274,11 @@ export function useReadingQueue(
         return { outcome: 'unchanged', dropped };
       }
       if (made.markdown === now.markdown) return { outcome: 'unchanged', dropped };
+      // Never over a draft with changes of its own, which publishing would publish too.
       const clean =
-        (change
-          ? !change.sending && onlyTicked(based, change.payload)
-          : !info?.heads.draftChanges) && kept.every((each) => each.kind === 'task');
+        !info?.heads.draftChanges &&
+        (!change || (!change.sending && onlyTicked(based, change.payload))) &&
+        kept.every((each) => each.kind === 'task');
       // Saved and published at once, so another tab can't type in between (#700).
       const saved = await queue.saveTicked(
         {

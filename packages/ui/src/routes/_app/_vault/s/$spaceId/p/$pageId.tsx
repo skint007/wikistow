@@ -103,7 +103,6 @@ import {
 import { PublishDialog } from '../../../../../../page/publish-dialog';
 import {
   ReadingChanges,
-  noteUndone,
   ReadingNotices,
   useReadingQueue,
 } from '../../../../../../page/reading-changes';
@@ -1239,8 +1238,8 @@ function PageBody({
                     void act(async () => {
                       // Both at once, refused if another tab saved into the draft or published since.
                       await queueChoices(ctx)?.undoTicked(page, change.version);
-                      noteUndone(page.pageId, change.version);
-                      // And those still waiting for their pause, made on the draft it dropped.
+                      // And those still waiting for their pause, made on the draft it dropped;
+                      // those saving now are left out, as made on a draft that is gone.
                       reading.discard();
                     })
                   }
