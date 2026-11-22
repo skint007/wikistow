@@ -1,5 +1,6 @@
 import { PluginError, type AppHost, type PageRef, type PageVersion } from '@wikistow/plugin-sdk';
 import { describe, expect, it, vi } from 'vite-plus/test';
+import type { HistoryState } from '@tanstack/react-router';
 import { createLocation, type Place } from '../src/plugins/location.ts';
 import type { ShownPage } from '../src/plugins/runtime.ts';
 import type { LaunchScript } from '../src/plugins/script-worker.ts';
@@ -307,5 +308,27 @@ describe('the plugin runtime', () => {
     expect(() => host.events.on('space.opened', () => {})).toThrow(
       expect.objectContaining({ code: 'unsupported' }),
     );
+  });
+
+  // The drawer marks a space opened from its rail this way (#697).
+  it('goes with the history state its listeners give, told where it goes', async () => {
+    const location = createLocation();
+    const went: [Place, HistoryState][] = [];
+    location.navigateWith(async (to, state) => void went.push([to, state]));
+    const told: Place[] = [];
+    location.onNavigate((to) => void told.push(to));
+    // The shell declares its own state's keys.
+    const tap = { drawerTap: 1 } as HistoryState;
+    const stop = location.onNavigate((to) => (to.kind === 'space' ? tap : undefined));
+    await location.navigate({ kind: 'space', spaceId: 's' });
+    await location.navigate({ kind: 'page', ...PAGE });
+    stop();
+    await location.navigate({ kind: 'space', spaceId: 's' });
+    expect(told).toHaveLength(3);
+    expect(went).toEqual([
+      [{ kind: 'space', spaceId: 's' }, { drawerTap: 1 }],
+      [{ kind: 'page', ...PAGE }, {}],
+      [{ kind: 'space', spaceId: 's' }, {}],
+    ]);
   });
 });

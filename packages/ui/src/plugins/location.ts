@@ -1,3 +1,4 @@
+import type { HistoryState } from '@tanstack/react-router';
 import type { AppLocation, Destination, PageRef, PluginEvents } from '@wikistow/plugin-sdk';
 import { PluginError } from '@wikistow/plugin-sdk';
 
@@ -9,6 +10,11 @@ export type Place =
   | Exclude<Destination, { kind: 'plugin' | 'settings' }>
   | { kind: 'plugin'; pluginId: string; viewId: string }
   | { kind: 'settings'; pluginId: string };
+
+/** Goes to a place, with the history state for the entry it makes. */
+type Navigator = (to: Place, state: HistoryState) => Promise<void>;
+/** Told of a move before it goes, giving any history state for it. */
+type Going = (to: Place) => HistoryState | void;
 
 const OTHER: AppLocation = { kind: 'other' };
 
@@ -33,9 +39,9 @@ export function createLocation() {
   /** Who shows it: only their own end clears it. */
   let showing: object | null = null;
   let location: AppLocation = OTHER;
-  let navigator: ((to: Place) => Promise<void>) | null = null;
+  let navigator: Navigator | null = null;
   const listeners = new Set<() => void>();
-  const goers = new Set<() => void>();
+  const goers = new Set<Going>();
 
   const update = () => {
     location =
@@ -78,8 +84,8 @@ export function createLocation() {
           update();
         });
     },
-    /** Navigate with `go` until the returned function runs. */
-    navigateWith(go: (to: Place) => Promise<void>) {
+    /** Navigate with `go` until the returned function runs, with the history state `onNavigate`'s listeners gave. */
+    navigateWith(go: Navigator) {
       navigator = go;
       return () => {
         if (navigator === go) navigator = null;
@@ -87,14 +93,17 @@ export function createLocation() {
     },
     navigate(to: Place): Promise<void> {
       if (!navigator) return Promise.reject(new PluginError('unsupported', 'Nowhere to go here'));
-      for (const going of goers) going();
-      return navigator(to);
+      const state: HistoryState = {};
+      for (const going of goers) Object.assign(state, going(to));
+      return navigator(to, state);
     },
     /**
      * Call `going` as a plugin navigates, before it goes, even to where the
      * person is already, such as to close search, whose results it drew.
+     * What it returns goes in the history entry the move makes, as the
+     * drawer's mark of a space opened from its rail (#697).
      */
-    onNavigate(going: () => void) {
+    onNavigate(going: Going) {
       goers.add(going);
       return () => void goers.delete(going);
     },

@@ -159,6 +159,36 @@ export function AppShell({ children }: { children: ReactNode }) {
     },
     [navigate],
   );
+  // A plugin drawing the rail opens a space with `host.app.navigate`, which
+  // keeps the drawer open the same way when a tap in the drawer's rail made
+  // it, rather than one in the sidebar or a script's (#697): a plugin's
+  // views share one `host`, so the rail's own call can't be told apart.
+  const drawerRail = useRef<HTMLDivElement>(null);
+  const railTapped = useRef(false);
+  useEffect(() => {
+    if (!drawer) return;
+    const note = (event: Event) => {
+      railTapped.current =
+        event.target instanceof Node && (drawerRail.current?.contains(event.target) ?? false);
+    };
+    document.addEventListener('pointerdown', note, true);
+    document.addEventListener('keydown', note, true);
+    return () => {
+      railTapped.current = false;
+      document.removeEventListener('pointerdown', note, true);
+      document.removeEventListener('keydown', note, true);
+    };
+  }, [drawer]);
+  useEffect(
+    () =>
+      plugins.location.onNavigate((to) => {
+        const fromRail = railTapped.current;
+        railTapped.current = false;
+        if (to.kind !== 'space' || !fromRail) return;
+        return { drawerTap: (lastTap.current = Math.random()) };
+      }),
+    [plugins.location],
+  );
   useEffect(() => {
     const kept = tapped !== undefined && tapped === lastTap.current;
     lastTap.current = null;
@@ -221,7 +251,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 showCloseButton={false}
               >
                 <DialogTitle className="sr-only">Navigation</DialogTitle>
-                <div className="w-[70px] shrink-0">
+                <div ref={drawerRail} className="w-[70px] shrink-0">
                   <Rail
                     onNavigate={closeDrawer}
                     onSpace={openSpace}
