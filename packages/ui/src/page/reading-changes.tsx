@@ -7,6 +7,7 @@ import {
   type PagePayload,
   type Region,
 } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
 import { connection, useOffline } from '../data/connection';
 import { queueQuery } from '../data/offline-changes';
 import { useQueryClient } from '@tanstack/react-query';
@@ -52,6 +53,12 @@ export type ReadingChangesHere = {
 
 /** Why a change made before another tab or window changed the page is left out (#700). */
 const CHANGED_ELSEWHERE = 'The page was changed in another tab or window meanwhile.';
+
+/** Null for the queue's refusal (`stale-head`) of a save of what was read before another tab changed the page. */
+function refusedHere(error: unknown): null {
+  if (error instanceof ApiError && error.code === 'stale-head') return null;
+  throw error;
+}
 
 /** Why a change made while another change to the page waits on this device is left out. */
 const WAITS_ON_DEVICE = 'Another change to this page waits to be sent from this device.';
@@ -251,6 +258,12 @@ export function useReadingQueue(
         if (!here && made.kind === 'property') cut = true;
       });
       const left = moved.map((made) => ({ change: made, reason: CHANGED_ELSEWHERE }));
+      // Refused by the queue, as another tab changed the page since it was read
+      // here: left out, never kept to go online later over that change (#700).
+      const everyChangeLeftOut = changes.map((made) => ({
+        change: made,
+        reason: CHANGED_ELSEWHERE,
+      }));
       if (kept.length === 0) return { outcome: 'unchanged', dropped: left };
       const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);
       const based = revisePayload(draft.opened, {});
@@ -268,7 +281,9 @@ export function useReadingQueue(
         made.markdown === based.markdown &&
         onlyTicked(based, ticked)
       ) {
-        await queue.undoTicked(page, change.version);
+        if ((await queue.undoTicked(page, change.version).catch(refusedHere)) === null) {
+          return { outcome: 'unchanged', dropped: everyChangeLeftOut };
+        }
         mine.set(change.version, null);
         await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
         return { outcome: 'unchanged', dropped };
@@ -280,25 +295,28 @@ export function useReadingQueue(
         (!change || (!change.sending && onlyTicked(based, change.payload))) &&
         kept.every((each) => each.kind === 'task');
       // Saved and published at once, so another tab can't type in between (#700).
-      const saved = await queue.saveTicked(
-        {
-          page,
-          basedOn: head,
-          region: change?.region ?? draft.region,
-          payload: ticked,
-          seen: version,
-        },
-        clean
-          ? {
-              page,
-              title: named.current,
-              draftHead: head,
-              publishedOn,
-              // Said in history as a flush online says it (ADR 0008).
-              change: summarizeChange(based.markdown, made.markdown),
-            }
-          : null,
-      );
+      const saved = await queue
+        .saveTicked(
+          {
+            page,
+            basedOn: head,
+            region: change?.region ?? draft.region,
+            payload: ticked,
+            seen: version,
+          },
+          clean
+            ? {
+                page,
+                title: named.current,
+                draftHead: head,
+                publishedOn,
+                // Said in history as a flush online says it (ADR 0008).
+                change: summarizeChange(based.markdown, made.markdown),
+              }
+            : null,
+        )
+        .catch(refusedHere);
+      if (saved === null) return { outcome: 'unchanged', dropped: everyChangeLeftOut };
       mine.set(version, saved);
       // Shown from the queue before they leave this one, as the draft opens from it.
       await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });

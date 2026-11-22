@@ -1161,18 +1161,18 @@ export class OfflineQueue {
   }
 
   /**
-   * Delete `entry`, and the files it names that no other entry does. A file
+   * Delete each entry `gone` names, and the files they name that no other entry does. A file
    * added since its last save, which no entry names yet, stays for the save
    * about to name it. Only from within `queueExclusive`.
    */
-  async #remove(entry: QueueEntry) {
+  async #remove(...gone: QueueEntry[]) {
     const others = (await this.entries()).filter(
-      (other) => other.id !== entry.id || other.kind !== entry.kind,
+      (other) => !gone.some((entry) => other.id === entry.id && other.kind === entry.kind),
     );
     const named = new Set(others.flatMap(filesOf));
-    const own = [...new Set(filesOf(entry))];
+    const own = [...new Set(gone.flatMap(filesOf))];
     const names = own.filter((blobHash) => !named.has(blobHash)).map((h) => this.#blobName(h));
-    await this.#store.queue.remove([this.#entryName(entry), ...names]);
+    await this.#store.queue.remove([...gone.map((entry) => this.#entryName(entry)), ...names]);
   }
 
   /** Those of `refs` whose files this queue holds, added offline and not sent yet. */
@@ -1253,8 +1253,8 @@ export class OfflineQueue {
       ) {
         throw new ApiError(409, 'stale-head', 'The draft changed on this device meanwhile');
       }
-      await this.#remove(publish);
-      await this.#remove(change);
+      // In one write, so neither goes without the other.
+      await this.#remove(publish, change);
     });
     this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
     this.#emit({ kind: 'discarded', spaceId: page.spaceId, pageId: page.pageId });
