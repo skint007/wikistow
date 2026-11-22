@@ -53,8 +53,15 @@ test('on a phone, picking a space keeps the drawer open for its pages', async ({
   await drawer.getByRole('link', { name: 'Garden', exact: true }).click();
   await expect(page).toHaveURL(/\/s\/[^/]+\/?$/);
   await expect(drawer.getByRole('treeitem', { name: 'Seed list' })).toBeVisible();
+  // Tapped again on the space shown, it adds no entry for Back to land on (#697).
+  await drawer.getByRole('link', { name: 'Garden', exact: true }).click();
+  await expect(drawer.getByRole('treeitem', { name: 'Seed list' })).toBeVisible();
   await drawer.getByRole('link', { name: 'Trash' }).click();
   await expect(drawer).toBeHidden();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/s\/[^/]+\/?$/);
+  await page.goBack();
+  await expect(page.locator('#page-title')).toHaveValue('Seed list');
 });
 
 /**
@@ -132,8 +139,17 @@ test('on a phone, a plugin’s rail opening a space keeps the drawer open for it
   await expect(drawer.getByRole('heading', { name: 'Garden', level: 2 })).toBeVisible();
   // Still open once the space has opened behind it.
   await expect(drawer.getByRole('treeitem', { name: 'Seed list' })).toBeVisible();
+  // The space shown already, tapped again: still open, with no entry added for Back.
+  await drawer.getByRole('button', { name: 'Garden' }).click();
+  await expect(drawer.getByRole('treeitem', { name: 'Seed list' })).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('#page-title')).toHaveValue('Bean soup');
+  await expect(drawer).toBeHidden();
 
   // A page opened from the rail closes it, as any other move does.
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/s/${garden}/?$`));
+  await page.getByRole('button', { name: 'Open navigation' }).click();
   await drawer.getByRole('button', { name: 'Soup' }).click();
   await expect(drawer).toBeHidden();
   await expect(page.locator('#page-title')).toHaveValue('Bean soup');

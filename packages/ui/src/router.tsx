@@ -84,12 +84,18 @@ async function navigateTo(router: AppRouter, to: Place, state: HistoryState): Pr
   // Only state given, so a move with none keeps the router's own.
   const given = Object.keys(state).length > 0 ? { state } : {};
   switch (to.kind) {
-    case 'space':
+    case 'space': {
+      const params = { spaceId: SpaceId.parse(to.spaceId) };
+      // State given for where it is already marks that entry, rather than add one Back returns to.
+      const here =
+        router.buildLocation({ to: '/s/$spaceId', params }).href === router.state.location.href;
       return router.navigate({
         to: '/s/$spaceId',
-        params: { spaceId: SpaceId.parse(to.spaceId) },
+        params,
         ...given,
+        replace: here && 'state' in given,
       });
+    }
     case 'folder':
       return router.navigate({
         to: '/s/$spaceId/f/$folderId',

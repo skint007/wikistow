@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useLocation, useNavigate, useRouterState } from '@tanstack/react-router';
+import { useLocation, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { Menu, Search } from 'lucide-react';
 import type { ClientContext, SpaceId } from '@wikistow/client';
 import {
@@ -67,6 +67,17 @@ const SlotContext = createContext<Slot | null>(null);
  * as the command palette, listing what is offered there
  * (`usePaletteEntries`).
  */
+/** How long after a press in the drawer's rail a plugin's move to a space counts as that press's (#697). */
+const RAIL_TAP_MS = 1000;
+
+/** Whether `spaceId`'s page is where the router is now. */
+function isHere(router: ReturnType<typeof useRouter>, spaceId: SpaceId) {
+  return (
+    router.buildLocation({ to: '/s/$spaceId', params: { spaceId } }).href ===
+    router.state.location.href
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [spaceId, setSpace] = useState<SpaceId | null>(null);
   const [drawer, setDrawer] = useState(false);
@@ -152,39 +163,49 @@ export function AppShell({ children }: { children: ReactNode }) {
   const href = useRouterState({ select: (state) => state.location.href });
   const tapped = useRouterState({ select: (state) => state.location.state.drawerTap });
   const lastTap = useRef<number | null>(null);
+  const router = useRouter();
   const openSpace = useCallback(
     (spaceId: SpaceId) => {
       const tap = (lastTap.current = Math.random());
-      void navigate({ to: '/s/$spaceId', params: { spaceId }, state: { drawerTap: tap } });
+      // The space shown already: its entry is marked, with none added that Back would return to.
+      const here = isHere(router, spaceId);
+      void navigate({
+        to: '/s/$spaceId',
+        params: { spaceId },
+        state: { drawerTap: tap },
+        replace: here,
+      });
     },
-    [navigate],
+    [navigate, router],
   );
   // A plugin drawing the rail opens a space with `host.app.navigate`, which
   // keeps the drawer open the same way when a tap in the drawer's rail made
-  // it, rather than one in the sidebar or a script's (#697): a plugin's
-  // views share one `host`, so the rail's own call can't be told apart.
+  // it, rather than one in the sidebar or a script's (#697). A plugin's views
+  // share one `host`, so the call can't say where it came from: it counts
+  // only within `RAIL_TAP_MS` of a press in the drawer's rail, once, so a
+  // press that opened nothing doesn't keep the drawer open for a move long after.
   const drawerRail = useRef<HTMLDivElement>(null);
-  const railTapped = useRef(false);
+  const railTapAt = useRef<number | null>(null);
   useEffect(() => {
     if (!drawer) return;
     const note = (event: Event) => {
-      railTapped.current =
-        event.target instanceof Node && (drawerRail.current?.contains(event.target) ?? false);
+      if (event.target instanceof Node && drawerRail.current?.contains(event.target)) {
+        railTapAt.current = performance.now();
+      }
     };
-    document.addEventListener('pointerdown', note, true);
-    document.addEventListener('keydown', note, true);
+    const kinds = ['pointerdown', 'click', 'keydown'] as const;
+    for (const kind of kinds) document.addEventListener(kind, note, true);
     return () => {
-      railTapped.current = false;
-      document.removeEventListener('pointerdown', note, true);
-      document.removeEventListener('keydown', note, true);
+      railTapAt.current = null;
+      for (const kind of kinds) document.removeEventListener(kind, note, true);
     };
   }, [drawer]);
   useEffect(
     () =>
       plugins.location.onNavigate((to) => {
-        const fromRail = railTapped.current;
-        railTapped.current = false;
-        if (to.kind !== 'space' || !fromRail) return;
+        const at = railTapAt.current;
+        railTapAt.current = null;
+        if (to.kind !== 'space' || at === null || performance.now() - at > RAIL_TAP_MS) return;
         return { drawerTap: (lastTap.current = Math.random()) };
       }),
     [plugins.location],
