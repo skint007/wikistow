@@ -27,7 +27,6 @@ import {
   applyChanges,
   marksIgnored,
   ReadingChangeJson,
-  sameChange,
   withMadeOn,
   type ReadingChange,
 } from '../reading-changes.ts';
@@ -287,17 +286,20 @@ const QueuedReadingJson = z.strictObject({
   id: PageId,
   spaceId: SpaceId,
   title: z.string(),
-  changes: z.array(z.strictObject({ change: ReadingChangeJson, on: RevisionId.nullable() })),
+  changes: z.array(
+    z.strictObject({ id: z.number().int(), change: ReadingChangeJson, on: RevisionId.nullable() }),
+  ),
   version: z.number().int(),
-  told: z.string().nullable(),
+  told: z.array(z.string()),
   sending: z
     .strictObject({
       draftId: RevisionId,
       publicationId: RevisionId,
       prepared: z
         .strictObject({
-          sent: z.array(ReadingChangeJson),
+          sent: z.array(z.number().int()),
           publishing: z.boolean(),
+          replacing: RevisionId.nullable(),
           clean: z.boolean(),
           dropped: z.array(z.string()),
           change: z.strictObject({
@@ -612,28 +614,28 @@ export class OfflineQueue {
     page,
     title,
     changes,
-    publishedOn,
   }: {
     page: PageRef;
     title: string;
-    changes: readonly ReadingChange[];
-    /** The publication they were made on, if known. */
-    publishedOn: RevisionId | null;
+    /** Each with the publication it was made on, if known. */
+    changes: readonly { change: ReadingChange; on: RevisionId | null }[];
   }): Promise<void> {
     if (changes.length === 0) return;
     await this.#store.queueExclusive(async () => {
       const before = await this.#reading(page.pageId);
       if (before?.failure) throw new Error('Your earlier changes to this page wait for you');
+      const version = before?.version ?? this.#firstVersion();
       await this.#write({
         kind: 'reading',
         id: page.pageId,
         spaceId: page.spaceId,
         title,
+        // Each its own ID, counted on from the version, so a send takes out just those it sent.
         changes: changes
-          .map((change) => ({ change, on: publishedOn }))
+          .map((made, index) => ({ ...made, id: version + index + 1 }))
           .reduce(withMadeOn, before?.changes ?? []),
-        version: (before?.version ?? this.#firstVersion()) + 1,
-        told: before?.told ?? null,
+        version: version + changes.length,
+        told: before?.told ?? [],
         sending: before?.sending ?? null,
         failure: null,
         at: before?.at ?? this.#at(),
@@ -1262,6 +1264,17 @@ export class OfflineQueue {
       if (entry?.kind === 'reading' && entry.sending) {
         throw new Error('What you ticked is being sent already');
       }
+      // What an earlier send said stays to be told, as what Undo drops is only what waits.
+      if (entry?.kind === 'reading' && !entry.failure && entry.told.length > 0) {
+        const message = entry.told.join(' ');
+        await this.#write({
+          ...entry,
+          changes: [],
+          told: [],
+          failure: { kind: 'refused', message },
+        });
+        return entry;
+      }
       if (entry?.kind === 'publish') await this.#handOver(entry);
       if (entry) await this.#remove(entry);
       return entry;
@@ -1539,29 +1552,29 @@ export class OfflineQueue {
         spaceId: entry.spaceId,
         pageId: entry.id,
         ...flushed.published,
-        changes: flushed.sent,
+        changes: entry.changes
+          .filter(({ id }) => flushed.sent.includes(id))
+          .map(({ change }) => change),
       });
     }
     const said = readingTold(flushed);
     await this.#store.queueExclusive(async () => {
       const current = await this.#reading(entry.id);
       if (!current) return;
-      const told = [current.told, said].filter(Boolean).join(' ') || null;
-      const left = current.changes.filter(
-        ({ change }) => !flushed.sent.some((sent) => sameChange(sent, change)),
-      );
+      const told = [...new Set([...current.told, ...(said ? [said] : [])])];
+      const left = current.changes.filter(({ id }) => !flushed.sent.includes(id));
       // Made since: sent next, what this said told once they are.
       if (left.length > 0) {
         await this.#write({ ...current, changes: left, told, sending: null });
         return;
       }
-      if (told) {
+      if (told.length > 0) {
         await this.#write({
           ...current,
           changes: left,
-          told: null,
+          told: [],
           sending: null,
-          failure: { kind: 'refused', message: told },
+          failure: { kind: 'refused', message: told.join(' ') },
         });
       } else await this.#remove(current);
     });
@@ -1591,10 +1604,12 @@ export class OfflineQueue {
     ): ReadingFlushed => ({
       outcome,
       // Before a draft was worked out, they were all looked at: none goes again.
-      sent: prepared?.sent ?? entry.changes.map(({ change }) => change),
+      sent: prepared?.sent ?? entry.changes.map(({ id }) => id),
       dropped: prepared?.dropped ?? [],
       ...more,
     });
+    // Shown over the page until it shows the publication; not one confirmed
+    // after someone published over it, which it would show over theirs.
     const published = (replaced: RevisionId | null) =>
       told('published', { published: { revisionId: sending.publicationId, replaced } });
     // Whether a version recorded before its request is on the server.
@@ -1615,17 +1630,23 @@ export class OfflineQueue {
           on,
           (text = openRevisionOf(ctx, page, 'published', on).then(
             (opened) => marksIgnored(revisePayload(opened.opened, {}).markdown),
-            () => null,
+            // Gone, it is unknown; any other failure stops this send, to go again (#698).
+            (error: unknown) => {
+              if (error instanceof ApiError && error.code === 'not-found') return null;
+              throw error;
+            },
           )),
         );
       return text;
     };
     for (let tries = 1; ; tries++) {
       const { heads } = await loadPage(ctx, entry.id);
-      if (heads.publishedHead === sending.publicationId) return published(null);
+      if (heads.publishedHead === sending.publicationId) {
+        return published(prepared?.replacing ?? null);
+      }
       // Published, its answer lost, and someone published after it.
       if (prepared?.publishing && (await there('published', sending.publicationId))) {
-        return published(null);
+        return told('published');
       }
       // Refused with why, as the server would.
       if (heads.draftHead === null) throw new Error(COPY_MESSAGE);
@@ -1642,13 +1663,14 @@ export class OfflineQueue {
           entry.changes.map(async ({ on }) => on === null || (await source(on)) !== plain),
         );
         const changes = entry.changes.map(({ change }) => change);
+        const ids = entry.changes.map(({ id }) => id);
         const made = applyChanges(payload.markdown, changes, { strict: (i) => strict[i] ?? true });
         const dropped = made.dropped.map(({ reason }) => reason);
         if (made.markdown === payload.markdown) {
           const kept = made.dropped.length < changes.length;
           return {
             outcome: heads.draftChanges && kept ? 'in-draft' : 'unchanged',
-            sent: changes,
+            sent: ids,
             dropped,
           };
         }
@@ -1656,8 +1678,9 @@ export class OfflineQueue {
         // someone, would come back as `duplicate` though this didn't land.
         draftId = newId(RevisionId);
         prepared = {
-          sent: changes,
+          sent: ids,
           publishing: false,
+          replacing: null,
           clean: !heads.draftChanges,
           change: summarizeChange(payload.markdown, made.markdown),
           dropped,
@@ -1686,7 +1709,7 @@ export class OfflineQueue {
       if (links.some((link) => link.pageId === entry.id)) {
         return told('in-draft', { publicLink: true });
       }
-      prepared = { ...prepared, publishing: true };
+      prepared = { ...prepared, publishing: true, replacing: heads.publishedHead };
       const now = await this.#prepareReading(entry, draftId, prepared);
       if (now === 'gone-here') return told(now);
       try {
@@ -2385,8 +2408,8 @@ type ReadingFlushed = {
     | 'saved-over'
     | 'gone-here'
     | 'held';
-  /** The changes sent, which those made since go after. */
-  sent: readonly ReadingChange[];
+  /** The IDs of the changes sent, which those made since go after. */
+  sent: readonly number[];
   /** Why each change left out was. */
   dropped: string[];
   publicLink?: true;

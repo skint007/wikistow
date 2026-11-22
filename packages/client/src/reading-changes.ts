@@ -89,15 +89,14 @@ export function applyChanges(
  * way differ only in what is ticked, so a task's place in one is its place
  * in the other.
  */
-export const marksIgnored = (markdown: string): string =>
-  markdown.replace(/^([ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[[xX]\]/gm, '$1[ ]');
-
-/** Whether `a` and `b` are the same change: the same thing, set the same way. */
-export const sameChange = (a: ReadingChange, b: ReadingChange): boolean =>
-  sameTarget(a, b) &&
-  (a.kind === 'task'
-    ? b.kind === 'task' && a.checked === b.checked
-    : b.kind === 'property' && JSON.stringify(a.value) === JSON.stringify(b.value));
+export function marksIgnored(markdown: string): string {
+  let plain = markdown;
+  // Each task the reader reads, nested ones too (#698): its mark is one character.
+  for (const { mark } of taskItems(markdown)) {
+    plain = plain.slice(0, mark) + ' ' + plain.slice(mark + 1);
+  }
+  return plain;
+}
 
 /** Whether `a` and `b` set the same task or property, so the later one takes the earlier's place. */
 export const sameTarget = (a: ReadingChange, b: ReadingChange): boolean =>
@@ -111,11 +110,15 @@ export const withChange = (
   change: ReadingChange,
 ): ReadingChange[] => [...changes.filter((other) => !sameTarget(other, change)), change];
 
-/** A change as the queue keeps it: with the publication it was made on, if known (#698). */
+/** A change with the publication it was made on, if known (#698). */
 export type MadeOn = { change: ReadingChange; on: string | null };
 
-/** `items` with `item` after them, in place of an earlier one setting the same thing. */
+/**
+ * `items` with `item` after them, in place of an earlier one setting the
+ * same thing on the same publication: on another, the same place may be
+ * another task's.
+ */
 export const withMadeOn = <T extends MadeOn>(items: readonly T[], item: T): T[] => [
-  ...items.filter((other) => !sameTarget(other.change, item.change)),
+  ...items.filter((other) => other.on !== item.on || !sameTarget(other.change, item.change)),
   item,
 ];

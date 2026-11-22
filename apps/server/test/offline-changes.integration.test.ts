@@ -24,6 +24,7 @@ import {
   trashOperations as trash,
   utf8,
   type ClientContext,
+  type ReadingChange,
 } from '@wikistow/client';
 import {
   JoinId,
@@ -985,6 +986,9 @@ describe('changes made while reading offline', () => {
   };
   const on = async (ctx: ClientContext, page: pages.PageRef) =>
     (await pages.loadPage(ctx, page.pageId)).heads.publishedHead;
+  // Changes as the reading view makes them, each with the publication it was made on.
+  const made = (on: RevisionId | null, changes: readonly ReadingChange[]) =>
+    changes.map((change) => ({ change, on }));
   const unpublish = async (ctx: ClientContext, page: pages.PageRef) => {
     const { heads, permissionVersion } = await pages.loadPage(ctx, page.pageId);
     if (!heads.publishedHead) throw new Error('Not published');
@@ -1002,14 +1006,12 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('beans'), tick('salt')],
+      changes: made(await on(ctx, page), [tick('beans'), tick('salt')]),
     });
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('salt', false), tick('rice')],
+      changes: made(await on(ctx, page), [tick('salt', false), tick('rice')]),
     });
     const [entry] = await queue.entries();
     expect(entry).toMatchObject({
@@ -1034,8 +1036,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('beans')],
+      changes: made(await on(ctx, page), [tick('beans')]),
     });
     expect(await queue.send(losing(save))).toBe('offline');
     expect(await queue.send(ctx)).toBe('sent');
@@ -1047,8 +1048,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('rice')],
+      changes: made(await on(ctx, page), [tick('rice')]),
     });
     expect(await queue.send(losing(publish))).toBe('offline');
     expect(await queue.send(ctx)).toBe('sent');
@@ -1064,8 +1064,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('beans'), tick('salt')],
+      changes: made(await on(ctx, page), [tick('beans'), tick('salt')]),
     });
     // Meanwhile, from another device: salt is taken out of the draft.
     await pages.editDraft(ctx, page, { markdown: '- [ ] beans\n- [ ] rice\n' });
@@ -1087,8 +1086,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('rice')],
+      changes: made(await on(ctx, page), [tick('rice')]),
     });
     await links.turnOn(ctx, page.pageId);
     expect(await queue.send(ctx)).toBe('sent');
@@ -1106,8 +1104,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('beans')],
+      changes: made(await on(ctx, page), [tick('beans')]),
     });
     expect(await queue.send(losing(save))).toBe('offline');
     // Being sent, it can't be undone: its draft landed.
@@ -1115,8 +1112,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('rice')],
+      changes: made(await on(ctx, page), [tick('rice')]),
     });
     expect(await queue.send(ctx)).toBe('sent');
     expect(await queue.entries()).toEqual([]);
@@ -1126,8 +1122,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('salt'), tick('beans', false)],
+      changes: made(await on(ctx, page), [tick('salt'), tick('beans', false)]),
     });
     await pages.editDraft(ctx, page, { markdown: '- [x] beans\n- [x] rice\n' });
     await pages.publishPage(ctx, page);
@@ -1144,8 +1139,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('rice')],
+      changes: made(await on(ctx, page), [tick('rice')]),
     });
     await unpublish(ctx, page);
     expect(await queue.send(ctx)).toBe('sent');
@@ -1159,8 +1153,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('salt')],
+      changes: made(await on(ctx, page), [tick('salt')]),
     });
     const save = pageRoutes.saveDraft.path.replace(':pageId', page.pageId);
     expect(await queue.send(losing(save))).toBe('offline');
@@ -1183,7 +1176,7 @@ describe('changes made while reading offline', () => {
       line: 'Call',
       checked: true,
     };
-    await queue.tick({ page, title: 'Plan', publishedOn: await on(ctx, page), changes: [call] });
+    await queue.tick({ page, title: 'Plan', changes: made(await on(ctx, page), [call]) });
     // The sections swap, each as long as the other.
     await pages.editDraft(ctx, page, { markdown: '## Home\n- [ ] Call\n## Work\n- [ ] Call\n' });
     expect(await queue.send(ctx)).toBe('sent');
@@ -1199,8 +1192,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('beans')],
+      changes: made(await on(ctx, page), [tick('beans')]),
     });
     expect(await queue.send(losing(publish))).toBe('offline');
     // From another device: beans unticked, and published.
@@ -1218,8 +1210,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('rice')],
+      changes: made(await on(ctx, page), [tick('rice')]),
     });
     expect(await queue.send(losing(save))).toBe('offline');
     await pages.editDraft(ctx, page, { markdown: LIST });
@@ -1242,7 +1233,7 @@ describe('changes made while reading offline', () => {
       line: 'milk',
       checked: true,
     });
-    await queue.tick({ page, title: 'Plan', publishedOn: p0, changes: [milk(0)] });
+    await queue.tick({ page, title: 'Plan', changes: made(p0, [milk(0)]) });
     const publish = pageRoutes.publish.path.replace(':pageId', page.pageId);
     const tue = milk(week.indexOf('## Tue'));
     const eggs = {
@@ -1253,34 +1244,68 @@ describe('changes made while reading offline', () => {
     };
     // Ticked while the first goes.
     const sending = during(publish, () =>
-      queue.tick({ page, title: 'Plan', publishedOn: p0, changes: [tue, eggs] }),
+      queue.tick({ page, title: 'Plan', changes: made(p0, [tue, eggs]) }),
     );
     expect(await queue.send(sending)).toBe('sent');
     expect(await queue.entries()).toEqual([]);
     expect((await publication(ctx, page)).markdown).toBe(
       '## Mon\n- [x] milk\n## Tue\n- [x] milk\n- [x] eggs\n',
     );
+  });
 
-    // Mon's milk, published, is unticked by someone while eggs is ticked again and unticked here.
-    await queue.tick({ page, title: 'Plan', publishedOn: await on(ctx, page), changes: [milk(0)] });
-    await queue.send(
-      during(publish, async () => {
-        await queue.tick({
-          page,
-          title: 'Plan',
-          publishedOn: null,
-          changes: [{ ...eggs, checked: false }],
-        });
-      }),
-    );
-    await pages.editDraft(ctx, page, {
-      markdown: '## Mon\n- [ ] milk\n## Tue\n- [x] milk\n- [ ] eggs\n',
+  it('tick again what was ticked again during the send it was sent in, after someone unticked it', async () => {
+    const { ctx, queue, page, during } = await reading();
+    const publish = pageRoutes.publish.path.replace(':pageId', page.pageId);
+    await queue.tick({ page, title: 'Plan', changes: made(await on(ctx, page), [tick('beans')]) });
+    const sending = during(publish, async () => {
+      // Someone unticks it and publishes; here it is ticked again, on that.
+      await pages.editDraft(ctx, page, { markdown: LIST });
+      await pages.publishPage(ctx, page);
+      await queue.tick({
+        page,
+        title: 'Plan',
+        changes: made(await on(ctx, page), [tick('beans')]),
+      });
     });
+    expect(await queue.send(sending)).toBe('sent');
+    expect(await queue.entries()).toEqual([]);
+    expect((await publication(ctx, page)).markdown).toBe('- [x] beans\n- [ ] rice\n- [ ] salt\n');
+  });
+
+  it('keep two ticks on one place of two publications, as each may be another task', async () => {
+    const { ctx, queue, page } = await reading();
+    const p0 = await on(ctx, page);
+    await queue.tick({ page, title: 'Plan', changes: made(p0, [tick('beans')]) });
+    await pages.editDraft(ctx, page, { markdown: '- [ ] rice\n- [ ] beans\n- [ ] salt\n' });
     await pages.publishPage(ctx, page);
-    await queue.send(ctx);
-    expect((await publication(ctx, page)).markdown).toBe(
-      '## Mon\n- [ ] milk\n## Tue\n- [x] milk\n- [ ] eggs\n',
+    await queue.tick({ page, title: 'Plan', changes: made(await on(ctx, page), [tick('beans')]) });
+    expect((await queue.entries())[0]).toMatchObject({
+      changes: [{ on: p0 }, { on: expect.any(String) }],
+    });
+  });
+
+  it('keep what a send said to tell when Undo drops what was ticked after it', async () => {
+    const { ctx, queue, page, during } = await reading();
+    const save = pageRoutes.saveDraft.path.replace(':pageId', page.pageId);
+    await pages.editDraft(ctx, page, { markdown: LIST + '- [ ] tea\n' });
+    await queue.tick({ page, title: 'Plan', changes: made(await on(ctx, page), [tick('beans')]) });
+    const now = await on(ctx, page);
+    // Rice ticked as beans goes into the draft, which has changes of its own;
+    // then a tab joins the page's live session, so rice waits.
+    let asked = 0;
+    await queue.send(
+      during(save, () => queue.tick({ page, title: 'Plan', changes: made(now, [tick('rice')]) })),
+      { held: async () => asked++ >= 3 },
     );
+    const [waiting] = await queue.entries();
+    expect(waiting).toMatchObject({
+      failure: null,
+      told: [expect.stringContaining('went into the draft')],
+    });
+    await queue.discard({ kind: 'reading', id: page.pageId });
+    expect((await queue.entries())[0]?.failure).toMatchObject({
+      message: expect.stringContaining('went into the draft'),
+    });
   });
 
   it('take each change’s place on the publication it was made on', async () => {
@@ -1294,7 +1319,7 @@ describe('changes made while reading offline', () => {
       line: 'milk',
       checked: true,
     };
-    await queue.tick({ page, title: 'Plan', publishedOn: await on(ctx, page), changes: [tue] });
+    await queue.tick({ page, title: 'Plan', changes: made(await on(ctx, page), [tue]) });
     // Someone adds Sunday at the top and publishes; this device then ticks eggs on that.
     const sunday = '## Sun\n- [ ] milk\n' + week;
     await pages.editDraft(ctx, page, { markdown: sunday });
@@ -1305,7 +1330,7 @@ describe('changes made while reading offline', () => {
       line: 'eggs',
       checked: true,
     };
-    await queue.tick({ page, title: 'Plan', publishedOn: await on(ctx, page), changes: [eggs] });
+    await queue.tick({ page, title: 'Plan', changes: made(await on(ctx, page), [eggs]) });
     expect(await queue.send(ctx)).toBe('sent');
     expect((await publication(ctx, page)).markdown).toBe(
       sunday.replace('- [ ] eggs', '- [x] eggs'),
@@ -1320,12 +1345,13 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('rice')],
+      changes: made(await on(ctx, page), [tick('rice')]),
     });
     let asked = 0;
     // Not in the session as the IDs are recorded; in it by the time the draft would be saved.
-    expect(await queue.send(ctx, { held: async () => asked++ > 0 })).toBe('sent');
+    // Asked as it is picked, as its IDs are recorded, and as its draft is about to be saved.
+    expect(await queue.send(ctx, { held: async () => asked++ >= 2 })).toBe('sent');
+    expect(asked).toBeGreaterThan(2);
     expect((await publication(ctx, page)).count).toBe(1);
     expect((await queue.entries())[0]).toMatchObject({ kind: 'reading', failure: null });
     expect(await queue.send(ctx, { held: async () => false })).toBe('sent');
@@ -1337,8 +1363,7 @@ describe('changes made while reading offline', () => {
     await queue.tick({
       page,
       title: 'Plan',
-      publishedOn: await on(ctx, page),
-      changes: [tick('rice')],
+      changes: made(await on(ctx, page), [tick('rice')]),
     });
     await queue.delete({ spaceId, id: page.pageId, node: 'page', name: 'Plan' });
     expect((await queue.entries()).map((entry) => entry.kind)).toEqual(['delete']);

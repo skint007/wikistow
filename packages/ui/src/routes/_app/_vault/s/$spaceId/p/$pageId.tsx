@@ -102,6 +102,7 @@ import {
 import { PublishDialog } from '../../../../../../page/publish-dialog';
 import {
   ReadingChanges,
+  noteMadeOn,
   ReadingNotices,
   useReadingQueue,
 } from '../../../../../../page/reading-changes';
@@ -301,6 +302,13 @@ function PageView() {
   const queueUnknown = asked.view === 'draft' && queuedHere === undefined;
   if (!info || (unpublishedCopy && !history) || draftWaits || queueUnknown)
     return <PageCard>{null}</PageCard>;
+  // Unpublished meanwhile, it has nothing else to show (#698).
+  if (holdsDraft && info.heads.publishedHead === null)
+    return (
+      <PageCard>
+        <Missing message="The draft opens once what you ticked is sent." />
+      </PageCard>
+    );
   const model = pageViewModel({
     viewer: { role: info.role, canPublish: info.canPublish },
     heads: info.heads,
@@ -792,9 +800,16 @@ function PageBody({
   const readingHere = useMemo(
     () =>
       model.view === 'published' && shownMarkdown !== null
-        ? { markdown: shownMarkdown, rights, change: reading.add }
+        ? {
+            markdown: shownMarkdown,
+            rights,
+            change: (change: ReadingChange) => {
+              noteMadeOn(change, revisionId);
+              reading.add(change);
+            },
+          }
         : null,
-    [model.view, shownMarkdown, reading, rights],
+    [model.view, shownMarkdown, reading, rights, revisionId],
   );
   // A copy names its source only inside its payload: a label, never a link,
   // and named only once this app has checked it against the source.

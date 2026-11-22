@@ -239,8 +239,8 @@ export type PageWriter = {
   tick(input: {
     page: PageRef;
     title: string;
-    changes: readonly ReadingChange[];
-    publishedOn: RevisionId | null;
+    /** Each with the publication it was made on, if known. */
+    changes: readonly { change: ReadingChange; on: RevisionId | null }[];
   }): Promise<boolean>;
   /** Put what is in a folder, or at the top, in order on this device (#400), as `OfflineQueue.order`. */
   order(input: {

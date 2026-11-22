@@ -48,6 +48,14 @@ export type ReadingChangesHere = {
 
 export const ReadingChanges = createContext<ReadingChangesHere | null>(null);
 
+// The publication each change was made on, as the page showed it (#698).
+const madeOn = new WeakMap<ReadingChange, RevisionId>();
+
+/** `change` was made on the publication `on`, which the queue keeps with it offline. */
+export function noteMadeOn(change: ReadingChange, on: RevisionId) {
+  madeOn.set(change, on);
+}
+
 // A flush outlives the page it was made on: leaving starts one, and its
 // queue's guards go with the page. So closing the app or locking the vault
 // waits for every page's, the pages left included.
@@ -148,10 +156,9 @@ export function useReadingQueue(
         refetchType: 'all',
       });
     const flush = async (changes: readonly ReadingChange[]): Promise<Flushed> => {
-      // The publication they were made on, as this device last heard of it.
-      const shown = queryClient.getQueryData(pageQuery(ctx, pageId).queryKey);
-      const publishedOn = shown ? (shown.heads.publishedHead ?? null) : null;
-      if (await pageWriter(ctx).tick({ page, title: named.current, changes, publishedOn })) {
+      // Each with the publication it was made on, as the page showed it then (#698).
+      const made = changes.map((change) => ({ change, on: madeOn.get(change) ?? null }));
+      if (await pageWriter(ctx).tick({ page, title: named.current, changes: made })) {
         // Shown from the queue before they leave this one, so no box flickers back.
         await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
         return { outcome: 'on-device', dropped: [] };
