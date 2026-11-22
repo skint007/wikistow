@@ -519,8 +519,9 @@ function PageBody({
     change !== null &&
     !change.newPage &&
     change.failure === null &&
-    // Queued by ticks, not by the person's own Publish (#700).
+    // Queued by ticks, not by the person's own Publish, of the draft as it is (#700).
     publishWaiting?.publishedOn !== undefined &&
+    (!publishWaiting.draft || publishWaiting.draft.version === change.version) &&
     (entries ?? []).every(
       (entry) => entry.id !== page.pageId || entry === change || entry === publishWaiting,
     ) &&

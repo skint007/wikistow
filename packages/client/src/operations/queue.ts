@@ -616,13 +616,29 @@ export class OfflineQueue {
     save: DraftSave,
     publish: Omit<PublishOrder, 'version'> | null,
   ): Promise<number> {
-    const { entry, made } = await this.#store.queueExclusive(async () => {
-      const saved = await this.#saveDraft(save);
-      if (publish) await this.#queuePublish({ ...publish, version: saved.entry.version });
-      return saved;
-    });
-    this.#saved(entry, made || publish !== null);
-    return entry.version;
+    // What was saved, told even if its publish couldn't be written after it.
+    const done: { saved?: { entry: QueuedPage; made: boolean } } = {};
+    try {
+      await this.#store.queueExclusive(async () => {
+        // Only over the entry as the caller saw it: not one another tab
+        // dropped since, nor one whose publish isn't the ticks' own (#700).
+        const before = await this.#page(save.page.pageId);
+        const waiting = await this.#publish(save.page.pageId);
+        if (
+          (before?.version ?? null) !== save.seen ||
+          (waiting &&
+            (!waiting.publishedOn || (waiting.draft && waiting.draft.version !== save.seen)))
+        ) {
+          throw new ApiError(409, 'stale-head', 'This page was changed in another window');
+        }
+        done.saved = await this.#saveDraft(save);
+        if (publish) await this.#queuePublish({ ...publish, version: done.saved.entry.version });
+      });
+    } finally {
+      if (done.saved) this.#saved(done.saved.entry, done.saved.made || publish !== null);
+    }
+    if (!done.saved) throw new Error('Nothing was saved');
+    return done.saved.entry.version;
   }
 
   #saved(entry: QueuedPage, made: boolean) {
@@ -1764,14 +1780,17 @@ export class OfflineQueue {
     }
     const draftHead = entry.draftHead;
     if (!draftHead) return this.#stop(entry, PUBLISH_CHANGED);
-    const sending = entry.sending ?? (await this.#recordPublish(entry));
-    if (!sending) return;
+    const recorded = entry.sending ? entry : await this.#recordPublish(entry);
+    if (!recorded?.sending) return;
+    // Published again meanwhile, with a draft of its own to save first: the next round sends it.
+    if (recorded.draft || recorded.draftHead !== draftHead) return;
+    const { sending } = recorded;
     try {
       const { heads } = await loadPage(ctx, entry.id);
       // Published already: by this, whose answer was lost.
       if (heads.publishedHead !== sending.revisionId) {
         // What was ticked publishes only over what it was ticked on (#695).
-        if (entry.publishedOn && heads.publishedHead !== entry.publishedOn) {
+        if (recorded.publishedOn && heads.publishedHead !== recorded.publishedOn) {
           return this.#stop(entry, TICKED_ON_CHANGED);
         }
         // Its public copy changes too, which the person checks online (ADR 0005).
@@ -1782,7 +1801,8 @@ export class OfflineQueue {
         await publishPage(ctx, page, {
           expected: { draftHead, publishedHead: heads.publishedHead },
           revisionId: sending.revisionId,
-          ...(entry.change && { change: entry.change }),
+          // The entry as recorded: one published again meanwhile says what it ticked, or nothing.
+          ...(recorded.change && { change: recorded.change }),
           ...(read && { read }),
         });
       }
@@ -1810,7 +1830,7 @@ export class OfflineQueue {
     read: ReadWikilinks | undefined,
   ): Promise<'offline' | void> {
     const page = { spaceId: entry.spaceId, pageId: entry.id };
-    const sending = entry.sending ?? (await this.#recordPublish(entry));
+    const sending = entry.sending ?? (await this.#recordPublish(entry))?.sending;
     if (!sending) return;
     const { revisionId } = sending;
     this.#emit({ kind: 'recorded', spaceId: entry.spaceId, pageId: entry.id, revisionId });
@@ -1851,16 +1871,17 @@ export class OfflineQueue {
 
   // Record what the next publish request sends, before it is sent; one that
   // saves a draft first waits while a tab is in the page's live session.
-  async #recordPublish(entry: QueuedPublish): Promise<QueuedPublish['sending']> {
+  // The entry as recorded, which may have been published again since `entry` was read.
+  async #recordPublish(entry: QueuedPublish): Promise<QueuedPublish | null> {
     const held = this.#held;
     return this.#store.queueExclusive(async () => {
       const current = await this.#publish(entry.id);
       if (!current || current.failure) return null;
-      if (current.sending) return current.sending;
+      if (current.sending) return current;
       if (current.draft && held && (await held(current.id).catch(() => false))) return null;
-      const sending = { revisionId: newId(RevisionId) };
-      await this.#write({ ...current, sending });
-      return sending;
+      const recorded = { ...current, sending: { revisionId: newId(RevisionId) } };
+      await this.#write(recorded);
+      return recorded;
     });
   }
 

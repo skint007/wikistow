@@ -133,6 +133,7 @@ export function useReadingQueue(
           change,
         });
         published = written.revisionId;
+        ownPublished.set(publishedHead, written.revisionId);
         // Before the page loads again, so the view reading it stays (`originOf`).
         notePublished(pageId, written.revisionId, publishedHead);
         return written.revisionId;
@@ -165,14 +166,17 @@ export function useReadingQueue(
     // by the one each was saved over (null for none), so a change made on
     // the entry before its flush's save was heard still goes on top of it.
     const mine = new Map<number | null, number | null>();
-    // Whether the entry at `from`, as a change was made on it, is `to` now,
-    // or became it only through this queue's own saves.
-    const reaches = (from: number | null, to: number | null) => {
-      const seen = new Set<number | null>();
-      for (let at = from; !seen.has(at); at = mine.get(at) ?? null) {
+    // The publications this queue's own flushes made online, by the one each replaced.
+    const ownPublished = new Map<string | null, string | null>();
+    // Whether `from`, the entry's version or the publication a change was
+    // made on, is `to` now, or became it only through this queue's own
+    // saves or publishes (`own`).
+    const reaches = <T,>(own: Map<T | null, T | null>, from: T | null, to: T | null) => {
+      const seen = new Set<T | null>();
+      for (let at = from; !seen.has(at); at = own.get(at) ?? null) {
         if (at === to) return true;
         seen.add(at);
-        if (!mine.has(at)) return false;
+        if (!own.has(at)) return false;
       }
       return false;
     };
@@ -194,7 +198,12 @@ export function useReadingQueue(
       // change already on its way, which would leave out what it holds
       // (#695), nor a draft the person published themselves (#700).
       const others = waiting.filter((each) => each !== entry && each !== publish);
-      if (others.length > 0 || (publish && (!change || !publish.publishedOn)) || change?.failure) {
+      // Its publish of the draft as it is: one saved over since, as from the
+      // draft view, would publish the version before.
+      const stalePublish =
+        publish &&
+        (!publish.publishedOn || (publish.draft && publish.draft.version !== change?.version));
+      if (others.length > 0 || (publish && !change) || stalePublish || change?.failure) {
         throw new Error('Waits until your change made offline is sent');
       }
       // Over the publication the first of them was ticked on, not one their own publish made.
@@ -208,10 +217,17 @@ export function useReadingQueue(
       const version = change?.version ?? null;
       const madeHere = (index: number) => {
         const made = on[index];
-        return !made || (reaches(made.version, version) && made.publishedOn === publishedOn);
+        return (
+          !made ||
+          (reaches(mine, made.version, version) &&
+            reaches(ownPublished, made.publishedOn, publishedOn))
+        );
       };
-      const moved = changes.filter((_, index) => !madeHere(index));
-      const kept = changes.filter((_, index) => madeHere(index));
+      // Those after one left out were made in text that held it: left out too,
+      // as their places may have moved with it.
+      const first = changes.findIndex((_, index) => !madeHere(index));
+      const kept = first === -1 ? changes : changes.slice(0, first);
+      const moved = first === -1 ? [] : changes.slice(first);
       const left = moved.map((made) => ({ change: made, reason: CHANGED_ELSEWHERE }));
       if (kept.length === 0) return { outcome: 'unchanged', dropped: left };
       const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);

@@ -969,10 +969,20 @@ describe('moves and publishes made offline', () => {
     await expect(queue.undoTicked(page, version - 1)).rejects.toThrow(/changed on this device/);
     await queue.publish({ page, title: 'Plan', draftHead: draftHead });
     await expect(queue.undoTicked(page, version)).rejects.toThrow(/changed on this device/);
+    // Nor are ticks saved over a Publish the person pressed, which they would take the place of.
+    await expect(queue.saveTicked(save('- [x] milk\n- [x] bread', version), order)).rejects.toThrow(
+      /another window/,
+    );
+    await queue.discard({ kind: 'publish', id: page.pageId });
     // Ticked again, its publish is theirs once more, and both go.
     await queue.undoTicked(
       page,
       await queue.saveTicked(save('- [x] milk\n- [ ] bread', version), order),
+    );
+    expect(await kinds()).toEqual([]);
+    // Saved over an entry another tab dropped since: refused, so what it undid stays undone.
+    await expect(queue.saveTicked(save('- [x] milk\n- [x] bread', version), order)).rejects.toThrow(
+      /another window/,
     );
     expect(await kinds()).toEqual([]);
 
