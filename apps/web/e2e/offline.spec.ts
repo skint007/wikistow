@@ -440,6 +440,16 @@ test('tasks ticked offline wait on this device and publish once back online', as
     await expect(box('eggs')).toBeChecked();
   });
 
+  await test.step('Undo drops them, and its publish, at once (#700)', async () => {
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(waits).toBeHidden();
+    await expect(page.getByText('Publish waits to be sent')).toBeHidden();
+    await expect(box('milk')).not.toBeChecked();
+    await box('milk').check();
+    await box('eggs').check();
+    await expect(waits).toBeVisible({ timeout: 15_000 });
+  });
+
   await test.step('loaded again offline, they are still ticked, and more can be', async () => {
     await page.reload();
     await expect(offline).toBeVisible();
@@ -468,4 +478,7 @@ test('tasks ticked offline wait on this device and publish once back online', as
   await expect(box('milk')).toBeChecked();
   await expect(box('bread')).toBeChecked();
   await expect(box('eggs')).not.toBeChecked();
+  // History says what was ticked, as for ticks published online (#700).
+  await page.getByRole('button', { name: 'History' }).click();
+  await expect(page.getByRole('dialog', { name: 'History' }).getByText('Ticked 2')).toBeVisible();
 });

@@ -19,6 +19,7 @@ import {
   showing,
   type FlushOperations,
   type Flushed,
+  type MadeOn,
   type ReadingChange,
 } from '../src/page/reading-changes-model.ts';
 
@@ -341,14 +342,16 @@ const pass = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 /** A queue whose flush records what it gets, and finishes once `finish()` is called. */
 function queue() {
   const flushes: ReadingChange[][] = [];
+  const made: (MadeOn | null)[][] = [];
   let finish: (result?: Error | Flushed) => void = () => {};
-  const reading = new ReadingQueue(async (changes) => {
+  const reading = new ReadingQueue(async (changes, on) => {
     flushes.push([...changes]);
+    made.push([...on]);
     const result = await new Promise<Error | Flushed | undefined>((resolve) => (finish = resolve));
     if (result instanceof Error) throw result;
     return result ?? ({ outcome: 'published', dropped: [] } satisfies Flushed);
   });
-  return { reading, flushes, finish: (result?: Error | Flushed) => finish(result) };
+  return { reading, flushes, made, finish: (result?: Error | Flushed) => finish(result) };
 }
 
 const tick = (line: string): ReadingChange => ({ kind: 'task', offset: 0, line, checked: true });
@@ -403,6 +406,18 @@ describe('a page’s queue', () => {
     q.finish();
     await pass(0);
     expect(q.reading.get().changes).toEqual([]);
+  });
+
+  // On the device, a change made on a draft another tab changed since is left out (#700).
+  it('gives each change with what it was made on, kept from the click', async () => {
+    const q = queue();
+    const on = { version: 7, publishedOn: 'p1' };
+    q.reading.add(tick('a'), on);
+    q.reading.add(tick('b'));
+    await pass(3000);
+    expect(q.made).toEqual([[on, null]]);
+    q.finish();
+    await pass(0);
   });
 
   it('flushes at once as the person leaves, then what came meanwhile', async () => {

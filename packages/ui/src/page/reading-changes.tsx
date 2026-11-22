@@ -2,6 +2,7 @@ import {
   pageOperations,
   revisePayload,
   RevisionId,
+  summarizeChange,
   type ClientContext,
   type PagePayload,
   type Region,
@@ -29,6 +30,7 @@ import {
   showing,
   type Flushed,
   type FlushOperations,
+  type MadeOn,
   type ReadingChange,
   type ReadingRights,
   type ReadingState,
@@ -47,6 +49,9 @@ export type ReadingChangesHere = {
   rights: ReadingRights;
   change: (change: ReadingChange) => void;
 };
+
+/** Why a change made before another tab or window changed the page is left out (#700). */
+const CHANGED_ELSEWHERE = 'The page was changed in another tab or window meanwhile.';
 
 export const ReadingChanges = createContext<ReadingChangesHere | null>(null);
 
@@ -156,7 +161,25 @@ export function useReadingQueue(
     // values set by plugin blocks, which change what a draft holds besides
     // its tasks. Sent with the rest, someone's edit meanwhile comes back as
     // the usual conflict, which Merge… settles.
-    const onDevice = async (changes: readonly ReadingChange[]): Promise<Flushed | null> => {
+    // The versions of the page's draft entry this queue's own saves made,
+    // by the one each was saved over (null for none), so a change made on
+    // the entry before its flush's save was heard still goes on top of it.
+    const mine = new Map<number | null, number | null>();
+    // Whether the entry at `from`, as a change was made on it, is `to` now,
+    // or became it only through this queue's own saves.
+    const reaches = (from: number | null, to: number | null) => {
+      const seen = new Set<number | null>();
+      for (let at = from; !seen.has(at); at = mine.get(at) ?? null) {
+        if (at === to) return true;
+        seen.add(at);
+        if (!mine.has(at)) return false;
+      }
+      return false;
+    };
+    const onDevice = async (
+      changes: readonly ReadingChange[],
+      on: readonly (MadeOn | null)[],
+    ): Promise<Flushed | null> => {
       const queue = ctx.keptContent?.queue;
       if (!queue) return null;
       if (connection.get().online && (await queue.waiting(pageId)).length === 0) return null;
@@ -164,54 +187,86 @@ export function useReadingQueue(
       const waiting = await queue.waiting(pageId);
       const entry = waiting.find((each) => each.kind === 'page');
       const change = entry?.kind === 'page' && entry.basedOn ? entry : null;
-      const publish = waiting.find((each) => each.kind === 'publish');
-      // Only as the page allowed them (`ticksOnly`): its draft and that draft's
-      // publish, or nothing, waiting; never the kept draft behind a change
-      // already on its way, which would leave out what it holds (#695).
+      const found = waiting.find((each) => each.kind === 'publish');
+      const publish = found?.kind === 'publish' ? found : null;
+      // Only as the page allowed them (`ticksOnly`): its draft and the publish
+      // its ticks queued, or nothing, waiting; never the kept draft behind a
+      // change already on its way, which would leave out what it holds
+      // (#695), nor a draft the person published themselves (#700).
       const others = waiting.filter((each) => each !== entry && each !== publish);
-      if (others.length > 0 || (publish && !change) || change?.failure) {
+      if (others.length > 0 || (publish && (!change || !publish.publishedOn)) || change?.failure) {
         throw new Error('Waits until your change made offline is sent');
       }
       // Over the publication the first of them was ticked on, not one their own publish made.
-      const publishedOn =
-        (publish?.kind === 'publish' && publish.publishedOn) || info?.heads.publishedHead;
+      const publishedOn = publish?.publishedOn ?? info?.heads.publishedHead;
       const head = change?.basedOn ?? info?.heads.draftHead;
       if (!head || !publishedOn) throw new Error('This page has no publication to change.');
+      // Each only where it was made: on this draft as it is now, or as this
+      // queue's own saves left it, and on this publication (#700). One made
+      // before another tab changed the draft may have been made on a task
+      // that has moved.
+      const version = change?.version ?? null;
+      const madeHere = (index: number) => {
+        const made = on[index];
+        return !made || (reaches(made.version, version) && made.publishedOn === publishedOn);
+      };
+      const moved = changes.filter((_, index) => !madeHere(index));
+      const kept = changes.filter((_, index) => madeHere(index));
+      const left = moved.map((made) => ({ change: made, reason: CHANGED_ELSEWHERE }));
+      if (kept.length === 0) return { outcome: 'unchanged', dropped: left };
       const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);
       const based = revisePayload(draft.opened, {});
       const now = change?.payload ?? based;
-      const { markdown, dropped } = applyChanges(now.markdown, changes);
-      const ticked = { ...now, markdown };
+      const made = applyChanges(now.markdown, kept);
+      const dropped = [...left, ...made.dropped];
+      const ticked = { ...now, markdown: made.markdown };
       // Back as the draft was: what waits goes, as nothing is left to publish,
       // unless it is on its way, when it may have landed already.
-      const sending = change?.sending || (publish?.kind === 'publish' && publish.sending);
-      if (change && !sending && markdown === based.markdown && onlyTicked(based, ticked)) {
-        await queue.discard(change, { version: change.version });
-        await queue.discard({ kind: 'publish', id: pageId });
+      const sending = change?.sending || publish?.sending;
+      if (
+        change &&
+        publish &&
+        !sending &&
+        made.markdown === based.markdown &&
+        onlyTicked(based, ticked)
+      ) {
+        await queue.undoTicked(page, change.version);
+        mine.set(change.version, null);
         await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
         return { outcome: 'unchanged', dropped };
       }
-      if (markdown === now.markdown) return { outcome: 'unchanged', dropped };
+      if (made.markdown === now.markdown) return { outcome: 'unchanged', dropped };
       const clean =
         (change
           ? !change.sending && onlyTicked(based, change.payload)
-          : !info?.heads.draftChanges) && changes.every((made) => made.kind === 'task');
-      const version = await queue.saveDraft({
-        page,
-        basedOn: head,
-        region: change?.region ?? draft.region,
-        payload: ticked,
-        seen: change?.version ?? null,
-      });
-      if (clean) {
-        await queue.publish({ page, title: named.current, draftHead: head, version, publishedOn });
-      }
+          : !info?.heads.draftChanges) && kept.every((each) => each.kind === 'task');
+      // Saved and published at once, so another tab can't type in between (#700).
+      const saved = await queue.saveTicked(
+        {
+          page,
+          basedOn: head,
+          region: change?.region ?? draft.region,
+          payload: ticked,
+          seen: version,
+        },
+        clean
+          ? {
+              page,
+              title: named.current,
+              draftHead: head,
+              publishedOn,
+              // Said in history as a flush online says it (ADR 0008).
+              change: summarizeChange(based.markdown, made.markdown),
+            }
+          : null,
+      );
+      mine.set(version, saved);
       // Shown from the queue before they leave this one, as the draft opens from it.
       await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
       return { outcome: clean ? 'on-device' : 'in-draft', dropped };
     };
-    const flush = async (changes: readonly ReadingChange[]) => {
-      const device = await onDevice(changes);
+    const flush = async (changes: readonly ReadingChange[], on: readonly (MadeOn | null)[]) => {
+      const device = await onDevice(changes, on);
       if (device) return device;
       published = null;
       opened.clear();
@@ -233,8 +288,8 @@ export function useReadingQueue(
       await contentChanged(queryClient, ctx, { spaceId, pageId }, { unshown: true });
       return flushed;
     };
-    const queue = new ReadingQueue((changes) =>
-      inTurn(pageId, () => flush(changes)).then(
+    const queue = new ReadingQueue((changes, on) =>
+      inTurn(pageId, () => flush(changes, on)).then(
         (last) => {
           if (left) leftOutcome(pageId, { last, error: null });
           return last;

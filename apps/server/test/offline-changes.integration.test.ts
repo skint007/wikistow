@@ -932,6 +932,63 @@ describe('moves and publishes made offline', () => {
     expect((await pages.loadPage(ctx, page.pageId)).heads.publishedHead).toBeNull();
   });
 
+  it('save what was ticked with its publish at once, saying what it ticked, and undo both only as they were (#700)', async () => {
+    const { ctx, queue, page, based, payload } = await device();
+    await pages.saveDraft(ctx, {
+      page,
+      basedOn: based,
+      payload: payload('- [ ] milk\n- [ ] bread'),
+    });
+    await pages.publishPage(ctx, page);
+    const { heads } = await pages.loadPage(ctx, page.pageId);
+    const { publishedHead, draftHead } = heads;
+    if (!publishedHead || !draftHead) throw new Error('Not published');
+    const save = (markdown: string, seen: number | null) => ({
+      page,
+      basedOn: draftHead,
+      region: null,
+      payload: payload(markdown),
+      seen,
+    });
+    const order = {
+      page,
+      title: 'Plan',
+      draftHead: draftHead,
+      publishedOn: publishedHead,
+      change: { ticked: 1, unticked: 0, properties: [] },
+    };
+    const version = await queue.saveTicked(save('- [x] milk\n- [ ] bread', null), order);
+    const kinds = async () => (await queue.entries()).map((entry) => entry.kind).sort();
+    expect(await kinds()).toEqual(['page', 'publish']);
+
+    // Another tab saved into it since: refused, and nothing changes, the draft nor its publish.
+    await expect(
+      queue.saveTicked(save('- [x] milk\n- [x] bread', version - 1), order),
+    ).rejects.toThrow(/another window/);
+    // Undone only at the version shown, and only while its publish is the ticks' own.
+    await expect(queue.undoTicked(page, version - 1)).rejects.toThrow(/changed on this device/);
+    await queue.publish({ page, title: 'Plan', draftHead: draftHead });
+    await expect(queue.undoTicked(page, version)).rejects.toThrow(/changed on this device/);
+    // Ticked again, its publish is theirs once more, and both go.
+    await queue.undoTicked(
+      page,
+      await queue.saveTicked(save('- [x] milk\n- [ ] bread', version), order),
+    );
+    expect(await kinds()).toEqual([]);
+
+    // Sent, the publication says what was ticked, as one published online does.
+    await queue.saveTicked(save('- [x] milk\n- [ ] bread', null), order);
+    expect(await queue.send(ctx)).toBe('sent');
+    expect(await kinds()).toEqual([]);
+    const now = (await pages.loadPage(ctx, page.pageId)).heads.publishedHead;
+    if (!now || now === publishedHead) throw new Error('Not published again');
+    expect((await pages.versionChanges(ctx, page, [now])).get(now)).toEqual({
+      ticked: 1,
+      unticked: 0,
+      properties: [],
+    });
+  });
+
   it('send a folder put in order offline in one request, leaving out what moved away', async () => {
     const { ctx, queue, spaceId, page } = await device();
     const second = await pages.createPage(ctx, { spaceId, parentId: null, title: 'Agenda' });
