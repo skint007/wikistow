@@ -2,10 +2,12 @@ import {
   pageOperations,
   revisePayload,
   RevisionId,
+  summarizeChange,
   type ClientContext,
   type PagePayload,
   type Region,
 } from '@wikistow/client';
+import { ApiError } from '@wikistow/client/api';
 import { connection, useOffline } from '../data/connection';
 import { queueQuery } from '../data/offline-changes';
 import { useQueryClient } from '@tanstack/react-query';
@@ -29,6 +31,7 @@ import {
   showing,
   type Flushed,
   type FlushOperations,
+  type MadeOn,
   type ReadingChange,
   type ReadingRights,
   type ReadingState,
@@ -48,11 +51,48 @@ export type ReadingChangesHere = {
   change: (change: ReadingChange) => void;
 };
 
+/** Why a change made before another tab or window changed the page is left out (#700). */
+const CHANGED_ELSEWHERE = 'The page was changed in another tab or window meanwhile.';
+
+/** Null for the queue's refusal (`stale-head`) of a save of what was read before another tab changed the page. */
+function refusedHere(error: unknown): null {
+  if (error instanceof ApiError && error.code === 'stale-head') return null;
+  throw error;
+}
+
+/** Why a change made while another change to the page waits on this device is left out. */
+const WAITS_ON_DEVICE = 'Another change to this page waits to be sent from this device.';
+
 export const ReadingChanges = createContext<ReadingChangesHere | null>(null);
 
 // A flush outlives the page it was made on: leaving starts one, and its
 // queue's guards go with the page. So closing the app or locking the vault
 // waits for every page's, the pages left included.
+// For each page, the versions of its draft entry this tab's own reading
+// saves and Undo made, by the one each replaced (null for none), and the
+// publications its own online flushes made: so a change made on what this
+// tab had before it heard of its own save, in this visit to the page or
+// one before, still goes on top of it (#700).
+const ownSaves = new Map<string, Map<number | null, number | null>>();
+const ownPublications = new Map<string, Map<string | null, string | null>>();
+
+function ownMoves<T>(all: Map<string, Map<T | null, T | null>>, pageId: string) {
+  let moves = all.get(pageId);
+  if (!moves) all.set(pageId, (moves = new Map()));
+  return moves;
+}
+
+/** Whether `from`, as a change was made on it, is `to` now, or became it only through `own`. */
+function reaches<T>(own: Map<T | null, T | null>, from: T | null, to: T | null) {
+  const seen = new Set<T | null>();
+  for (let at = from; !seen.has(at); at = own.get(at) ?? null) {
+    if (at === to) return true;
+    seen.add(at);
+    if (!own.has(at)) return false;
+  }
+  return false;
+}
+
 vaultStore.guardLock(async () => {
   await flushesUnderway();
   return true;
@@ -128,6 +168,7 @@ export function useReadingQueue(
           change,
         });
         published = written.revisionId;
+        ownPublished.set(publishedHead, written.revisionId);
         // Before the page loads again, so the view reading it stays (`originOf`).
         notePublished(pageId, written.revisionId, publishedHead);
         return written.revisionId;
@@ -156,7 +197,12 @@ export function useReadingQueue(
     // values set by plugin blocks, which change what a draft holds besides
     // its tasks. Sent with the rest, someone's edit meanwhile comes back as
     // the usual conflict, which Merge… settles.
-    const onDevice = async (changes: readonly ReadingChange[]): Promise<Flushed | null> => {
+    const mine = ownMoves(ownSaves, pageId);
+    const ownPublished = ownMoves(ownPublications, pageId);
+    const onDevice = async (
+      changes: readonly ReadingChange[],
+      on: readonly (MadeOn | null)[],
+    ): Promise<Flushed | null> => {
       const queue = ctx.keptContent?.queue;
       if (!queue) return null;
       if (connection.get().online && (await queue.waiting(pageId)).length === 0) return null;
@@ -164,54 +210,120 @@ export function useReadingQueue(
       const waiting = await queue.waiting(pageId);
       const entry = waiting.find((each) => each.kind === 'page');
       const change = entry?.kind === 'page' && entry.basedOn ? entry : null;
-      const publish = waiting.find((each) => each.kind === 'publish');
-      // Only as the page allowed them (`ticksOnly`): its draft and that draft's
-      // publish, or nothing, waiting; never the kept draft behind a change
-      // already on its way, which would leave out what it holds (#695).
+      const found = waiting.find((each) => each.kind === 'publish');
+      const publish = found?.kind === 'publish' ? found : null;
+      // Only as the page allowed them (`ticksOnly`): its draft and the publish
+      // its ticks queued, or nothing, waiting; never the kept draft behind a
+      // change already on its way, which would leave out what it holds
+      // (#695), nor a draft the person published themselves (#700).
       const others = waiting.filter((each) => each !== entry && each !== publish);
-      if (others.length > 0 || (publish && !change) || change?.failure) {
-        throw new Error('Waits until your change made offline is sent');
+      // Its publish of the draft as it is: one saved over since, as from the
+      // draft view, would publish the version before.
+      const stalePublish =
+        publish && (!publish.publishedOn || publish.draft?.version !== change?.version);
+      // Left out, not kept to try again: tried once nothing waits, they would
+      // go online over whatever the change waiting made of the page (#700).
+      if (others.length > 0 || (publish && !change) || stalePublish || change?.failure) {
+        return {
+          outcome: 'unchanged',
+          dropped: changes.map((made) => ({ change: made, reason: WAITS_ON_DEVICE })),
+        };
       }
       // Over the publication the first of them was ticked on, not one their own publish made.
-      const publishedOn =
-        (publish?.kind === 'publish' && publish.publishedOn) || info?.heads.publishedHead;
+      const publishedOn = publish?.publishedOn ?? info?.heads.publishedHead;
       const head = change?.basedOn ?? info?.heads.draftHead;
       if (!head || !publishedOn) throw new Error('This page has no publication to change.');
+      // Each only where it was made: on this draft as it is now, or as this
+      // queue's own saves left it, and on this publication (#700). One made
+      // before another tab changed the draft may have been made on a task
+      // that has moved.
+      const version = change?.version ?? null;
+      const madeHere = (index: number) => {
+        const made = on[index];
+        return (
+          !made ||
+          (reaches(mine, made.version, version) &&
+            reaches(ownPublished, made.publishedOn, publishedOn))
+        );
+      };
+      // Those after a property left out were made in text that held it, its
+      // frontmatter longer or shorter: left out too, as their places moved
+      // with it. A tick moves nothing.
+      const kept: ReadingChange[] = [];
+      const moved: ReadingChange[] = [];
+      let cut = false;
+      changes.forEach((made, index) => {
+        const here = !cut && madeHere(index);
+        (here ? kept : moved).push(made);
+        if (!here && made.kind === 'property') cut = true;
+      });
+      const left = moved.map((made) => ({ change: made, reason: CHANGED_ELSEWHERE }));
+      // Refused by the queue, as another tab changed the page since it was read
+      // here: left out, never kept to go online later over that change (#700).
+      const everyChangeLeftOut = changes.map((made) => ({
+        change: made,
+        reason: CHANGED_ELSEWHERE,
+      }));
+      if (kept.length === 0) return { outcome: 'unchanged', dropped: left };
       const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);
       const based = revisePayload(draft.opened, {});
       const now = change?.payload ?? based;
-      const { markdown, dropped } = applyChanges(now.markdown, changes);
-      const ticked = { ...now, markdown };
+      const made = applyChanges(now.markdown, kept);
+      const dropped = [...left, ...made.dropped];
+      const ticked = { ...now, markdown: made.markdown };
       // Back as the draft was: what waits goes, as nothing is left to publish,
       // unless it is on its way, when it may have landed already.
-      const sending = change?.sending || (publish?.kind === 'publish' && publish.sending);
-      if (change && !sending && markdown === based.markdown && onlyTicked(based, ticked)) {
-        await queue.discard(change, { version: change.version });
-        await queue.discard({ kind: 'publish', id: pageId });
+      const sending = change?.sending || publish?.sending;
+      if (
+        change &&
+        publish &&
+        !sending &&
+        made.markdown === based.markdown &&
+        onlyTicked(based, ticked)
+      ) {
+        if ((await queue.undoTicked(page, change.version).catch(refusedHere)) === null) {
+          return { outcome: 'unchanged', dropped: everyChangeLeftOut };
+        }
+        mine.set(change.version, null);
         await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
         return { outcome: 'unchanged', dropped };
       }
-      if (markdown === now.markdown) return { outcome: 'unchanged', dropped };
+      if (made.markdown === now.markdown) return { outcome: 'unchanged', dropped };
+      // Never over a draft with changes of its own, which publishing would publish too.
       const clean =
-        (change
-          ? !change.sending && onlyTicked(based, change.payload)
-          : !info?.heads.draftChanges) && changes.every((made) => made.kind === 'task');
-      const version = await queue.saveDraft({
-        page,
-        basedOn: head,
-        region: change?.region ?? draft.region,
-        payload: ticked,
-        seen: change?.version ?? null,
-      });
-      if (clean) {
-        await queue.publish({ page, title: named.current, draftHead: head, version, publishedOn });
-      }
+        !info?.heads.draftChanges &&
+        (!change || (!change.sending && onlyTicked(based, change.payload))) &&
+        kept.every((each) => each.kind === 'task');
+      // Saved and published at once, so another tab can't type in between (#700).
+      const saved = await queue
+        .saveTicked(
+          {
+            page,
+            basedOn: head,
+            region: change?.region ?? draft.region,
+            payload: ticked,
+            seen: version,
+          },
+          clean
+            ? {
+                page,
+                title: named.current,
+                draftHead: head,
+                publishedOn,
+                // Said in history as a flush online says it (ADR 0008).
+                change: summarizeChange(based.markdown, made.markdown),
+              }
+            : null,
+        )
+        .catch(refusedHere);
+      if (saved === null) return { outcome: 'unchanged', dropped: everyChangeLeftOut };
+      mine.set(version, saved);
       // Shown from the queue before they leave this one, as the draft opens from it.
       await queryClient.refetchQueries({ queryKey: queueQuery(ctx).queryKey });
       return { outcome: clean ? 'on-device' : 'in-draft', dropped };
     };
-    const flush = async (changes: readonly ReadingChange[]) => {
-      const device = await onDevice(changes);
+    const flush = async (changes: readonly ReadingChange[], on: readonly (MadeOn | null)[]) => {
+      const device = await onDevice(changes, on);
       if (device) return device;
       published = null;
       opened.clear();
@@ -233,8 +345,8 @@ export function useReadingQueue(
       await contentChanged(queryClient, ctx, { spaceId, pageId }, { unshown: true });
       return flushed;
     };
-    const queue = new ReadingQueue((changes) =>
-      inTurn(pageId, () => flush(changes)).then(
+    const queue = new ReadingQueue((changes, on) =>
+      inTurn(pageId, () => flush(changes, on)).then(
         (last) => {
           if (left) leftOutcome(pageId, { last, error: null });
           return last;

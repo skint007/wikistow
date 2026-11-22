@@ -35,6 +35,13 @@ export type ReadingChange =
   | { kind: 'task'; offset: number; line: string; checked: boolean }
   | { kind: 'property'; key: string; value: PropertyValue };
 
+/**
+ * What a change was made on, as the page showed it at the click (#700): the
+ * version of the page's draft waiting on this device, null for none, and
+ * the publication. On the device, a change made on another is left out.
+ */
+export type MadeOn = { version: number | null; publishedOn: string };
+
 /** A change left out, as it no longer applies, and why. */
 export type Dropped = { change: ReadingChange; reason: string };
 
@@ -314,7 +321,7 @@ export function inTurn<T>(pageId: string, flush: () => Promise<T>): Promise<T> {
 }
 
 /** A change in the queue, with an id of its own so a flush takes out just those it saved. */
-export type Queued = { id: number; change: ReadingChange };
+export type Queued = { id: number; change: ReadingChange; on: MadeOn | null };
 
 /**
  * A page's queue: the changes waiting, those being saved among them;
@@ -347,11 +354,15 @@ export class ReadingQueue {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #running: Promise<void> | null = null;
   readonly #listeners = new Set<() => void>();
-  readonly #flush: (changes: readonly ReadingChange[]) => Promise<Flushed>;
+  readonly #flush: (
+    changes: readonly ReadingChange[],
+    on: readonly (MadeOn | null)[],
+  ) => Promise<Flushed>;
   readonly #timing: { debounceMs: number; maxWaitMs: number };
 
+  /** `flush` is given the changes, and what each was made on, in the same order. */
   constructor(
-    flush: (changes: readonly ReadingChange[]) => Promise<Flushed>,
+    flush: (changes: readonly ReadingChange[], on: readonly (MadeOn | null)[]) => Promise<Flushed>,
     timing = { debounceMs: 3000, maxWaitMs: 15_000 },
   ) {
     this.#flush = flush;
@@ -371,9 +382,9 @@ export class ReadingQueue {
     for (const listener of this.#listeners) listener();
   }
 
-  /** `change` made: shown at once, and saved once changes pause. */
-  add = (change: ReadingChange) => {
-    this.#set({ changes: [...this.#state.changes, { id: this.#next++, change }] });
+  /** `change` made, on `on`: shown at once, and saved once changes pause. */
+  add = (change: ReadingChange, on: MadeOn | null = null) => {
+    this.#set({ changes: [...this.#state.changes, { id: this.#next++, change, on }] });
     this.#schedule();
   };
 
@@ -410,7 +421,10 @@ export class ReadingQueue {
     this.#set({ saving: true, error: null, before: null });
     const ids = new Set(taken.map(({ id }) => id));
     let failed = false;
-    this.#running = this.#flush(taken.map(({ change }) => change)).then(
+    this.#running = this.#flush(
+      taken.map(({ change }) => change),
+      taken.map(({ on }) => on),
+    ).then(
       (last) =>
         this.#set({
           changes: this.#state.changes.filter(({ id }) => !ids.has(id)),

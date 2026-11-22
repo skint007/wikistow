@@ -112,6 +112,7 @@ import {
   originOf,
   pageFlushing,
   readingRights,
+  type ReadingChange,
   type ReadingQueue,
 } from '../../../../../../page/reading-changes-model';
 import { PublishedCopiesDialog } from '../../../../../../page/published-copies';
@@ -518,7 +519,9 @@ function PageBody({
     change !== null &&
     !change.newPage &&
     change.failure === null &&
-    publishWaiting !== undefined &&
+    // Queued by ticks, not by the person's own Publish, of the draft as it is (#700).
+    publishWaiting?.publishedOn !== undefined &&
+    publishWaiting.draft?.version === change.version &&
     (entries ?? []).every(
       (entry) => entry.id !== page.pageId || entry === change || entry === publishWaiting,
     ) &&
@@ -777,9 +780,16 @@ function PageBody({
   const readingHere = useMemo(
     () =>
       model.view === 'published' && shownMarkdown !== null
-        ? { markdown: shownMarkdown, rights, change: reading.add }
+        ? {
+            markdown: shownMarkdown,
+            rights,
+            // What it was made on, as shown now: offline, a change made before
+            // another tab changed the page is left out (#700).
+            change: (made: ReadingChange) =>
+              reading.add(made, { version: change?.version ?? null, publishedOn: revisionId }),
+          }
         : null,
-    [model.view, shownMarkdown, reading, rights],
+    [model.view, shownMarkdown, reading, rights, change?.version, revisionId],
   );
   // A copy names its source only inside its payload: a label, never a link,
   // and named only once this app has checked it against the source.
@@ -1226,10 +1236,11 @@ function PageBody({
                   className="underline underline-offset-2 hover:text-foreground"
                   onClick={() =>
                     void act(async () => {
-                      // The draft first, which refuses if another tab saved into it since.
-                      const choices = queueChoices(ctx);
-                      await choices?.discard(change, { version: change.version });
-                      await choices?.discard(publishWaiting);
+                      // Both at once, refused if another tab saved into the draft or published since.
+                      await queueChoices(ctx)?.undoTicked(page, change.version);
+                      // And those still waiting for their pause, made on the draft it dropped;
+                      // those saving now are left out, as made on a draft that is gone.
+                      reading.discard();
                     })
                   }
                 >

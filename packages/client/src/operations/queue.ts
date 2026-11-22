@@ -16,6 +16,7 @@ import {
 import { z } from 'zod';
 import { ApiError, noAnswer } from '../api/client.ts';
 import { COVER_NAMESPACE, coverLeftBehind, reviseCover } from '../cover.ts';
+import type { ChangeSummary } from '../change.ts';
 import { decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { newId } from '../ids.ts';
@@ -239,6 +240,14 @@ const QueuedPublishJson = z.strictObject({
    * publishes a page unpublished, or published by someone, meanwhile.
    */
   publishedOn: RevisionId.exactOptional(),
+  /** What it ticked, for history to say as it does online (ADR 0008, #700). */
+  change: z
+    .strictObject({
+      ticked: z.number().int().nonnegative(),
+      unticked: z.number().int().nonnegative(),
+      properties: z.array(z.string()),
+    })
+    .exactOptional(),
   failure: Failure.nullable(),
   at: z.number(),
 });
@@ -389,6 +398,38 @@ export class QueueClosed extends Error {
     this.name = 'QueueClosed';
   }
 }
+
+/** What `OfflineQueue.saveDraft` saves. */
+type DraftSave = {
+  page: PageRef;
+  basedOn: RevisionId;
+  region: Region | null;
+  payload: PagePayload;
+  seen: number | null;
+  onTop?: boolean;
+  linkChoices?: ReadonlyMap<string, PageId>;
+  /** Made from a live session's document: what is kept beside it; left as it was when absent. */
+  live?: KeptLive | null;
+  /**
+   * Kept stopped as a conflict, never sent until the person merges it (a
+   * provisional document), or, false, sendable whatever stopped it before;
+   * left as it was when absent.
+   */
+  stopped?: boolean;
+};
+
+/** What `OfflineQueue.publish` queues. */
+type PublishOrder = {
+  page: PageRef;
+  title: string;
+  draftHead: RevisionId;
+  /** Only the page's change at this version, as it was just saved, never one saved into since. */
+  version?: number;
+  /** Only over this publication (`QueuedPublish.publishedOn`). */
+  publishedOn?: RevisionId;
+  /** What it ticks, for history (`QueuedPublish.change`). */
+  change?: ChangeSummary;
+};
 
 /**
  * Changes made offline, waiting on the device for the account it keeps
@@ -559,7 +600,54 @@ export class OfflineQueue {
    * window saved into since, or made, is a conflict (`stale-head`), as the
    * server would answer. Returns the entry's version now.
    */
-  async saveDraft({
+  async saveDraft(save: DraftSave): Promise<number> {
+    const { entry, made } = await this.#store.queueExclusive(() => this.#saveDraft(save));
+    this.#saved(entry, made);
+    return entry.version;
+  }
+
+  /**
+   * What was ticked while reading, saved as the page's draft on this device
+   * as `saveDraft` saves it, and with `publish`, its publish queued as
+   * `publish` queues it, both at once (#700), so another tab can't type
+   * between them and leave the ticks saved but never published.
+   */
+  async saveTicked(
+    save: DraftSave,
+    publish: Omit<PublishOrder, 'version'> | null,
+  ): Promise<number> {
+    const { entry, made } = await this.#store.queueExclusive(async () => {
+      // Only over the entry as the caller saw it: not one another tab
+      // dropped since, nor one whose publish isn't the ticks' own (#700).
+      const before = await this.#page(save.page.pageId);
+      const waiting = await this.#publish(save.page.pageId);
+      if (
+        (before?.version ?? null) !== save.seen ||
+        (waiting && (!waiting.publishedOn || waiting.draft?.version !== save.seen))
+      ) {
+        throw new ApiError(409, 'stale-head', 'This page was changed in another window');
+      }
+      const saved = await this.#saveDraft(save);
+      try {
+        if (publish) await this.#queuePublish({ ...publish, version: saved.entry.version });
+      } catch (error) {
+        // Its publish couldn't be written: the entry goes back as it was, never the ticks alone.
+        await (before ? this.#write(before) : this.#remove(saved.entry));
+        throw error;
+      }
+      return saved;
+    });
+    this.#saved(entry, made || publish !== null);
+    return entry.version;
+  }
+
+  #saved(entry: QueuedPage, made: boolean) {
+    this.#emit({ kind: 'saved', entry });
+    if (made) this.#emit({ kind: 'changed', spaceId: entry.spaceId, id: entry.id });
+  }
+
+  // `saveDraft` itself. Only from within `queueExclusive`.
+  async #saveDraft({
     page,
     basedOn,
     region,
@@ -569,95 +657,72 @@ export class OfflineQueue {
     linkChoices,
     live,
     stopped,
-  }: {
-    page: PageRef;
-    basedOn: RevisionId;
-    region: Region | null;
-    payload: PagePayload;
-    seen: number | null;
-    onTop?: boolean;
-    linkChoices?: ReadonlyMap<string, PageId>;
-    /** Made from a live session's document: what is kept beside it; left as it was when absent. */
-    live?: KeptLive | null;
-    /**
-     * Kept stopped as a conflict, never sent until the person merges it (a
-     * provisional document), or, false, sendable whatever stopped it before;
-     * left as it was when absent.
-     */
-    stopped?: boolean;
-  }): Promise<number> {
+  }: DraftSave): Promise<{ entry: QueuedPage; made: boolean }> {
     const picks = Object.fromEntries(linkChoices ?? []);
-    const { entry, made } = await this.#store.queueExclusive(async () => {
-      const before = await this.#page(page.pageId);
-      if (before && before.version !== seen) {
-        throw new ApiError(409, 'stale-head', 'This page was changed in another window');
-      }
-      // Only a page the server has: one made offline goes on top of nothing.
-      const rebased =
-        (onTop || before?.failure?.kind === 'conflict') &&
-        before !== null &&
-        before.newPage === null &&
-        before.basedOn !== basedOn;
-      // The change the caller saw landed and went just now: this goes on top
-      // of it, if the caller hadn't heard yet and is still on its base.
-      const went = before ? undefined : this.#landedOn.get(page.pageId);
-      this.#landedOn.delete(page.pageId);
-      const landed =
-        went?.base === basedOn && Date.now() - went.at < LANDING_MS ? went.landed : undefined;
-      // The person put theirs on top of the base it stopped on (Merge…, Save mine on top): settled.
-      const settled = onTop && before?.failure?.kind === 'conflict' && before.basedOn === basedOn;
-      const entry: QueuedPage = before
-        ? {
-            ...before,
-            ...(settled && { failure: null }),
-            payload,
-            picks,
-            version: before.version + 1,
-            // What was being sent on the old base is the person's no more,
-            // nor is the base its text was merged from.
-            ...(rebased && { basedOn, failure: null, sending: null, live: null }),
-            ...(live !== undefined && { live }),
-            // Saved into by a view outside the session after it was put in: the
-            // session holds the change as it was then, the base of what's new.
-            ...(!rebased &&
-              live === undefined &&
-              before.live?.putIn && {
-                live: {
-                  base: before.payload,
-                  typed: before.payload,
-                  sessionId: before.live.putIn.sessionId,
-                  joinId: before.live.putIn.joinId,
-                  baseSeq: before.live.putIn.seq,
-                  seq: before.live.putIn.seq,
-                  putIn: null,
-                },
-              }),
-          }
-        : {
-            kind: 'page',
-            id: page.pageId,
-            spaceId: page.spaceId,
-            newPage: null,
-            basedOn: landed ?? basedOn,
-            region,
-            payload,
-            version: this.#firstVersion(),
-            sending: null,
-            picks,
-            failure: null,
-            at: this.#at(),
-            live: live ?? null,
-          };
-      const kept: QueuedPage =
-        stopped === undefined
-          ? entry
-          : { ...entry, failure: stopped ? { kind: 'conflict' } : null };
-      await this.#write(kept);
-      return { entry: kept, made: !before || rebased || stopped !== undefined };
-    });
-    this.#emit({ kind: 'saved', entry });
-    if (made) this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
-    return entry.version;
+    const before = await this.#page(page.pageId);
+    if (before && before.version !== seen) {
+      throw new ApiError(409, 'stale-head', 'This page was changed in another window');
+    }
+    // Only a page the server has: one made offline goes on top of nothing.
+    const rebased =
+      (onTop || before?.failure?.kind === 'conflict') &&
+      before !== null &&
+      before.newPage === null &&
+      before.basedOn !== basedOn;
+    // The change the caller saw landed and went just now: this goes on top
+    // of it, if the caller hadn't heard yet and is still on its base.
+    const went = before ? undefined : this.#landedOn.get(page.pageId);
+    this.#landedOn.delete(page.pageId);
+    const landed =
+      went?.base === basedOn && Date.now() - went.at < LANDING_MS ? went.landed : undefined;
+    // The person put theirs on top of the base it stopped on (Merge…, Save mine on top): settled.
+    const settled = onTop && before?.failure?.kind === 'conflict' && before.basedOn === basedOn;
+    const entry: QueuedPage = before
+      ? {
+          ...before,
+          ...(settled && { failure: null }),
+          payload,
+          picks,
+          version: before.version + 1,
+          // What was being sent on the old base is the person's no more,
+          // nor is the base its text was merged from.
+          ...(rebased && { basedOn, failure: null, sending: null, live: null }),
+          ...(live !== undefined && { live }),
+          // Saved into by a view outside the session after it was put in: the
+          // session holds the change as it was then, the base of what's new.
+          ...(!rebased &&
+            live === undefined &&
+            before.live?.putIn && {
+              live: {
+                base: before.payload,
+                typed: before.payload,
+                sessionId: before.live.putIn.sessionId,
+                joinId: before.live.putIn.joinId,
+                baseSeq: before.live.putIn.seq,
+                seq: before.live.putIn.seq,
+                putIn: null,
+              },
+            }),
+        }
+      : {
+          kind: 'page',
+          id: page.pageId,
+          spaceId: page.spaceId,
+          newPage: null,
+          basedOn: landed ?? basedOn,
+          region,
+          payload,
+          version: this.#firstVersion(),
+          sending: null,
+          picks,
+          failure: null,
+          at: this.#at(),
+          live: live ?? null,
+        };
+    const kept: QueuedPage =
+      stopped === undefined ? entry : { ...entry, failure: stopped ? { kind: 'conflict' } : null };
+    await this.#write(kept);
+    return { entry: kept, made: !before || rebased || stopped !== undefined };
   }
 
   /**
@@ -1029,43 +1094,40 @@ export class OfflineQueue {
    * server's. Sent after that change, and before what is typed after.
    * Publishing again takes the place of a publish still waiting.
    */
-  async publish({
+  async publish(order: PublishOrder): Promise<void> {
+    await this.#store.queueExclusive(() => this.#queuePublish(order));
+    this.#emit({ kind: 'changed', spaceId: order.page.spaceId, id: order.page.pageId });
+  }
+
+  // `publish` itself. Only from within `queueExclusive`.
+  async #queuePublish({
     page,
     title,
     draftHead,
     version,
     publishedOn,
-  }: {
-    page: PageRef;
-    title: string;
-    draftHead: RevisionId;
-    /** Only the page's change at this version, as it was just saved, never one saved into since. */
-    version?: number;
-    /** Only over this publication (`QueuedPublish.publishedOn`). */
-    publishedOn?: RevisionId;
-  }): Promise<void> {
-    await this.#store.queueExclusive(async () => {
-      const change = await this.#page(page.pageId);
-      if (change?.newPage) throw new Error('A page made offline is published once it is made');
-      if (version !== undefined && change?.version !== version) {
-        throw new ApiError(409, 'stale-head', 'The draft changed on this device meanwhile');
-      }
-      const before = await this.#publish(page.pageId);
-      if (before) await this.#handOver(before);
-      await this.#write({
-        kind: 'publish',
-        id: page.pageId,
-        spaceId: page.spaceId,
-        title: change?.payload.title ?? title,
-        draftHead: change ? null : draftHead,
-        draft: change ? { version: change.version, payload: change.payload } : null,
-        sending: null,
-        ...(publishedOn && { publishedOn }),
-        failure: null,
-        at: before?.at ?? this.#at(),
-      });
+    change: ticked,
+  }: PublishOrder) {
+    const change = await this.#page(page.pageId);
+    if (change?.newPage) throw new Error('A page made offline is published once it is made');
+    if (version !== undefined && change?.version !== version) {
+      throw new ApiError(409, 'stale-head', 'The draft changed on this device meanwhile');
+    }
+    const before = await this.#publish(page.pageId);
+    if (before) await this.#handOver(before);
+    await this.#write({
+      kind: 'publish',
+      id: page.pageId,
+      spaceId: page.spaceId,
+      title: change?.payload.title ?? title,
+      draftHead: change ? null : draftHead,
+      draft: change ? { version: change.version, payload: change.payload } : null,
+      sending: null,
+      ...(publishedOn && { publishedOn }),
+      ...(ticked && { change: ticked }),
+      failure: null,
+      at: before?.at ?? this.#at(),
     });
-    this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
   }
 
   /**
@@ -1099,18 +1161,18 @@ export class OfflineQueue {
   }
 
   /**
-   * Delete `entry`, and the files it names that no other entry does. A file
+   * Delete each entry `gone` names, and the files they name that no other entry does. A file
    * added since its last save, which no entry names yet, stays for the save
    * about to name it. Only from within `queueExclusive`.
    */
-  async #remove(entry: QueueEntry) {
+  async #remove(...gone: QueueEntry[]) {
     const others = (await this.entries()).filter(
-      (other) => other.id !== entry.id || other.kind !== entry.kind,
+      (other) => !gone.some((entry) => other.id === entry.id && other.kind === entry.kind),
     );
     const named = new Set(others.flatMap(filesOf));
-    const own = [...new Set(filesOf(entry))];
+    const own = [...new Set(gone.flatMap(filesOf))];
     const names = own.filter((blobHash) => !named.has(blobHash)).map((h) => this.#blobName(h));
-    await this.#store.queue.remove([this.#entryName(entry), ...names]);
+    await this.#store.queue.remove([...gone.map((entry) => this.#entryName(entry)), ...names]);
   }
 
   /** Those of `refs` whose files this queue holds, added offline and not sent yet. */
@@ -1169,6 +1231,33 @@ export class OfflineQueue {
     if (entry.kind === 'page') {
       this.#emit({ kind: 'discarded', spaceId: entry.spaceId, pageId: entry.id });
     }
+  }
+
+  /**
+   * Forget what was ticked while reading (#695): the page's draft at
+   * `version` and the publish its ticks queued, both at once (#700). Refused
+   * (`stale-head`) where either changed since, as when another tab saved
+   * into the draft or pressed Publish, and while either is being sent, as it
+   * may have landed already.
+   */
+  async undoTicked(page: PageRef, version: number): Promise<void> {
+    await this.#store.queueExclusive(async () => {
+      const change = await this.#page(page.pageId);
+      const publish = await this.#publish(page.pageId);
+      if (
+        change?.version !== version ||
+        change.sending ||
+        !publish?.publishedOn ||
+        publish.sending ||
+        publish.draft?.version !== version
+      ) {
+        throw new ApiError(409, 'stale-head', 'The draft changed on this device meanwhile');
+      }
+      // In one write, so neither goes without the other.
+      await this.#remove(publish, change);
+    });
+    this.#emit({ kind: 'changed', spaceId: page.spaceId, id: page.pageId });
+    this.#emit({ kind: 'discarded', spaceId: page.spaceId, pageId: page.pageId });
   }
 
   /** Send a stopped change again at the next `send`, as for a page restored from the trash. */
@@ -1691,14 +1780,19 @@ export class OfflineQueue {
     }
     const draftHead = entry.draftHead;
     if (!draftHead) return this.#stop(entry, PUBLISH_CHANGED);
-    const sending = entry.sending ?? (await this.#recordPublish(entry));
-    if (!sending) return;
+    const recorded = entry.sending
+      ? entry
+      : await this.#recordPublish(entry, (now) => !now.draft && now.draftHead === draftHead);
+    if (!recorded?.sending) return;
+    // Published again meanwhile, with a draft of its own to save first: the next round sends it.
+    if (recorded.draft || recorded.draftHead !== draftHead) return;
+    const { sending } = recorded;
     try {
       const { heads } = await loadPage(ctx, entry.id);
       // Published already: by this, whose answer was lost.
       if (heads.publishedHead !== sending.revisionId) {
         // What was ticked publishes only over what it was ticked on (#695).
-        if (entry.publishedOn && heads.publishedHead !== entry.publishedOn) {
+        if (recorded.publishedOn && heads.publishedHead !== recorded.publishedOn) {
           return this.#stop(entry, TICKED_ON_CHANGED);
         }
         // Its public copy changes too, which the person checks online (ADR 0005).
@@ -1709,6 +1803,8 @@ export class OfflineQueue {
         await publishPage(ctx, page, {
           expected: { draftHead, publishedHead: heads.publishedHead },
           revisionId: sending.revisionId,
+          // The entry as recorded: one published again meanwhile says what it ticked, or nothing.
+          ...(recorded.change && { change: recorded.change }),
           ...(read && { read }),
         });
       }
@@ -1736,9 +1832,13 @@ export class OfflineQueue {
     read: ReadWikilinks | undefined,
   ): Promise<'offline' | void> {
     const page = { spaceId: entry.spaceId, pageId: entry.id };
-    const sending = entry.sending ?? (await this.#recordPublish(entry));
-    if (!sending) return;
-    const { revisionId } = sending;
+    const recorded = entry.sending
+      ? entry
+      : await this.#recordPublish(entry, (now) => now.draft?.version === draft.version);
+    if (!recorded?.sending) return;
+    // Published again meanwhile, of another version: the next round sends that one.
+    if (recorded.draft?.version !== draft.version) return;
+    const { revisionId } = recorded.sending;
     this.#emit({ kind: 'recorded', spaceId: entry.spaceId, pageId: entry.id, revisionId });
     try {
       await this.upload(draft.payload.attachments, (blob) => uploadBlob(ctx, page, 'draft', blob));
@@ -1777,16 +1877,22 @@ export class OfflineQueue {
 
   // Record what the next publish request sends, before it is sent; one that
   // saves a draft first waits while a tab is in the page's live session.
-  async #recordPublish(entry: QueuedPublish): Promise<QueuedPublish['sending']> {
+  // The entry as recorded, which may have been published again since `entry` was read.
+  // Only one still as `same` says, so a publish pressed meanwhile is recorded by the round that sends it.
+  async #recordPublish(
+    entry: QueuedPublish,
+    same: (current: QueuedPublish) => boolean,
+  ): Promise<QueuedPublish | null> {
     const held = this.#held;
     return this.#store.queueExclusive(async () => {
       const current = await this.#publish(entry.id);
       if (!current || current.failure) return null;
-      if (current.sending) return current.sending;
+      if (current.sending) return current;
+      if (!same(current)) return null;
       if (current.draft && held && (await held(current.id).catch(() => false))) return null;
-      const sending = { revisionId: newId(RevisionId) };
-      await this.#write({ ...current, sending });
-      return sending;
+      const recorded = { ...current, sending: { revisionId: newId(RevisionId) } };
+      await this.#write(recorded);
+      return recorded;
     });
   }
 
@@ -1979,7 +2085,7 @@ export type QueueReader = Pick<
  */
 export type QueueChoices = Pick<
   OfflineQueue,
-  'retry' | 'discard' | 'saveAsNewPage' | 'renameOnTop'
+  'retry' | 'discard' | 'saveAsNewPage' | 'renameOnTop' | 'undoTicked'
 >;
 
 /**
