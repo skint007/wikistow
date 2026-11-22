@@ -165,23 +165,26 @@ export function onlyTicked(before: PagePayload, after: PagePayload): boolean {
 }
 
 /**
- * Whether `after` is `before` as it was, ticks and all: only tasks ticked
- * or not, each as `before` has it, so nothing is left to publish. A box
- * ticked as `[X]` and ticked again comes back as `[x]`, the same (#700).
+ * Whether `after`, made from `before` by ticks alone, is `before` as it
+ * was: each box as `before` has it, though one written `[X]` and ticked
+ * again comes back as `[x]` (#700), and nothing else changed. Compared
+ * as text, never parsed: a tick changes only a box's mark.
  */
 export function tickedBack(before: PagePayload, after: PagePayload): boolean {
-  return onlyTicked(before, after) && sameTicks(before.markdown, after.markdown);
+  const rest = (payload: PagePayload) =>
+    JSON.stringify({ ...withoutLiveState(withoutChange(payload)), markdown: '' });
+  return sameTicks(before.markdown, after.markdown) && rest(before) === rest(after);
 }
 
-/** Whether `after` is `before` with every box as it was, though `[X]` may be `[x]` now (#700). */
+/** Whether `after`, made from `before` by ticks alone, has every box as `before` has it. */
 function sameTicks(before: string, after: string): boolean {
-  const { ticked, unticked, properties } = summarizeChange(before, after);
-  return (
-    ticked === 0 &&
-    unticked === 0 &&
-    properties.length === 0 &&
-    marksIgnored(before) === marksIgnored(after)
-  );
+  if (before.length !== after.length) return false;
+  for (let i = 0; i < before.length; i++) {
+    const was = before[i];
+    const is = after[i];
+    if (was !== is && !((was === 'X' && is === 'x') || (was === 'x' && is === 'X'))) return false;
+  }
+  return true;
 }
 
 /** What a flush needs of the page, so it can be tried without a server. */

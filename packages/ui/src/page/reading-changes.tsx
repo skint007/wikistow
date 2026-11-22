@@ -95,9 +95,13 @@ function reaches<T>(own: Map<T | null, T | null>, from: T | null, to: T | null) 
   return false;
 }
 
-// The page text kept to find its tasks goes as the vault locks.
+// The page text kept to find its tasks goes as the vault locks, or opens for another session.
+let keptFor: ClientContext | null = null;
 vaultStore.subscribe(() => {
-  if (vaultStore.get().status !== 'unlocked') forgetTaskItems();
+  const now = vaultStore.get();
+  const ctx = now.status === 'unlocked' ? now.ctx : null;
+  if (ctx !== keptFor) forgetTaskItems();
+  keptFor = ctx;
 });
 vaultStore.guardLock(async () => {
   await flushesUnderway();
