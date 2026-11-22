@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { expect, pick, test } from './fixtures';
-import { folderMenu, newFolder } from './sharing';
+import { folderMenu, newFolder, publishedPageIn } from './sharing';
 import {
   adminTab,
   expectSource,
@@ -387,4 +387,76 @@ test('a page moved and published offline goes once back online', async ({
   await expect(page.getByRole('heading', { level: 1, name: 'Bread' })).toBeVisible();
   await expect(page.getByText(/Published v1$/)).toBeVisible();
   await expect(page.getByText('Flour and rye.')).toBeVisible();
+});
+
+/**
+ * Tasks ticked while reading offline (#695): they show at once, wait on
+ * this device as the page's offline draft with its publish, kept through a
+ * reload, and the draft opens with them. Back online, they go up as one
+ * version.
+ */
+test('tasks ticked offline wait on this device and publish once back online', async ({
+  page,
+  context,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(180_000);
+  await memberWithVault(page, await adminTab(freshPage, admin.email));
+  await newFolder(page, 'Lists');
+  await publishedPageIn(page, 'Lists', 'Shopping', '- [ ] milk\n- [ ] bread\n- [ ] eggs\n');
+  await watchKeeping(page);
+  await page.reload();
+  await expect(page.getByRole('heading', { level: 1, name: 'Shopping' })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-keeping', 'done', { timeout: 30_000 });
+  await page.evaluate(() => navigator.serviceWorker.ready);
+
+  await context.setOffline(true);
+  const tree = page.getByRole('tree');
+  // The app finds it is offline on its next request.
+  await tree.getByRole('treeitem', { name: /Lists/ }).click();
+  const offline = page.getByRole('status').filter({ hasText: 'Offline' });
+  await expect(offline).toBeVisible();
+  await tree.getByRole('treeitem', { name: /^Shopping/ }).click();
+  const box = (name: string) => page.getByRole('checkbox', { name, exact: true });
+  const waits = page.getByText('What you ticked waits to be sent');
+  const saving = page.getByText('Saving your changes on this device…');
+
+  await test.step('ticks show at once, and wait on this device', async () => {
+    await box('milk').check();
+    await box('eggs').check();
+    await expect(saving).toBeVisible();
+    await expect(waits).toBeVisible({ timeout: 15_000 });
+    await expect(box('milk')).toBeChecked();
+    await expect(box('eggs')).toBeChecked();
+  });
+
+  await test.step('loaded again offline, they are still ticked, and more can be', async () => {
+    await page.reload();
+    await expect(offline).toBeVisible();
+    await expect(box('milk')).toBeChecked();
+    await box('eggs').uncheck();
+    await box('bread').check();
+    await expect(saving).toBeHidden({ timeout: 15_000 });
+    await expect(waits).toBeVisible();
+    await expect(box('eggs')).not.toBeChecked();
+  });
+
+  await test.step('the draft opens with them', async () => {
+    await page.getByRole('button', { name: 'Edit' }).click();
+    await expectSource(page, '- [x] milk\n- [x] bread\n- [ ] eggs\n');
+    await page.getByRole('button', { name: 'Done' }).click();
+    await expect(waits).toBeVisible();
+  });
+
+  await context.setOffline(false);
+  await expect(offline).toBeHidden({ timeout: 15_000 });
+  await expect(waits).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByText(/Published v2$/)).toBeVisible({ timeout: 30_000 });
+  // Loaded afresh, as readers see it: one version with every tick.
+  await page.goto(new URL(page.url()).pathname);
+  await expect(page.getByText(/Published v2$/)).toBeVisible();
+  await expect(box('milk')).toBeChecked();
+  await expect(box('bread')).toBeChecked();
+  await expect(box('eggs')).not.toBeChecked();
 });

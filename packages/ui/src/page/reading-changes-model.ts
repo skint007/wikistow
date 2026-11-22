@@ -1,4 +1,8 @@
 import {
+  marksIgnored,
+  withoutChange,
+  withoutLiveState,
+  type PagePayload,
   propertyKeyFor,
   setPageProperty,
   setTask,
@@ -52,9 +56,10 @@ export const PUBLIC_LINK_HINT = 'This page has a public link: open the draft to 
  * even when it is now, as it stays that one once a tick publishes. Each
  * publish ends a public page's copy, which Publish asks about first (ADR
  * 0005), so a tick there would end it without asking. Readers are told
- * nothing, as nothing would let them. A tick publishes, so `offline`, or
- * while a change made offline waits (`waiting`), it waits as `availability`
- * says (ADR 0009, decision 8).
+ * nothing, as nothing would let them. A tick publishes: `offline` it waits
+ * on this device, as an offline draft and its publish, and while another
+ * change made offline waits (`waiting`), it waits as `availability` says
+ * (ADR 0009, decisions 7 and 8; #695).
  */
 export function readingRights({
   viewer,
@@ -88,7 +93,8 @@ export function readingRights({
   if (pinned) return { allowed: false, hint: 'Open the latest version to tick this' };
   if (!viewer.canPublish)
     return { allowed: false, hint: 'Open the draft to tick this: you can’t publish this page' };
-  if (publicLink === null) return { allowed: false, hint: null };
+  // Offline, links not known are checked as the publish is sent, as a publish waiting is (#331).
+  if (publicLink === null && !offline) return { allowed: false, hint: null };
   if (publicLink) return { allowed: false, hint: PUBLIC_LINK_HINT };
   if (heads.draftChanges)
     return { allowed: false, hint: 'Open the draft to tick this: it has unpublished changes' };
@@ -126,6 +132,19 @@ export function applyChanges(
   return { markdown, dropped };
 }
 
+/**
+ * Whether `after` is `before` with only tasks ticked or unticked: an
+ * offline draft made of what was ticked while reading, which more ticks
+ * may go into and publish, as it holds nothing the person typed (#695).
+ */
+export function onlyTicked(before: PagePayload, after: PagePayload): boolean {
+  const plain = (payload: PagePayload) => {
+    const kept = withoutLiveState(withoutChange(payload));
+    return JSON.stringify({ ...kept, markdown: marksIgnored(kept.markdown) });
+  };
+  return plain(before) === plain(after);
+}
+
 /** What a flush needs of the page, so it can be tried without a server. */
 export type FlushOperations = {
   /** The page's heads as they are now. */
@@ -152,7 +171,8 @@ export type FlushOperations = {
  * `unchanged`, the page already as asked, or every change left out.
  */
 export type Flushed = {
-  outcome: 'published' | 'in-draft' | 'unchanged';
+  /** `on-device`: saved on this device as the page's draft, with its publish waiting (#695). */
+  outcome: 'published' | 'in-draft' | 'unchanged' | 'on-device';
   dropped: Dropped[];
   /** Left in the draft as the page had a public link by then, which a publish would end. */
   publicLink?: true;
@@ -484,10 +504,14 @@ export function leftOutcome(pageId: string, told: Told) {
 }
 
 /** What the queue says on the page: saving, how the last flush went, or why it failed. */
-export function readingNotices({ changes, saving, last, error, before }: ReadingState): string[] {
+export function readingNotices(
+  { changes, saving, last, error, before }: ReadingState,
+  offline = false,
+): string[] {
   const notices: string[] = [];
   if (error !== null) notices.push(failed(error));
-  else if (saving || changes.length > 0) notices.push('Publishing your changes…');
+  else if (saving || changes.length > 0)
+    notices.push(offline ? 'Saving your changes on this device…' : 'Publishing your changes…');
   else if (last?.outcome === 'published') notices.push('Your changes are published.');
   if (!saving) notices.push(...settled(last));
   // A flush from before this visit's, after what this visit's says, each thing once.

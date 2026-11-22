@@ -1,4 +1,4 @@
-import { taskItems } from '@wikistow/client';
+import { newPayload, taskItems } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
@@ -14,6 +14,7 @@ import {
   PUBLIC_LINK_HINT,
   readingNotices,
   ReadingQueue,
+  onlyTicked,
   readingRights,
   showing,
   type FlushOperations,
@@ -106,6 +107,16 @@ describe('who may change a page while reading it', () => {
   it('is an editor who can publish, on the latest publication, its draft without changes', () => {
     expect(rights({})).toEqual({ allowed: true });
     expect(rights({ viewer: { role: 'owner', canPublish: true } })).toEqual({ allowed: true });
+  });
+
+  it('waits on this device offline, behind nothing else, links not known checked as it goes (#695)', () => {
+    expect(rights({ offline: true })).toEqual({ allowed: true });
+    expect(rights({ offline: true, publicLink: null })).toEqual({ allowed: true });
+    expect(rights({ offline: true, publicLink: true })).toEqual({
+      allowed: false,
+      hint: PUBLIC_LINK_HINT,
+    });
+    expect(rights({ offline: true, waiting: 'changed' })).toMatchObject({ allowed: false });
   });
 
   it('is nobody else, with a hint saying why where there is one to give', () => {
@@ -614,5 +625,16 @@ describe('what the queue says', () => {
       'A change was left out. The task “a” isn’t on the page any more.',
     ]);
     expect(readingNotices({ ...state, last: null })).toEqual([]);
+  });
+});
+
+describe('an offline draft made only of ticks (#695)', () => {
+  const payload = newPayload({ title: 'Shopping', markdown: '- [ ] milk\n- [ ] eggs\n' });
+  it('is the publication with tasks ticked or not, and nothing else', () => {
+    expect(onlyTicked(payload, { ...payload, markdown: '- [x] milk\n- [ ] eggs\n' })).toBe(true);
+    expect(onlyTicked(payload, { ...payload, markdown: '- [x] milk\n- [ ] eggs\nbread\n' })).toBe(
+      false,
+    );
+    expect(onlyTicked(payload, { ...payload, title: 'Shops' })).toBe(false);
   });
 });

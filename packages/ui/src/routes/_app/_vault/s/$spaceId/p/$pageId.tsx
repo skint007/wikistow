@@ -107,6 +107,7 @@ import {
 } from '../../../../../../page/reading-changes';
 import {
   applyChanges,
+  onlyTicked,
   originOf,
   pageFlushing,
   readingRights,
@@ -217,7 +218,8 @@ function PageView() {
   useEffect(() => setSharingLinkFor(null), [pageId]);
   const sharingLink = sharingLinkFor === pageId;
   // Changes made while reading, kept across the publications they make.
-  const reading = useReadingQueue(ctx, page);
+  // The page's name, for the publish of what was ticked while reading it offline (#695).
+  const reading = useReadingQueue(ctx, page, tree?.pages.find((p) => p.id === pageId)?.title ?? '');
   const queued = useSyncExternalStore(reading.subscribe, reading.get);
   // Turning to the draft or an older version saves what waits first, at
   // once, saying only how that went; the draft opens once it's done, on
@@ -488,6 +490,25 @@ function PageBody({
     (entry): entry is queueOperations.QueuedPublish =>
       entry.kind === 'publish' && entry.id === page.pageId && entry.failure === null,
   );
+  // What was ticked while reading, waiting on this device as the page's
+  // draft, the publication with only tasks ticked or not, and its publish
+  // (#695): more may be ticked into it, and the page shows it.
+  const shownPublication =
+    model.view === 'published' &&
+    revisionId === info.heads.publishedHead &&
+    revision?.opened.kind === 'current'
+      ? revision.opened.payload
+      : null;
+  const ticksOnly =
+    shownPublication !== null &&
+    change !== null &&
+    !change.newPage &&
+    change.failure === null &&
+    publishWaiting !== undefined &&
+    (entries ?? []).every(
+      (entry) => entry.id !== page.pageId || entry === change || entry === publishWaiting,
+    ) &&
+    onlyTicked(shownPublication, change.payload);
   const rights = useMemo(
     () =>
       readingRights({
@@ -498,7 +519,7 @@ function PageBody({
         pinned,
         publicLink: linked,
         offline: availability.offline,
-        waiting,
+        waiting: ticksOnly ? 'none' : waiting,
       }),
     [
       info.role,
@@ -510,6 +531,7 @@ function PageBody({
       linked,
       availability.offline,
       waiting,
+      ticksOnly,
     ],
   );
 
@@ -725,7 +747,8 @@ function PageBody({
   }, [showThread, navigate]);
   const title = pageTitle(payload?.title ?? null);
   const latest = model.view === 'published' && revisionId === publishedHead;
-  const readMarkdown = payload?.markdown ?? null;
+  // What was ticked offline, as the page's draft waiting to be published, shows over the publication.
+  const readMarkdown = (ticksOnly ? change?.payload.markdown : payload?.markdown) ?? null;
   const shownMarkdown = useMemo(
     () =>
       readMarkdown !== null && latest
@@ -1179,7 +1202,28 @@ function PageBody({
           </h1>
         )}
         <Pills pills={model.pills} older={model.older} onSwitch={(view) => void go(view)}>
-          {publishWaiting && (
+          {ticksOnly && change && publishWaiting && (
+            <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
+              What you ticked waits to be sent
+              {/* Once it is being sent, its draft may have landed already. */}
+              {!change.sending && !publishWaiting.sending && (
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() =>
+                    void act(async () => {
+                      const choices = queueChoices(ctx);
+                      await choices?.discard(publishWaiting);
+                      await choices?.discard(change);
+                    })
+                  }
+                >
+                  Undo
+                </button>
+              )}
+            </span>
+          )}
+          {publishWaiting && !ticksOnly && (
             <span className="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-[3px] text-subtle-foreground">
               Publish waits to be sent
               <button
