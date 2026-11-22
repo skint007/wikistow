@@ -350,7 +350,9 @@ export function useReadingQueue(
       } catch (error) {
         // The first changes after the connection dropped, before the app knew:
         // kept on the device, as offline, if nothing was sent that may have
-        // landed (#700). After a save or publish with no answer, they wait here.
+        // landed (#700). After a save or publish with no answer, they wait here for
+        // the next flush, which keeps them on the device, a save that landed then
+        // coming back as the conflict prompt.
         const device =
           noAnswer(error) && !wrote ? await onDevice(changes, on, true).catch(() => null) : null;
         if (device) return device;
