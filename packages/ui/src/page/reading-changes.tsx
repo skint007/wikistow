@@ -223,11 +223,17 @@ export function useReadingQueue(
             reaches(ownPublished, made.publishedOn, publishedOn))
         );
       };
-      // Those after one left out were made in text that held it: left out too,
-      // as their places may have moved with it.
-      const first = changes.findIndex((_, index) => !madeHere(index));
-      const kept = first === -1 ? changes : changes.slice(0, first);
-      const moved = first === -1 ? [] : changes.slice(first);
+      // Those after a property left out were made in text that held it, its
+      // frontmatter longer or shorter: left out too, as their places moved
+      // with it. A tick moves nothing.
+      const kept: ReadingChange[] = [];
+      const moved: ReadingChange[] = [];
+      let cut = false;
+      changes.forEach((made, index) => {
+        const here = !cut && madeHere(index);
+        (here ? kept : moved).push(made);
+        if (!here && made.kind === 'property') cut = true;
+      });
       const left = moved.map((made) => ({ change: made, reason: CHANGED_ELSEWHERE }));
       if (kept.length === 0) return { outcome: 'unchanged', dropped: left };
       const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);

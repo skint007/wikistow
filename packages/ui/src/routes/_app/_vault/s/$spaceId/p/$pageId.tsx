@@ -1238,6 +1238,8 @@ function PageBody({
                     void act(async () => {
                       // Both at once, refused if another tab saved into the draft or published since.
                       await queueChoices(ctx)?.undoTicked(page, change.version);
+                      // And those still waiting for their pause, made on the draft it dropped.
+                      reading.discard();
                     })
                   }
                 >

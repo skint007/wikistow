@@ -1830,9 +1830,11 @@ export class OfflineQueue {
     read: ReadWikilinks | undefined,
   ): Promise<'offline' | void> {
     const page = { spaceId: entry.spaceId, pageId: entry.id };
-    const sending = entry.sending ?? (await this.#recordPublish(entry))?.sending;
-    if (!sending) return;
-    const { revisionId } = sending;
+    const recorded = entry.sending ? entry : await this.#recordPublish(entry);
+    if (!recorded?.sending) return;
+    // Published again meanwhile, of another version: the next round sends that one.
+    if (recorded.draft?.version !== draft.version) return;
+    const { revisionId } = recorded.sending;
     this.#emit({ kind: 'recorded', spaceId: entry.spaceId, pageId: entry.id, revisionId });
     try {
       await this.upload(draft.payload.attachments, (blob) => uploadBlob(ctx, page, 'draft', blob));
