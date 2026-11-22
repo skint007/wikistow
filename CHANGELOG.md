@@ -4,6 +4,22 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Maintenance
+
+- This release sends the web clipper extension to Mozilla Add-ons as a listed add-on.
+
+### Changes
+
+#### Desktop
+
+- The web clipper extension 0.1.3, the same as 0.1.2, for Mozilla Add-ons' first listed version: 0.1.2 went there unlisted too, which can't be changed. (#709)
+
+#### Releases and packaging
+
+- The release gives Mozilla Add-ons the web clipper's categories, Bookmarks and Other, which a listed version needs as well as its license. (#709)
+
 ## 0.30.0 - 2026-11-22
 
 ### Highlights
