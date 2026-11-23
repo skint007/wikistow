@@ -75,11 +75,12 @@ class FakeParticipant {
   /** The draft head, for putting typing back onto it. */
   head: { revisionId: RevisionId; payload: PagePayload } | null = null;
   /**
-   * A commit's save lands, and the session stops: before its change is sent
-   * to anyone (`after` it went into this document), or before its answer
+   * A commit's save lands, and the session stops: once its change was sent
+   * (`sent`); with it in this document but sent to nobody (`unsent`), the
+   * person maybe removing the file first (`removed`); or before its answer
    * came (`before`, the document as it was).
    */
-  stopOnCommit: 'before' | 'after' | null = null;
+  stopOnCommit: 'sent' | 'unsent' | 'removed' | 'before' | null = null;
 
   constructor(payload: PagePayload) {
     this.base = payload;
@@ -196,6 +197,13 @@ class FakeParticipant {
         else this.document.map(root).set(key, value);
       }
     }, 'copy');
+    if (this.stopOnCommit === 'removed') {
+      this.document.edit(() => {
+        for (const { root, key } of typeof change === 'function' ? [] : (change.entries ?? [])) {
+          this.document.map(root).delete(key);
+        }
+      });
+    }
     if (this.stopOnCommit) {
       // As the participant does: its document holds the landed change, and it stops.
       this.end({
@@ -704,8 +712,13 @@ describe('a draft session in a live session', () => {
     expect(joins[0]?.document.text('body').toJSON()).toContain('(attachment:a-photo_png)');
   });
 
-  for (const when of ['after', 'before'] as const) {
-    it(`says a file whose save landed as the session stopped (${when} its answer) went in, adding nothing itself`, async () => {
+  for (const [when, kept] of [
+    ['sent', true],
+    ['unsent', true],
+    ['removed', false],
+    ['before', false],
+  ] as const) {
+    it(`links a file whose save landed as the session stopped (${when}) only if the page shows it`, async () => {
       const { draft, joins } = session();
       await draft.joinLive();
       const live = joins[0];
@@ -716,13 +729,13 @@ describe('a draft session in a live session', () => {
       await settle();
       // The draft holds it: never "Try again", which would add it twice (#522).
       expect(draft.snapshot().uploadError).toBe(
-        'The file was added, but live editing stopped before its link went in.',
+        kept ? null : 'The file was added, but live editing stopped before its link went in.',
       );
-      // The view shows the page as the session left it, and puts nothing back itself.
+      // The page as the session left it, never a file put back or a link to one it lacks.
       expect(draft.snapshot().attachments.map((ref) => ref.id)).toEqual(
-        when === 'after' ? ['a-photo_png'] : [],
+        kept ? ['a-photo_png'] : [],
       );
-      expect(draft.snapshot().markdown).not.toContain('(attachment:a-photo_png)');
+      expect(draft.snapshot().markdown.includes('(attachment:a-photo_png)')).toBe(kept);
     });
   }
 
