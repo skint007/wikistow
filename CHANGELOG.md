@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Releases and packaging
+
+- The release gives Mozilla Add-ons the web clipper's category as Bookmarks alone, as Mozilla refuses Other beside another category. 0.30.1's submission was refused for it. (#713)
+
 ## 0.30.1 - 2026-11-23
 
 ### Highlights
