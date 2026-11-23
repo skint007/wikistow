@@ -1739,22 +1739,21 @@ export class LiveParticipant {
       // fold in what they lack once this join goes, as for a restore.
       if (!this.#keyed()) {
         giveUp();
-        // Stopped, not closed: this app's document takes it too, so settling
-        // goes on from that draft, never saving over it as someone else's.
-        if (!this.#abort.signal.aborted) {
-          this.document.apply(update, COPY_ORIGIN);
-          record();
-          this.#update();
-        }
+        // This app's document takes it too, sending nothing, so settling goes
+        // on from that draft, never saving over it as someone else's.
+        this.document.apply(update, COPY_ORIGIN);
+        record();
+        this.#update();
         return true;
       }
       // Landed: the change goes into this app's document and out to everyone.
       this.#placing = true;
       try {
         this.document.apply(update, COPY_ORIGIN);
+        // Recorded before sending: settling while the send is held up goes on from it.
+        record();
         const clock = Y.getState(copy.doc.store, clientId);
         await send(seal(2, 'update', clock, update));
-        record();
         if (!this.#keyed()) return true;
         await send(seal(3, 'saved', clock, stateContent(result.revisionId, stateBytes)), covers);
         // Done with: a join has at most two further joins at a time.
@@ -1763,7 +1762,6 @@ export class LiveParticipant {
         // The draft claims a change the others never got: the session can't
         // go on with it. The draft holds it all the same, and so does this
         // app's document, which settling goes on from.
-        record();
         this.#stop('a file’s change couldn’t be sent', null, true);
         return true;
       } finally {
