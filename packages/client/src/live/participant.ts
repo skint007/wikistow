@@ -1532,7 +1532,9 @@ export class LiveParticipant {
    * (section 5.10, **Files**): in a copy of the document under a further
    * join of its own, saved as a draft of the session, and sent from that
    * join once the save has landed, with a Saved notice after it. Its main
-   * join sends nothing built on it until it is placed. Whether it went in.
+   * join sends nothing built on it until it is placed. Whether it went in:
+   * true once the save has landed, even if the app stopped before sending
+   * it, as the draft holds it.
    */
   commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
     return this.#tracked(this.#commitOwn(change));
@@ -1715,7 +1717,12 @@ export class LiveParticipant {
         // Nothing of it went to anyone: a refused save leaves nothing behind.
         return giveUp();
       }
-      if (!this.#keyed()) return giveUp();
+      // It landed: whatever happens next, the draft holds it, and others
+      // fold in what they lack once this join goes, as for a restore.
+      if (!this.#keyed()) {
+        giveUp();
+        return true;
+      }
       // Landed: the change goes into this app's document and out to everyone.
       this.#placing = true;
       try {
@@ -1739,9 +1746,10 @@ export class LiveParticipant {
         // Done with: a join has at most two further joins at a time.
         void this.#transport.leave(further).catch(() => {});
       } catch {
-        // The draft claims a change the others never got: the session can't go on with it.
+        // The draft claims a change the others never got: the session can't
+        // go on with it. The draft holds it all the same.
         this.#stop('a file’s change couldn’t be sent', null, true);
-        return false;
+        return true;
       } finally {
         this.#placing = false;
         this.#schedule();

@@ -304,14 +304,25 @@ export function coverage(ranges: readonly ClockRange[]): ClockRange[] {
   return out;
 }
 
-// Whether `outer`'s merged ranges cover each of `inner`'s.
+// Whether `outer`'s merged ranges cover each of `inner`'s: one walk of both,
+// as each is sorted, so a delete set of many scattered ranges compares in
+// linear time. Merged ranges neither touch nor overlap, so only the first one
+// of `outer` that doesn't end before a range starts can cover it.
 function covers(outer: readonly ClockRange[], inner: readonly ClockRange[]): boolean {
   const merged = coverage(outer);
-  return coverage(inner).every((range) =>
-    merged.some(
-      (held) => held.clock <= range.clock && range.clock + range.length <= held.clock + held.length,
-    ),
-  );
+  let at = 0;
+  for (const range of coverage(inner)) {
+    let held = merged[at];
+    while (held && held.clock + held.length < range.clock) held = merged[++at];
+    if (
+      !held ||
+      held.clock > range.clock ||
+      range.clock + range.length > held.clock + held.length
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**

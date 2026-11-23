@@ -982,6 +982,18 @@ export class DraftSession {
           this.#set({ uploadError: 'The file couldn’t be added just now. Try again.' });
           return;
         }
+        // Its save landed, and the session stopped before sending it: the
+        // draft holds the files, so this view's text takes them too, with
+        // their links, as outside a session. Never added again on a retry.
+        if (!this.#participant) {
+          const now = this.#content.attachments;
+          this.#change({
+            attachments: [
+              ...now,
+              ...added.filter((ref) => !now.some((held) => held.id === ref.id)),
+            ],
+          });
+        }
         place(added.map(attachmentLink));
         return;
       }

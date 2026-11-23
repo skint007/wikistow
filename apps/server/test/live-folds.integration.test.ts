@@ -163,10 +163,11 @@ describe('a draft saved from outside a live session', () => {
     const mine = await join(owner, page, { landed: () => crash() });
     const theirs = await join(editor, page);
     await expect.poll(() => mine.status().people.length).toBe(1);
-    // Its save lands, and the app is gone before it sends the change.
+    // Its save lands, and the app is gone before it sends the change: it
+    // went in all the same, as the draft holds it (#522).
     crash = () => mine.close();
     expect(await mine.commitOwn({ texts: { body: `${body(mine)}\n\nSaved, never sent.\n` } })).toBe(
-      false,
+      true,
     );
     await expect.poll(() => body(theirs), { timeout: 60_000 }).toContain('Saved, never sent.');
     expect(theirs.status().state).toEqual({ kind: 'live' });

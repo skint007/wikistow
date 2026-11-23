@@ -74,6 +74,8 @@ class FakeParticipant {
   outside: PagePayload | null = null;
   /** The draft head, for putting typing back onto it. */
   head: { revisionId: RevisionId; payload: PagePayload } | null = null;
+  /** A commit's save lands, and the session stops before its change is sent. */
+  stopOnCommit = false;
 
   constructor(payload: PagePayload) {
     this.base = payload;
@@ -175,6 +177,15 @@ class FakeParticipant {
     this.closed = true;
   }
   async commitOwn(change: Parameters<LiveParticipant['commitOwn']>[0]) {
+    if (this.stopOnCommit) {
+      this.end({
+        kind: 'stopped',
+        why: 'a file’s change couldn’t be sent',
+        saveOver: null,
+        rejoin: true,
+      });
+      return true;
+    }
     this.document.edit(() => {
       if (typeof change === 'function') return change(this.document);
       for (const [name, text] of Object.entries(change.texts ?? {})) {
@@ -681,6 +692,21 @@ describe('a draft session in a live session', () => {
     await draft.flush();
     expect([...(joins[0]?.document.map('attachments').keys() ?? [])]).toEqual(['a-photo_png']);
     expect(joins[0]?.document.text('body').toJSON()).toContain('(attachment:a-photo_png)');
+  });
+
+  it('takes in a file whose save landed as the session stopped, with its link', async () => {
+    const { draft, joins } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.stopOnCommit = true;
+    draft.attach([new File(['x'], 'photo.png', { type: 'image/png' })]);
+    await draft.flush();
+    await settle();
+    // The draft holds it: never "Try again", which would add it twice (#522).
+    expect(draft.snapshot().uploadError).toBeNull();
+    expect(draft.snapshot().attachments.map((ref) => ref.id)).toEqual(['a-photo_png']);
+    expect(draft.snapshot().markdown).toContain('(attachment:a-photo_png)');
   });
 
   it('keeps body text that reads like frontmatter in the body', async () => {
