@@ -121,7 +121,7 @@ The first upload gives the item its ID, which the dashboard shows. It goes in `P
 
 At [the Developer Hub](https://addons.mozilla.org/developers/addon/submit/distribution), **Submit a New Add-on**, **On this site**, then upload `wikistow-clipper-<version>-firefox.zip` ([submitting](https://extensionworkshop.com/documentation/publish/submitting-an-add-on/)). Its ID is `web-clipper@wikistow.skint007.github.io`, and this first upload claims it for the account.
 
-This add-on's first uploads went in **On your own**, so it has unlisted versions only, to 0.1.2. Once an add-on has a version, the Developer Hub's **Upload New Version** never asks where to distribute it, and uploads go in unlisted. So listed versions come from the release's `mozilla-add-ons` job, which asks for the listed channel through the API and sends the license and categories in `apps/clipper/amo-metadata.json`; the first is 0.1.3. Never delete the add-on to start again: its ID can't be used again, and every desktop app trusts it.
+This add-on's first uploads went in **On your own**, so it has unlisted versions only, to 0.1.2. Once an add-on has a version, the Developer Hub's **Upload New Version** never asks where to distribute it, and uploads go in unlisted. So listed versions come from the release's `mozilla-add-ons` job, which asks for the listed channel through the API and sends the license and category in `apps/clipper/amo-metadata.json`; the first is 0.1.3, which 0.30.1's job sent with Bookmarks and Other and Mozilla refused, so it was sent by hand with the same `web-ext sign` and Bookmarks alone. Never delete the add-on to start again: its ID can't be used again, and every desktop app trusts it.
 
 | Field | Value |
 | --- | --- |
@@ -131,7 +131,7 @@ This add-on's first uploads went in **On your own**, so it has unlisted versions
 | Add-on URL | `https://addons.mozilla.org/firefox/addon/wikistow-clipper/` |
 | Summary | The short description above |
 | Description | The long description above |
-| Categories | **Bookmarks** and **Other**, at most two. None fits a clipper well ([categories](https://mozilla.github.io/addons-server/topics/api/categories.html)) |
+| Categories | **Bookmarks** alone. At most two, but Mozilla refuses **Other** beside another, and none fits a clipper well ([categories](https://mozilla.github.io/addons-server/topics/api/categories.html)) |
 | Tags | None: Mozilla's fixed list has none for notes or clipping |
 | Support email | Scott's support address |
 | Support website | https://github.com/skint007/wikistow/issues |
