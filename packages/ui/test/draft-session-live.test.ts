@@ -74,7 +74,7 @@ class FakeParticipant {
   outside: PagePayload | null = null;
   /** The draft head, for putting typing back onto it. */
   head: { revisionId: RevisionId; payload: PagePayload } | null = null;
-  /** A commit's save lands, and the session stops before its change is sent. */
+  /** A commit's save lands, and the session stops before its change is sent to anyone. */
   stopOnCommit = false;
 
   constructor(payload: PagePayload) {
@@ -177,15 +177,6 @@ class FakeParticipant {
     this.closed = true;
   }
   async commitOwn(change: Parameters<LiveParticipant['commitOwn']>[0]) {
-    if (this.stopOnCommit) {
-      this.end({
-        kind: 'stopped',
-        why: 'a file’s change couldn’t be sent',
-        saveOver: null,
-        rejoin: true,
-      });
-      return true;
-    }
     this.document.edit(() => {
       if (typeof change === 'function') return change(this.document);
       for (const [name, text] of Object.entries(change.texts ?? {})) {
@@ -196,6 +187,16 @@ class FakeParticipant {
         else this.document.map(root).set(key, value);
       }
     }, 'copy');
+    if (this.stopOnCommit) {
+      // As the participant does: its document holds the landed change, and it stops.
+      this.end({
+        kind: 'stopped',
+        why: 'a file’s change couldn’t be sent',
+        saveOver: null,
+        rejoin: true,
+      });
+      return true;
+    }
     for (const listener of this.#changes) listener(false);
     return true;
   }

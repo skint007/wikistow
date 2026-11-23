@@ -982,6 +982,8 @@ export class DraftSession {
           this.#set({ uploadError: 'The file couldn’t be added just now. Try again.' });
           return;
         }
+        // Locked meanwhile: nothing more is saved here, and the draft holds the files.
+        if (this.#ports.epoch() !== epoch) return;
         // Its save landed, and the session stopped before sending it: the
         // draft holds the files, so this view's text takes them too, with
         // their links, as outside a session. Never added again on a retry.

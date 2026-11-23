@@ -1717,18 +1717,11 @@ export class LiveParticipant {
         // Nothing of it went to anyone: a refused save leaves nothing behind.
         return giveUp();
       }
-      // It landed: whatever happens next, the draft holds it, and others
-      // fold in what they lack once this join goes, as for a restore.
-      if (!this.#keyed()) {
-        giveUp();
-        return true;
-      }
-      // Landed: the change goes into this app's document and out to everyone.
-      this.#placing = true;
-      try {
-        this.document.apply(update, COPY_ORIGIN);
-        const clock = Y.getState(copy.doc.store, clientId);
-        await send(seal(2, 'update', clock, update));
+      // This app's draft, the head now: what settling and the draft view go on from.
+      let recorded = false;
+      const record = () => {
+        if (recorded) return;
+        recorded = true;
         this.#drafts.set(result.revisionId, {
           ours: true,
           revisionId: result.revisionId,
@@ -1741,13 +1734,36 @@ export class LiveParticipant {
         if (this.#head === headId) this.#head = result.revisionId;
         if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
         this.#seenOwn(result.revisionId, headId);
+      };
+      // It landed: whatever happens next, the draft holds it, and others
+      // fold in what they lack once this join goes, as for a restore.
+      if (!this.#keyed()) {
+        giveUp();
+        // Stopped, not closed: this app's document takes it too, so settling
+        // goes on from that draft, never saving over it as someone else's.
+        if (!this.#abort.signal.aborted) {
+          this.document.apply(update, COPY_ORIGIN);
+          record();
+          this.#update();
+        }
+        return true;
+      }
+      // Landed: the change goes into this app's document and out to everyone.
+      this.#placing = true;
+      try {
+        this.document.apply(update, COPY_ORIGIN);
+        const clock = Y.getState(copy.doc.store, clientId);
+        await send(seal(2, 'update', clock, update));
+        record();
         if (!this.#keyed()) return true;
         await send(seal(3, 'saved', clock, stateContent(result.revisionId, stateBytes)), covers);
         // Done with: a join has at most two further joins at a time.
         void this.#transport.leave(further).catch(() => {});
       } catch {
         // The draft claims a change the others never got: the session can't
-        // go on with it. The draft holds it all the same.
+        // go on with it. The draft holds it all the same, and so does this
+        // app's document, which settling goes on from.
+        record();
         this.#stop('a file’s change couldn’t be sent', null, true);
         return true;
       } finally {
@@ -1947,6 +1963,9 @@ export class LiveParticipant {
     /** Whether `base` is the draft head, a session draft the document holds. */
     atHead: boolean;
   }> {
+    // A file or rename whose save may land now is counted first: settling
+    // on the head from before it would save over this app's own draft.
+    await withTimeout(Promise.allSettled([...this.#work]), 10_000).catch(() => {});
     const provisional = this.#provisional;
     const mine =
       Y.getState(this.document.doc.store, this.#clientId) > this.#startClock ||

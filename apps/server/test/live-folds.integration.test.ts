@@ -4,6 +4,7 @@
 // where both changed one part and a note for Review.
 import {
   agentTools,
+  createApiClient,
   moveOperations as moves,
   pageMerge,
   pageOperations as pages,
@@ -70,10 +71,14 @@ function gate() {
 async function join(
   person: Person,
   page: Page,
-  { held, landed }: { held?: Promise<void>; landed?: () => void } = {},
+  {
+    held,
+    landed,
+    ctx = person.ctx,
+  }: { held?: Promise<void>; landed?: () => void; ctx?: Person['ctx'] } = {},
 ) {
   const draft = await draftOf(person, page);
-  const ports = participantPorts(person.ctx, page, () => draft.region, {
+  const ports = participantPorts(ctx, page, () => draft.region, {
     live: { fetch: person.browser.fetch },
   });
   if (held || landed) {
@@ -177,6 +182,41 @@ describe('a draft saved from outside a live session', () => {
     // Folded once, and then quiet: no more saves while nobody types.
     await new Promise((resolve) => setTimeout(resolve, 4_000));
     expect((await draftOf(editor, page)).revisionId).toBe(settled.revisionId);
+  });
+
+  it('settles on its own file draft when the file’s change can’t be sent', async () => {
+    const { owner, editor, page } = await sharedPage();
+    // Once its save lands, the server refuses what the app sends (#522).
+    let refuse = false;
+    const api = createApiClient({
+      fetch: (input, init) =>
+        refuse && String(input).endsWith('/messages')
+          ? Promise.resolve(
+              Response.json(
+                { error: { code: 'not-found', message: 'Not found' } },
+                { status: 404 },
+              ),
+            )
+          : owner.browser.fetch(input, init),
+    });
+    const mine = await join(owner, page, {
+      landed: () => (refuse = true),
+      ctx: { ...owner.ctx, api },
+    });
+    const theirs = await join(editor, page);
+    await expect.poll(() => mine.status().people.length).toBe(1);
+    expect(await mine.commitOwn({ texts: { body: `${body(mine)}\n\nSaved, not sent.\n` } })).toBe(
+      true,
+    );
+    expect(mine.status().state.kind).toBe('stopped');
+    // It goes on from that draft, which it holds, never from the head before it.
+    const landed = await draftOf(owner, page);
+    expect(landed.payload.markdown).toContain('Saved, not sent.');
+    const settled = await mine.settle();
+    expect(settled.base?.revisionId).toBe(landed.revisionId);
+    expect(settled.atHead).toBe(true);
+    expect(settled.payload?.markdown).toContain('Saved, not sent.');
+    await theirs.leave();
   });
 
   it('the app that folded a gone writer’s draft can leave and join again', async () => {
