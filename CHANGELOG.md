@@ -4,6 +4,15 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.30.2-beta.1 - 2026-11-23
+
+### Highlights
+
+#### Fixes
+
+- In live editing, many deletions scattered across a long page no longer slow typing for everyone in the session.
+- A file added just as live editing stops is no longer said not to have been added, so trying again no longer adds it twice.
+
 ### Changes
 
 #### App
@@ -13,6 +22,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Releases and packaging
 
 - The release gives Mozilla Add-ons the web clipper's category as Bookmarks alone, as Mozilla refuses Other beside another category. 0.30.1's submission was refused for it. (#713)
+
+#### Development
+
+- A version pull request that changes only the version and the changelog can merge without waiting for CI, once `.claude/version-check.sh` passes on a `main` whose CI passed. (#714)
 
 ## 0.30.1 - 2026-11-23
 
