@@ -1533,10 +1533,13 @@ export class LiveParticipant {
    * join of its own, saved as a draft of the session, and sent from that
    * join once the save has landed, with a Saved notice after it. Its main
    * join sends nothing built on it until it is placed. Whether it went in:
-   * true once the save has landed, even if the app stopped before sending
-   * it, as the draft holds it.
+   * `'landed'` when its save landed but the app stopped before the change
+   * and its Saved notice went out, so the draft holds it and others fold it
+   * in, though this app may not show it.
    */
-  commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
+  commitOwn(
+    change: ((document: LiveDocument) => void) | DocumentChange,
+  ): Promise<boolean | 'landed'> {
     return this.#tracked(this.#commitOwn(change));
   }
 
@@ -1557,7 +1560,7 @@ export class LiveParticipant {
   async #commitOwn(
     change: ((document: LiveDocument) => void) | DocumentChange,
     { retry = true, on = null }: { retry?: boolean; on?: RevisionId | null } = {},
-  ): Promise<boolean> {
+  ): Promise<boolean | 'landed'> {
     // Text given whole is made a change of the text as it is now, anchored
     // in it, so whatever others type meanwhile, around it, stays.
     const make: Make =
@@ -1574,14 +1577,14 @@ export class LiveParticipant {
     let release = (_saved: boolean) => {};
     const mine = new Promise<boolean>((resolve) => (release = resolve));
     this.#saving = mine;
-    let done = false;
+    let done: boolean | 'landed' = false;
     try {
       // A change given as code is never made again: only text and entries are checked for that.
       done = await this.#commitCopy(make, retry && typeof change !== 'function', on);
       return done;
     } finally {
       if (this.#saving === mine) this.#saving = null;
-      release(done);
+      release(done !== false);
       // A save that came while this one held the way goes now.
       this.#scheduleSave();
     }
@@ -1589,7 +1592,11 @@ export class LiveParticipant {
 
   // The copy's change, saved on the head; if another app saved first, on
   // the new head once more, when it may be `retry`d.
-  async #commitCopy(make: Make, retry: boolean, on: RevisionId | null): Promise<boolean> {
+  async #commitCopy(
+    make: Make,
+    retry: boolean,
+    on: RevisionId | null,
+  ): Promise<boolean | 'landed'> {
     const further = newId(JoinId);
     const ctx = this.#ports.ctx;
     const clientId = liveClientId({
@@ -1724,7 +1731,7 @@ export class LiveParticipant {
       // draft as a conflict, never saving over it.
       if (!this.#keyed()) {
         giveUp();
-        return true;
+        return 'landed';
       }
       // Landed: the change goes into this app's document and out to everyone.
       this.#placing = true;
@@ -1755,7 +1762,7 @@ export class LiveParticipant {
         // go on with it. The draft holds it all the same, and so does this
         // app's document, which settling goes on from.
         this.#stop('a file’s change couldn’t be sent', null, true);
-        return true;
+        return 'landed';
       } finally {
         this.#placing = false;
         this.#schedule();

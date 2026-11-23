@@ -984,19 +984,16 @@ export class DraftSession {
         }
         // Locked meanwhile: nothing more is saved here, and the draft holds the files.
         if (this.#ports.epoch() !== epoch) return;
-        // Its save landed, and the session stopped meanwhile: the draft holds
-        // the files, and this view went on from the page as the session left
-        // it. Only a file that page shows gets its link here, never one it
-        // lacks, or one removed meanwhile.
-        const shown = this.#participant
-          ? added
-          : added.filter((ref) => this.#content.attachments.some((held) => held.id === ref.id));
-        if (shown.length < added.length) {
+        // Its save landed, and the session stopped before sending it: the
+        // draft holds the files, and this view, which may not show them,
+        // adds nothing itself.
+        if (committed === 'landed') {
           this.#set({
             uploadError: 'The file was added, but live editing stopped before its link went in.',
           });
+          return;
         }
-        if (shown.length > 0) place(shown.map(attachmentLink));
+        place(added.map(attachmentLink));
         return;
       }
       this.#change({ attachments: [...this.#content.attachments, ...added] });
