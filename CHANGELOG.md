@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Live editing: a session with many deletions scattered across a long page no longer makes typing slower for everyone in it, as comparing what each app holds now takes time in step with the deletions rather than with their square. A file added just as live editing stops is no longer said not to have been added, when trying again added it twice.
+- Live editing: a session with many deletions scattered across a long page no longer makes typing slower for everyone in it, as comparing what each app holds now takes time in step with the deletions rather than with their square. A file added just as live editing stops is no longer said not to have been added, when trying again added it twice. (#715)
 
 #### Releases and packaging
 
