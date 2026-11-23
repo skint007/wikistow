@@ -6,6 +6,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- Live editing: a session with many deletions scattered across a long page no longer makes typing slower for everyone in it, as comparing what each app holds now takes time in step with the deletions rather than with their square. A file added just as live editing stops is no longer said not to have been added, when trying again added it twice. (#715)
+
 #### Releases and packaging
 
 - The release gives Mozilla Add-ons the web clipper's category as Bookmarks alone, as Mozilla refuses Other beside another category. 0.30.1's submission was refused for it. (#713)

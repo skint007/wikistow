@@ -982,6 +982,17 @@ export class DraftSession {
           this.#set({ uploadError: 'The file couldn’t be added just now. Try again.' });
           return;
         }
+        // Locked meanwhile: nothing more is saved here, and the draft holds the files.
+        if (this.#ports.epoch() !== epoch) return;
+        // Its save landed, and the session stopped before sending it: the
+        // draft holds the files, and this view, which may not show them,
+        // adds nothing itself.
+        if (committed === 'landed') {
+          this.#set({
+            uploadError: 'The file was added, but live editing stopped before its link went in.',
+          });
+          return;
+        }
         place(added.map(attachmentLink));
         return;
       }

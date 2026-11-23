@@ -74,6 +74,14 @@ class FakeParticipant {
   outside: PagePayload | null = null;
   /** The draft head, for putting typing back onto it. */
   head: { revisionId: RevisionId; payload: PagePayload } | null = null;
+  /**
+   * A commit's save lands, and the session stops: once its change was sent
+   * (`sent`, which went in); with it in this document but sent to nobody
+   * (`unsent`), the person maybe removing the file first (`removed`); or
+   * before its answer came (`before`, the document as it was). All but
+   * `sent` answer `'landed'`.
+   */
+  stopOnCommit: 'sent' | 'unsent' | 'removed' | 'before' | null = null;
 
   constructor(payload: PagePayload) {
     this.base = payload;
@@ -175,6 +183,11 @@ class FakeParticipant {
     this.closed = true;
   }
   async commitOwn(change: Parameters<LiveParticipant['commitOwn']>[0]) {
+    if (this.stopOnCommit === 'before') {
+      this.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+      await settle();
+      return 'landed' as const;
+    }
     this.document.edit(() => {
       if (typeof change === 'function') return change(this.document);
       for (const [name, text] of Object.entries(change.texts ?? {})) {
@@ -185,6 +198,23 @@ class FakeParticipant {
         else this.document.map(root).set(key, value);
       }
     }, 'copy');
+    if (this.stopOnCommit === 'removed') {
+      this.document.edit(() => {
+        for (const { root, key } of typeof change === 'function' ? [] : (change.entries ?? [])) {
+          this.document.map(root).delete(key);
+        }
+      });
+    }
+    if (this.stopOnCommit) {
+      // As the participant does: its document holds the landed change, and it stops.
+      this.end({
+        kind: 'stopped',
+        why: 'a file’s change couldn’t be sent',
+        saveOver: null,
+        rejoin: true,
+      });
+      return this.stopOnCommit === 'sent' ? true : ('landed' as const);
+    }
     for (const listener of this.#changes) listener(false);
     return true;
   }
@@ -682,6 +712,34 @@ describe('a draft session in a live session', () => {
     expect([...(joins[0]?.document.map('attachments').keys() ?? [])]).toEqual(['a-photo_png']);
     expect(joins[0]?.document.text('body').toJSON()).toContain('(attachment:a-photo_png)');
   });
+
+  for (const [when, shown] of [
+    ['sent', true],
+    ['unsent', true],
+    ['removed', false],
+    ['before', false],
+  ] as const) {
+    it(`links a file whose save landed as the session stopped (${when}) only once it went in`, async () => {
+      const { draft, joins } = session();
+      await draft.joinLive();
+      const live = joins[0];
+      if (!live) throw new Error('not joined');
+      live.stopOnCommit = when;
+      draft.attach([new File(['x'], 'photo.png', { type: 'image/png' })]);
+      await draft.flush();
+      await settle();
+      const sent = when === 'sent';
+      // The draft holds it: never "Try again", which would add it twice (#522).
+      expect(draft.snapshot().uploadError).toBe(
+        sent ? null : 'The file was added, but live editing stopped before its link went in.',
+      );
+      // The page as the session left it: never a file put back, nor a link unless it went in.
+      expect(draft.snapshot().attachments.map((ref) => ref.id)).toEqual(
+        shown ? ['a-photo_png'] : [],
+      );
+      expect(draft.snapshot().markdown.includes('(attachment:a-photo_png)')).toBe(sent);
+    });
+  }
 
   it('keeps body text that reads like frontmatter in the body', async () => {
     const { draft, surface, joins } = session();

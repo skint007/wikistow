@@ -1532,9 +1532,14 @@ export class LiveParticipant {
    * (section 5.10, **Files**): in a copy of the document under a further
    * join of its own, saved as a draft of the session, and sent from that
    * join once the save has landed, with a Saved notice after it. Its main
-   * join sends nothing built on it until it is placed. Whether it went in.
+   * join sends nothing built on it until it is placed. Whether it went in:
+   * `'landed'` when its save landed but the app stopped before the change
+   * and its Saved notice went out, so the draft holds it and others fold it
+   * in, though this app may not show it.
    */
-  commitOwn(change: ((document: LiveDocument) => void) | DocumentChange): Promise<boolean> {
+  commitOwn(
+    change: ((document: LiveDocument) => void) | DocumentChange,
+  ): Promise<boolean | 'landed'> {
     return this.#tracked(this.#commitOwn(change));
   }
 
@@ -1555,7 +1560,7 @@ export class LiveParticipant {
   async #commitOwn(
     change: ((document: LiveDocument) => void) | DocumentChange,
     { retry = true, on = null }: { retry?: boolean; on?: RevisionId | null } = {},
-  ): Promise<boolean> {
+  ): Promise<boolean | 'landed'> {
     // Text given whole is made a change of the text as it is now, anchored
     // in it, so whatever others type meanwhile, around it, stays.
     const make: Make =
@@ -1572,14 +1577,14 @@ export class LiveParticipant {
     let release = (_saved: boolean) => {};
     const mine = new Promise<boolean>((resolve) => (release = resolve));
     this.#saving = mine;
-    let done = false;
+    let done: boolean | 'landed' = false;
     try {
       // A change given as code is never made again: only text and entries are checked for that.
       done = await this.#commitCopy(make, retry && typeof change !== 'function', on);
       return done;
     } finally {
       if (this.#saving === mine) this.#saving = null;
-      release(done);
+      release(done !== false);
       // A save that came while this one held the way goes now.
       this.#scheduleSave();
     }
@@ -1587,7 +1592,11 @@ export class LiveParticipant {
 
   // The copy's change, saved on the head; if another app saved first, on
   // the new head once more, when it may be `retry`d.
-  async #commitCopy(make: Make, retry: boolean, on: RevisionId | null): Promise<boolean> {
+  async #commitCopy(
+    make: Make,
+    retry: boolean,
+    on: RevisionId | null,
+  ): Promise<boolean | 'landed'> {
     const further = newId(JoinId);
     const ctx = this.#ports.ctx;
     const clientId = liveClientId({
@@ -1715,13 +1724,21 @@ export class LiveParticipant {
         // Nothing of it went to anyone: a refused save leaves nothing behind.
         return giveUp();
       }
-      if (!this.#keyed()) return giveUp();
+      // It landed: whatever happens next, the draft holds it, and others
+      // fold in what they lack once this join goes, as for a restore.
+      // Stopped meanwhile, the draft view has gone on from the document as
+      // it was, which this leaves as it is: what it saves next meets this
+      // draft as a conflict, never saving over it.
+      if (!this.#keyed()) {
+        giveUp();
+        return 'landed';
+      }
       // Landed: the change goes into this app's document and out to everyone.
       this.#placing = true;
       try {
         this.document.apply(update, COPY_ORIGIN);
-        const clock = Y.getState(copy.doc.store, clientId);
-        await send(seal(2, 'update', clock, update));
+        // Recorded with the change, before sending: a stop while the send is
+        // held up settles on this draft, as the document holds it.
         this.#drafts.set(result.revisionId, {
           ours: true,
           revisionId: result.revisionId,
@@ -1734,14 +1751,18 @@ export class LiveParticipant {
         if (this.#head === headId) this.#head = result.revisionId;
         if (this.#drafts.get(result.revisionId)?.compared) this.#checked = result.revisionId;
         this.#seenOwn(result.revisionId, headId);
+        const clock = Y.getState(copy.doc.store, clientId);
+        await send(seal(2, 'update', clock, update));
         if (!this.#keyed()) return true;
         await send(seal(3, 'saved', clock, stateContent(result.revisionId, stateBytes)), covers);
         // Done with: a join has at most two further joins at a time.
         void this.#transport.leave(further).catch(() => {});
       } catch {
-        // The draft claims a change the others never got: the session can't go on with it.
+        // The draft claims a change the others never got: the session can't
+        // go on with it. The draft holds it all the same, and so does this
+        // app's document, which settling goes on from.
         this.#stop('a file’s change couldn’t be sent', null, true);
-        return false;
+        return 'landed';
       } finally {
         this.#placing = false;
         this.#schedule();

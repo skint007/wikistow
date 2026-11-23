@@ -274,6 +274,63 @@ describe('states', () => {
     ).toEqual([{ clock: 0, length: 6 }]);
   });
 
+  it('compares delete sets as a plain range check would, however they are cut', () => {
+    const next = random(11);
+    const ranges = (count: number) =>
+      Array.from({ length: count }, () => ({
+        clock: Math.floor(next() * 60),
+        length: 1 + Math.floor(next() * 6),
+      }));
+    const plain = (outer: { clock: number; length: number }[], inner: typeof outer) => {
+      const held = new Set(
+        outer.flatMap((r) => Array.from({ length: r.length }, (_, i) => r.clock + i)),
+      );
+      return inner.every((r) =>
+        Array.from({ length: r.length }, (_, i) => r.clock + i).every((c) => held.has(c)),
+      );
+    };
+    const asState = (list: { clock: number; length: number }[]) =>
+      decodeState(
+        state({
+          deletes:
+            list.length > 0 ? [{ client: 1, ranges: list.map((r) => [r.clock, r.length]) }] : [],
+          vector: [[1, 100]],
+        }),
+      );
+    let held = 0;
+    for (let round = 0; round < 2_000; round++) {
+      const outer = ranges(Math.floor(next() * 12));
+      // Often a part of `outer`, cut differently, so both answers come up.
+      const inner =
+        next() < 0.5
+          ? outer
+              .filter(() => next() < 0.6)
+              .map((r) => ({ clock: r.clock + 1, length: Math.max(1, r.length - 2) }))
+          : ranges(Math.floor(next() * 6));
+      const a = asState(outer);
+      const b = asState(inner);
+      if (!a || !b) throw new Error('a state didn’t decode');
+      expect(holdsState(a, b), JSON.stringify({ outer, inner })).toBe(plain(outer, inner));
+      if (plain(outer, inner)) held++;
+    }
+    expect(held).toBeGreaterThan(200);
+    expect(held).toBeLessThan(1_800);
+  });
+
+  it('compares delete sets of many scattered ranges in linear time', () => {
+    // One update deleting every other character of a long page (#540).
+    const scattered = Array.from({ length: 100_000 }, (_, i) => ({ clock: i * 2, length: 1 }));
+    const a = { vector: new Map([[1, 200_000]]), deletes: new Map([[1, scattered]]) };
+    const b = {
+      vector: new Map([[1, 200_000]]),
+      deletes: new Map([[1, [...scattered].reverse()]]),
+    };
+    const started = performance.now();
+    expect(sameState(a, b)).toBe(true);
+    // Quadratic, this took seconds; linear, a few tens of ms.
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
   it('counts a state that doesn’t decode strictly as none', () => {
     for (const bad of [
       state({ vector: [[1, 0]] }),
