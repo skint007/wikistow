@@ -1,6 +1,6 @@
 {
   "name": "@wikistow/cli",
-  "version": "0.30.1-beta.1",
+  "version": "0.30.1",
   "private": true,
   "license": "MIT",
   "bin": {
