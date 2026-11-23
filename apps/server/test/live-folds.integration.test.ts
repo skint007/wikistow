@@ -6,7 +6,6 @@ import {
   agentTools,
   createApiClient,
   moveOperations as moves,
-  OWNER_REGION,
   pageMerge,
   pageOperations as pages,
 } from '@wikistow/client';
@@ -217,27 +216,6 @@ describe('a draft saved from outside a live session', () => {
     expect(settled.base?.revisionId).toBe(landed.revisionId);
     expect(settled.atHead).toBe(true);
     expect(settled.payload?.markdown).toContain('Saved, not sent.');
-    await theirs.leave();
-  });
-
-  it('settles on its own file draft when it stops before the save’s answer', async () => {
-    const { owner, editor, page } = await sharedPage();
-    let stop = () => {};
-    const mine = await join(owner, page, { landed: () => stop() });
-    const theirs = await join(editor, page);
-    await expect.poll(() => mine.status().people.length).toBe(1);
-    // The save lands, and the app stops, not closed, before its answer comes (#522).
-    stop = () => mine.regionIs(OWNER_REGION);
-    expect(
-      await mine.commitOwn({ texts: { body: `${body(mine)}\n\nSaved, then stopped.\n` } }),
-    ).toBe(true);
-    expect(mine.status().state.kind).toBe('stopped');
-    const landed = await draftOf(owner, page);
-    expect(landed.payload.markdown).toContain('Saved, then stopped.');
-    const settled = await mine.settle();
-    expect(settled.base?.revisionId).toBe(landed.revisionId);
-    expect(settled.atHead).toBe(true);
-    expect(settled.payload?.markdown).toContain('Saved, then stopped.');
     await theirs.leave();
   });
 

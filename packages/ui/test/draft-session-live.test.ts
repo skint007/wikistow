@@ -74,8 +74,12 @@ class FakeParticipant {
   outside: PagePayload | null = null;
   /** The draft head, for putting typing back onto it. */
   head: { revisionId: RevisionId; payload: PagePayload } | null = null;
-  /** A commit's save lands, and the session stops before its change is sent to anyone. */
-  stopOnCommit = false;
+  /**
+   * A commit's save lands, and the session stops: before its change is sent
+   * to anyone (`after` it went into this document), or before its answer
+   * came (`before`, the document as it was).
+   */
+  stopOnCommit: 'before' | 'after' | null = null;
 
   constructor(payload: PagePayload) {
     this.base = payload;
@@ -177,6 +181,11 @@ class FakeParticipant {
     this.closed = true;
   }
   async commitOwn(change: Parameters<LiveParticipant['commitOwn']>[0]) {
+    if (this.stopOnCommit === 'before') {
+      this.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+      await settle();
+      return true;
+    }
     this.document.edit(() => {
       if (typeof change === 'function') return change(this.document);
       for (const [name, text] of Object.entries(change.texts ?? {})) {
@@ -695,20 +704,22 @@ describe('a draft session in a live session', () => {
     expect(joins[0]?.document.text('body').toJSON()).toContain('(attachment:a-photo_png)');
   });
 
-  it('takes in a file whose save landed as the session stopped, with its link', async () => {
-    const { draft, joins } = session();
-    await draft.joinLive();
-    const live = joins[0];
-    if (!live) throw new Error('not joined');
-    live.stopOnCommit = true;
-    draft.attach([new File(['x'], 'photo.png', { type: 'image/png' })]);
-    await draft.flush();
-    await settle();
-    // The draft holds it: never "Try again", which would add it twice (#522).
-    expect(draft.snapshot().uploadError).toBeNull();
-    expect(draft.snapshot().attachments.map((ref) => ref.id)).toEqual(['a-photo_png']);
-    expect(draft.snapshot().markdown).toContain('(attachment:a-photo_png)');
-  });
+  for (const when of ['after', 'before'] as const) {
+    it(`takes in a file whose save landed as the session stopped (${when} its answer), with its link`, async () => {
+      const { draft, joins } = session();
+      await draft.joinLive();
+      const live = joins[0];
+      if (!live) throw new Error('not joined');
+      live.stopOnCommit = when;
+      draft.attach([new File(['x'], 'photo.png', { type: 'image/png' })]);
+      await draft.flush();
+      await settle();
+      // The draft holds it: never "Try again", which would add it twice (#522).
+      expect(draft.snapshot().uploadError).toBeNull();
+      expect(draft.snapshot().attachments.map((ref) => ref.id)).toEqual(['a-photo_png']);
+      expect(draft.snapshot().markdown).toContain('(attachment:a-photo_png)');
+    });
+  }
 
   it('keeps body text that reads like frontmatter in the body', async () => {
     const { draft, surface, joins } = session();
