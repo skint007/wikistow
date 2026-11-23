@@ -77,7 +77,7 @@ The desktop app's two AUR packages install side by side: the beta goes under nam
    2. In `CHANGELOG.md`, rename `## Unreleased` to `## <version> - <day>`, with the day you will tag it in UTC (`date -u +%F`). Put a new, empty `## Unreleased` above it.
    3. Finish the entry ([below](#the-changelog)). Check that its Changes list every pull request merged since the release before, or for a stable release, since the stable release before: `git log --merges --first-parent --oneline v<previous>..origin/main`. Write or edit its highlights.
    4. Run `node scripts/changelog.ts --tags`, then read the notes the release will publish: `node scripts/changelog.ts notes v<version>`.
-   5. Commit, and merge once CI passes.
+   5. Commit, and merge once CI passes. A pull request that changes only the version and `CHANGELOG.md` can merge as soon as `.claude/version-check.sh` passes, if CI passed on `main`. Raising Electron changes more, so it waits for CI.
 2. Wait for CI on the merged commit of `main`, which also builds and checks the desktop packages. Then, on the day the entry names in UTC, tag that commit and push the tag:
 
    ```sh
