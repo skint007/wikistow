@@ -705,7 +705,7 @@ describe('a draft session in a live session', () => {
   });
 
   for (const when of ['after', 'before'] as const) {
-    it(`takes in a file whose save landed as the session stopped (${when} its answer), with its link`, async () => {
+    it(`says a file whose save landed as the session stopped (${when} its answer) went in, adding nothing itself`, async () => {
       const { draft, joins } = session();
       await draft.joinLive();
       const live = joins[0];
@@ -715,9 +715,14 @@ describe('a draft session in a live session', () => {
       await draft.flush();
       await settle();
       // The draft holds it: never "Try again", which would add it twice (#522).
-      expect(draft.snapshot().uploadError).toBeNull();
-      expect(draft.snapshot().attachments.map((ref) => ref.id)).toEqual(['a-photo_png']);
-      expect(draft.snapshot().markdown).toContain('(attachment:a-photo_png)');
+      expect(draft.snapshot().uploadError).toBe(
+        'The file was added, but live editing stopped before its link went in.',
+      );
+      // The view shows the page as the session left it, and puts nothing back itself.
+      expect(draft.snapshot().attachments.map((ref) => ref.id)).toEqual(
+        when === 'after' ? ['a-photo_png'] : [],
+      );
+      expect(draft.snapshot().markdown).not.toContain('(attachment:a-photo_png)');
     });
   }
 

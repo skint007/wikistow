@@ -985,16 +985,14 @@ export class DraftSession {
         // Locked meanwhile: nothing more is saved here, and the draft holds the files.
         if (this.#ports.epoch() !== epoch) return;
         // Its save landed, and the session stopped before sending it: the
-        // draft holds the files, so this view's text takes them too, with
-        // their links, as outside a session. Never added again on a retry.
+        // draft holds the files, and this view went on from the page as it
+        // then was. It adds nothing itself, never a file removed meanwhile,
+        // nor a link to one its text lacks.
         if (!this.#participant) {
-          const now = this.#content.attachments;
-          this.#change({
-            attachments: [
-              ...now,
-              ...added.filter((ref) => !now.some((held) => held.id === ref.id)),
-            ],
+          this.#set({
+            uploadError: 'The file was added, but live editing stopped before its link went in.',
           });
+          return;
         }
         place(added.map(attachmentLink));
         return;
