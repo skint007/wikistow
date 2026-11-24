@@ -262,12 +262,6 @@ async function installCalculator(page: Page) {
 }
 
 /**
- * A plugin block's field tied to a property (#212): in the reader it sets
- * the frontmatter through the same queue as ticks, making one version, and
- * in the visual editor it changes the draft's frontmatter, with `=servings`
- * following it both times.
- */
-/**
  * A tick on a line two tasks share (#703): it lands on the one clicked,
  * and is left out, saying why, when the page changed before it was saved,
  * as another tab swapping the sections that hold them may have put the
@@ -331,6 +325,12 @@ test('a tick on a line two tasks share lands on the one clicked, or is left out 
   });
 });
 
+/**
+ * A plugin block's field tied to a property (#212): in the reader it sets
+ * the frontmatter through the same queue as ticks, making one version, and
+ * in the visual editor it changes the draft's frontmatter, with `=servings`
+ * following it both times.
+ */
 test('a block field tied to a property changes the frontmatter in the reader and the editor', async ({
   page,
   freshPage,

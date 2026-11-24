@@ -8,6 +8,7 @@ import {
   holding,
   inTurn,
   leftOutcome,
+  madeIn,
   notePublished,
   originOf,
   pageFlushing,
@@ -41,11 +42,11 @@ const swap = (markdown: string) => {
   return `${bob.trimEnd()}\n\n${mum}\n`;
 };
 
-/** The tick of the `nth` task `line` in `madeIn`, the text it was clicked in. */
-function tickIn(madeIn: string, line: string, nth: number): ReadingChange {
-  const item = taskItems(madeIn).filter((found) => found.line === line)[nth];
+/** The tick of the `nth` task `line` in `shown`, the text it was clicked in, as the page queues it. */
+function tickIn(shown: string, line: string, nth: number): ReadingChange {
+  const item = taskItems(shown).filter((found) => found.line === line)[nth];
   if (!item) throw new Error(`No task “${line}” number ${nth}`);
-  return { kind: 'task', offset: item.offset, line, checked: true, madeIn };
+  return madeIn({ kind: 'task', offset: item.offset, line, checked: true }, shown, shown);
 }
 
 const REPEATED =
@@ -391,15 +392,29 @@ describe('a flush of a tick on a line two tasks have (#703)', () => {
     }
   });
 
-  it('ticks the one clicked where the page changed only in what is ticked', async () => {
+  it('leaves it out where someone only ticked another task, but ticks one no other task shares', async () => {
+    // Two sections may differ only in what is ticked, so a tick is a change like any other.
     const page = server(CALLS);
     page.savesFirst((draft) => draft.replace('- [ ] Tidy', '- [X] Tidy'), { publishes: true });
+    const bobs = tickIn(CALLS, 'Call', 1);
+    const tidy = { ...tickIn(CALLS, 'Tidy', 0), checked: false };
+    expect(await flushChanges(page.operations, [bobs, tidy])).toEqual({
+      outcome: 'published',
+      dropped: [leftOutTick(bobs)],
+    });
+    expect(page.state.published).toEqual([
+      '## Mum\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n- [ ] Call\n',
+    ]);
+  });
+
+  it('ticks the one clicked where nothing changed since', async () => {
+    const page = server(CALLS);
     expect(await flushChanges(page.operations, [tickIn(CALLS, 'Call', 1)])).toEqual({
       outcome: 'published',
       dropped: [],
     });
     expect(page.state.published).toEqual([
-      '## Mum\n- [ ] Call\n- [X] Tidy\n\n## Bob\n- [x] Call\n',
+      '## Mum\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n- [x] Call\n',
     ]);
   });
 

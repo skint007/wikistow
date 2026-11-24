@@ -7,6 +7,7 @@ import {
   setPageProperty,
   setTask,
   taskIndex,
+  tasksWithLine,
   splitFrontmatter,
   summarizeChange,
   type ChangeSummary,
@@ -44,6 +45,19 @@ export type ReadingChange =
  * the publication. On the device, a change made on another is left out.
  */
 export type MadeOn = { version: number | null; publishedOn: string };
+
+/**
+ * `change` as made in `shown`, the page as the person saw it: a tick keeps
+ * that text, and whether more than one task had its line there (#703).
+ * They're counted in `read`, the text `shown` is made from by the changes
+ * queued, which has the same tasks, as ticks and properties move none
+ * between lines, and which is parsed once however many ticks are made.
+ */
+export function madeIn(change: ReadingChange, shown: string, read: string): ReadingChange {
+  if (change.kind !== 'task') return change;
+  const repeated = tasksWithLine(read, change.line) > 1;
+  return { ...change, madeIn: { markdown: shown, repeated } };
+}
 
 /** A change left out, as it no longer applies, and why. */
 export type Dropped = { change: ReadingChange; reason: string };
