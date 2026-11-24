@@ -397,14 +397,15 @@ const isLink = (wrap: Wrap) => wrap.node.type === 'link';
 // Marks that hold a space at their ends: a link's text, and a colour's HTML.
 const SPACED = new Set(['link', 'textColor', 'colorHighlight']);
 
-// Spaces the guard reads as spaces, which show no marks, at a text's start or end.
+// ASCII spaces, and those held for Milkdown, at a text's start or end.
 const PLAIN_SPACES = `[ \\t\\r\\n${HELD_SPACE}]+`;
 const PLAIN_START = new RegExp(`^${PLAIN_SPACES}`);
 const PLAIN_END = new RegExp(`${PLAIN_SPACES}$`);
 
 // Whether `nodes`, read from their start (`first`) or end, and past line
 // breaks and plain spaces (`PLAIN_SPACES`), come to another space, as a
-// no-break space is, which shows the marks it's in; null if they come to
+// no-break space is, which keeps a mark after a line break, and a link or
+// a colour's HTML keeps before one (`around`); null if they come to
 // nothing.
 function markedSpaceAt(nodes: readonly Tree[], first: boolean): boolean | null {
   for (const node of first ? nodes : nodes.toReversed()) {
@@ -427,11 +428,17 @@ function markedSpaceAt(nodes: readonly Tree[], first: boolean): boolean | null {
 // hold it, as it can a no-break space or another of Unicode's, which
 // Milkdown leaves in. `writable` takes a mark off a line break at its
 // run's end, but `nest` may end a mark sooner, before a link it would
-// cut. A line break stays in where moving it out would end the mark
-// beside a space that shows it (`markedSpaceAt`), which `writable` would
-// take the mark off when next written.
+// cut. A line break stays in where moving it out would start the mark
+// beside a space that keeps it (`markedSpaceAt`), as a no-break space
+// does once the break is before it. At its end, only in a link or a
+// colour's HTML, which hold the space: a mark around it would then end
+// beside the space, and `writable` would take that mark off the space
+// when next written, writing it another way. Another mark gives up the
+// space with the break, as remark writes the last space a `**` or `~~`
+// closes on as a reference, which parts a break into `\&#xA;` (#730).
 function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[] {
   const inside = [...children];
+  const holds = SPACED.has(wrap.type);
   // The spaces and line breaks at one end, across text nodes of only
   // spaces, as a held space and a soft line break are.
   const take = (first: boolean, edge: RegExp) => {
@@ -442,7 +449,7 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
     for (;;) {
       const node = first ? inside[0] : inside.at(-1);
       if (node?.type === 'break') {
-        if ((shields ??= markedSpaceAt(inside, first))) break;
+        if ((first || holds) && (shields ??= markedSpaceAt(inside, first))) break;
         inside.splice(first ? 0 : -1, 1);
         if (first) taken.push(node);
         else taken.unshift(node);
@@ -463,7 +470,7 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
     }
     return taken;
   };
-  const spaces = SPACED.has(wrap.type) ? ' \\t\\r\\n' : `\\s${HELD_SPACE}`;
+  const spaces = holds ? ' \\t\\r\\n' : `\\s${HELD_SPACE}`;
   const before = take(true, new RegExp(`^[${spaces}]+`));
   const after = take(false, new RegExp(`[${spaces}]+$`));
   return [...before, ...(inside.length > 0 ? [{ ...wrap, children: inside }] : []), ...after];
@@ -541,6 +548,12 @@ const RANKED_FIRST = new Set([HIGHLIGHT, TEXT_COLOR]);
 const holdsSpaces = (mark: Mark) =>
   mark.type.name === TEXT_COLOR || (mark.type.name === HIGHLIGHT && mark.attrs['color'] !== null);
 
+// What a colour's HTML gives up of the spaces at its run's ends, which
+// it holds: each line break, with the ASCII spaces and tabs beside it,
+// which Milkdown would move out of a mark around the colour. Another
+// space, as a no-break space, it keeps on either side of a break (#730).
+const BROKEN = /[ \t]*\n[ \t\n]*/g;
+
 /**
  * `doc` without the marks Markdown can't hold. None on the spaces and line
  * breaks a mark's run starts or ends with: delimiters can't sit beside
@@ -582,13 +595,20 @@ function writable(doc: Node): Node {
     });
     for (const { mark, from, to } of runs) {
       const inside = text.slice(from, to);
-      // A colour's HTML keeps spaces at its ends, but not a line break.
-      const edge = (spaces: string) =>
-        holdsSpaces(mark) && !spaces.includes('\n') ? 0 : spaces.length;
-      const lead = edge(inside.slice(0, inside.length - inside.trimStart().length));
-      const trail = edge(inside.slice(inside.trimEnd().length));
-      if (lead > 0) tr.removeMark(start + from, start + from + lead, mark);
-      if (trail > 0 && lead < inside.length) tr.removeMark(start + to - trail, start + to, mark);
+      const lead = inside.length - inside.trimStart().length;
+      const trail = lead < inside.length ? inside.length - inside.trimEnd().length : 0;
+      for (const [at, length] of [
+        [0, lead],
+        [inside.length - trail, trail],
+      ] as const) {
+        const edge = start + from + at;
+        if (!holdsSpaces(mark)) {
+          if (length > 0) tr.removeMark(edge, edge + length, mark);
+          continue;
+        }
+        for (const broken of inside.slice(at, at + length).matchAll(BROKEN))
+          tr.removeMark(edge + broken.index, edge + broken.index + broken[0].length, mark);
+      }
     }
     return false;
   });

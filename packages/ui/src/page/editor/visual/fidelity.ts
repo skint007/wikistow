@@ -83,6 +83,11 @@ const marksOf = (marks: readonly Mark[], link: number) =>
     ]),
   );
 
+// Spaces Markdown reads as one and drops at a line's ends, and the rest
+// of Unicode's spaces, which it keeps.
+const SPACES = /([ \t\r\n]+|[^\S \t\r\n]+)/;
+const BARE = marksOf([], 0);
+
 const isBreak = (item: Shown | undefined) =>
   typeof item === 'object' && 'type' in item && item.type === 'hardbreak';
 
@@ -93,7 +98,11 @@ const isBreak = (item: Shown | undefined) =>
  * the block's end, nothing. A hard break shows no marks, and one at a
  * mark's end is written without it. Other atoms show the marks Markdown
  * can hold on them (`holds`). Links are numbered in turn, so one written
- * as two, or two as one, doesn't show the same.
+ * as two, or two as one, doesn't show the same. A no-break space, or
+ * another of Unicode's, shows as itself, as Markdown keeps it, but with no
+ * marks, as an ASCII space does, in code too: no delimiter can sit beside
+ * one either, so one at a mark's end is written outside it (`writable`,
+ * `around`), save in a colour's HTML, which holds it (#730).
  */
 function inline(block: Node): Shown[] {
   const shown: Shown[] = [];
@@ -119,8 +128,9 @@ function inline(block: Node): Shown[] {
     previous = blank && !going ? undefined : link;
     if (child.isText) {
       const marks = marksOf(child.marks, links);
-      for (const part of (child.text ?? '').split(/([ \t\r\n]+)/))
+      for (const part of (child.text ?? '').split(SPACES))
         if (/^[ \t\r\n]+$/.test(part)) space = true;
+        else if (/^\s+$/.test(part)) add({ text: part, marks: BARE });
         else if (part) add({ text: part, marks });
     } else if (child.type.name === 'hardbreak' && child.attrs['isInline']) {
       space = true;

@@ -140,9 +140,10 @@ type Run = { text: string; marks: string[] } | { node: Tree; marks: string[] };
 const INLINE = new Set([...NESTING, 'text', 'inlineCode', 'break']);
 const INLINE_PARENTS = new Set(['paragraph', 'heading', 'tableCell']);
 
-// Spaces and line breaks, as the visual editor shows them (`shownOf`).
-const SPACES = /([ \t\r\n]+)/;
-const BLANK = /^[ \t\r\n]+$/;
+// Spaces and line breaks, as the visual editor shows them (`shownOf`),
+// with no marks: a no-break space or another of Unicode's too.
+const SPACES = /(\s+)/;
+const BLANK = /^\s+$/;
 
 // A mark by its type and what it holds, a link's address or a colour, in
 // LF; a link by which of its block's links it is too.
