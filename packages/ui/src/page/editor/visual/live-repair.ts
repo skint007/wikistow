@@ -159,17 +159,18 @@ const LONGEST_TAG = 32;
 const COLOR_TAG = /^<(span|mark) data-color="([a-z]+)">$/;
 /**
  * Whether the line of `text` at `at` may start code or HTML of its own:
- * past its quote and list markers, four columns of space or a tab, as
- * `>     code`, or `<`.
+ * four columns of space or a tab anywhere before its text, at its start
+ * or after a quote or list marker, as `    > code` or `>     code`; or `<`.
  */
 function codeOrHtmlAt(text: string, at: number): boolean {
   const { rest } = lineStartOf(text, at, lineEnd(text, at));
   let columns = 0;
-  for (let i = rest - 1; i >= at && (text[i] === ' ' || text[i] === '\t'); i--) {
+  for (let i = at; i < rest; i++) {
     if (text[i] === '\t') return true;
-    columns++;
+    columns = text[i] === ' ' ? columns + 1 : 0;
+    if (columns >= 4) return true;
   }
-  return columns >= 4 || text[rest] === '<';
+  return text[rest] === '<';
 }
 
 /** Whether the character at `at` is escaped, by an odd number of backslashes before it. */
@@ -1096,20 +1097,39 @@ function repairs1(
   const isNew = (item: Found) =>
     putBy(recent, item) >= 0 ||
     recent.some((w) => item.clock + item.length > (w.seen.get(item.client) ?? 0));
-  const written = new Map<number, string>();
+  const newText = new Map<number, Span[]>();
   const more = new Set<number>();
   for (const item of items) {
     if (item.deleted || !isNew(item)) continue;
-    const put = text(item.at, item.at + item.length);
-    written.set(item.client, (written.get(item.client) ?? '') + put);
+    const list = newText.get(item.client) ?? [];
+    list.push({ from: item.at, to: item.at + item.length });
+    newText.set(item.client, list);
     if (near(item) && !lone(item)) more.add(item.client);
   }
-  const halfOf: Record<string, string> = { '[': ']', ']': '[', '`': '`', $: '$' };
+  for (const [client, list] of newText) newText.set(client, merged(list, []));
+  // Its other half: the nearest of its writer's new marks on the line, at
+  // most a link's length away, that it pairs with, a backtick with a
+  // backtick or a `[` with a `]`, with a tag that doesn't read cleanly
+  // between them and nothing else of its writer's, as code's closing
+  // backtick: not a `$` of a sentence it typed, as `Total: $70`.
   const paired = (item: Found) => {
     const char = text(item.at, item.at + 1);
-    const half = halfOf[char] as string;
-    const all = written.get(item.client) ?? '';
-    return half === char ? all.split(char).length > 2 : all.includes(half);
+    const theirs = newText.get(item.client) ?? [];
+    const way = char === ']' ? -1 : 1;
+    for (let pass = 0; pass < (char === '`' || char === '$' ? 2 : 1); pass++) {
+      const step = pass === 0 ? way : -way;
+      for (let i = item.at + step, n = 0; n < LINK_AT_MOST; i += step, n++) {
+        const at = text(i, i + 1);
+        if (at === '' || at === '\n') break;
+        if (!overlapsAny(theirs, i, i + 1)) continue;
+        const half = char === '[' ? ']' : char === ']' ? '[' : char;
+        if (at !== half) break;
+        const [from, to] = i < item.at ? [i, item.at] : [item.at, i];
+        if (overlapsAny(tags, from, to)) return true;
+        break;
+      }
+    }
+    return false;
   };
   const inOne = (item: Found) =>
     near(item) && (!lone(item) || more.has(item.client) || paired(item));

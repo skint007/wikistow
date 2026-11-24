@@ -2004,6 +2004,44 @@ describe('two people formatting the same text at once (#720)', () => {
         );
   });
 
+  it('keeps what main keeps: code indented before a quote marker', async () => {
+    const page = '    > Hello <ak data-color="red">world there.\n';
+    for (const aLower of orders) {
+      const [mine, theirs] = [page.replace('<ak', '<mak'), page.replace('<ak', '<ark')];
+      expect(await merged(page, mine, theirs, aLower)).toBe(
+        byCharacter(page, mine, theirs, aLower),
+      );
+    }
+    for (const prefix of ['    - ', '\t> ', '    1. ', '>     - ', '-     > ', '- > \t* ']) {
+      const example = `Example:\n\n${prefix}Use <mark data-color="red">x</mark> here.\n`;
+      for (const aLower of orders) {
+        const [mine, theirs] = [example.replace('red', 'blue'), example.replace('red', 'green')];
+        expect(await merged(example, mine, theirs, aLower), prefix).toBe(
+          byCharacter(example, mine, theirs, aLower),
+        );
+      }
+    }
+  });
+
+  it('keeps a third person’s brackets typed beside the tags and farther along', async () => {
+    const page = 'Hello world there. More text here.\n';
+    for (const ids of threeOrders) {
+      const { got } = await withThird(
+        page,
+        page.replace('world', hi('world')),
+        page.replace('world', red('span', 'world', 'blue')),
+        (body) => {
+          replace('here.', 'herex.')(body);
+          replace(' text', ' [text]')(body);
+          body.insert(body.toJSON().indexOf('world'), '[');
+        },
+        ids,
+      );
+      for (const typed of ['[text]', 'herex.']) expect(got, ids.join()).toContain(typed);
+      expect(got.split('[').length, `${got} ${ids.join()}`).toBe(3);
+    }
+  });
+
   it('keeps a `$` a third person typed beside the tags', async () => {
     const page = 'It costs 50 today.\n';
     for (const ids of threeOrders) {
@@ -2015,6 +2053,24 @@ describe('two people formatting the same text at once (#720)', () => {
         ids,
       );
       expect(got, ids.join()).toContain('$');
+    }
+  });
+
+  it('keeps a sentence with a `$` a third person typed on the line, and the `$` beside the tags', async () => {
+    const page = 'It costs 50 today.\n';
+    for (const ids of threeOrders) {
+      const { got } = await withThird(
+        page,
+        page.replace('50', hi('50')),
+        page.replace('50', red('span', '50', 'blue')),
+        (body) => {
+          body.insert(body.toJSON().indexOf('50'), '$');
+          body.insert(0, 'Total: $70 now. ');
+        },
+        ids,
+      );
+      expect(got, ids.join()).toContain('Total: $70 now. ');
+      expect(got.split('$').length, `${got} ${ids.join()}`).toBe(3);
     }
   });
 
