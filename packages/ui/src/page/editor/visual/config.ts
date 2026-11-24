@@ -404,8 +404,9 @@ const PLAIN_END = new RegExp(`${PLAIN_SPACES}$`);
 
 // Whether `nodes`, read from their start (`first`) or end, and past line
 // breaks and plain spaces (`PLAIN_SPACES`), come to another space, as a
-// no-break space is, which a link or a colour's HTML holds; null if they
-// come to nothing.
+// no-break space is, which keeps a mark after a line break, and a link or
+// a colour's HTML keeps before one (`around`); null if they come to
+// nothing.
 function markedSpaceAt(nodes: readonly Tree[], first: boolean): boolean | null {
   for (const node of first ? nodes : nodes.toReversed()) {
     if (node.type === 'break') continue;
