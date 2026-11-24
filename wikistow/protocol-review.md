@@ -1633,6 +1633,40 @@ Round 53 reviewed that revision (b5dd73a) with the three briefs, fresh reviewers
 
 **Outcome.** Round 53 found Highs, so it doesn't meet the stopping rule. Every finding is fixed, or fixed in part with the rest accepted as availability. Round 54 repeats the three briefs against this revision.
 
+## Round 54: identity key rotation, narrowed, eighth review
+
+Round 54 reviewed round 53's revision (27bbd42) with the three briefs, fresh reviewers given the text, the log of rounds 38 to 53, the dropped rule and the list of what earlier rounds accepted: the member and encoding briefs as Claude subagents. **The server brief's Codex (gpt-6.2-sol) agent was refused** by its provider's content filter partway through, worded as in round 53, which it had run; its last message said it was checking devices with only part of a share's history. As the run's instructions say, the server brief was then given once, unchanged, to a Claude subagent, so this round's server findings come from a second Claude reviewer, not a second model. The round found no Critical finding, 6 High, 4 Medium, 15 Low and no Info (25 in all; 4 distinct Highs). Every reviewer found the exception fully gone and the "owns alone" test consistent. The Highs were again in what the last revision added: sharing again from a new space took its members from finishing, not the current version, and its shares' roots from the server's unsigned tree; floors were worked out once, from one device's view; and an own ID on `removedOwners` the old key wrote, which the rotation no longer clears, blocked finishing for good in a space the person owns alone. Sharing again carried a choice the person makes better in the ordinary share dialog, so it is now a copy shared with nobody.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S54-1 | 54 | High | 4.6 **A space the person owns alone**; 6.1; 10 | Sharing again took each share's root and contents from the server's unsigned share row and tree, so a server could put owner-region pages or another share under a root and have them sealed to its members. | Fixed by removing the carry-over: the new space is a copy shared with nobody, and the person shares it with the usual dialog and its preview (§6.7). |
+| S54-2 | 54 | High | 4.6 **A space the person owns alone**; 7.5 | Sharing again used finishing's members and roles, so someone the person removed or demoted since got the share back, drafts included. | Fixed with S54-1. Same as M54-1. |
+| S54-3 | 54 | High | 8.4; 8.6; 9.4 | Floors were worked out once, by the declining device, so a share version withheld from it, or one another device sealed to an agent, never got a floor. | Fixed: a floor is a standing rule; the declining device fetches every share's envelopes first, and every device adds the floor, in a confirmed write, at each unlock and whenever it meets such an envelope, before sealing to an agent there; agents read the record before each write. Same as E54-F1. |
+| M54-1 | 54 | High | 4.6 | Same as S54-2. | Fixed with S54-1. |
+| M54-2 | 54 | High | 4.6; 6.5 step 4 | Since the rotation no longer clears `removedOwners`, an own ID the old key wrote there left a space the person owns alone with no way back: finishing couldn't rotate it, members kept saving under keys the old key holds, and the dialog said otherwise. | Fixed: the rotation dialog names spaces whose first name record the person signed and whose `removedOwners` holds their own ID, and the person may confirm "become an owner" there before rotating, the one way back without a co-owner. |
+| E54-F1 | 54 | High | 8.4; 9.4 | Same as S54-3. | Fixed with S54-3. |
+| S54-4 | 54 | Medium | 4.6 **Shares left at an earlier key** | A server that stopped listing a rotated owner led the co-owner's app to write a lasting removal when they pressed **Rotate keys**. | Fixed in wording: the dialog says it removes them as an owner, as **Remove owner** does, and that the server may only be hiding them. |
+| M54-3 | 54 | Medium | 8.4; 8.6 | A floor was permanent, so one the old key wrote, at a huge version, stopped the person writing in a share for good. | Fixed: a floor above the share's current key version counts for nothing, and a rotation above a floor ends its effect. |
+| E54-F2 | 54 | Medium | 8.6 | The decline row's "removed only" branch didn't say whether floors are added. | Fixed: in every branch. |
+| E54-F3 | 54 | Medium | 8.6 | The fallback for a device without a kept pin restored the key just below the current pin, which skips keys when one follow passed several. | Fixed: it restores the pin of the latest record version before the one that moved it, fetched by version. |
+| S54-5 | 54 | Low | 4.6 **Adding a rotated owner again** | A withheld statement makes an accepted co-owner look like a pending re-add on one device. | Accepted: availability only, as E53-L4. |
+| S54-6 | 54 | Low | 4.6 **Owners**; 6.5 step 4 | A replayed statement can bring up the co-owner dialog after a self-removal. | Accepted: confirming it needs the person, and the server listing them again is A5. |
+| S54-7 | 54 | Low | 4.6 | The "owns alone" test left out a space whose only other owners rotated and weren't added again. | Fixed: the test includes it. Same as E54-L5. |
+| S54-8 | 54 | Low | 8.4; 4.6 | Whether versions the restored pin sealed count, for agents, was unclear. | Fixed: they set floors too. Same as M54-4. |
+| S54-9 | 54 | Low | ADR | The ADR contradicted itself on whether old members were listed ticked. | Moot: nothing carries over. |
+| M54-4 | 54 | Low | 8.4 | Same as S54-8. | Fixed with S54-8. |
+| M54-5 | 54 | Low | 4.6 | Sharing again didn't say what publish rights it grants. | Moot with S54-1. Same as E54-L6. |
+| M54-6 | 54 | Low | 4.6 | Same as S54-6. | Accepted with S54-6. |
+| M54-7 | 54 | Low | 4.6; 6.5 step 4 | The release before rotation's sentence read as clearing `removedOwners`, and step 4 still said only an add takes an owner off the list. | Fixed: both reworded. |
+| E54-L1 | 54 | Low | 4.6 **A version it can't use yet** | Round 53's rewording dropped that the envelope's signature must verify. | Fixed. |
+| E54-L2 | 54 | Low | 8.4 | `floors` allowed 0, and its absence was unstated. | Fixed: at least 1, absent meaning empty. |
+| E54-L3 | 54 | Low | 8.6 | "Add a co-owner" didn't take the added key itself out of `openOnly`. | Fixed. |
+| E54-L4 | 54 | Low | 4.6; 8.6 | "Needs nothing but the record" was untrue: key order needs the chain. | Fixed in wording. |
+| E54-L5 | 54 | Low | 4.6 | Same as S54-7. | Fixed with S54-7. |
+| E54-L6 | 54 | Low | 4.6 | Same as M54-5. | Moot with S54-1. |
+
+**Outcome.** Round 54 found Highs, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed, moot or accepted as availability. Round 55 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
