@@ -401,7 +401,8 @@ const SPACED = new Set(['link', 'textColor', 'colorHighlight']);
 // and end with outside it, as Milkdown puts spaces: a delimiter beside a
 // space isn't one, nor beside a line break. A space held for Milkdown
 // (`HELD_SPACE`) goes out too, but of a link or a colour's HTML, which can
-// hold it. `writable` takes a mark off a line break at its run's end, but
+// hold it, as it can a no-break space or another of Unicode's, which
+// Milkdown leaves in. `writable` takes a mark off a line break at its run's end, but
 // `nest` may end a mark sooner, before a link it would cut.
 function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[] {
   const inside = [...children];
@@ -431,9 +432,9 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
     }
     return taken;
   };
-  const held = SPACED.has(wrap.type) ? '' : HELD_SPACE;
-  const before = take(true, new RegExp(`^[\\s${held}]+`));
-  const after = take(false, new RegExp(`[\\s${held}]+$`));
+  const spaces = SPACED.has(wrap.type) ? ' \\t\\r\\n' : `\\s${HELD_SPACE}`;
+  const before = take(true, new RegExp(`^[${spaces}]+`));
+  const after = take(false, new RegExp(`[${spaces}]+$`));
   return [...before, ...(inside.length > 0 ? [{ ...wrap, children: inside }] : []), ...after];
 }
 

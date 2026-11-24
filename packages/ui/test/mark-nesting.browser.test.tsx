@@ -188,7 +188,7 @@ describe('marks that overlap partly', () => {
     expect(fidelityOf('a b *c **d***__`  e  `*`f`*__\n', t)).toEqual({ visual: true });
   });
 
-  it('end a mark ended before a link off the line break it ends at (#682)', async () => {
+  it('write a line break out of a mark ended before a link (#682)', async () => {
     // Bold over `b`, the break and `c d`, then a link from `c` on past it,
     // which the bold ends before: the break goes out of the bold, as a
     // delimiter after one doesn't close it.
@@ -208,6 +208,18 @@ describe('marks that overlap partly', () => {
         ['strong', 3, 8],
       ],
       '[a **b**](u)\\\n**c d** e\n',
+    );
+    // A colour's HTML keeps the no-break space before the break, which
+    // Milkdown leaves in, as it does at its end.
+    await writes(
+      'a <span data-color="red">b\u00a0\\\nc d</span> e\n',
+      [['link', 6, 11, { href: 'u' }]],
+      'a <span data-color="red">b\u00a0</span>\\\n[<span data-color="red">c d</span> e](u)\n',
+    );
+    await writes(
+      'a <span data-color="red">b\u00a0</span> e\n',
+      [],
+      'a <span data-color="red">b\u00a0</span> e\n',
     );
   });
 
