@@ -48,6 +48,25 @@ const DELETIONS = 256;
 export const REPAIR_MS = 3_000;
 // The reader is used on a block no longer than this, as it reads it quickly.
 const READ_AT_MOST = 1_024;
+// How much the reader reads, in all and how many times, for one take-in's repairs.
+const REPAIR_READS = 64;
+const REPAIR_READ_AT_MOST = 32 * READ_AT_MOST;
+// What's left of that while `repairs` runs; elsewhere, null, as there's no bound.
+let budget: { reads: number; chars: number } | null = null;
+
+/** `text` read, or null if the reader fails or has read all it may for this take-in. */
+function readerOf(text: string): Nodes | null {
+  if (budget) {
+    if (budget.reads === 0 || budget.chars < text.length) return null;
+    budget.reads--;
+    budget.chars -= text.length;
+  }
+  try {
+    return parseMarkdown(text);
+  } catch {
+    return null;
+  }
+}
 
 /** The state of `doc`, by Yjs client, as a writing keeps what it was written on. */
 export const stateOf = (doc: Y.Doc): ReadonlyMap<number, number> =>
@@ -138,13 +157,26 @@ const MARKING = new Set('*_~=[]!`\\|$\n<>');
 const LONGEST_TAG = 32;
 // A colour's opening tag, exactly as the visual editor writes it and the reader reads it.
 const COLOR_TAG = /^<(span|mark) data-color="([a-z]+)">$/;
-// A line that may start code or HTML of its own: four spaces or a tab, or `<`.
-const CODE_OR_HTML = /^(?: {4}| {0,3}\t| {0,3}<)/;
+/**
+ * Whether the line of `text` at `at` may start code or HTML of its own:
+ * past its quote and list markers, four columns of space or a tab, as
+ * `>     code`, or `<`.
+ */
+function codeOrHtmlAt(text: string, at: number): boolean {
+  const { rest } = lineStartOf(text, at, lineEnd(text, at));
+  let columns = 0;
+  for (let i = rest - 1; i >= at && (text[i] === ' ' || text[i] === '\t'); i--) {
+    if (text[i] === '\t') return true;
+    columns++;
+  }
+  return columns >= 4 || text[rest] === '<';
+}
 
 /** Whether the character at `at` is escaped, by an odd number of backslashes before it. */
 function escaped(text: string, at: number): boolean {
   let slashes = 0;
-  for (let i = at - 1; i >= 0 && text.charCodeAt(i) === 92 && slashes < 64; i--) slashes++;
+  // Each run of backslashes is counted once, by the `<` right after it.
+  for (let i = at - 1; i >= 0 && text.charCodeAt(i) === 92; i--) slashes++;
   return slashes % 2 === 1;
 }
 
@@ -267,12 +299,12 @@ function scanned(block: string): Reading | null {
   let clean = true;
   // Something only the reader can tell: a mark inside a colour, or a tag written otherwise.
   let unsure = false;
-  let code = CODE_OR_HTML.test(block.slice(0, 4));
+  let code = codeOrHtmlAt(block, 0);
   for (let at = 0; at < block.length; at++) {
     const char = block.charCodeAt(at);
     // A backtick or tilde may start code, and `$` maths, whose text is no HTML.
     if (char === 96 || char === 126 || char === 36) code = true;
-    else if (char === 10 && CODE_OR_HTML.test(block.slice(at + 1, at + 5))) code = true;
+    else if (char === 10 && codeOrHtmlAt(block, at + 1)) code = true;
     // After a link's `](`, a reference's `][`, a definition's `]:` or a
     // wikilink's `[[`, a tag may be in its address, title or label, as
     // `[a](x "title <mark>")`, which the reader keeps whole.
@@ -319,12 +351,8 @@ function scanned(block: string): Reading | null {
  * a highlight is in a highlight or a colour in a colour, which it shows as one.
  */
 function read(block: string): Reading {
-  let tree: Nodes;
-  try {
-    tree = parseMarkdown(block);
-  } catch {
-    return 'broken';
-  }
+  const tree = readerOf(block);
+  if (!tree) return 'unsure';
   if (rawTags(block, tree, false).length > 0) return 'broken';
   return doubledNodes(tree).length > 0 ? 'broken' : 'clean';
 }
@@ -358,18 +386,14 @@ function rawTags(text: string, tree: Nodes, loose: boolean): Span[] {
 
 /**
  * The tags of `block`, which reads cleanly, that make a colour, as the
- * reader reads them: not text in code or maths that looks like one. None
- * where it's too long to read quickly.
+ * reader reads them: not text in code or maths that looks like one. Null
+ * where it's too long to read quickly, or the reader can't.
  */
-function colourTagsOf(block: string): Span[] {
+function colourTagsOf(block: string): Span[] | null {
   if (scanned(block) === 'clean') return tagsIn(block, 0, block.length);
-  if (block.length > READ_AT_MOST) return [];
-  let tree: Nodes;
-  try {
-    tree = parseMarkdown(block);
-  } catch {
-    return [];
-  }
+  if (block.length > READ_AT_MOST) return null;
+  const tree = readerOf(block);
+  if (!tree) return null;
   const tags: Span[] = [];
   const stack: Nodes[] = [tree];
   for (let node = stack.pop(); node; node = stack.pop()) {
@@ -542,12 +566,8 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
  * highlight in a highlight or a colour in a colour; null if it fails.
  */
 function readerBad(line: string): Span[] | null {
-  let tree: Nodes;
-  try {
-    tree = parseMarkdown(line);
-  } catch {
-    return null;
-  }
+  const tree = readerOf(line);
+  if (!tree) return null;
   // The tags the reader read as a colour, and what it read as code or maths.
   const good = new Set<number>();
   const code: Span[] = [];
@@ -819,15 +839,6 @@ function codeFrom(tree: Nodes, from: number): string[] | null {
   return out.sort();
 }
 
-/** `text` read, or null if the reader fails. */
-function treeOf(text: string): Nodes | null {
-  try {
-    return parseMarkdown(text);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Whether blocks of `text`, asked in order, read in their place on the
  * page as they read alone: not in a code fence, maths or HTML left open
@@ -877,7 +888,7 @@ class Context {
     if (to - from > this.#left || this.#reads === 0) return null;
     this.#left -= to - from;
     this.#reads--;
-    return treeOf(this.#text.slice(from, to));
+    return readerOf(this.#text.slice(from, to));
   }
 
   /** Whether nothing the reader reads from the line the scan was sure of is open at `at`. */
@@ -944,7 +955,7 @@ class Context {
     if (!this.#unsure) return this.#fence === null;
     if (block.to - this.#sure > READ_AT_MOST) return false;
     const context = this.#read(this.#sure, block.to);
-    const alone = context && treeOf(this.#text.slice(block.from, block.to));
+    const alone = context && readerOf(this.#text.slice(block.from, block.to));
     if (!context || !alone) return false;
     const there = codeFrom(context, block.from - this.#sure);
     return there !== null && there.join() === codeFrom(alone, 0)?.join();
@@ -1065,13 +1076,30 @@ function repairs1(
   if (recent.some((w) => w.deleted === null)) return null;
   const { tags, spans } = conflict;
   // In a tag, or all of it in a tag and the marks beside it: not text that only meets one.
-  const inOne = (item: Found) => {
+  const near = (item: Found) => {
     if (item.deleted) return touchesAny(spans, item.at, item.at);
     const end = item.at + item.length;
     if (overlapsAny(tags, item.at, end)) return true;
     const span = spans[firstEnding(spans, item.at)];
     return span !== undefined && span.from <= item.at && span.to >= end;
   };
+  // A single `$`, backtick or bracket beside a tag, and nothing else of its
+  // writer's there, may be a third person's, as `$` typed before `50`: it
+  // counts only with another of its writer's, as code's two backticks.
+  const lone = (item: Found) =>
+    !item.deleted &&
+    item.length === 1 &&
+    !overlapsAny(tags, item.at, item.at + 1) &&
+    SINGLE.has(text(item.at, item.at + 1));
+  const singles = new Map<number, number>();
+  const more = new Set<number>();
+  for (const item of items)
+    if (!item.deleted && near(item)) {
+      if (lone(item)) singles.set(item.client, (singles.get(item.client) ?? 0) + 1);
+      else more.add(item.client);
+    }
+  const inOne = (item: Found) =>
+    near(item) && (!lone(item) || more.has(item.client) || (singles.get(item.client) ?? 0) >= 2);
   let latest = -1;
   for (const item of items)
     if (inOne(item))
@@ -1171,7 +1199,8 @@ function overlapsAny(spans: readonly Span[], from: number, to: number): boolean 
  * `theirs`, others' changes in a block of `body` from `at`, undone within
  * `lines`, in order and none overlapping: what they put in there out, but
  * for what lies in `kept`, and what they took out of a tag in `mine`, the
- * block as this app wrote it, or of the marks beside one, beside one of
+ * block as this app wrote it, whose colour tags are `mineTags`, or of the
+ * marks beside one, beside one of
  * `conflicts`, back in. What
  * they put in or took out across a line break stays, and so does other
  * text they took out, as a word deleted elsewhere on the line.
@@ -1183,11 +1212,12 @@ function undoneOn(
   lines: readonly Span[],
   conflicts: readonly Span[],
   mine: string,
+  mineTags: readonly Span[],
   kept: readonly Span[],
   held: string,
 ): TextChange[] {
   // A link beside a tag in it is its own, as all its tags pair.
-  const tags = besideOf(mine, colourTagsOf(mine), 0, mine.length, []);
+  const tags = besideOf(mine, mineTags, 0, mine.length, []);
   // How far `mine` is behind `body`, before the change in turn.
   let shift = 0;
   const out: TextChange[] = [];
@@ -1294,14 +1324,17 @@ function keepsWords(mine: string, merged: string, result: string): boolean {
 
 /**
  * Whether each mark `changes` put back, as a `**` someone took out beside
- * a tag, is in `result` as often as in `mine`: so a repair never leaves
- * half of a pair someone else took out whole, as `big**` from `**big**`.
+ * a tag, is in `result` as often as in `mine`, and a link's brackets with
+ * its parentheses: so a repair never leaves half of a pair someone else
+ * took out whole, as `big**` from `**big**`, or `[world]` from a link.
  */
 function marksAsMine(changes: readonly TextChange[], mine: string, result: string): boolean {
   const count = (text: string, char: string) => text.split(char).length;
   const back = new Set<string>();
   for (const change of changes)
     for (const char of change.insert) if (PAIRED.has(char) || SINGLE.has(char)) back.add(char);
+  // A link's brackets come back only with its address, as `[world](x.md)`.
+  if (back.has('[') || back.has(']')) for (const char of '()') back.add(char);
   for (const char of back) if (count(result, char) !== count(mine, char)) return false;
   return true;
 }
@@ -1323,6 +1356,23 @@ type Candidate = { block: Span; shown: string; mine: string; theirs: Theirs[] };
  * is left.
  */
 export function repairs(
+  text: Y.Text,
+  body: string,
+  held: string,
+  map: () => Mapping,
+  writings: readonly Writing[],
+  now: number,
+): TextChange[] {
+  // The reader reads only so much for one take-in; past it, blocks are left.
+  budget = { reads: REPAIR_READS, chars: REPAIR_READ_AT_MOST };
+  try {
+    return repairsIn(text, body, held, map, writings, now);
+  } finally {
+    budget = null;
+  }
+}
+
+function repairsIn(
   text: Y.Text,
   body: string,
   held: string,
@@ -1399,6 +1449,8 @@ export function repairs(
       continue;
     // Its own text in the conflict, as its letters of a tag the other took out, for what to put back.
     const conflicts = merged(conflict.spans, own);
+    const mineTags = colourTagsOf(mine);
+    if (!mineTags) continue;
     const changes = undoneOn(
       body,
       inside,
@@ -1406,6 +1458,7 @@ export function repairs(
       failing,
       conflicts,
       mine,
+      mineTags,
       repairer.kept,
       held,
     );

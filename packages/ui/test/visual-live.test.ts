@@ -1969,6 +1969,100 @@ describe('two people formatting the same text at once (#720)', () => {
       }
   });
 
+  it('keeps what main keeps: code indented in a quote or list item, tags after many backslashes', async () => {
+    const cases: [string, string, string][] = [];
+    for (const prefix of [
+      '>     ',
+      '-     ',
+      '1.     ',
+      '> >     ',
+      '>\t\t',
+      '-\t\t',
+      '> -     ',
+      '  >     ',
+    ])
+      cases.push([
+        `${prefix}${line('world')}`,
+        `${prefix}${line(hi('world'))}`,
+        `${prefix}${line(red('span', 'world', 'blue'))}`,
+      ]);
+    const quoted = '- Example:\n\n>     <mark data-color="red">x</mark>\n\nNext.\n';
+    cases.push([quoted, quoted.replace('red', 'blue'), quoted.replace('red', 'green')]);
+    const later = '> Try this:\n>\n>     <mark data-color="red">x</mark>\n';
+    cases.push([later, later.replace('red', 'blue'), later.replace('red', 'green')]);
+    cases.push([
+      'Example \\<mk data-color="red">\n',
+      'Example \\<mrk data-color="red">\n',
+      '>     Example <mak data-color="red">\n',
+    ]);
+    const slashes = `Example ${'\\'.repeat(65)}<mk data-color="red">\n`;
+    cases.push([slashes, slashes.replace('<mk', '<mrk'), slashes.replace('<mk', '<mak')]);
+    for (const [was, mine, theirs] of cases)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower), JSON.stringify(was)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('keeps a `$` a third person typed beside the tags', async () => {
+    const page = 'It costs 50 today.\n';
+    for (const ids of threeOrders) {
+      const { got } = await withThird(
+        page,
+        page.replace('50', hi('50')),
+        page.replace('50', red('span', '50', 'blue')),
+        (body) => body.insert(body.toJSON().indexOf('50'), '$'),
+        ids,
+      );
+      expect(got, ids.join()).toContain('$');
+    }
+  });
+
+  it('never leaves a link’s brackets without its address when a third person took the link off', async () => {
+    for (const [page, mine, theirs] of [
+      [
+        'See [world](x.md) there.\n',
+        `See [${hi('world')}](x.md) there.\n`,
+        `See [${red('span', 'world', 'blue')}](x.md) there.\n`,
+      ],
+      [
+        'See [world](x.md) there.\n',
+        `See ${hi('[world](x.md)')} there.\n`,
+        `See ${red('span', '[world](x.md)', 'blue')} there.\n`,
+      ],
+    ] as const)
+      for (const ids of threeOrders) {
+        const { got } = await withThird(page, mine, theirs, replace('[world](x.md)', 'world'), ids);
+        const brackets = (got.match(/[[\]()]/g) ?? []).join('');
+        expect(['', '[]()'], `${got} ${ids.join()}`).toContain(brackets);
+      }
+  });
+
+  it('takes in a source change to many paragraphs quickly within seconds of writing', async () => {
+    const page =
+      Array.from(
+        { length: 900 },
+        (_, i) => `Para ${i} \`<mark data-color="red">x</mark>\` end.`,
+      ).join('\n\n') + '\n';
+    const [a, b] = start(page, false);
+    a.editor.shown = page.replace('Para 0', 'Para 0 now');
+    a.binding.write();
+    await exchange();
+    const body = b.doc.getText('body');
+    b.doc.transact(() => {
+      const text = body.toJSON();
+      for (let at = text.lastIndexOf(' end.'); at >= 0; at = text.lastIndexOf(' end.', at - 1))
+        body.insert(at + 5, '!');
+    });
+    const started = Date.now();
+    send(b, a);
+    await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
+    const took = Date.now() - started;
+    process.stderr.write(`many paragraphs: ${took} ms\n`);
+    expect(took).toBeLessThan(150);
+    expect(bodyOf(a)).toBe(bodyOf(b));
+  });
+
   it('leaves a block broken when the one to repair it is gone', async () => {
     const [a, b] = start(line('world'), true);
     a.editor.shown = line(hi('world'));
