@@ -52,9 +52,11 @@ export type MadeOn = { version: number | null; publishedOn: string };
  * They're counted in `read`, the text `shown` is made from by the changes
  * queued, which has the same tasks, as ticks and properties move none
  * between lines, and which is parsed once however many ticks are made.
+ * A tick that already says what it was made in keeps that: one made on
+ * the body as it showed while a newer text was read (#728).
  */
 export function madeIn(change: ReadingChange, shown: string, read: string): ReadingChange {
-  if (change.kind !== 'task') return change;
+  if (change.kind !== 'task' || change.madeIn !== undefined) return change;
   const repeated = tasksWithLine(read, change.line) > 1;
   return { ...change, madeIn: { markdown: shown, repeated } };
 }

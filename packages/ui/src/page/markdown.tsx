@@ -8,11 +8,12 @@ import {
   bodyStart,
   splitFrontmatter,
   taskAt,
+  tasksWithLine,
 } from '@wikistow/client';
 import { pageHtml, SYNTAX, TASK, taskLabels, taskMarks } from '@wikistow/client/reader';
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
 import { useLocation } from '@tanstack/react-router';
-import type { InlineCode, Root, RootContent } from 'mdast';
+import type { InlineCode, Nodes, Root, RootContent } from 'mdast';
 import {
   Component,
   createContext,
@@ -302,18 +303,30 @@ function OwnCodeBlock({ node, ...props }: ComponentProps<'pre'> & ExtraProps) {
 }
 
 /**
+ * The whole text the body's tree was read from, where the page shown is
+ * another, still being read, and not just that text with boxes ticked
+ * since: its offsets may be other tasks' there (#728). Null otherwise.
+ */
+const ReadFrom = createContext<string | null>(null);
+
+/**
  * A task's checkbox (`taskMarks`). Where the page can change while it's
  * read (`ReadingChanges`), it shows the task as the Markdown shown has
  * it, queued changes made, and ticking it queues the change; it is
  * disabled, with a hint saying why when there's a reason to give, where
- * this person can't. Anywhere else, and for a checkbox the page's own HTML
- * holds, it is the reader's disabled box, as written.
+ * this person can't. While a newer text is read, it is the task as the
+ * text it was drawn from has it, and a tick says it was made there
+ * (`madeIn`), so one that may be another task's now is left out, as one
+ * made before the page changed is (#703, #728). Anywhere else, and for a
+ * checkbox the page's own HTML holds, it is the reader's disabled box, as
+ * written.
  */
 const TaskBox: NonNullable<Components['input']> = ({ node, ...props }) => {
   const here = use(ReadingChanges);
+  const older = use(ReadFrom);
   const at = node?.properties[TASK];
   const offset = at === undefined ? null : Number(at);
-  const task = here && offset !== null ? taskAt(here.markdown, offset) : null;
+  const task = here && offset !== null ? taskAt(older ?? here.markdown, offset) : null;
   if (!here || !task || offset === null) return <input {...props} />;
   const { rights, change } = here;
   const hint = rights.allowed ? undefined : (rights.hint ?? undefined);
@@ -326,11 +339,58 @@ const TaskBox: NonNullable<Components['input']> = ({ node, ...props }) => {
       aria-description={hint}
       data-hint={hint}
       onChange={(event) =>
-        change({ kind: 'task', offset, line: task.line, checked: event.target.checked })
+        change({
+          kind: 'task',
+          offset,
+          line: task.line,
+          checked: event.target.checked,
+          ...(older !== null && {
+            madeIn: { markdown: older, repeated: tasksWithLine(older, task.line) > 1 },
+          }),
+        })
       }
     />
   );
 };
+
+const BOX_MARKS = new Set([' ', 'x', 'X']);
+
+/**
+ * Whether `shown` is `read`, the whole text the body's `tree` was read
+ * from (`start` where its body starts), but for boxes ticked or not since,
+ * the boxes of the tree's task items: ticking moves no block, so the
+ * tree's tasks are where `shown` has them. Compared as text, the tree
+ * walked only once they differ, as each tick shown before it's read does.
+ */
+function ticksSince(read: string, shown: string, tree: Root, start: number): boolean {
+  if (read === shown) return true;
+  if (read.length !== shown.length) return false;
+  let marks: Set<number> | null = null;
+  for (let i = 0; i < read.length; i++) {
+    const was = read[i]!;
+    const is = shown[i]!;
+    if (was === is) continue;
+    if (!BOX_MARKS.has(was) || !BOX_MARKS.has(is)) return false;
+    marks ??= boxMarks(read, tree, start);
+    if (!marks.has(i)) return false;
+  }
+  return true;
+}
+
+/** Where each task item of `tree` has its box's mark in `markdown`, read without recursion. */
+function boxMarks(markdown: string, tree: Root, start: number): Set<number> {
+  const marks = new Set<number>();
+  const stack: Nodes[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    const at = node.position?.start.offset;
+    if (node.type === 'listItem' && typeof node.checked === 'boolean' && at !== undefined) {
+      const task = taskAt(markdown, start + at);
+      if (task) marks.add(task.mark);
+    }
+    if ('children' in node) for (const child of node.children) stack.push(child);
+  }
+  return marks;
+}
 
 /** A code block as written, under its language and a button that copies it. */
 function WrittenCode({
@@ -362,7 +422,8 @@ function WrittenCode({
 const readTree = (tree: Root) => () => tree;
 
 /**
- * A body as the worker reads it (`markdownJobs.body`), kept a few minutes
+ * A body as the worker reads it (`markdownJobs.body`), with the body it
+ * was read from, as one shows while the next is read; kept a few minutes
  * once nothing shows it (the default `gcTime`), so going back to a page
  * shows it at once, and dropped with the decrypted queries when the vault
  * locks. A read nothing waits for any more is ended with its worker. It
@@ -371,7 +432,10 @@ const readTree = (tree: Root) => () => tree;
 const readQuery = (body: string) =>
   queryOptions({
     queryKey: [PLAIN, 'markdown', body],
-    queryFn: ({ signal }) => pageReader.run('body', body, { budgetMs: READ_BUDGET_MS, signal }),
+    queryFn: async ({ signal }) => ({
+      body,
+      tree: await pageReader.run('body', body, { budgetMs: READ_BUDGET_MS, signal }),
+    }),
     staleTime: 'static',
     networkMode: 'always',
     retry: false,
@@ -435,8 +499,20 @@ export function Markdown({
   );
   const moved = useMovedLinks(attachments.ctx, attachments.page, pages, links);
   const read = useQuery(readQuery(body));
+  const tree = read.data?.tree;
   // Each task's label, from the tree as read: links and references are only placeholders in the HTML.
-  const labels = useMemo(() => (read.data ? taskLabels(read.data) : new Map()), [read.data]);
+  const labels = useMemo(() => (tree ? taskLabels(tree) : new Map()), [tree]);
+  // The whole text the tree was read from, as its task offsets count, which
+  // may be an older body than the one shown while that's read.
+  const readFrom = read.data ? (frontmatter ?? '') + read.data.body : source;
+  const start = bodyStart(readFrom);
+  const here = use(ReadingChanges);
+  const shownText = here?.markdown ?? null;
+  const older = useMemo(
+    () =>
+      tree && shownText !== null && !ticksSince(readFrom, shownText, tree, start) ? readFrom : null,
+    [tree, shownText, readFrom, start],
+  );
   const hash = useLocation({ select: (location) => location.hash });
   // A link to a heading of this page arrives before its body is read: it
   // goes there once the body first shows, and as the hash changes, but not
@@ -498,15 +574,17 @@ export function Markdown({
                 <div className="page-body" {...(passages && { [QUOTE_ROOT]: '' })}>
                   {/* Filled as ReactMarkdown reads the body, before the spans render. */}
                   <Held value={held}>
-                    <ReactMarkdown
-                      remarkPlugins={[[readTree, read.data]]}
-                      remarkRehypeOptions={{
-                        handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
-                      }}
-                      rehypePlugins={[[taskMarks, bodyStart(source), labels], pageHtml]}
-                      urlTransform={urlTransform}
-                      components={components}
-                    />
+                    <ReadFrom value={older}>
+                      <ReactMarkdown
+                        remarkPlugins={[[readTree, read.data.tree]]}
+                        remarkRehypeOptions={{
+                          handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
+                        }}
+                        rehypePlugins={[[taskMarks, start, labels], pageHtml]}
+                        urlTransform={urlTransform}
+                        components={components}
+                      />
+                    </ReadFrom>
                   </Held>
                 </div>
               </AsWritten>

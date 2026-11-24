@@ -9,11 +9,13 @@ import {
 } from '@tanstack/react-router';
 import { act, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { Markdown } from '../src/page/markdown.tsx';
+import { pageReader } from '../src/page/page-reader.ts';
 import { ReadingChanges } from '../src/page/reading-changes.tsx';
 import {
   applyChanges,
+  madeIn,
   type ReadingChange,
   type ReadingRights,
 } from '../src/page/reading-changes-model.ts';
@@ -40,16 +42,23 @@ title: Shopping
 const unmounts: (() => void)[] = [];
 afterEach(() => {
   for (const unmount of unmounts.splice(0)) unmount();
+  vi.restoreAllMocks();
 });
 
 /**
- * The reader's body of `source`, with `rights` to change it while it's
- * read, or none; each change is queued in `changes` and made in what's
- * shown, as the page's queue does.
+ * The reader's body of `first`, with `rights` to change it while it's
+ * read, or none; each change is kept in `changes` as the box made it, and
+ * queued and made in what's shown, as the page's queue does, with what it
+ * was made in (`madeIn`). `arrive` makes the page's text another, as
+ * another tab's publication does.
  */
-async function render(source: string, rights: ReadingRights | null) {
+async function render(first: string, rights: ReadingRights | null) {
   const changes: ReadingChange[] = [];
+  const queue: ReadingChange[] = [];
+  let arrive = (_source: string) => {};
   function Reading() {
+    const [source, setSource] = useState(first);
+    arrive = setSource;
     const [queued, setQueued] = useState<ReadingChange[]>([]);
     const markdown = applyChanges(source, queued).markdown;
     const body = (
@@ -69,7 +78,9 @@ async function render(source: string, rights: ReadingRights | null) {
     if (!rights) return body;
     const change = (made: ReadingChange) => {
       changes.push(made);
-      setQueued((before) => [...before, made]);
+      const kept = madeIn(made, markdown, source);
+      queue.push(kept);
+      setQueued((before) => [...before, kept]);
     };
     return <ReadingChanges value={{ markdown, rights, change }}>{body}</ReadingChanges>;
   }
@@ -100,7 +111,8 @@ async function render(source: string, rights: ReadingRights | null) {
     if (!found) throw new Error(`No checkbox “${label}”`);
     return found;
   };
-  return { container, changes, box };
+  const shown = (source: string) => act(async () => arrive(source));
+  return { container, changes, queue, box, shown };
 }
 
 describe('a task’s checkbox in the reader', () => {
@@ -167,5 +179,62 @@ describe('a task’s checkbox in the reader', () => {
     );
     expect(mine?.disabled).toBe(true);
     expect(mine?.hasAttribute('data-task')).toBe(false);
+  });
+
+  it('ticks in the text its tree was read from while a newer one waits to be read (#728)', async () => {
+    const before = '- [ ] Call\n  Mum\n- [ ] Call\n  Bob\n';
+    // Another tab swapped them: the task at the first one's offset is Bob's now.
+    const swapped = '- [ ] Call\n  Bob\n- [ ] Call\n  Mum\n';
+    const { box, changes, queue, shown, container } = await render(before, { allowed: true });
+    // The swapped text's read waits, so the tree shows the one before it.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const run = pageReader.run.bind(pageReader);
+    vi.spyOn(pageReader, 'run').mockImplementation(async (job, input, options) => {
+      if (input === swapped) await held;
+      return run(job, input, options);
+    });
+    await shown(swapped);
+    expect(box('Call Mum').checked).toBe(false);
+    await act(async () => box('Call Mum').click());
+    expect(changes).toEqual([
+      {
+        kind: 'task',
+        offset: 0,
+        line: 'Call',
+        checked: true,
+        madeIn: { markdown: before, repeated: true },
+      },
+    ]);
+    // Bob's task, now at that offset, stays as it was, and the tick is left out as #703 says.
+    const made = applyChanges(swapped, queue);
+    expect(made.markdown).toBe(swapped);
+    expect(made.dropped.map(({ reason }) => reason)).toEqual([
+      'The task “Call” is on the page more than once, and the page changed since it was ticked.',
+    ]);
+    await act(async () => release());
+    await expect
+      .poll(() => container.querySelector('input[type=checkbox]')?.getAttribute('aria-label'))
+      .toBe('Call Bob');
+    expect([box('Call Bob').checked, box('Call Mum').checked]).toEqual([false, false]);
+  });
+
+  it('ticks in the text shown while a read of it with only boxes ticked since waits', async () => {
+    const page = '- [ ] Call\n  Mum\n- [ ] Call\n  Bob\n';
+    const { box, changes, queue } = await render(page, { allowed: true });
+    vi.spyOn(pageReader, 'run').mockImplementation(() => new Promise(() => {}));
+    await act(async () => box('Call Mum').click());
+    // Bob's is ticked before Mum's tick is read: it's made in the text with Mum's ticked.
+    await act(async () => box('Call Bob').click());
+    // Each made in the text shown, as the tree's tasks are where it has them.
+    expect(changes.map((change) => change.kind === 'task' && change.madeIn)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect([box('Call Mum').checked, box('Call Bob').checked]).toEqual([true, true]);
+    expect(applyChanges(page, queue)).toEqual({
+      markdown: '- [x] Call\n  Mum\n- [x] Call\n  Bob\n',
+      dropped: [],
+    });
   });
 });
