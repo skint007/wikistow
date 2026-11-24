@@ -6,7 +6,17 @@
 // the page says how saving it went, so a reload loses nothing.
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import type { ClientContext, PageId, SpaceId } from '@wikistow/client';
+import {
+  ApiError,
+  keptOperations,
+  noAnswer,
+  pageOperations,
+  spaceOperations,
+  revisePayload,
+  type ClientContext,
+  type PageId,
+  type SpaceId,
+} from '@wikistow/client';
 import type { DesktopBridge, DesktopClip } from '@wikistow/contracts';
 import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
@@ -35,7 +45,7 @@ import {
   searchPlaces,
   type ClipPlace,
 } from './clip-places';
-import { saveClip, type Places, type Saved } from './save-clip';
+import { hiddenByTrash, saveClip, type Places, type Saved } from './save-clip';
 import { MarkdownWorker, READ_BUDGET_MS } from '../page/markdown-worker';
 
 /** How long a space's tree loaded for clipping is taken as current. */
@@ -148,6 +158,47 @@ const convert = async (html: string, text: string) => {
 /** The question for a clip whose folder can't take it: where it goes instead. */
 type Asking = { title: string; places: ClipPlace[]; answer: (place: ClipPlace | null) => void };
 
+/**
+ * Whether a page is out of its space's tree for a trash waiting on this
+ * device (`SaveClipDeps.trashedHere`). Not known, as when its space isn't
+ * kept offline, it isn't.
+ */
+async function trashedHere(ctx: ClientContext, page: { spaceId: SpaceId; pageId: PageId }) {
+  const queue = ctx.keptContent?.queue;
+  if (!queue) return false;
+  try {
+    const entries = await queue.entries();
+    if (!entries.some((one) => one.kind === 'delete' && one.spaceId === page.spaceId)) return false;
+    // Without its tree, as when its space isn't kept offline, only the page's own trash counts.
+    const tree = await spaceOperations
+      .loadTree(ctx, page.spaceId)
+      .catch((error: unknown) => {
+        if (!noAnswer(error)) throw error;
+        return keptOperations.keptTree(ctx, page.spaceId);
+      })
+      .catch(() => null);
+    return hiddenByTrash(tree, page.spaceId, entries, page.pageId);
+  } catch {
+    return false;
+  }
+}
+
+/** A page's draft on the server now, fetched afresh (`SaveClipDeps.current`). */
+async function currentDraft(ctx: ClientContext, page: { spaceId: SpaceId; pageId: PageId }) {
+  const { heads } = await pageOperations.loadPage(ctx, page.pageId);
+  // None for someone who may no longer change it: theirs to make again.
+  if (!heads.draftHead) throw new ApiError(404, 'not-found', 'You can’t change this page');
+  // A draft the server has but can't serve isn't a page gone, which is made again.
+  const draft = await pageOperations
+    .openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true })
+    .catch((error: unknown) => {
+      throw error instanceof ApiError && error.status === 404
+        ? new Error('Its draft can’t be read', { cause: error })
+        : error;
+    });
+  return { head: heads.draftHead, payload: revisePayload(draft.opened, {}) };
+}
+
 /** Mounted once in the desktop app's shell. */
 export function ClipReceiver() {
   return desktop ? <Receiver bridge={desktop} /> : null;
@@ -251,6 +302,8 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
         convert,
         spans,
         made: (page) => bridge.clipMade(next.id, page),
+        current: (page) => currentDraft(ctx, page),
+        trashedHere: (page) => trashedHere(ctx, page),
         image: (url) => bridge.clipImage(next.id, url),
         today: localDay(),
         choose: (_clip, title) =>

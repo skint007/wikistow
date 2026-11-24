@@ -16,6 +16,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - On Linux, logging out with the app open, or stopping it with `systemctl`, no longer crashes it with a core dump, after which Ubuntu offered to report a problem. The launcher starts it with `--no-unsandboxed-zygote`, so the app can start its GPU process again when the session ends that process and the zygote first. (#727)
 
+#### Desktop
+
+- Web clipper: a screenshot clip that a reload or a lock cut short adds its screenshot to the page it made, rather than putting that page in the trash and making another. Where you can add pages to a shared folder but not trash them, it no longer leaves two pages, and if adding it fails, the page with your note and link stays. (#734)
+
 #### Server
 
 - Suspending someone no longer fails while that person unpublishes a page, turns its public link off, changes who can publish, deletes a space or moves a page to another space, where it ended a public link they shared or a copy they uploaded. (#724)
