@@ -1116,9 +1116,9 @@ Round 36 ran the three briefs again, with fresh reviewers given the same materia
 | E36-L3 | 36 | Low | 4.6; 6.8 | Tabs older than the release ignore `lock`. | Fixed: the rotating tab also sends the signed-out message they already obey. |
 | E36-L4 | 36 | Low | 4.6 | The re-seal record named no key, so a second rotation cut the retired keys off early. | Fixed: it records the key's hash. |
 | E36-L5 | 36 | Low | 4.6; 7.9 | The `waiting` role had no source and could disagree with §7.9's sealing check. | Fixed: it is the role their access needs. |
-| E36-I1 | 36 | Info | 8.6 | A device that never did the follow has no stored `method` and `verifiedAt` for the restored pin. | No change: it reads them from the version before the follow, which every device can fetch (section 8.5). |
+| E36-I1 | 36 | Info | 8.6 | A device that never did the follow has no stored `method` and `verifiedAt` for the restored pin. | Fixed: such a device writes `first-seen` and its own clock, which order nothing (section 8.4). |
 
-**Outcome.** Round 36 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but S36-2's part about apps older than the release before rotation, accepted in A15, and E36-I1. Round 37 repeats the three briefs against this revision.
+**Outcome.** Round 36 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but S36-2's part about apps older than the release before rotation, accepted in A15. Round 37 repeats the three briefs against this revision.
 
 ## Known items for reviewers
 
