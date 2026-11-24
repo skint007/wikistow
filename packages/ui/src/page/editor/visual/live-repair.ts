@@ -182,9 +182,9 @@ function splitTagAt(text: string, at: number): boolean {
       marks++;
       i++;
       if (char === ']' && text[i] === '(') {
-        const close = text.slice(i, i + LINK_AT_MOST).indexOf(')');
+        const close = addressAfter(text, i, text.length);
         if (close < 0) return false;
-        i += close + 1;
+        i = close;
       }
       continue;
     }
@@ -196,26 +196,53 @@ function splitTagAt(text: string, at: number): boolean {
 }
 
 /**
- * The tags of `text` that put a colour on twice: two opening tags the same,
- * one right after the other, and two closing tags the same, one right after
- * the other, later, as `<mark data-color="red"><mark data-color="red">world</mark></mark>`,
+ * The tags of `pairs`, pairs of tags of `text`, that put a colour on
+ * twice: a pair right inside one the same, its ends against the other's,
+ * as `<mark data-color="red"><mark data-color="red">world</mark></mark>`,
  * which the editor shows as one. A colour inside a longer one of its own
  * reads as the longer one, and isn't.
  */
-function doubled(text: string, from = 0, to = text.length): Span[] {
+function doubled(text: string, pairs: readonly [Span, Span][]): Span[] {
+  const byEnd = new Map(pairs.map((pair) => [pair[0].to, pair]));
   const out: Span[] = [];
-  const tags = tagsIn(text, from, to);
-  for (let i = 0; i + 1 < tags.length; i++) {
-    const [a, b] = [tags[i] as Span, tags[i + 1] as Span];
-    const opening = text.slice(a.from, a.to);
-    if (a.to !== b.from || opening !== text.slice(b.from, b.to) || !COLOR_TAG.test(opening))
-      continue;
-    const name = opening.slice(1, 5);
-    const close = text.indexOf(`</${name}></${name}>`, b.to);
-    if (close < 0 || close >= to) continue;
-    out.push(a, b, { from: close, to: close + 7 }, { from: close + 7, to: close + 14 });
+  for (const [open, close] of pairs) {
+    const outer = byEnd.get(open.from);
+    if (!outer || outer[1].from !== close.to) continue;
+    if (text.slice(outer[0].from, outer[0].to) !== text.slice(open.from, open.to)) continue;
+    out.push(outer[0], open, close, outer[1]);
   }
   return out.sort((x, y) => x.from - y.from);
+}
+
+/** The colour nodes of `tree` that are all of another the same, as the reader reads a colour put on twice. */
+function doubledNodes(tree: Nodes): Nodes[] {
+  const out: Nodes[] = [];
+  const stack: Nodes[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    if (!('children' in node)) continue;
+    const [only] = node.children;
+    if (
+      node.children.length === 1 &&
+      only &&
+      (node.type === 'colorHighlight' || node.type === 'textColor') &&
+      only.type === node.type &&
+      only.color === node.color
+    )
+      out.push(node, only);
+    for (const child of node.children) stack.push(child);
+  }
+  return out;
+}
+
+/** A colour node's opening and closing tags, as `block` has them. */
+function tagsOfNode(block: string, node: Nodes): Span[] {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  if (start === undefined || end === undefined) return [];
+  return [
+    { from: start, to: block.indexOf('>', start) + 1 },
+    { from: end - 7, to: end },
+  ];
 }
 
 /** Whether `text` holds a tag named `span` or `mark` (`tagAt`), which may not read cleanly. */
@@ -270,7 +297,11 @@ function scanned(block: string): Reading | null {
     at += end;
   }
   // A colour put on twice the editor shows as one.
-  if (open.length > 0 || doubled(block).length > 0) clean = false;
+  if (open.length > 0) clean = false;
+  else if (clean && !code) {
+    const { pairs } = pairsOf(block);
+    if (doubled(block, pairs).length > 0) clean = false;
+  }
   // Code may hold any of it; where none can, a tag as written is as read.
   if (code) return null;
   if (!clean) return 'broken';
@@ -302,7 +333,7 @@ function read(block: string): Reading {
     if (!('children' in node)) continue;
     for (const child of node.children) stack.push(child);
   }
-  return doubled(block).length > 0 ? 'broken' : 'clean';
+  return doubledNodes(tree).length > 0 ? 'broken' : 'clean';
 }
 
 /**
@@ -375,6 +406,27 @@ const SINGLE = new Set('[]`$');
 // How far past a link's text its address is looked for.
 const LINK_AT_MOST = 256;
 
+/** Whether `char` may be in a link's address as written bare: not a space or a bracket. */
+const inAddress = (char: string | undefined) => char !== undefined && !/[\s()[\]<>]/.test(char);
+
+/** Where the link's address `(…)` that starts at `at` in `text` ends, past its `)`, not past `to`; or -1. */
+function addressAfter(text: string, at: number, to: number): number {
+  for (let i = at + 1; i < Math.min(to, at + LINK_AT_MOST); i++) {
+    if (text[i] === ')') return i + 1;
+    if (!inAddress(text[i])) return -1;
+  }
+  return -1;
+}
+
+/** Where the `](` of a link's address that ends with the `)` at `close` in `text` starts, not before `from`; or -1. */
+function addressBefore(text: string, close: number, from: number): number {
+  for (let i = close - 1; i > Math.max(from, close - LINK_AT_MOST); i--) {
+    if (text[i] === '(' && text[i - 1] === ']') return i - 1;
+    if (!inAddress(text[i])) return -1;
+  }
+  return -1;
+}
+
 /**
  * How many characters of a mark lie beside `at` in `text`, going `way`
  * (-1 before, 1 after) and not past `limit`: a run of two or more of `*`,
@@ -428,7 +480,7 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
     else open.push({ name, key, tag });
   }
   for (const left of open) bad.push(left.tag);
-  bad.push(...doubled(line));
+  bad.push(...doubled(line, pairs));
   return { pairs, bad: merged(bad, []) };
 }
 
@@ -443,17 +495,36 @@ function readerBad(line: string): Span[] | null {
   } catch {
     return null;
   }
-  const bad: Span[] = [];
+  // The tags the reader read as a colour, and what it read as code or maths.
+  const good = new Set<number>();
+  const code: Span[] = [];
   const stack: Nodes[] = [tree];
   for (let node = stack.pop(); node; node = stack.pop()) {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
-    if ((node.type === 'html' || node.type === 'text') && start !== undefined && end !== undefined)
-      bad.push(...tagsIn(line, start, end, true));
-    if (!('children' in node)) continue;
-    for (const child of node.children) stack.push(child);
+    if (node.type === 'colorHighlight' || node.type === 'textColor')
+      for (const tag of tagsOfNode(line, node)) good.add(tag.from);
+    else if (
+      (node.type === 'inlineCode' ||
+        node.type === 'code' ||
+        node.type === 'inlineMath' ||
+        node.type === 'math') &&
+      start !== undefined &&
+      end !== undefined
+    )
+      code.push({ from: start, to: end });
+    if ('children' in node) for (const child of node.children) stack.push(child);
   }
-  bad.push(...doubled(line));
+  code.sort((a, b) => a.from - b.from);
+  // Every other tag, split ones too, not wholly in code: as one a mark of code split, `<mark\``.
+  const inCode = (tag: Span) => {
+    const span = code[firstEnding(code, tag.from)];
+    return span !== undefined && span.from <= tag.from && span.to >= tag.to;
+  };
+  const bad = tagsIn(line, 0, line.length, true).filter(
+    (tag) => !good.has(tag.from) && !inCode(tag),
+  );
+  for (const node of doubledNodes(tree)) bad.push(...tagsOfNode(line, node));
   return merged(bad, []);
 }
 
@@ -495,8 +566,8 @@ function besideOf(text: string, tags: readonly Span[], from: number, to: number)
     let start = tag.from;
     // A link's address before a tag, as `[<mark>world](x.md)</mark>`.
     if (text[start - 1] === ')') {
-      const open = text.lastIndexOf('](', start - 1);
-      if (open >= Math.max(from, start - LINK_AT_MOST)) start = open;
+      const address = addressBefore(text, start - 1, from);
+      if (address >= 0) start = address;
     }
     for (let run = markRun(text, start, -1, from); run > 0; run = markRun(text, start, -1, from))
       start -= run;
@@ -504,8 +575,8 @@ function besideOf(text: string, tags: readonly Span[], from: number, to: number)
     for (let run = markRun(text, end, 1, to); run > 0; run = markRun(text, end, 1, to)) end += run;
     // A link's address after its text: `](x.md)`.
     if (text[end - 1] === ']' && text[end] === '(') {
-      const close = text.slice(end, Math.min(to, end + LINK_AT_MOST)).indexOf(')');
-      if (close >= 0) end += close + 1;
+      const close = addressAfter(text, end, to);
+      if (close >= 0) end = close;
     }
     const last = spans.at(-1);
     if (last && last.to >= start) last.to = Math.max(last.to, end);
@@ -689,10 +760,9 @@ class Fences {
       let open = this.#open;
       if (open && !goesOn(text, this.#at, end, open.container)) open = null;
       const fence = fenceOn(text, this.#at, end);
-      // Maths ends on a line ending `$$`, as `x$$`.
+      // Maths ends on a line ending `$$`, as `x$$` or `$$ x $$`.
       if (
         open?.run[0] === '$' &&
-        !fence &&
         /\$\$[ \t\r]*$/.test(text.slice(Math.max(this.#at, end - 40), end))
       )
         open = null;

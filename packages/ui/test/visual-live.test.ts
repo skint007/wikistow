@@ -1651,6 +1651,47 @@ describe('two people formatting the same text at once (#720)', () => {
       }
   });
 
+  it('keeps what main keeps: doubled tags in code, a far link, a colour in a longer one', async () => {
+    const code = 'See `<mark data-color="red">world</mark>` here.\n';
+    const ref = 'Hello [ref](x) intro (tail)world there.\n';
+    const nest = `Say big world now and <mark data-color="blue">y ${hi('c')}</mark>.\n`;
+    for (const [was, mine, theirs] of [
+      [
+        code,
+        code.replace('`<mark', '`<mark data-color="red"><mark'),
+        code.replace('</mark>`', '</mark></mark>`'),
+      ],
+      [nest, nest.replace('big world', hi('big world')), nest.replace('big', hi('big'))],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+    // A third person's word in brackets before a link, as the formatting is settled.
+    for (const aLower of orders) {
+      const [a, b] = start(ref, aLower);
+      const c = { doc: docOf('', 500, a.doc) };
+      a.editor.shown = ref.replace('world', hi('world'));
+      b.editor.shown = ref.replace('world', red('span', 'world'));
+      a.binding.write();
+      b.binding.write();
+      const body = c.doc.getText('body');
+      const at = body.toJSON().indexOf('tail');
+      body.delete(at, 4);
+      body.insert(at, 'NEW');
+      await exchange([a, b, c]);
+      for (const s of [a, b, c]) expect(bodyOf(s)).toContain('(NEW)');
+      expect(readsCleanly(bodyOf(a))).toBe(true);
+    }
+  });
+
+  it('settles code put on a word whose tag the code split', async () => {
+    for (const aLower of orders) {
+      const [mine, theirs] = [line(hi('mark')), line('`mark`')];
+      expect([mine, theirs]).toContain(await merged(line('mark'), mine, theirs, aLower));
+    }
+  });
+
   it('leaves a block broken when the one to repair it is gone', async () => {
     const [a, b] = start(line('world'), true);
     a.editor.shown = line(hi('world'));
