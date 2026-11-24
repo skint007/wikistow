@@ -64,6 +64,7 @@ import {
   makeShare,
   endShare,
   shareEnding,
+  requireShare,
   checkMover,
   moveNode,
   arrangeNodes,
@@ -183,6 +184,10 @@ const LOOKUP_LIMIT = { windowSeconds: 600, max: 30 };
 // co-owner an envelope for every owner-region record: a space share of a
 // family library is a few megabytes (see the benchmark).
 const BULK_BODY = 64 * 1024 * 1024;
+// Half the bulk body limit, and half the 60-second clocks that bind first
+// on a slow link or a busy server: the large-body deadline, then the idle
+// socket while the transaction runs (ADR 0019, decision 1).
+const BULK_LARGE = { bytes: BULK_BODY / 2, ms: 30_000 };
 // A rotation carries one envelope for each member and owner; an owner's
 // removal, one rotation for each share in the space.
 const ROTATION_BODY = 4 * 1024 * 1024;
@@ -200,6 +205,7 @@ export function mountContentRoutes(
     limits,
     contentLimits = DEFAULT_CONTENT_LIMITS,
     minKdf,
+    bulkLarge = BULK_LARGE,
     log,
   }: {
     db: Database;
@@ -207,6 +213,7 @@ export function mountContentRoutes(
     limits: Config['limits'];
     contentLimits: Config['contentLimits'];
     minKdf: Config['minKdf'];
+    bulkLarge?: Config['bulkLarge'];
     log: Log;
   },
 ): void {
@@ -217,6 +224,32 @@ export function mountContentRoutes(
     checkShareOwner(db, accountId, params['shareId'] ?? '').catch(toApiError);
   const groupOwnerFirst = (params: Record<string, string>, { accountId }: EarlyCaller) =>
     checkGroupOwner(db, accountId, params['groupId'] ?? '').catch(toApiError);
+
+  // A bulk request near its limits, logged so the operator sees a library
+  // outgrowing one request before sharing it fails, answered or refused. It
+  // names the route, space and sizes, never content, names or key material.
+  const bulk = async <T>(
+    route: { method: string; path: string },
+    { spaceId, bodyBytes }: { spaceId: string; bodyBytes: number },
+    change: () => Promise<T>,
+  ): Promise<T> => {
+    const started = performance.now();
+    try {
+      return await change();
+    } finally {
+      const ms = performance.now() - started;
+      if (bodyBytes > bulkLarge.bytes || ms > bulkLarge.ms) {
+        log({
+          level: 'warn',
+          event: 'bulk-request-large',
+          route: `${route.method} ${route.path}`,
+          bodyBytes,
+          transactionMs: Math.round(ms),
+          spaceId,
+        });
+      }
+    }
+  };
 
   // A stored row a listing left out: named by table and ID, never content.
   const report: ReportUnreadable = ({ table, id }) =>
@@ -355,12 +388,14 @@ export function mountContentRoutes(
 
   routes.account(
     sharingRoutes.makeShare,
-    async ({ params, body }, { principal }) => {
-      await makeShare(db, {
-        accountId: principal.accountId,
-        spaceId: params.spaceId,
-        ...body,
-      }).catch(toApiError);
+    async ({ params, body }, { principal, bodyBytes }) => {
+      await bulk(sharingRoutes.makeShare, { spaceId: params.spaceId, bodyBytes }, () =>
+        makeShare(db, {
+          accountId: principal.accountId,
+          spaceId: params.spaceId,
+          ...body,
+        }).catch(toApiError),
+      );
       return { shareId: body.shareId };
     },
     { rateLimit: WRITE_LIMIT, bodyLimit: BULK_BODY, beforeBody: spaceOwnerFirst },
@@ -383,8 +418,10 @@ export function mountContentRoutes(
 
   routes.content(
     sharingRoutes.move,
-    async ({ params, body }, { actor, once }) => {
-      await moveNode(db, { actor, ...params, ...body, once }, report).catch(toApiError);
+    async ({ params, body }, { actor, once, bodyBytes }) => {
+      await bulk(sharingRoutes.move, { spaceId: params.spaceId, bodyBytes }, () =>
+        moveNode(db, { actor, ...params, ...body, once }, report).catch(toApiError),
+      );
       return { ok: true as const };
     },
     { rateLimit: WRITE_LIMIT, bodyLimit: BULK_BODY, beforeBody: moverFirst, idempotent: true },
@@ -424,12 +461,16 @@ export function mountContentRoutes(
   // wrapped under it (section 6.9).
   routes.account(
     sharingRoutes.endShare,
-    async ({ params, body }, { principal }) => {
-      await endShare(
-        db,
-        { accountId: principal.accountId, shareId: params.shareId, ...body },
-        report,
-      ).catch(toApiError);
+    async ({ params, body }, { principal, bodyBytes }) => {
+      // The share's row goes with it, so its space is read first.
+      const { spaceId } = await requireShare(db, params.shareId).catch(toApiError);
+      await bulk(sharingRoutes.endShare, { spaceId, bodyBytes }, () =>
+        endShare(
+          db,
+          { accountId: principal.accountId, shareId: params.shareId, ...body },
+          report,
+        ).catch(toApiError),
+      );
       return { ok: true as const };
     },
     { rateLimit: WRITE_LIMIT, bodyLimit: BULK_BODY, beforeBody: shareOwnerFirst },
@@ -638,12 +679,14 @@ export function mountContentRoutes(
 
   routes.account(
     ownerRoutes.addOwner,
-    async ({ params, body }, { principal }) => {
-      await addOwner(db, {
-        accountId: principal.accountId,
-        spaceId: params.spaceId,
-        ...body,
-      }).catch(toApiError);
+    async ({ params, body }, { principal, bodyBytes }) => {
+      await bulk(ownerRoutes.addOwner, { spaceId: params.spaceId, bodyBytes }, () =>
+        addOwner(db, {
+          accountId: principal.accountId,
+          spaceId: params.spaceId,
+          ...body,
+        }).catch(toApiError),
+      );
       return { ok: true as const };
     },
     { rateLimit: WRITE_LIMIT, bodyLimit: BULK_BODY, beforeBody: spaceOwnerFirst },
