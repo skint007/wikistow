@@ -5,7 +5,8 @@
 // main fetched attached to it (`attach`), then the text pointing at them
 // (`draft`). A clip that stops partway still leaves its text. Main hears
 // the page's ID before it's made, and again once it is (`made`), so a
-// clip a reload cut short makes no second page.
+// clip a reload cut short makes no second page, and a screenshot's page
+// it cut short gets its screenshot.
 import {
   ApiError,
   newId,
@@ -85,17 +86,14 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   if (clip.mode === 'screenshot' && !shot && (!clip.made || clip.made.making)) {
     return failed('failed', 'WikiStow couldn’t read this screenshot.');
   }
-  // A screenshot's page made before a reload cut it short, without the
-  // screenshot: it isn't the clip, so it goes in the trash, and the clip
-  // is saved again.
+  // A screenshot's page made before a reload or a lock cut it short, with
+  // its note and link but not the screenshot: the screenshot goes in it.
+  // It isn't put in the trash and made again, which leaves two pages where
+  // the person can add pages but not trash them, and none if the new one
+  // fails (#681). One in the trash already is made again.
   if (clip.made?.partial) {
-    const { spaceId, pageId } = clip.made;
-    // One the person, or a failure before the reload, put in the trash
-    // already is gone: the clip is saved again all the same.
-    await deps.writer
-      .deleteNode({ spaceId, nodeId: pageId, node: 'page', name: title, dropChanges: true })
-      .catch(() => {});
-    return saveClip({ ...clip, made: null }, deps);
+    const finished = await finishPartly(clip, clip.made, shot, deps);
+    return finished === 'gone' ? saveClip({ ...clip, made: null }, deps) : finished;
   }
   // Made before a reload cut it short: its text is saved, so it's done.
   if (clip.made && !clip.made.making) {
@@ -130,42 +128,9 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       : failed('no-folder', 'That folder is gone, or you can’t add pages to it. Choose another.');
   }
 
-  let body = '';
-  let faithful = true;
-  /** Where the last piece starts: a screenshot's link, which its image goes above. */
-  let last = 0;
-  try {
-    for (const part of clipParts(clip)) {
-      const written = await deps.convert(part.html, part.text);
-      if (!written.markdown.trim()) continue;
-      body += body ? '\n' : '';
-      last = body.length;
-      body += written.markdown;
-      faithful &&= written.faithful;
-    }
-  } catch {
-    return failed('failed', 'WikiStow couldn’t read this clip.');
-  }
-  let markdown: string;
-  try {
-    markdown = clipFrontmatter(clip, deps.today) + body;
-  } catch {
-    return failed('failed', 'This clip’s address or tags can’t be written as its properties.');
-  }
-  if (!mayFit(markdown)) return failed('too-large', TOO_LONG);
-  let plan: ReturnType<typeof planImages>;
-  try {
-    plan = planImages(markdown, await (deps.spans ?? (async (text) => linkSpans(text)))(markdown));
-  } catch {
-    return failed('too-large', TOO_LONG);
-  }
-  const first = plan.written(new Map());
-  if (!fitsPage(first)) return failed('too-large', TOO_LONG);
-  // A screenshot's page, its image above the link: its note and link
-  // name no images, so `first` is `markdown`.
-  const at = markdown.length - body.length + last;
-  const shown = (id: string) => first.slice(0, at) + screenshotMarkdown(id) + first.slice(at);
-  if (shot && !fitsPage(shown('x'.repeat(22)))) return failed('too-large', TOO_LONG);
+  const text = await pageText(clip, shot, deps);
+  if ('outcome' in text) return text;
+  const { plan, first, shown, faithful } = text;
 
   const { spaceId, folderId } = place;
   // Its IDs, kept with main before the page is made, so a reload makes it
@@ -194,9 +159,10 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
     // Made before the reload, its text in: done, or, without its
     // screenshot, made only partly.
     if (making && error instanceof ApiError && error.code === 'duplicate') {
-      const { spaceId: was, pageId, path } = making;
+      const { spaceId: was, pageId, revisionId, path } = making;
       const found = { spaceId: was, pageId, path };
-      return saveClip({ ...clip, made: shot ? { ...found, partial: true } : found }, deps);
+      const partly = { ...found, revisionId, partial: true };
+      return saveClip({ ...clip, made: shot ? partly : found }, deps);
     }
     if (error instanceof PageTooLarge) return failed('too-large', TOO_LONG);
     if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
@@ -206,7 +172,9 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   }
   const page = { spaceId, pageId: made.pageId };
   const madeAs = { spaceId, pageId: made.pageId, path: savedTo(place.path) };
-  await deps.made?.(shot ? { ...madeAs, partial: true } : madeAs).catch(() => {});
+  // A screenshot's names its first draft, which a reload adds the screenshot on top of.
+  const partly = { ...madeAs, revisionId: made.revisionId, partial: true };
+  await deps.made?.(shot ? partly : madeAs).catch(() => {});
 
   if (shot) {
     let ref: AttachmentRef;
@@ -307,5 +275,127 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       faithful,
     },
     place,
+  };
+}
+
+type Shot = NonNullable<DesktopClip['screenshot']>;
+
+/** The clip's page as written: its text, then, for a screenshot, with it shown. */
+type PageText = {
+  plan: ReturnType<typeof planImages>;
+  /** The text its page is made with: images as links, a screenshot not yet in. */
+  first: string;
+  /** `first`, showing the screenshot attached as `id` above its link. */
+  shown: (id: string) => string;
+  faithful: boolean;
+};
+
+async function pageText(
+  clip: DesktopClip,
+  shot: Shot | null,
+  deps: SaveClipDeps,
+): Promise<PageText | Saved> {
+  let body = '';
+  let faithful = true;
+  /** Where the last piece starts: a screenshot's link, which its image goes above. */
+  let last = 0;
+  try {
+    for (const part of clipParts(clip)) {
+      const written = await deps.convert(part.html, part.text);
+      if (!written.markdown.trim()) continue;
+      body += body ? '\n' : '';
+      last = body.length;
+      body += written.markdown;
+      faithful &&= written.faithful;
+    }
+  } catch {
+    return failed('failed', 'WikiStow couldn’t read this clip.');
+  }
+  let markdown: string;
+  try {
+    markdown = clipFrontmatter(clip, deps.today) + body;
+  } catch {
+    return failed('failed', 'This clip’s address or tags can’t be written as its properties.');
+  }
+  if (!mayFit(markdown)) return failed('too-large', TOO_LONG);
+  let plan: ReturnType<typeof planImages>;
+  try {
+    plan = planImages(markdown, await (deps.spans ?? (async (text) => linkSpans(text)))(markdown));
+  } catch {
+    return failed('too-large', TOO_LONG);
+  }
+  const first = plan.written(new Map());
+  if (!fitsPage(first)) return failed('too-large', TOO_LONG);
+  // A screenshot's page, its image above the link: its note and link
+  // name no images, so `first` is `markdown`.
+  const at = markdown.length - body.length + last;
+  const shown = (id: string) => first.slice(0, at) + screenshotMarkdown(id) + first.slice(at);
+  if (shot && !fitsPage(shown('x'.repeat(22)))) return failed('too-large', TOO_LONG);
+  return { plan, first, shown, faithful };
+}
+
+const KEPT = 'Its page keeps your note and link.';
+
+/**
+ * Add the screenshot to its page made partly before a reload or a lock:
+ * saved, or failed with the page kept as it is, or `'gone'` if the page
+ * is in the trash, or no longer the person's to change.
+ */
+async function finishPartly(
+  clip: DesktopClip,
+  made: ClipMade,
+  shot: Shot | null,
+  deps: SaveClipDeps,
+): Promise<Saved | 'gone'> {
+  if (!shot) return failed('failed', `WikiStow couldn’t read this screenshot. ${KEPT}`);
+  const text = await pageText(clip, shot, deps);
+  if ('outcome' in text) return text;
+  const { spaceId, pageId, path } = made;
+  const page = { spaceId, pageId };
+  let ref: AttachmentRef;
+  try {
+    ref = await deps.writer.attach(page, {
+      name: `Screenshot.${shot.mediaType === 'image/jpeg' ? 'jpg' : 'png'}`,
+      mediaType: shot.mediaType,
+      bytes: shot.bytes,
+    });
+  } catch (error) {
+    // Locked again: it waits for the next unlock, as before.
+    if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
+    if (error instanceof ApiError && error.status === 404) return 'gone';
+    return error instanceof ApiError && error.status === 413
+      ? failed('too-large', `This screenshot is larger than your WikiStow server takes. ${KEPT}`)
+      : failed('failed', `${SHOT_FAILED} ${KEPT}`);
+  }
+  try {
+    const drafts = deps.writer.draft(page, { seen: null });
+    // On its change waiting here, the clip's own, as this comes as soon as
+    // the app loads or unlocks, or else on the first draft it was made
+    // with: a draft saved on the server since is a conflict, not written over.
+    const basedOn = (await drafts.waitingHead()) ?? made.revisionId;
+    if (!basedOn) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+    await drafts.save({
+      basedOn,
+      payload: {
+        ...newPayload({ title: clipTitle(clip), markdown: text.shown(ref.id) }),
+        attachments: [ref],
+      },
+    });
+  } catch (error) {
+    if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
+    return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+  }
+  await deps.made?.({ spaceId, pageId, path }).catch(() => {});
+  return {
+    outcome: {
+      ok: true,
+      spaceId,
+      pageId,
+      title: clipTitle(clip),
+      path,
+      images: { saved: 1, skipped: 0 },
+      faithful: text.faithful,
+    },
+    place: null,
   };
 }
