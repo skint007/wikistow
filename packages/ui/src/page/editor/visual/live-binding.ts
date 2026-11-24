@@ -15,7 +15,7 @@
 //   cleanly, it puts back as it wrote it, if it's the one to
 //   (`live-repair.ts`), before it takes the change in.
 import * as Y from 'yjs';
-import { noteDeleted, repairs, WRITINGS, writingOf, type Writing } from './live-repair';
+import { repairs, WRITINGS, wrote, writingOf, type Writing } from './live-repair';
 import { applyTo, Mapping, ownChanges, putInto, type Delta } from './live-text';
 
 /** How a take-in went: in, not by block (read whole), or waiting on a composition. */
@@ -228,8 +228,7 @@ export class VisualBinding {
     if (writing !== this.#writings.at(-1)) this.#writings.push(writing);
     if (this.#writings.length > WRITINGS) this.#writings.shift();
     this.#heard = false;
-    put();
-    noteDeleted(writing, transaction);
+    wrote(writing, doc, transaction, performance.now(), put);
   }
 
   // Blocks others' changes, merged with its own, left not reading cleanly,
@@ -238,7 +237,14 @@ export class VisualBinding {
     const text = this.#body.text;
     const body = text.toJSON();
     if (this.#writings.length === 0 || body === this.#held) return;
-    const changes = repairs(text, body, this.#held, this.#mapNow(body), this.#writings);
+    const changes = repairs(
+      text,
+      body,
+      this.#held,
+      this.#mapNow(body),
+      this.#writings,
+      performance.now(),
+    );
     if (changes.length === 0) return;
     this.#body.edit(() =>
       text.doc?.transact((transaction) => {

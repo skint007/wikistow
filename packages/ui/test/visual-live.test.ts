@@ -8,7 +8,7 @@ import {
   type BoundEditor,
   type Taking,
 } from '../src/page/editor/visual/live-binding.ts';
-import { readsCleanly } from '../src/page/editor/visual/live-repair.ts';
+import { REPAIR_MS, readsCleanly } from '../src/page/editor/visual/live-repair.ts';
 import { applyTo, Mapping, ownChanges, putInto } from '../src/page/editor/visual/live-text.ts';
 
 // The visual editor in a live session (ADR 0015 decision 3): its own edits
@@ -733,6 +733,16 @@ describe('two people formatting the same text at once (#720)', () => {
     return bodyOf(a);
   };
 
+  // A's and B's writing of `was`, merged by character as Yjs merges them, with no repair.
+  const byCharacter = (was: string, mine: string, theirs: string, aLower: boolean) => {
+    const a = docOf(was, aLower ? 1_000 : 2_000);
+    const b = docOf(was, aLower ? 2_000 : 1_000, a);
+    putInto(a.getText('body'), ownChanges(was, mine));
+    putInto(b.getText('body'), ownChanges(was, theirs));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    return a.getText('body').toJSON();
+  };
+
   const red = (tag: string, inner: string, color = 'red') =>
     `<${tag} data-color="${color}">${inner}</${tag}>`;
   const hi = (inner: string) => red('mark', inner);
@@ -801,7 +811,10 @@ describe('two people formatting the same text at once (#720)', () => {
       line(`${hi('world')} big`),
     ],
   ])('merges a highlight with %s as by character', async (_, was, mine, theirs, both) => {
-    for (const aLower of orders) expect(await merged(was, mine, theirs, aLower)).toBe(both);
+    for (const aLower of orders) {
+      expect(byCharacter(was, mine, theirs, aLower)).toBe(both);
+      expect(await merged(was, mine, theirs, aLower)).toBe(both);
+    }
   });
 
   // Each merges by character into HTML neither wrote: the higher client's writing stands.
@@ -883,6 +896,7 @@ describe('two people formatting the same text at once (#720)', () => {
     ['at the line’s start', 0],
     ['beside the highlight', 'Hello '.length],
     ['after the highlight', `Hello ${hi('world')}`.length],
+    ['inside the highlighted word', 'Hello <mark data-color="red">wo'.length],
   ])(
     'never undoes colour HTML someone types or pastes by hand %s in a block it formatted',
     async (_, at) => {
@@ -890,11 +904,13 @@ describe('two people formatting the same text at once (#720)', () => {
       for (const paste of [false, true]) {
         const [a] = start(line('world'), false);
         sides.splice(1).forEach((s) => s.binding.destroy());
-        // C edits the source, with no binding, from a lower client than A's.
+        // C edits the source, with no binding, from a lower client than A's,
+        // having seen A's highlight a while: past the time two changes can be at once.
         const c = { doc: docOf('', 500, a.doc) };
         a.editor.shown = line(hi('world'));
         a.binding.write();
         await exchange([a, c]);
+        await vi.advanceTimersByTimeAsync(REPAIR_MS);
         const expected = (n: number) => {
           const page = line(hi('world'));
           return page.slice(0, at) + typed.slice(0, n) + page.slice(at);
@@ -926,6 +942,97 @@ describe('two people formatting the same text at once (#720)', () => {
     body.delete(body.toJSON().indexOf('</mark>'), '</mark>'.length);
     await exchange([a, c]);
     expect(bodyOf(a)).toBe(line('<mark data-color="red">world'));
+  });
+
+  it('never undoes what the person types in split view’s source pane', async () => {
+    const [a] = start(line('world'), false);
+    sides.splice(1).forEach((s) => s.binding.destroy());
+    const c = { doc: docOf('', 500, a.doc) };
+    a.editor.shown = line(hi('world'));
+    a.binding.write();
+    await exchange([a, c]);
+    // The same app's Yjs client, as the source pane writes, at once after.
+    const body = a.doc.getText('body');
+    for (const [i, char] of [...'<span class="x">'].entries()) {
+      body.insert(i, char);
+      await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
+    }
+    expect(bodyOf(a)).toBe(`<span class="x">${line(hi('world'))}`);
+  });
+
+  it('keeps others’ changes main keeps, as text naming a colour or HTML in code', async () => {
+    for (const [was, mine, theirs] of [
+      // Typed in the word someone highlights.
+      [line('world'), line(hi('world')), line('wdata-colororld')],
+      // A link's address changed as someone highlights it.
+      [
+        line('[world](https://old.test)'),
+        line(hi('[world](https://old.test)')),
+        line('[world](https://new.test/?data-color=red)'),
+      ],
+      // Code in a fence with blank lines in it.
+      ['```html\n\nXYZ\n\n```\n', '```html\n\nX!YZ\n\n```\n', '```html\n\nX</mark>YZ\n\n```\n'],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('settles a word someone highlights as someone else types beside it, to one side', async () => {
+    for (const word of ['card', 'colour', 'ok', 'tea']) {
+      for (const aLower of orders) {
+        const [mine, theirs] = [line(hi(word)), line(`big ${word}`)];
+        const result = await merged(line(word), mine, theirs, aLower);
+        // Main splices the typing into the tag (`<mark data-big color="red">card`).
+        expect([mine, theirs, line(`big ${hi(word)}`)]).toContain(result);
+      }
+    }
+    for (const aLower of orders) {
+      const [mine, theirs] = [line(red('span', '==world==')), line('big ==world==')];
+      expect([mine, theirs, line(`big ${red('span', '==world==')}`)]).toContain(
+        await merged(line('==world=='), mine, theirs, aLower),
+      );
+    }
+  });
+
+  it('settles the same plain highlight put on twice', async () => {
+    for (const aLower of orders)
+      expect(await merged(line('world'), line('==world=='), line('==world=='), aLower)).toBe(
+        line('==world=='),
+      );
+  });
+
+  it('repairs what it wrote though it typed more there before taking the other’s in', async () => {
+    const [a, b] = start(line('world'), false);
+    a.editor.shown = line(hi('world'));
+    b.editor.shown = line(red('span', 'world'));
+    a.binding.write();
+    b.binding.write();
+    send(b, a);
+    // A types on the line as B's change comes in, before taking it in.
+    a.editor.shown = line(hi('world')).replace('there.', 'there!');
+    a.binding.write();
+    await exchange();
+    expect(bodyOf(a)).toBe(line(hi('world')).replace('there.', 'there!'));
+    expect(bodyOf(b)).toBe(bodyOf(a));
+  });
+
+  it('keeps a third person’s typing on another line of the block', async () => {
+    const page = 'Hello world there.\nSaid C.\n';
+    for (const aLower of orders) {
+      const [a, b] = start(page, aLower);
+      const c = side(docOf(page, 3_000, a.doc));
+      sides.push(c);
+      a.editor.shown = page.replace('world', hi('world'));
+      b.editor.shown = page.replace('world', red('span', 'world'));
+      c.editor.shown = page.replace('Said C.', 'Said C, typing.');
+      for (const s of sides) s.binding.write();
+      await exchange();
+      const higher = aLower ? red('span', 'world') : hi('world');
+      for (const s of sides)
+        expect(bodyOf(s)).toBe(page.replace('world', higher).replace('Said C.', 'Said C, typing.'));
+    }
   });
 
   it('leaves a block broken when the one to repair it is gone', async () => {
@@ -1027,6 +1134,14 @@ describe('whether a block reads cleanly', () => {
       ['colours inside their own kind', (n: number) => '<mark data-color="red">'.repeat(n)],
       ['colour names alone', (n: number) => 'data-color'.repeat(n)],
       ['spaced list markers', (n: number) => '-  '.repeat(n)],
+      [
+        'marks inside a colour, then highlights left open',
+        (n: number) => `<mark data-color="red">**x**</mark> ${'a== '.repeat(n)}`,
+      ],
+      [
+        'lines of marks inside colours',
+        (n: number) => '<mark data-color="red">**x** `y`</mark>\n'.repeat(n / 10),
+      ],
       ['colours', (n: number) => '<mark data-color="red">x</mark>'.repeat(n)],
     ] as const) {
       const short = time(line(2_000));
