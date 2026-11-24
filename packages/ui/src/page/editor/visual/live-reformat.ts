@@ -79,6 +79,10 @@ export class FormatRecord {
   }
 }
 
+/** Whether `intent` adds or takes off a mark whose text is code, which reads as written. */
+export const literal = (intent: unknown): boolean =>
+  isFormatting(intent) && intent.steps.some((step) => !!step.mark.type.spec.code);
+
 /**
  * `intents`' marks made again over the document `view` shows now, as one
  * edit of the person's own (`remade`).
@@ -108,16 +112,23 @@ export function readsAs(merged: Node, theirs: Node, intents: readonly unknown[])
 function remade(tr: Transform, intents: readonly unknown[]): void {
   for (const intent of intents) {
     if (!isFormatting(intent) || intent.before.type.schema !== tr.doc.type.schema) continue;
-    // Lined up by its text and the marks it doesn't change, so a word typed
-    // beside its copy isn't taken for it; by its text alone where someone's
-    // other marks cut across a range.
+    // Lined up by its text and marks, so a word typed beside its copy isn't
+    // taken for it; failing that, where someone's marks cut across a range,
+    // by the marks it doesn't change, and then by its text alone.
     const changed = new Set(intent.steps.map((step) => step.mark.type));
-    const kept = (mark: Mark) => !changed.has(mark.type);
-    const marked = carried(intent.before, tr.doc, kept);
-    const cut = intent.steps.some((step) =>
-      [step.from, step.to].some((at) => marked.mapResult(at, 1).deleted),
-    );
-    const map = cut ? carried(intent.before, tr.doc, () => false) : marked;
+    const ways: ((mark: Mark) => boolean)[] = [
+      () => true,
+      (mark) => !changed.has(mark.type),
+      () => false,
+    ];
+    let map = StepMap.empty;
+    for (const kept of ways) {
+      map = carried(intent.before, tr.doc, kept);
+      const cut = intent.steps.some((step) =>
+        [step.from, step.to].some((at) => map.mapResult(at, 1).deleted),
+      );
+      if (!cut) break;
+    }
     for (const step of intent.steps) {
       const from = map.map(step.from, 1);
       const to = map.map(step.to, 1);

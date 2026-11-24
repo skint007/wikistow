@@ -57,7 +57,7 @@ import * as Y from 'yjs';
 import type { LiveSource } from '../source/live';
 import { resolveIn } from '../live-cursor';
 import { VisualBinding, type Taking } from './live-binding';
-import { FormatRecord, readsAs, reformat } from './live-reformat';
+import { FormatRecord, literal, readsAs, reformat } from './live-reformat';
 import { barDecorations, barsOf, blockAt, liveBars, setBars, type BarsHost } from './live-bars';
 
 export { checkFidelity, type Fidelity } from './fidelity';
@@ -735,6 +735,7 @@ function Surface({
         cantShow: (by, reason) => latest.current.onCantShow?.(by, reason),
         canShow: () => latest.current.onCanShow?.(),
         intent: () => formats.take(),
+        literal,
         reapply: (intents) => {
           const view = viewNow();
           if (view) reformat(view, intents);

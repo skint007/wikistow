@@ -347,4 +347,50 @@ describe('formatting made alongside someone else’s', () => {
     await settle([a, b, c]);
     for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
   });
+
+  it('leaves alone a write someone typed inside, as literal text in code', async () => {
+    const page = 'Say abcdefgh now.\n';
+    const [a, b] = [await person(page, 3), await person(page, 2)];
+    const c = sourcePerson(page, 1);
+    toggle('abcdefgh', 'code')(a);
+    typeSource(c, 'Say nice abcdefgh now.\n');
+    await expect.poll(() => a.log.length).toBe(1);
+    send(a, b);
+    await shows(b, a.text.toJSON());
+    typing('cdefgh', 0, 0, '**X**')(b);
+    await expect.poll(() => b.log.length).toBe(1);
+    const main = merged(page, [a, b, c], [1, 1, 1]);
+    send(b, a);
+    send(c, a);
+    await settle([a, b, c]);
+    for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
+    expect(main).toContain('`ab');
+  });
+
+  it('leaves alone a write the person typed inside in the source pane', async () => {
+    const page = 'Say abcdefgh now.\n';
+    const a = await person(page, 2);
+    const c = sourcePerson(page, 1);
+    toggle('abcdefgh', 'code')(a);
+    typeSource(c, 'Say nice abcdefgh now.\n');
+    await expect.poll(() => a.log.length).toBe(1);
+    typeSource(a, a.text.toJSON().replace('ab', 'ab**X**'));
+    const main = merged(page, [a, c], [2, 1]);
+    send(c, a);
+    await settle([a, c]);
+    for (const p of [a, c]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('comes out as main does when a recoloured word is typed beside it', async () => {
+    const page = 'Say ==world== now.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    colour('world', 'highlight', 'blue')(a);
+    typing('world', 0, 0, 'world ')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
 });
