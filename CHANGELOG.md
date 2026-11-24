@@ -4,6 +4,44 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.30.3 - 2026-11-24
+
+### Highlights
+
+#### Fixes
+
+- In a live session, a space typed at the end of a line in the visual editor is no longer lost when someone else changes it at the same moment.
+- Ticking a task while reading no longer lands on another task with the same line when the page changed just before the tick was saved.
+- On Linux, logging out with the desktop app open no longer makes it crash.
+- A screenshot clip cut short by a reload or a lock adds its screenshot to the page it made, rather than making a second page.
+- In the visual editor, Comment over selected table cells quotes all of them, and bold ending at a line break before a link no longer sends the page to source mode.
+- Suspending someone no longer fails while they unpublish a page or end its public link.
+
+### Changes
+
+#### App
+
+- Live editing: a draft someone saved elsewhere while the app was getting back into a lost session is no longer missed when the app goes on without joining again, as when it had nothing of the person's to keep. The editor showed the old draft, and **Publish** published one the person never saw. (#722)
+- In the visual editor, Comment over cells selected in a table quotes them from the first to the last, as the page reads, rather than only the last cell. (#721)
+- Live editing: a space typed at the end of a paragraph or heading in the visual editor is no longer lost when someone else changes that block or the one beside it at the same moment, which ran the next word typed into the one before. The visual editor now keeps the spaces a paragraph or heading ends with in the page, as it writes them. (#723)
+- A public link's copy lists the other pages in its query tables by when the server saved them, not by this device's clock, for pages published from this device too. A device whose clock ran fast or slow could list them out of order. (#725)
+- In the visual editor, bold or another mark that ends at a line break, where a link starts inside it and goes on past the break, no longer sends the page to source mode. (#731)
+- Ticking a task while reading: where two tasks share a line, such as two sections each with a `Call` task, and anyone changed the page in the seconds before the tick was saved, the tick is left out and the page says why, rather than maybe landing on the other task. A tick on a line no other task has is saved as before. (#729)
+
+#### Desktop
+
+- On Linux, logging out with the app open, or stopping it with `systemctl`, no longer crashes it with a core dump, after which Ubuntu offered to report a problem. The launcher starts it with `--no-unsandboxed-zygote`, so the app can start its GPU process again when the session ends that process and the zygote first. (#727)
+- Web clipper: a screenshot clip that a reload or a lock cut short adds its screenshot to the page it made, rather than putting that page in the trash and making another. Where you can add pages to a shared folder but not trash them, it no longer leaves two pages, and if adding it fails, the page with your note and link stays. (#734)
+
+#### Server
+
+- Suspending someone no longer fails while that person unpublishes a page, turns its public link off, changes who can publish, deletes a space or moves a page to another space, where it ended a public link they shared or a copy they uploaded. (#724)
+
+#### Development
+
+- Four CI checks that failed at random now wait for what they check: the live restore test for the other app to hear the saved head, the live-fold limit allows 15 seconds, the clipper's area screenshot test for the overlay and the clip, and the Windows Arm uninstall check for its shortcut and manifests, saying what still runs when it times out. (#726)
+- ADR 0019 accepts a design for sending very large shares and moves in parts, with the protocol change and its review rounds. It isn't built yet. (#732)
+
 ## 0.30.3-beta.1 - 2026-11-24
 
 ### Highlights
