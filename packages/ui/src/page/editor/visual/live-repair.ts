@@ -161,16 +161,49 @@ const COLOR_TAG = /^<(span|mark) data-color="([a-z]+)">$/;
  * Whether the line of `text` at `at` may start code or HTML of its own:
  * four columns of space or a tab anywhere before its text, at its start
  * or after a quote or list marker, as `    > code` or `>     code`; or `<`.
+ * Under a list item whose text starts at column `item` (`itemAt`), the
+ * space at the line's start makes code only from four columns past that,
+ * so `\t- sub` under `- point` is a list item in it.
  */
-function codeOrHtmlAt(text: string, at: number): boolean {
+function codeOrHtmlAt(text: string, at: number, item: number | null = null): boolean {
   const { rest } = lineStartOf(text, at, lineEnd(text, at));
+  const lead = leadOf(text, at);
+  let i = item !== null && lead.columns < item + 4 ? lead.end : at;
   let columns = 0;
-  for (let i = at; i < rest; i++) {
+  for (; i < rest; i++) {
     if (text[i] === '\t') return true;
     columns = text[i] === ' ' ? columns + 1 : 0;
     if (columns >= 4) return true;
   }
   return text[rest] === '<';
+}
+
+/** The space and tabs that start the line of `text` at `at`: their columns, a tab to the next of four, and where they end. */
+function leadOf(text: string, at: number): { columns: number; end: number } {
+  let columns = 0;
+  let end = at;
+  for (; text[end] === ' ' || text[end] === '\t'; end++)
+    columns = text[end] === '\t' ? columns + 4 - (columns % 4) : columns + 1;
+  return { columns, end };
+}
+
+// A list item's marker at a line's start, after space or tabs, and a thematic break.
+const ITEM = /^[ \t]*(?:[-*+]|[0-9]{1,9}[.)])(?=[ \t]|$)/;
+const BREAK = /^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+
+/**
+ * The column a list item's text starts at, for the line of `text` at `at`
+ * and below it in the block, where `item` is that of the lines above: its
+ * own, at its least, where it starts one; the one above where it's text
+ * of that item, as far in; else null, as below a heading or a line
+ * nearer the start, where four columns of space may well make code.
+ */
+function itemAt(text: string, at: number, item: number | null): number | null {
+  const line = text.slice(at, lineEnd(text, at));
+  const lead = leadOf(text, at);
+  const marker = ITEM.exec(line);
+  if (marker && !BREAK.test(line)) return lead.columns + marker[0].length - (lead.end - at) + 1;
+  return item !== null && lead.columns >= item ? item : null;
 }
 
 /** Whether the character at `at` is escaped, by an odd number of backslashes before it. */
@@ -301,11 +334,16 @@ function scanned(block: string): Reading | null {
   // Something only the reader can tell: a mark inside a colour, or a tag written otherwise.
   let unsure = false;
   let code = codeOrHtmlAt(block, 0);
+  // Where the text of the list item the line is in starts.
+  let item = itemAt(block, 0, null);
   for (let at = 0; at < block.length; at++) {
     const char = block.charCodeAt(at);
     // A backtick or tilde may start code, and `$` maths, whose text is no HTML.
     if (char === 96 || char === 126 || char === 36) code = true;
-    else if (char === 10 && codeOrHtmlAt(block, at + 1)) code = true;
+    else if (char === 10) {
+      if (codeOrHtmlAt(block, at + 1, item)) code = true;
+      item = itemAt(block, at + 1, item);
+    }
     // After a link's `](`, a reference's `][`, a definition's `]:` or a
     // wikilink's `[[`, a tag may be in its address, title or label, as
     // `[a](x "title <mark>")`, which the reader keeps whole.
@@ -558,7 +596,7 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
     }
   }
   for (const left of open) bad.push(left.tag);
-  bad.push(...doubled(line, pairs));
+  for (const tag of doubled(line, pairs)) bad.push(tag);
   return { pairs, bad: merged(bad, []) };
 }
 
@@ -1111,18 +1149,21 @@ function repairs1(
   // most a link's length away, that it pairs with, a backtick with a
   // backtick or a `[` with a `]`, with a tag that doesn't read cleanly
   // between them and nothing else of its writer's, as code's closing
-  // backtick: not a `$` of a sentence it typed, as `Total: $70`.
+  // backtick: not a `$` of a sentence it typed, as `Total: $70`, nor one
+  // in code, past a backtick. A backslash of its writer's, and what it
+  // escapes, as the `\]` in a link's `[world\]]`, is neither.
   const paired = (item: Found) => {
     const char = text(item.at, item.at + 1);
     const theirs = newText.get(item.client) ?? [];
     const way = char === ']' ? -1 : 1;
+    const half = char === '[' ? ']' : char === ']' ? '[' : char;
     for (let pass = 0; pass < (char === '`' || char === '$' ? 2 : 1); pass++) {
       const step = pass === 0 ? way : -way;
       for (let i = item.at + step, n = 0; n < LINK_AT_MOST; i += step, n++) {
         const at = text(i, i + 1);
-        if (at === '' || at === '\n') break;
+        if (at === '' || at === '\n' || (at === '`' && char !== '`')) break;
         if (!overlapsAny(theirs, i, i + 1)) continue;
-        const half = char === '[' ? ']' : char === ']' ? '[' : char;
+        if (at === '\\' || escapedIn(text, i)) continue;
         if (at !== half) break;
         const [from, to] = i < item.at ? [i, item.at] : [item.at, i];
         if (overlapsAny(tags, from, to)) return true;
@@ -1197,6 +1238,13 @@ function repairs1(
     )
     .map((item) => ({ from: item.at, to: item.at + item.length }));
   return { kept, own, formatters: formatters.size };
+}
+
+/** Whether the character at `at` of `text` is escaped, by an odd number of backslashes before it. */
+function escapedIn(text: (from: number, to: number) => string, at: number): boolean {
+  let slashes = 0;
+  for (let i = at - 1; i >= 0 && text(i, i + 1) === '\\'; i--) slashes++;
+  return slashes % 2 === 1;
 }
 
 // What pieces of a tag or a mark have, and words don't.
@@ -1372,6 +1420,89 @@ function marksAsMine(changes: readonly TextChange[], mine: string, result: strin
   return true;
 }
 
+// What ends the word a tag is in, for what a repair may change: a space,
+// and code, maths or a link's address beside it.
+const WORD_END = /[\s`$()]/;
+
+/**
+ * Whether `changes` to `body`, in order and none overlapping, change only
+ * what doesn't read cleanly in `block`, `spans`, and the rest of the word
+ * each is in (to a space, but for the one in a colour's tag, or to code,
+ * maths or a link's address beside it), or text right beside that, with
+ * no text between that they leave as it is; elsewhere, only marks taken
+ * out whose other halves go with those: so a repair never changes code, a
+ * link's address or another word farther along the line, as a third
+ * person's typing a merge made look like a mark's other half.
+ */
+function withinWords(
+  body: string,
+  changes: readonly TextChange[],
+  spans: readonly Span[],
+  block: Span,
+): boolean {
+  // Whether the word goes on past `at` going `way`: not at a space, but for
+  // a tag's own, before its `data-color`, and one with a tag's text past
+  // it, as pieces of one a merge left, as `<m<spark data-color="red">an d</mark>`.
+  const goesOn = (at: number, way: 1 | -1) => {
+    const char = body[at] as string;
+    if (!WORD_END.test(char)) return true;
+    if (char !== ' ') return false;
+    if (body.startsWith('data-color', at + 1)) return true;
+    let end = at + way;
+    while (end > block.from && end < block.to && /\S/.test(body[end] as string)) end += way;
+    const past = way === 1 ? body.slice(at + 1, end) : body.slice(end + 1, at);
+    return /[<>"]|data-/.test(past);
+  };
+  const words: Span[] = [];
+  for (const span of spans) {
+    let from = span.from;
+    while (from > block.from && goesOn(from - 1, -1)) from--;
+    let to = span.to;
+    while (to < block.to && goesOn(to, 1)) to++;
+    words.push({ from, to });
+  }
+  const all = merged(words, []);
+  // The marks each run takes out, a link's `[` counted as its `]`.
+  const marksOf = (run: readonly TextChange[]) => {
+    const marks = new Map<string, number>();
+    for (const change of run)
+      for (const char of body.slice(change.from, change.from + change.remove)) {
+        const mark = char === '[' ? ']' : char;
+        if (PAIRED.has(mark) || SINGLE.has(mark)) marks.set(mark, (marks.get(mark) ?? 0) + 1);
+      }
+    return marks;
+  };
+  const near = new Map<string, number>();
+  const far = new Map<string, number>();
+  // Each run of changes with no text left as it is between them meets a
+  // word; or it only takes out marks, whose other halves one that does
+  // takes out, as the `**` of bold the other put on two words, `**See my**`.
+  for (let i = 0; i < changes.length;) {
+    const start = i;
+    const first = changes[i] as TextChange;
+    let end = first.from + first.remove;
+    for (i++; i < changes.length && (changes[i] as TextChange).from <= end; i++) {
+      const change = changes[i] as TextChange;
+      end = Math.max(end, change.from + change.remove);
+    }
+    const run = changes.slice(start, i);
+    const marks = marksOf(run);
+    if (touchesAny(all, first.from, end)) {
+      for (const [mark, times] of marks) near.set(mark, (near.get(mark) ?? 0) + times);
+      continue;
+    }
+    const only = run.every(
+      (change) =>
+        change.insert === '' &&
+        /^[*_~=[\]`$]+$/.test(body.slice(change.from, change.from + change.remove)),
+    );
+    if (!only) return false;
+    for (const [mark, times] of marks) far.set(mark, (far.get(mark) ?? 0) + times);
+  }
+  for (const [mark, times] of far) if ((near.get(mark) ?? 0) < times) return false;
+  return true;
+}
+
 /** A block to repair, if this app is the one to. */
 type Candidate = { block: Span; shown: string; mine: string; theirs: Theirs[] };
 
@@ -1503,6 +1634,7 @@ function repairsIn(
     const named = (text: string) => text.split('data-color').length;
     if (
       changes.length > 0 &&
+      withinWords(body, changes, conflict.spans, block) &&
       readingOf(result) === 'clean' &&
       named(result) <= named(mine) &&
       keepsWords(mine, shown, result) &&

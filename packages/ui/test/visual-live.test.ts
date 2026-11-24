@@ -2074,6 +2074,96 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
+  // `text` without its colour tags.
+  const untagged = (text: string) =>
+    text.replace(/<\/?(?:span|mark)(?: data-color="[a-z]+")?>/g, '');
+
+  it('never changes a third person’s inline code, nor their `$` beside the tags', async () => {
+    const page = 'It costs 50 today. Code: `40`.\n';
+    // The code's text replaced, or its backticks with it.
+    for (const [from, to] of [
+      ['40', '$400'],
+      ['`40`', '`$400`'],
+    ] as const)
+      for (const ids of threeOrders) {
+        const { got, main } = await withThird(
+          page,
+          page.replace('50', hi('50')),
+          page.replace('50', red('span', '50', 'blue')),
+          (body) => {
+            body.insert(body.toJSON().indexOf('50'), '$');
+            replace(from, to)(body);
+          },
+          ids,
+        );
+        // As main merges it, or with only colour tags changed, reading cleanly.
+        if (got !== main) {
+          expect(readsCleanly(got), `${got} ${ids.join()}`).toBe(true);
+          expect(untagged(got), ids.join()).toBe(untagged(main));
+        }
+        expect(got, ids.join()).toContain('Code: `$400`.');
+      }
+  });
+
+  it('repairs a mark the other put on two words, taking out both its halves', async () => {
+    const page = 'See my notes here.\n';
+    const mine = `See ${hi('my')} notes here.\n`;
+    for (const theirs of [
+      '**See my** notes here.\n',
+      '`See my` notes here.\n',
+      '[See my](x.md) notes here.\n',
+    ])
+      for (const aLower of orders) {
+        // As main merges it where that reads cleanly, else repaired.
+        const main = byCharacter(page, mine, theirs, aLower);
+        const settled = readsCleanly(main) ? [main] : [mine, theirs];
+        expect(settled, `${theirs} ${aLower}`).toContain(await merged(page, mine, theirs, aLower));
+      }
+  });
+
+  it('repairs a link with an escaped bracket crossed by a highlight', async () => {
+    const page = 'Hello world] there.\n';
+    for (const aLower of orders) {
+      const mine = `Hello ${hi('world]')} there.\n`;
+      const theirs = 'Hello [world\\]](x) there.\n';
+      expect(readsCleanly(byCharacter(page, mine, theirs, aLower))).toBe(false);
+      expect([mine, theirs], String(aLower)).toContain(await merged(page, mine, theirs, aLower));
+    }
+  });
+
+  it('repairs a long list with nested items, and leaves code indented under one', async () => {
+    const points = Array.from({ length: 30 }, (_, i) =>
+      i % 4 === 3
+        ? `\t- sub point number ${i} with some words to fill it out`
+        : `- point number ${i} with some more words to fill the line`,
+    ).join('\n');
+    const nested = `Notes\n\n- Hello world there.\n${points}\n\nNext.\n`;
+    const spaced = nested.replaceAll('\t- sub', '    - sub');
+    const deep = `Notes\n\n- Top item\n  - second level\n    - third level world here\n${points.replaceAll('\t- sub', '- sub')}\n\nNext.\n`;
+    for (const page of [nested, spaced, deep]) {
+      expect(page.length).toBeGreaterThan(1_024);
+      for (const aLower of orders) {
+        const [mine, theirs] = [
+          page.replace('world', hi('world')),
+          page.replace('world', red('span', 'world', 'blue')),
+        ];
+        expect([mine, theirs], JSON.stringify(page.slice(0, 60))).toContain(
+          await merged(page, mine, theirs, aLower),
+        );
+      }
+    }
+    // Code under a list item is still code, as is code after a thematic break.
+    for (const prefix of ['- # Item\n      ', '* * *\n    ', '- item\n# Heading\n    ']) {
+      const example = `${prefix}Use <mark data-color="red">x</mark> here.\n`;
+      for (const aLower of orders) {
+        const [mine, theirs] = [example.replace('red', 'blue'), example.replace('red', 'green')];
+        expect(await merged(example, mine, theirs, aLower), prefix).toBe(
+          byCharacter(example, mine, theirs, aLower),
+        );
+      }
+    }
+  });
+
   it('never leaves a link’s brackets without its address when a third person took the link off', async () => {
     for (const [page, mine, theirs] of [
       [
@@ -2196,6 +2286,11 @@ describe('whether a block reads cleanly', () => {
       'x < y and a <b>tag</b>',
     ])
       expect(readsCleanly(`Hello ${clean} there.`), clean).toBe(true);
+  });
+
+  it('reads a paragraph of very many colours put on twice without failing', () => {
+    const twice = '<mark data-color="red"><mark data-color="red">x</mark></mark> ';
+    expect(readsCleanly(`Hello ${twice.repeat(32_000)}`)).toBe(false);
   });
 
   it('reads a pathological line in time that grows with its length, not faster', () => {
