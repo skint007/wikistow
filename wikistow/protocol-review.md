@@ -1912,6 +1912,35 @@ Round 61 reviewed round 60's revision (aaa80ad2) with the three briefs, fresh re
 
 **Outcome.** Round 61 found Highs, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed but E61-F5, M61-4 and S61-7, accepted. Round 62, the fourth since question 11 and the last this run allows, repeats the three briefs against this revision.
 
+## Round 62: identity key rotation, narrowed, sixteenth review
+
+Round 62 reviewed round 61's revision (06031d3c) with the three briefs, fresh reviewers given the text, the settled list and the project owner's answers to questions 9 to 11: the member and encoding briefs as Claude subagents. **The server brief's Codex (gpt-6.2-sol) agent again did no review**: given a shorter brief inline, it asked for confirmation that it should take on a request from a delegated agent. The server brief was then given once, unchanged, to a Claude subagent. The round found no Critical finding, 4 High, 3 Medium, 11 Low and no Info (18 in all; 3 distinct Highs). Every reviewer found floors and `sealedFrom` gone, the record test the same on every device and agent and agreeing with every merge row, and only a confirm opening the space. The Highs were all in detecting a co-owner's add from statements: a closing-only `owners` entry becomes an ordinary accepted owner once a confirm takes its key out of `removed`, though the statement that made it accepts nobody (E62-F1, S62-1); an agent can't take as a closing signer an owner it reaches only through served statements (M62-1); and staying in a live session never reads the statements again (E62-F2). **These findings are open, not fixed**: this is the fourth round after question 11, the last this run allows, and the outcome column gives the fix each points to.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| E62-F1 | 62 | High | 6.5 step 5; 8.6 confirm and accept rows; 8.4 | A closing entry has no mark of its own: once a confirm takes its key out of `removed`, it is an ordinary accepted owner, made by a statement signed at an earlier key, which accepts nobody; a merge after another device's confirm does the same. | Open. Close from the statements and the server's owner list each time, recording nothing in `owners`, or mark closing-only entries. Same as S62-1. |
+| S62-1 | 62 | High | 6.5 step 5; 8.4; 2.3 | Same as E62-F1, for someone never given the space. | Open, with E62-F1. |
+| M62-1 | 62 | High | 8.4; 9.5 | An agent takes as closing signers only owners its record accepts, so an add by a co-owner it reaches only through served statements goes unnoticed until a device records that co-owner. | Open. Closing signers taken over the served statements from the owners the record accepts. |
+| E62-F2 | 62 | High | 8.4; 5.10; 4.6 | Staying in a live session never reads the statements again, so typing reaches a key a co-owner added after the decline. | Open. Say each live message is a write, or add served statements to §5.10's checks. |
+| E62-F3 | 62 | Medium | 6.5 steps 2, 3 and 5 | Owners accepted earlier in the same pass aren't closing signers, so a first visit can write before the space closes. | Open. Count them, or record them before any write. |
+| M62-2 | 62 | Medium | 8.4 removal; 4.6 | The allowed removal still seals to owners the declined key added. | Open. Offer to remove them too, or seal nothing to them. |
+| S62-2 | 62 | Medium | 8.4; 8.6 | A declined key never opens again, so after the space reopens the owner can't seal those versions on. | Open. State it as a cost. |
+| M62-3 | 62 | Low | 8.4 | The decline dialog's list misses spaces that served statements alone will close. | Open. |
+| M62-4 | 62 | Low | 8.6; 8.2 | A closing statement moves a key out of `openOnly` for good. | Open. |
+| M62-5 | 62 | Low | 8.5 | A fresh start after an unparseable `wikistow.declined` drops it. | Open. Same as E62-L5. |
+| E62-L1 | 62 | Low | 6.5 step 5 | "Not at a key in `removed`" and `openOnly` in the closing signer are loose. | Open. |
+| E62-L2 | 62 | Low | 6.5 step 5; 9.6 | An unresolvable owner reference or chain is undefined. | Open: fail closed. |
+| E62-L3 | 62 | Low | 8.6; 4.6 | A removal merged before the decline leaves a declined key in `openOnly`. | Open. |
+| E62-L4 | 62 | Low | CONTEXT.md; ADR | The glossary and ADR lag round 61. | Open. |
+| E62-L5 | 62 | Low | 8.4; 8.5 | Same as M62-5. | Open, with M62-5. |
+| E62-L6 | 62 | Low | 8.4 | Whether leaving a share is allowed in a closed space. | Open. |
+| S62-3 | 62 | Low | 8.4; 10 | Emptying the trash across spaces, updating a public copy, and finishing once the space opens aren't covered. | Open. |
+| S62-4 | 62 | Low | 8.4; 10 | Leaving, and copying out a whole space with a live publication target, are unclear. | Open. |
+
+**Outcome.** Round 62 found Highs, so it doesn't meet the stopping rule, and its findings are open.
+
+**After rounds 59 to 62.** Four rounds ran after the project owner answered question 11 (2026-11-24), with 5, 3, 6 and 4 High findings (4, 2, 3 and 3 distinct), none Critical; Codex did no review in any of them, asking each time for confirmation of a request from another agent, so every server brief ran on a substitute Claude reviewer. Closing the space held where it reads the record: floors and `sealedFrom` left nothing behind from round 59 on, the record test came out the same on every device and agent and agreed with every merge row from round 61 on, and the "write nothing" list was complete but for small gaps. Every High came from one place: a co-owner who adds the declined person at a key that holds every key of the space after the person declined it. The record can't show that, so the rules learn of it from owner statements, and each round's way of doing so (recording the statement's key in `owners`, then any key the decline makes a key change, then reading statements before each write and taking signers at any key of their chain) produced the next round's Highs. The rounds stop here unmet.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
