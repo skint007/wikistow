@@ -953,7 +953,7 @@ describe('two people formatting the same text at once (#720)', () => {
     await exchange([a, c]);
     // The same app's Yjs client, as the source pane writes, at once after.
     const body = a.doc.getText('body');
-    for (const [i, char] of [...'<span class="x">'].entries()) {
+    for (const [i, char] of Array.from('<span class="x">').entries()) {
       body.insert(i, char);
       await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
     }
