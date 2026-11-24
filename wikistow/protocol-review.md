@@ -1266,6 +1266,44 @@ Round 41 reviewed round 40's revision (983a86c), with fresh reviewers given the 
 
 **Outcome.** Round 41 found Highs, and ran without the server brief, so it doesn't meet the stopping rule. Every finding is fixed. Round 42 repeats the three briefs against this revision.
 
+## Round 42: identity key rotation, narrowed, third review
+
+Round 42 reviewed round 41's revision (e11e9ca) with the three briefs, fresh reviewers given the narrowed text, the log of rounds 31 to 41 and the list of what earlier rounds accepted: the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent. The first Codex run was refused by its provider's content filter partway through, as in round 41; the one retry, worded as a review of whether the specification's outcomes match its own goals and accepted limits, ran. It found no Critical finding, 4 High, 13 Medium, 10 Low and no Info (27 in all). Every reviewer found the narrowing itself applied consistently. The Highs were all in what rounds 40 and 41 added to hold the exception for spaces with no trusted owner: the check before rotating ran only in the client and could be raced, it could block a person's rotation for good, and a server's owner list could make an owner's own app take the exception. So the fixes replace that machinery rather than extend it: the exception now fires only where the person is the only owner the member's app accepts, read from its own record, never from the server's list; the server's added-at rule and the check before rotating are gone, the latter kept as advice; removals record the removed owner's later keys in a set of their own, for opening only, and carry the remover's envelopes in place of re-wrapping. Section numbers are protocol.md's after the fixes.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S42-1 | 42 | High | 4.6 **Before it sends the rotation**; route | Two owners' apps both passed the check before rotating while both were at their first keys, and both rotations landed, so members accepted both new keys through the exception. | Fixed by removing what it relied on: the exception reads only the member's own record, and a member that accepts two owners never takes it (§4.6 **A space whose only accepted owner is the person**). Two owners who both rotate leave members waiting, an availability cost the ADR names. Same as E42-F1. |
+| E42-F1 | 42 | High | 4.6 **Before it sends the rotation**; A15 | The check before rotating ran only in the client, so someone rotating a co-owner second skipped it, and members accepted both keys. | Fixed with S42-1. |
+| E42-F2 | 42 | High | 4.6 **When no owner the app trusts**; 6.5 | The exception's gate was the server's owner list, so a server leaving an owner out of their own app's list made that app accept a rotated co-owner, for good. | Fixed: the gate is the app's own state (it has accepted itself there neither in step 1 nor through the co-owner dialog), and the test never reads the server's list. |
+| M42-1 | 42 | High | 4.6 **Before it sends the rotation**; 6.5 step 2 | In a space where the person's app can take no owner action, the check before rotating could never be met, so the person could never rotate. | Fixed: the check is now advice in the dialog and holds nothing back. |
+| S42-3 | 42 | Medium | 4.6; 6.5; 7.6 | A re-added owner whose adder rotated since had no signer it could accept for its co-owner dialog. | Fixed: §4.6 **Adding a rotated owner again**. It takes that statement only to run the dialog, which offers to add the adder again or remove them. |
+| S42-4 | 42 | Medium | 4.6; 7.6 | After a transfer, a member that took the person's new key only as a statement signer couldn't open what they published under it. | Fixed: the member now accepts the person at the new key, so it opens it. |
+| S42-5 | 42 | Medium | 4.6 **Removing a rotated owner instead**; 7.5 | The lowest-key rule shut out the envelopes of a key a co-owner had vouched for, with no way to carry those members forward. | Fixed: removed keys go in `openOnly`, and only keys the remover doesn't hold in `owners` add nobody to `E`; members whose only envelope came from one are shown unticked and wait if left so. Same as E42-F4. |
+| S42-6 | 42 | Medium | 4.6 | A pending re-add couldn't move to the owner's newer key, or turn into a removal. | Fixed: it offers both. Same as M42-3 and part of E42-F5. |
+| S42-7 | 42 | Medium | 4.6; 6.8; 7.6 | A refused envelope above the committed version raised the mark, which then stopped the owner rotating from the version below. | Fixed: that mark doesn't stop a rotation or a removal from below. |
+| S42-8 | 42 | Medium | 4.6; 7.6 | A re-wrap after a removal, interrupted, was never resumed. | Fixed: the removal carries the remover's envelopes of those versions in the same request, and nothing is re-wrapped. |
+| E42-F3 | 42 | Medium | 4.6 | Which of a removed owner's keys add nobody to `E` had three definitions, and none for an owner never accepted. | Fixed: one rule, any key the remover doesn't hold for that owner in `owners`. Same as M42-5. |
+| E42-F4 | 42 | Medium | 4.6; 8.2 | Same as S42-5. | Fixed with S42-5. |
+| E42-F5 | 42 | Medium | 4.6 | A pending re-add was visible only on the device that started it, and had no exit. | Fixed: it is derived from the record and the served statements on every device, with exits as in S42-6. |
+| E42-F6 | 42 | Medium | 4.6; 8.2; 8.4 | Declining a co-owner's new key and then removing them either couldn't proceed or left versions nobody could open. | Fixed: an `openOnly` key opens for reading and sealing on even when in `removed`, and the removal's writing check takes it as an earlier key's. |
+| E42-F7 | 42 | Medium | 4.6 **Before it sends the rotation** | Whom the check covered was ambiguous, and the broad reading blocked rotation. | Fixed with M42-1. |
+| M42-2 | 42 | Medium | 4.6; 7.5 step 1 | A rotated owner nobody added again who removed themself left every share at a version no one could rotate from. | Fixed: **Shares left at an earlier key** lists those shares and offers **Rotate keys**, that owner's envelopes counting as in a removal. |
+| M42-3 | 42 | Medium | 4.6; 8.4 | Same as S42-6, with a declined key. | Fixed with S42-6. |
+| S42-2 | 42 | Low | 4.6 | Re-wrapping a removed owner's records under the new version gave a member's new agent history the dialog said it wouldn't read. Rated High by the reviewer; the agent reads only what its person reads, so by the scale it is Low. | Fixed with S42-8: nothing is re-wrapped. |
+| E42-L1 | 42 | Low | 4.6 | `sealedToKeys`' errors overlapped, and a repeated `sealedTo` ID was refused only beside it. | Fixed: it parses first, then binds; a repeated ID is refused either way. |
+| E42-L2 | 42 | Low | 8.6 | The merge rows carried one key, not a chain's. | Fixed: "accept an owner" carries every key it records, none in `removed`; "remove a rotated owner" writes `openOnly`. |
+| E42-L3 | 42 | Low | 4.6 | Which owner actions moved the added-at version was unstated. | Moot: the added-at rule is gone. |
+| E42-L4 | 42 | Low | 4.6 | "Current key" was undefined without a valid chain. | Fixed: such an owner is a key change, never an earlier key for the exception. |
+| E42-L5 | 42 | Low | 4.6; 6.8 | Whether a follow not yet stored raises the mark was unstated. | Fixed: it does. |
+| E42-L6 | 42 | Low | 4.6 | An unlisted owner as a statement signer was unrecorded, and could sign in a stranger. | Moot: the exception no longer reads the server's list. |
+| M42-4 | 42 | Low | ADR | The ADR's claim that settling first meant members never follow both was false for an app working out the owners afresh. | Moot with M42-1; the ADR rewritten. |
+| M42-5 | 42 | Low | 4.6 | Same as E42-F3. | Fixed with E42-F3. |
+| M42-6 | 42 | Low | 4.6 | The re-wrap carried a doubted key's content to members unannounced. | Moot with S42-8. |
+
+**Moot after this revision.** Round 40's server rule and its finding M40-1's fix, E41-F3 and M41-5 (the added-at version), M41-1's fix (the check before rotating, now advice), M41-4's re-wrap and E41-F1's lowest-key rule, replaced as above.
+
+**Outcome.** Round 42 found Highs, so it doesn't meet the stopping rule. Every finding is fixed or moot. Round 43 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
