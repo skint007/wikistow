@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Live editing: a space typed at the end of a paragraph or heading in the visual editor is no longer lost when someone else changes that block or the one beside it at the same moment, which ran the next word typed into the one before. The visual editor now keeps the spaces a paragraph or heading ends with in the page, as it writes them. (#PR)
+- Live editing: a space typed at the end of a paragraph or heading in the visual editor is no longer lost when someone else changes that block or the one beside it at the same moment, which ran the next word typed into the one before. The visual editor now keeps the spaces a paragraph or heading ends with in the page, as it writes them. (#723)
 
 ## 0.30.2 - 2026-11-23
 
