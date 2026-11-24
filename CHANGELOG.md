@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Desktop
+
+- On Linux, logging out with the app open, or stopping it with `systemctl`, no longer crashes it with a core dump, after which Ubuntu offered to report a problem. The launcher starts it with `--no-unsandboxed-zygote`, so the app can start its GPU process again when the session ends that process and the zygote first. (#PR)
+
 ## 0.30.2 - 2026-11-23
 
 ### Highlights

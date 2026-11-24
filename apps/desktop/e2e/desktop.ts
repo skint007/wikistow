@@ -3,6 +3,7 @@
 // `wikistow://` link the way the desktop does, through a second launch.
 import { _electron, type ElectronApplication, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -14,6 +15,24 @@ const APP_DIR = fileURLToPath(new URL('..', import.meta.url));
 // whose /dev/shm is too small for Chromium's shared memory.
 const CONTAINER_SWITCHES =
   process.getuid?.() === 0 ? ['--no-sandbox', '--disable-dev-shm-usage'] : [];
+
+/**
+ * The switches every Linux package starts the app with: those the launcher
+ * (`packaging/wikistow-desktop`) puts before the person's own, the same on
+ * its bundled Electron and on electron44. On Linux the tests start the app
+ * with them too.
+ */
+export const LAUNCHER_SWITCHES: string[] = (() => {
+  const launcher = readFileSync(new URL('../packaging/wikistow-desktop', import.meta.url), 'utf8');
+  const found = [
+    ...launcher.matchAll(/exec (?:"\$app\/\$name"|electron44 "\$app\/app\.asar") (.*?)"\$@"/g),
+  ].map((line) => (line[1] ?? '').trim());
+  if (found.length !== 2 || found[0] !== found[1]) {
+    throw new Error('The launcher no longer starts both Electrons the same way');
+  }
+  return (found[0] ?? '').split(/\s+/).filter(Boolean);
+})();
+const PACKAGE_SWITCHES = process.platform === 'linux' ? LAUNCHER_SWITCHES : [];
 
 // The binary itself, so Playwright starts it without its own loader, which
 // forces `--password-store=basic` and would hide the system keyring.
@@ -39,7 +58,14 @@ export async function launch(
     : ['--password-store=basic'];
   const app = await _electron.launch({
     executablePath,
-    args: [appPath, `--user-data-dir=${profile}`, ...CONTAINER_SWITCHES, ...store, ...args],
+    args: [
+      appPath,
+      `--user-data-dir=${profile}`,
+      ...PACKAGE_SWITCHES,
+      ...CONTAINER_SWITCHES,
+      ...store,
+      ...args,
+    ],
     ...(env ? { env } : {}),
   });
   return { app, window: await app.firstWindow(), profile };
@@ -96,7 +122,7 @@ export async function catchBrowser({ app }: Desktop): Promise<() => Promise<stri
 export async function openLink({ app, profile }: Desktop, link: string): Promise<void> {
   const second = spawn(
     app.process().spawnfile,
-    [APP_DIR, `--user-data-dir=${profile}`, ...CONTAINER_SWITCHES, link],
+    [APP_DIR, `--user-data-dir=${profile}`, ...PACKAGE_SWITCHES, ...CONTAINER_SWITCHES, link],
     {
       stdio: 'ignore',
     },
