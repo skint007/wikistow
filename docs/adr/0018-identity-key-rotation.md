@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Replacing a person's identity keys
@@ -210,9 +210,9 @@ Serving envelopes at every key version of the caller changes the existing routes
 
 ## Consequences
 
-- **Now, with this ADR:** protocol sections 4.6, 8.4 and Q4 hold the proposed rules, marked proposed, with the new domain `identity-key-rotation/v1`, accepted risk A15 and the "follow a rotation" contacts change. `wikistow.md` line 171 says it's proposed. `CONTEXT.md` gains **Identity key rotation**. Section 4.6's claim that recovery raises the key version is corrected.
-- **Before it's built:** protocol review rounds until one finds nothing high or critical, as for every format (`protocol-review.md`). Three ran with this ADR (rounds 38 to 40, **identity key rotation**), and six more (rounds 41 to 46) after the project owner decided its questions, without meeting the rule. The project owner then narrowed the scope (question 9), and the rounds went on from round 47. Rounds 47 to 52 didn't meet the rule either, every High after round 47 being in the rule for spaces the person owns alone, which the project owner dropped (question 10); the rounds went on from round 53. Rounds 53 to 58 didn't meet the rule either, every High after round 54 but two being in how a decline of an owner's key stops the person's agents writing; the project owner chose to close the space instead (question 11), and the rounds went on from round 59. Rounds 59 to 62 didn't meet the rule either, every High being in learning of a co-owner's add of a declined key; the project owner dropped closing a space (question 12), and the rounds went on from round 63. Round 64, the second after it, met the rule: no Critical or High finding, with the server brief on Codex (protocol-review.md, rounds 63 and 64).
-- **Once accepted:**
+- **Now, with this ADR:** protocol sections 4.6, 8.4 and Q4 hold the rules, marked accepted and not built, with the new domain `identity-key-rotation/v1`, accepted risk A15 and the "follow a rotation" contacts change. `wikistow.md` line 171 says it's accepted. `CONTEXT.md` gains **Identity key rotation**. Section 4.6's claim that recovery raises the key version is corrected.
+- **Before it's built:** protocol review rounds until one finds nothing high or critical, as for every format (`protocol-review.md`). Three ran with this ADR (rounds 38 to 40, **identity key rotation**), and six more (rounds 41 to 46) after the project owner decided its questions, without meeting the rule. The project owner then narrowed the scope (question 9), and the rounds went on from round 47. Rounds 47 to 52 didn't meet the rule either, every High after round 47 being in the rule for spaces the person owns alone, which the project owner dropped (question 10); the rounds went on from round 53. Rounds 53 to 58 didn't meet the rule either, every High after round 54 but two being in how a decline of an owner's key stops the person's agents writing; the project owner chose to close the space instead (question 11), and the rounds went on from round 59. Rounds 59 to 62 didn't meet the rule either, every High being in learning of a co-owner's add of a declined key; the project owner dropped closing a space (question 12), and the rounds went on from round 63. Round 64, the second after it, met the rule: no Critical or High finding, with the server brief on Codex (protocol-review.md, rounds 63 and 64). Scott accepted the ADR on 2026-11-24 (question 13).
+- **Once accepted** (done, PR #733):
   - `wikistow.md` gains **Replace my keys** in **Human and agent keys**, and the spec's ADR list says it's accepted.
   - `wikistow/ui-design.md` gains the dialog, the notice a contact sees, **Waiting**'s new reason, the warning on declining a key an owner accepted, the unfinished state and **Someone else replaced your keys**.
 - **Code:**
@@ -224,8 +224,8 @@ Serving envelopes at every key version of the caller changes the existing routes
 
 ## Implementation, in pull requests
 
-1. **This ADR**, with the protocol change and its first three review rounds, 31 to 33 (#327).
-2. **Review rounds** to the stopping rule, and the project owner's decisions recorded here (#327).
+1. **This ADR** (accepted, PR #733), with the protocol change and its first three review rounds, 38 to 40 (#327).
+2. **Review rounds** to the stopping rule, and the project owner's decisions recorded here (done, PR #733): rounds 38 to 64, round 64 meeting the rule (#327).
 3. **Formats and checks** (#327). The statement, chains, the format 2 wrapper and keyring, earlier keys in `TrustStore`, test vectors. Released before step 4: today's apps refuse an unknown wrapper format as an answer they can't read, so this teaches them to ask for an update (decision 10).
 4. **Rotating** (#327). The route, Settings → Security, the new vault and recovery key, agents' enrollments, ending sessions, the unfinished state, and **Someone else replaced your keys**.
 5. **Following** (#327). Contacts' apps and the CLI follow chains; owners add a rotated owner again or remove them, with `openOnly`; members' apps pause under versions they can't use yet; opening at earlier keys, on the server and in the apps; the devices' re-sealing.
@@ -236,7 +236,7 @@ Steps 3 and 4 come first. Step 5 needs 3, and step 6 needs 4 and 5.
 
 ## Decided (2026-11-23, changed 2026-11-24)
 
-Scott accepted every recommendation below on 2026-11-23. On 2026-11-24 he changed his answer to question 9, which changes questions 2 and 3 where they reach owners, as their notes say, and answered questions 10, 11 and 12; his answer to question 12 replaced his answer to question 11.
+Scott accepted every recommendation below on 2026-11-23. On 2026-11-24 he changed his answer to question 9, which changes questions 2 and 3 where they reach owners, as their notes say, and answered questions 10, 11, 12 and 13; his answer to question 12 replaced his answer to question 11.
 
 1. **One statement, `identity-key-rotation/v1`, signed by both the old key and the new?** Recommended: yes (decision 1). The old key's signature lets contacts follow; the new key's shows its holder agreed and vouches for the old key, so history signed before stays verifiable by anyone who meets the person later.
 2. **Contacts' apps follow a valid chain without asking, with a notice?** Recommended: yes (decision 3, A). The only real check a contact can make is the fingerprint, which is today's key-change warning; a click that checks nothing adds no safety, and until it came, owner-region saves would stop. A server alone still can't move a pin. The cost is A15: a thief with the old key and the person's session, or the server's help, is followed too.
@@ -266,6 +266,11 @@ Scott accepted every recommendation below on 2026-11-23. On 2026-11-24 he change
     - *Park #327* until the protocol has an owner-signed list of a space's owners.
     - **Scott: drop closing a space (2026-11-24).** A decline moves only the decliner's own pin back and stops their own sealing to the person, as today's key-change rules do. Where an owner (a co-owner who re-added the person) accepted the declined key as an owner of a space, the decliner's app warns, names that owner, and offers to leave the space. It closes nothing, and devices and agents work out nothing more. Why: owners already choose who reads a space, and a member can't overrule an owner adding anyone, so a decline can't promise more than that. This removes the case behind every High in rounds 54 to 62, and with it the two choices made without him in writing question 11's answer (removing the declined owner in a closed space, and leaving not reopening it). The cost: a member who declines a key an owner accepted keeps writing where that key reads, until they leave or an owner removes the person (A15). He unparked #327 with this answer, and the rounds went on from round 63.
 
+13. **Accept the ADR after round 64?** Round 64 found no Critical or High finding, so it meets the stopping rule (`protocol-review.md`). Its reviewer rated E64-F1 Medium and said it could be argued High.
+    - **Scott: accept it (2026-11-24).** ADR 0018 is accepted, and round 64 meets the stopping rule.
+    - **Scott: E64-F1 stays at Medium (2026-11-24)**, as rounds 61 and 63 rated the same mechanism (S61-4, S63-2), so round 64 meets the rule.
+    - **Scott: both choices in writing question 12's answer about leaving stand (2026-11-24).** A member is told to ask an owner to remove them, since members can't leave a space; and an owner is offered removing the person as an owner before leaving (**Decided in writing question 12's answer**, below).
+
 ## Decided while designing the narrowed scope (2026-11-24)
 
 These were decided without Scott, where the narrowing left a gap. Each can be changed.
@@ -289,12 +294,12 @@ These were decided without Scott, where the narrowing left a gap. Each can be ch
 
 ## Decided in writing question 12's answer (2026-11-24)
 
-These were decided without Scott, in writing his answer to question 12. Each can be changed.
+These were decided without Scott, in writing his answer to question 12. Each can be changed. Scott accepted the second, **What "leave the space" means**, on 2026-11-24 (question 13).
 
 - **When the app warns.** At the decline, for each space whose `owners` in the record holds a declined key; again once the decline lands, worked out from the served record, since the merge may add later keys of the chain to `removed`; and later, once for each statement it verifies, on each device, by an owner it accepts naming the person at a key in `removed`, or at a later key of theirs that it doesn't follow, which accepts nobody. The warning names each owner whose statement named a declined key, as served, and says that people and owners the key brought in may stay after the person is removed. It is advice, so a server that withholds a statement only keeps the warning back.
-- **What "leave the space" means.** For a member, the protocol has no way to leave a space of their own accord, so the warning says to ask one of the space's owners to remove them; a leave route for members would be new, and is for Scott to ask for. For an owner, leaving is removing themself (protocol section 7.6), which seals the new versions to every listed owner, so it can't run while the server lists the person at the declined key (`unaccepted-owner`). So an owner is also offered removing that person as an owner, the one step that stops other members' apps sealing to the declined key through an owner's statement, and leaving comes after it (round 63, M63-1 and E63-F1). Until then an owner's app seals nothing in the space, as after any key change.
+- **What "leave the space" means** (accepted by Scott, 2026-11-24). For a member, the protocol has no way to leave a space of their own accord, so the warning says to ask one of the space's owners to remove them; a leave route for members would be new, and is for Scott to ask for. For an owner, leaving is removing themself (protocol section 7.6), which seals the new versions to every listed owner, so it can't run while the server lists the person at the declined key (`unaccepted-owner`). So an owner is also offered removing that person as an owner, the one step that stops other members' apps sealing to the declined key through an owner's statement, and leaving comes after it (round 63, M63-1 and E63-F1). Until then an owner's app seals nothing in the space, as after any key change.
 - **A key in `removed` is never pinned by first sight.** With closing gone, a first-sight pin after an unpin would otherwise take a declined key back without a warning (round 63, E63-F3 and S63-2). Such a key is a key change, as the built `TrustStore.check` already treats it, and confirming it is the only way out of `removed`, with or without a pin to replace.
 
 ## Resumed (2026-11-24)
 
-Scott parked #327 on 2026-11-24, after rounds 59 to 62 didn't meet the stopping rule, and unparked it the same day with his answer to question 12: drop closing a space. That removes the case every High in rounds 54 to 62 came from, a co-owner's add of a declined key that the person's devices and agents had to learn of, so the rounds went on from round 63. The decisions in questions 1 to 10 stand, and question 12's replaces question 11's. Round 63 found one High, in a removal rule the change had taken with it, and round 64 met the stopping rule. The ADR stays proposed until Scott accepts it.
+Scott parked #327 on 2026-11-24, after rounds 59 to 62 didn't meet the stopping rule, and unparked it the same day with his answer to question 12: drop closing a space. That removes the case every High in rounds 54 to 62 came from, a co-owner's add of a declined key that the person's devices and agents had to learn of, so the rounds went on from round 63. The decisions in questions 1 to 10 stand, and question 12's replaces question 11's. Round 63 found one High, in a removal rule the change had taken with it, and round 64 met the stopping rule. Scott accepted the ADR on 2026-11-24 (question 13).
