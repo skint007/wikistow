@@ -23,7 +23,7 @@ import {
   type ParticipantStatus,
 } from '@wikistow/client/live';
 import { JoinId, LiveSessionId, PageId, SpaceId } from '@wikistow/contracts';
-import { describe, expect, it } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vite-plus/test';
 import { DraftSession, type DraftPorts } from '../src/page/draft-session.ts';
 import type { EditorSurfaceHandle } from '../src/page/editor/surface.ts';
 
@@ -665,6 +665,90 @@ describe('a draft session in a live session', () => {
     expect((await draft.mergeVersions())?.theirs).toBe('r-theirs');
     await expect(draft.saveOrThrow()).rejects.toThrow();
     expect(saves).toHaveLength(0);
+  });
+
+  it('meets a draft saved elsewhere while a lost join settled with nothing to keep (#685)', async () => {
+    const { draft, saves, joins, held } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+    await settle();
+    // Heard while the page's live lock is held for the next join.
+    expect(held()).toBeGreaterThan(0);
+    draft.noticeHead(RevisionId.parse('r-theirs'));
+    release();
+    await settle();
+    // Nothing kept, so the lock goes without a join: the head is judged then.
+    expect(held()).toBe(0);
+    expect(draft.snapshot().status).toBe('conflict');
+    expect((await draft.mergeVersions())?.theirs).toBe('r-theirs');
+    await expect(draft.saveOrThrow()).rejects.toThrow();
+    expect(saves).toHaveLength(0);
+  });
+
+  it('takes a session draft heard while a lost join settled as its own (#685)', async () => {
+    const { draft, joins } = session();
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    let release = () => {};
+    live.settling = new Promise((resolve) => (release = resolve));
+    live.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+    await settle();
+    draft.noticeHead(R0);
+    release();
+    await settle();
+    expect(draft.snapshot().status).toBe('saved');
+  });
+
+  it('leaves a draft saved elsewhere while typing is kept for the next join to that join (#685)', async () => {
+    const { draft, joins, kept, held } = session(page('A'));
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.outside = page('A');
+    draft.edit('A, typed');
+    live.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+    await settle();
+    expect(kept.at(-1)?.payload.markdown).toBe('A, typed');
+    expect(held()).toBe(1);
+    // Kept for the next join, which puts it in by block whatever saved meanwhile.
+    draft.noticeHead(RevisionId.parse('r-theirs'));
+    expect(draft.snapshot().status).toBe('saved');
+    await draft.joinLive();
+    expect(joins).toHaveLength(2);
+    expect(draft.snapshot().status).not.toBe('conflict');
+  });
+
+  it('meets a draft saved elsewhere while typing was kept, once the hold lapses unjoined (#685)', async () => {
+    const { draft, joins, held, noJoining } = session(page('A'));
+    await draft.joinLive();
+    const live = joins[0];
+    if (!live) throw new Error('not joined');
+    live.outside = page('A');
+    draft.edit('A, typed');
+    noJoining();
+    // The hold's checks run on these from the start.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      live.end({ kind: 'stopped', why: 'the connection was lost', saveOver: null, rejoin: true });
+      await vi.advanceTimersByTimeAsync(30);
+      expect(held()).toBe(1);
+      draft.noticeHead(RevisionId.parse('r-theirs'));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(draft.snapshot().status).toBe('saved');
+      // Online for long without getting back in: the queue sends what's kept.
+      await vi.advanceTimersByTimeAsync(90_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+    expect(held()).toBe(0);
+    expect(draft.snapshot().status).toBe('conflict');
+    expect((await draft.mergeVersions())?.theirs).toBe('r-theirs');
   });
 
   it('waits for a flush begun in the session to be saved from outside once it ends meanwhile', async () => {
