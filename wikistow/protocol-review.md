@@ -1086,6 +1086,40 @@ Round 35 ran the three briefs again, with fresh reviewers given the same materia
 
 **Outcome.** Round 35 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but S35-1 and S35-4, accepted in A15, and S35-3's part about a device that kept no mark, accepted in A15. Round 36 repeats the three briefs against this revision.
 
+## Round 36: identity key rotation, sixth review
+
+Round 36 ran the three briefs again, with fresh reviewers given the same material and the log of rounds 31 to 35, against the round 35 revision (3c9284f): the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent. It found no Critical finding, 4 High, 8 Medium, 12 Low and 1 Info (25 in all). The statement's bytes, the keyring and the chain held again. Round 35's fixes held where they reached: removed owners' envelopes adding nobody to `E`, the multi-owner request, the kept-mark floor, `sealedToKeys`' key, and the anchor moving only when a rotation lands; the reviewers found A15's text for the accepted findings correct, with two cases it understated. Two Highs were one finding, finishing's owner review once more: an owner the server lists only after the review was never reviewed. The others were an older owner's app joining a session sealed to the old key after confirming the new one, and a decline over a record where its follow never landed adding no block. Section numbers are protocol.md's after the fixes.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S36-1 | 36 | High | 4.6 finishing; 6.5 | The review covered the owners the server listed then; one it left out, or who left and came back, kept their acceptance and was sealed to once listed again. | Fixed: §4.6 and ADR decision 2. The review covers every owner the record accepted by the cutoff, listed or not; an owner is chosen once on `removedOwners` or named by a statement the new key signed; one not chosen counts for opening only, and the app asks before acting wherever the server lists them. Same as M36-1. |
+| S36-2 | 36 | High | 4.6 **Live sessions in the owner region**; 5.10; ADR decision 10 | An owner's older app that confirms the person's new key after the warning still joins an owner-region session sealed to the old key. | Fixed and accepted: the release before rotation ships carries the `sealedToKeys` check, for confirmed keys too; A15 names apps older than that release. |
+| S36-3 | 36 | Medium | 4.6 finishing; 6.4 | When an owner the person doesn't accept sealed their only envelope of `v`, the app couldn't open `v`, so finishing couldn't remove that owner. | Fixed: §4.6. In that removal such a `v` counts as the version to rotate from, every member then shown unticked. |
+| S36-4 | 36 | Medium | 4.6 finishing; 7.5 step 2 | Members whose only envelope came from a removed owner went in `X`, and so in `removed`. | Fixed with M36-2. |
+| S36-5 | 36 | Medium | 4.6 **Owners**; 6.5 step 2 | A member who rotated before opening a share had no first-sight item at their current key, so couldn't read its history. | Fixed: §4.6. Step 2 takes folder key envelopes to a retired key too, for opening. |
+| S36-6 | 36 | Medium | 4.6 **Using an earlier key**; 8.5 | The earlier-key enrollment rule needed the cutoff version's payload, which the server doesn't keep. | Fixed: §4.6. The check uses the current record's `agents` and `revokedAgents`, which carry the cutoff's, for agents enrolled by then. |
+| S36-7 | 36 | Low | A15 | "Kept no mark" understated the withheld-envelope case: a mark below the withheld version is the same. | Fixed in A15. |
+| S36-8 | 36 | Low | A15 | Any statement the server received and refused, not only two devices', can be shown to contacts. | Fixed in A15 and the §4.6 diagnostic. |
+| M36-1 | 36 | High | 4.6 finishing | Same as S36-1, and "chosen" had no definition. | Fixed with S36-1. |
+| M36-2 | 36 | Medium | 4.6 finishing; 7.5; 7.6 | Same as S36-4: a removed owner who last rotated every share could strand every member. | Fixed: §4.6. Such members are shown unticked, as for an earlier key's envelope, and otherwise wait. |
+| M36-3 | 36 | Medium | 4.6 finishing; 6.5 step 2 | A space whose co-owner dialog was pending or declined had no accepted owner to keep, and one unfinished space held up the rest. | Fixed: §4.6. A pending dialog runs first, a declined space is left out (A15 names it), and finishing goes on space by space. |
+| M36-4 | 36 | Medium | 4.6 **Members**; 9.4; 16 | The write floor and the agent routes disagreed: sealing only above it was refused, sealing every version let an agent write under one the old key held. | Fixed: §4.6. The app seals an agent only the versions above the floor, the server's checks take only those for such a person, and the dialog says so. |
+| M36-5 | 36 | Low | 4.6 **Members**; 6.8 | The live marks rise after the rotation, so "marks kept from before" needed a copy. | Fixed: the device copies them beside the anchor when its rotation lands. |
+| M36-6 | 36 | Low | 4.6; 7.9 | Whether `waiting`'s reader cap was their access made coverage checks loop. | Fixed: it caps what they may do; for coverage they count as left out. |
+| M36-7 | 36 | Low | 4.6; ADR decision 10 | An older owner's app puts waiting members in `removed`. | Fixed: the server refuses that from a request without a `waiting` list and asks to update. |
+| M36-8 | 36 | Low | 4.6 **Agents** | The agents the app runs could be ticked to keep. | Fixed: they are always revoked. |
+| M36-9 | 36 | Low | 4.6 **Members** | The co-owner add waited on shares the person had been removed from. | Fixed: only shares whose current version they hold through an earlier key. |
+| E36-F1 | 36 | High | 8.6; 8.4 | A decline merged over a record whose pin was still the restored key, as when its follow never landed, added no `wikistow.declined` entry, so a sibling chain was followed. | Fixed: §8.6. The merge adds the entry when the newer pin is that key too, and a decline is applied after any pending follow, never in its place. |
+| E36-F2 | 36 | Medium | 4.6 **When someone else rotated** | After a lost answer, a resend was refused, and the refusal dropped the kept hash, so the device took its own rotation for someone else's. | Fixed: §4.6. The server answers a resend of the same statement as accepted; the device resends the same request, and drops the hash only once the stored statement is shown not to be its own. |
+| E36-L1 | 36 | Low | 4.6; 5.10 | E35-L1's `sealedToKeys` rule refused a session without it, which the next sentence allowed. | Fixed in wording. |
+| E36-L2 | 36 | Low | 8.6 **Confirmed writes** | When a follow is "held" was undefined. | Fixed: when the served pin is the followed key or a later one on its chain. |
+| E36-L3 | 36 | Low | 4.6; 6.8 | Tabs older than the release ignore `lock`. | Fixed: the rotating tab also sends the signed-out message they already obey. |
+| E36-L4 | 36 | Low | 4.6 | The re-seal record named no key, so a second rotation cut the retired keys off early. | Fixed: it records the key's hash. |
+| E36-L5 | 36 | Low | 4.6; 7.9 | The `waiting` role had no source and could disagree with §7.9's sealing check. | Fixed: it is the role their access needs. |
+| E36-I1 | 36 | Info | 8.6 | A device that never did the follow has no stored `method` and `verifiedAt` for the restored pin. | No change: it reads them from the version before the follow, which every device can fetch (section 8.5). |
+
+**Outcome.** Round 36 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but S36-2's part about apps older than the release before rotation, accepted in A15, and E36-I1. Round 37 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
