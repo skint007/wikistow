@@ -14,8 +14,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - A public link's copy lists the other pages in its query tables by when the server saved them, not by this device's clock, for pages published from this device too. A device whose clock ran fast or slow could list them out of order. (#725)
 - In the visual editor, bold or another mark that ends at a line break, where a link starts inside it and goes on past the break, no longer sends the page to source mode. (#731)
 - Ticking a task while reading: where two tasks share a line, such as two sections each with a `Call` task, and anyone changed the page in the seconds before the tick was saved, the tick is left out and the page says why, rather than maybe landing on the other task. A tick on a line no other task has is saved as before. (#729)
-
 - Live editing: two people formatting the same word in the visual editor at once, as one highlights it while the other colours it, no longer leaves tags that cross or break, which the page then showed as raw HTML. The word keeps the formatting of one of them. (#PR)
+
 #### Desktop
 
 - On Linux, logging out with the app open, or stopping it with `systemctl`, no longer crashes it with a core dump, after which Ubuntu offered to report a problem. The launcher starts it with `--no-unsandboxed-zygote`, so the app can start its GPU process again when the session ends that process and the zygote first. (#727)
