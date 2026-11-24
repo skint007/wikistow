@@ -744,4 +744,21 @@ describe('formatting made alongside someone else’s', () => {
       expect(end).toContain('Look <mark data-color="blue">here</mark>.');
     });
   }
+
+  it('keeps the merge when their text, without its formatting, is one it can’t show', async () => {
+    const page = 'A **bold _mixed_ run** here.\n';
+    const [a, b, c] = [await person(page, 1), await person(page, 2), await person(page, 3)];
+    typing('A', 0, 0, 'Q')(b);
+    typing('A', 1, 0, ' A')(c);
+    await expect.poll(() => [b, c].map((p) => p.log.length)).toEqual([1, 1]);
+    send(b, a);
+    send(c, a);
+    // Before its editor takes theirs in.
+    toggle('A', 'italic')(a);
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b, c], [1, 1, 1]);
+    await settle([a, b, c]);
+    for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
+    expect(main).toContain('*A*');
+  });
 });

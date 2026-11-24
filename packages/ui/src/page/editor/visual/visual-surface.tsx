@@ -70,6 +70,9 @@ export { wikilinkEditorNode } from './wikilink-node';
 // it all is; one that must go out sooner, as the page is hidden or the
 // editor left, writes and reads the whole page then.
 const REPORT_MS = 150;
+// A page longer than this isn't checked at once before formatting is made
+// again over someone's change in a live session: its merge stays (#720).
+const KEEPS_MAX = 64_000;
 const SLICE_MS = 10;
 
 // The idle period the last slice ran in.
@@ -741,12 +744,21 @@ function Surface({
           if (view) reformat(view, intents);
         },
         keeps: (merged, theirs, intents) => {
-          const parse = editor.current?.action((ctx) => ctx.get(parserCtx));
+          // Their text, the formatting taken out, is to be taken in and
+          // shown before it's made again: one the editor can't show, or too
+          // long to check here at once, keeps the merge.
+          if (theirs.length > KEEPS_MAX) return true;
+          const transform = editor.current?.action((ctx) => ({
+            parse: ctx.get(parserCtx),
+            serialize: ctx.get(serializerCtx),
+          }));
+          if (!transform) return true;
           try {
-            const [a, b] = [parse?.(withLf(merged)), parse?.(withLf(theirs))];
+            if (!fidelityOf(theirs, transform).visual) return true;
+            const [a, b] = [transform.parse(withLf(merged)), transform.parse(withLf(theirs))];
             return !!a && !!b && keeps(a, b, intents);
           } catch {
-            return false;
+            return true;
           }
         },
       },
