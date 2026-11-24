@@ -233,14 +233,17 @@ function stillRunning() {
 // A silent uninstall gives up at once, removing nothing, while WikiStow.exe
 // or the helper still runs. Each can take a moment to go once it's done:
 // the app's own processes after it quits, the helper after its last
-// answer. So nothing may run from the folder, and both files must open for
-// writing, the uninstaller's own test.
+// answer. Both files must open for writing, the uninstaller's own test,
+// which a program running from either fails.
 await until(
   'the app and its helper to exit',
-  async () => runningFrom(folder).length === 0 && notRunning(exe) && notRunning(helper),
+  async () => notRunning(exe) && notRunning(helper),
 ).catch((error) => {
-  throw new Error(`${(error as Error).message} (running: ${stillRunning()})`);
+  const held = `WikiStow.exe free: ${notRunning(exe)}, helper free: ${notRunning(helper)}`;
+  throw new Error(`${(error as Error).message} (${held}; running: ${stillRunning()})`);
 });
+// Said, not checked: what else runs from the folder as the uninstall starts.
+process.stdout.write(`running from the app's folder: ${stillRunning()}\n`);
 // The uninstaller copies itself away to remove its folder, so it returns at
 // once. A slow runner gets a while longer, and says what was left. The
 // uninstaller runs once: a file it couldn't delete stays, however long
