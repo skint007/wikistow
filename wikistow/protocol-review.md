@@ -1240,6 +1240,32 @@ Round 40 reviewed the narrowed revision (11a6fe7) with the three briefs, fresh r
 
 **Outcome.** Round 40 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but S40-1, accepted in A2 as a property of the frozen rotation. Round 41 repeats the three briefs against this revision.
 
+## Round 41: identity key rotation, narrowed, second review
+
+Round 41 reviewed round 40's revision (983a86c), with fresh reviewers given the narrowed text, the log of rounds 31 to 40 and the list of what earlier rounds accepted: the member and encoding briefs as Claude subagents. **The server brief didn't run.** Its Codex (gpt-6.2-sol) agent was refused by its provider's content filter partway through, as in rounds 33 and 39, and again on the one retry, worded as a review of whether the specification's outcomes match its own goals and accepted limits. So round 41 had two of the three briefs, and can't meet the stopping rule whatever it found. The two found no Critical finding, 2 High, 7 Medium, 8 Low and no Info (17 in all). Both found the narrowing applied consistently, and round 40's fixes holding where they reached; the Highs were one step past them: an honest co-owner's own rotation turning the exception for spaces with no trusted owner on, and a retried removal letting the removed owner's new key choose who gets the new versions. Section numbers are protocol.md's after the fixes.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| M41-1 | 41 | High | 4.6 **When no owner the app trusts can add them again**; finishing | A co-owner's own rotation, while a rotated owner nobody added again was listed, left the members no trusted owner, so their apps accepted that owner's key through the chain, with no server help, and the server's refusal of their owner actions lapsed too. | Fixed: §4.6 **Before it sends the rotation** and ADR decision 2. The rotating app first asks the person to add such an owner again or remove them, and sends its rotation only then. A15 says so. |
+| E41-F1 | 41 | High | 4.6 **Removing a rotated owner instead**; 7.6 **If the request fails** | Once the removal's contacts write recorded the new key, a retry couldn't tell it from a key the app had accepted, so the new key's envelopes put people into `E` again. | Fixed: §4.6. In every removal, a retry and another device's included, envelopes sealed with a key above the lowest the app records for that owner add nobody to `E`. |
+| M41-2 | 41 | Medium | 4.6 **When no owner the app trusts**; ADR decision 6 | The exception accepted owners whether or not listed, so it brought back, in members' apps, an owner a co-owner had removed. | Fixed: §4.6. Unlisted owners count only as signers of statements reaching the listed owners, never for writing or opening what they sealed. |
+| M41-3 | 41 | Medium | 4.6 **Adding a rotated owner again**; 7.6 | A re-add that recorded the new key and then failed left the space stuck with nothing offering to finish it. | Fixed: §4.6. The re-add stays pending until the server serves its statement, the app offering only to send it again, as a failed removal does. Same as E41-F5. |
+| M41-4 | 41 | Medium | 4.6 **Removing a rotated owner instead**; 7.9 | After the removal, members could never open what was wrapped under the versions the removed owner's new key sealed. | Fixed: §4.6. The remover wraps those records again under the new version. |
+| E41-F2 | 41 | Medium | 4.6 **Owners**, **Using an earlier key** | Only one key of a chain was recorded, so versions sealed with keys between couldn't be opened or sealed on. | Fixed: §4.6. Every key of the chain between is recorded too, for opening only. |
+| E41-F3 | 41 | Medium | 4.6 **Adding a rotated owner again** | A rotated sole owner's added-at version never moved, so once they added a co-owner the server refused their owner actions for good. | Fixed: the server moves it when it lets them act because no owner is listed at theirs; rows from before keep key version 1. |
+| E41-F4 | 41 | Medium | 4.6 **The person's own app**; 6.5 **Opening** | Replacing the person's own retired-key `owners` entries dropped what those keys sealed from opening, for their agents among others. | Fixed: the current-key entry goes beside them. |
+| E41-F5 | 41 | Medium | 4.6; 7.6 | Same as M41-3. | Fixed with M41-3. |
+| M41-5 | 41 | Low | 4.6 **Adding a rotated owner again** | An owner could add themself again, moving their added-at version with nobody vouching. | Fixed: the server refuses a co-owner add naming the caller. |
+| M41-6 | 41 | Low | 4.6 **Shares left at an earlier key** | **Rotate keys** was offered where it can only stop at `unaccepted-owner`. | Fixed: it offers to add that owner again or remove them. |
+| M41-7 | 41 | Low | 4.6 | "An owner's own app always accepts itself" is wrong for co-owners, and a cross-reference pointed at finishing. | Fixed: the exception applies only in apps the server doesn't list as an owner; the reference corrected. Same as E41-L2 in part. |
+| E41-L1 | 41 | Low | 4.6 **Live sessions in the owner region** | `sealedToKeys`' `null`, malformed entries and a repeated `sealedTo` ID were unstated. | Fixed. |
+| E41-L2 | 41 | Low | 4.6 | Same as M41-7. | Fixed with M41-7. |
+| E41-L3 | 41 | Low | 6.8; 4.6 | The raised mark had two triggers, one without a verified envelope. | Fixed: both need the envelope's signature to verify under a later key on a valid chain. |
+| E41-L4 | 41 | Low | 4.6 | "Their current key" had three readings. | Fixed: the last key of the valid chain verified to the directory's current row. |
+| E41-L5 | 41 | Low | 8.2; 4.6 | An `owners` entry at a removed key counted for opening, where section 8.2 accepts nothing a removed key signed. | Fixed: it counts for nothing. |
+
+**Outcome.** Round 41 found Highs, and ran without the server brief, so it doesn't meet the stopping rule. Every finding is fixed. Round 42 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
