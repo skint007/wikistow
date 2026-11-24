@@ -1291,6 +1291,82 @@ describe('two people formatting the same text at once (#720)', () => {
     expect(bodyOf(sideB)).toBe(bodyOf(sideA));
   });
 
+  it('keeps tag text in maths and code as main does', async () => {
+    for (const [was, mine, theirs] of [
+      [line('$world$'), line(`$${hi('world')}$`), line(`$${red('span', 'world')}$`)],
+      [
+        '$$\nworld\n\nmore\n$$\n',
+        `$$\n${hi('world')}\n\nmore\n$$\n`,
+        `$$\n${red('span', 'world')}\n\nmore\n$$\n`,
+      ],
+      ['Use `<pan>` here.\n', 'Use `<span>` here.\n', 'Use `pan>` here.\n'],
+      ['Use `<pan>` here.\n', 'Use `<span>` here.\n', 'Use ahere.\n'],
+      ['    <spn>\n', '    <span>\n', '    spn>\n'],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('settles code put on a word someone highlights', async () => {
+    for (const aLower of orders) {
+      const [mine, theirs] = [line(hi('world')), line('`world`')];
+      expect([mine, theirs, line(hi('`world`'))]).toContain(
+        await merged(line('world'), mine, theirs, aLower),
+      );
+    }
+  });
+
+  it('puts back only the tag text taken out, not a word someone deleted', async () => {
+    const page = `Hello ${hi('world')} there.\n`;
+    const blue = red('mark', 'world', 'blue');
+    for (const aLower of orders) {
+      const [a, b] = start(page, aLower);
+      const c = { doc: docOf('', 3_000, a.doc) };
+      a.editor.shown = page.replace(hi('world'), blue);
+      b.editor.shown = page.replace(hi('world'), 'world');
+      a.binding.write();
+      b.binding.write();
+      c.doc.getText('body').delete(0, 'Hello '.length);
+      await exchange([a, b, c]);
+      for (const s of [a, b, c]) expect(bodyOf(s)).toBe(`${blue} there.\n`);
+    }
+  });
+
+  it('leaves the colour’s letters as main does when the other typed on the line too', async () => {
+    const was = line(hi('world'));
+    const mine = line(red('mark', 'world', 'blue'));
+    for (const theirs of ['Goodbye all.\n\nNext.\n', line('earth')])
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+    // Two highlights side by side, each recoloured by one and taken off by the other.
+    const pair = `Hello ${hi('world')}${red('mark', 'there', 'green')}.\n`;
+    const one = `Hello ${red('mark', 'world', 'blue')}there.\n`;
+    const other = `Hello world${red('mark', 'there', 'purple')}.\n`;
+    for (const aLower of orders)
+      expect(await merged(pair, one, other, aLower)).toBe(byCharacter(pair, one, other, aLower));
+  });
+
+  it('repairs after the person typed and took back a character in the source pane', async () => {
+    for (const aLower of orders) {
+      const [a, b] = start(line('world'), aLower);
+      const body = a.doc.getText('body');
+      body.insert(5, '!');
+      body.delete(5, 1);
+      await exchange();
+      a.editor.shown = line(hi('world'));
+      b.editor.shown = line(red('span', 'world'));
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(aLower ? line(red('span', 'world')) : line(hi('world')));
+      expect(bodyOf(b)).toBe(bodyOf(a));
+    }
+  });
+
   it('leaves a block broken when the one to repair it is gone', async () => {
     const [a, b] = start(line('world'), true);
     a.editor.shown = line(hi('world'));

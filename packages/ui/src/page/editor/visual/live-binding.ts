@@ -240,28 +240,30 @@ export class VisualBinding {
   }
 
   // Blocks others' changes, merged with its own, left not reading cleanly,
-  // put back as it wrote them, if it's the one to.
-  #repair() {
+  // put back as it wrote them, if it's the one to; and `body`, if it read
+  // it and changed nothing.
+  #repair(): string | null {
     // What the person typed elsewhere, as in split view's source pane, isn't anyone's to undo.
-    if (this.#writings.length === 0 || this.#local !== this.#localTaken) return;
+    if (this.#writings.length === 0 || this.#local !== this.#localTaken) return null;
     const text = this.#body.text;
     const body = text.toJSON();
-    if (body === this.#held) return;
+    if (body === this.#held) return body;
     const changes = repairs(
       text,
       body,
       this.#held,
-      this.#mapNow(body),
+      () => this.#mapNow(body),
       this.#writings,
       performance.now(),
     );
-    if (changes.length === 0) return;
+    if (changes.length === 0) return body;
     this.#body.edit(() =>
       text.doc?.transact((transaction) => {
         transaction.meta.set(REPAIR, this);
         this.#wrote(transaction.doc, transaction, () => putInto(text, changes));
       }),
     );
+    return null;
   }
 
   /** Text was given from elsewhere, which `body` holds: catch up with it soon. */
@@ -306,11 +308,11 @@ export class VisualBinding {
     if (!this.#body.active()) return;
     // The editor's own edit, before others' changes go in over it.
     this.write();
-    this.#repair();
-    const text = this.#body.text.toJSON();
+    const text = this.#repair() ?? this.#body.text.toJSON();
     if (text === this.#held) {
       // As changes that changed nothing it shows leave it: the same again.
       this.#map = Mapping.identity(text.length);
+      this.#localTaken = this.#local;
       return this.#caughtUp();
     }
     const pending: Pending = { text, map: Mapping.identity(text.length) };
