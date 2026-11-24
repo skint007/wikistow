@@ -13,7 +13,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { signedInPerson } from './support/accounts.ts';
 import { personWithVault, rejection } from './support/content.ts';
-import { copyAll } from './support/copies.ts';
+import { openCopy } from './support/copies.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
 import { invite, shareFolder, type Person } from './support/sharing.ts';
 
@@ -91,41 +91,50 @@ const permissionVersion = async (spaceId: string) => {
 };
 
 describe('ending a public link while its copy’s uploader is suspended', () => {
-  // Each ends the page's link, with the owner's copy, as the owner.
-  const endings: [string, (w: World) => Promise<unknown>][] = [
+  // Each gets ready, then answers the step that ends the page's link, with
+  // the owner's copy, as the owner.
+  const endings: [string, (w: World) => Promise<() => Promise<unknown>>][] = [
     [
       'unpublishing it',
       async ({ owner, page }) => {
         const { heads, permissionVersion } = await pages.loadPage(owner.ctx, page.pageId);
-        if (!heads.publishedHead) throw new Error('expected a publication');
-        await pages.unpublishPage(owner.ctx, page, {
-          publishedHead: heads.publishedHead,
-          permissionVersion,
-        });
+        const publishedHead = heads.publishedHead;
+        if (!publishedHead) throw new Error('expected a publication');
+        return () => pages.unpublishPage(owner.ctx, page, { publishedHead, permissionVersion });
       },
     ],
-    ['turning its link off', ({ owner, page }) => links.turnOff(owner.ctx, page.pageId)],
+    [
+      'turning its link off',
+      async ({ owner, page }) =>
+        () =>
+          links.turnOff(owner.ctx, page.pageId),
+    ],
     [
       'removing its sharer from the share',
-      ({ owner, sharer, shareId, page }) =>
-        sharing.removeMember(owner.ctx, {
-          spaceId: page.spaceId,
-          shareId,
-          identityId: sharer.vault.identity.public.id,
-        }),
+      async ({ owner, sharer, shareId, page }) =>
+        () =>
+          sharing.removeMember(owner.ctx, {
+            spaceId: page.spaceId,
+            shareId,
+            identityId: sharer.vault.identity.public.id,
+          }),
     ],
     [
       'moving it to the trash',
-      ({ owner, page }) =>
-        pages.deleteNode(owner.ctx, { spaceId: page.spaceId, nodeId: page.pageId }),
+      async ({ owner, page }) =>
+        () =>
+          pages.deleteNode(owner.ctx, { spaceId: page.spaceId, nodeId: page.pageId }),
     ],
     [
       'deleting its space',
-      async ({ owner, page }) =>
-        spaceOperations.deleteSpace(owner.ctx, {
-          spaceId: page.spaceId,
-          permissionVersion: await permissionVersion(page.spaceId),
-        }),
+      async ({ owner, page }) => {
+        const version = await permissionVersion(page.spaceId);
+        return () =>
+          spaceOperations.deleteSpace(owner.ctx, {
+            spaceId: page.spaceId,
+            permissionVersion: version,
+          });
+      },
     ],
     [
       'moving it into another space where its mover can’t publish',
@@ -141,7 +150,7 @@ describe('ending a public link while its copy’s uploader is suspended', () => 
           rootId: folder,
           people: [await invite(sharer, owner, 'editor')],
         });
-        await copyAll(owner.ctx, {
+        const copy = await openCopy(owner.ctx, {
           kind: 'move',
           from: page.spaceId,
           nodeId: page.pageId,
@@ -149,12 +158,16 @@ describe('ending a public link while its copy’s uploader is suspended', () => 
           parentId: folder,
           published: false,
         });
+        await copy.open();
+        await copy.send();
+        return () => copy.finish();
       },
     ],
   ];
 
-  it.each(endings)('waits for the suspension after %s (#679)', async (_, end) => {
+  it.each(endings)('waits for the suspension after %s (#679)', async (_, ready) => {
     const w = await world();
+    const end = await ready(w);
     let ended: Promise<string | undefined> | undefined;
     let suspended: Promise<number> | undefined;
     // This transaction holds the copy, so the ending stops there, holding
@@ -165,7 +178,7 @@ describe('ending a public link while its copy’s uploader is suspended', () => 
       await tx.execute(
         sql`select id from public_copies where page_id = ${w.page.pageId} for update`,
       );
-      ended = rejection(end(w));
+      ended = rejection(end());
       await waitingOrSettled(ended, 1);
       suspended = suspend(w.owner);
       await waitingOrSettled(suspended, 2);
