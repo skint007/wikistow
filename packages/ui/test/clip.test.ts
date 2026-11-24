@@ -8,6 +8,7 @@ import {
   keptOperations,
   memoryKeptStore,
   newId,
+  newPayload,
   PageId,
   RevisionId,
   SpaceId,
@@ -270,6 +271,7 @@ function fakeWriter({
     draft() {
       return {
         waitingHead: async () => null,
+        waitingChange: async () => null,
         save: async (input: DraftSave) => {
           calls.push({ call: 'save', input });
           if (refuse === 'save') throw new ApiError(409, 'stale-head', 'Stale');
@@ -736,7 +738,7 @@ describe('saving a screenshot', () => {
     });
 
     it('keeps it, with the note and link, if the screenshot can’t be added', async () => {
-      for (const refuse of ['attach', 'attach-failed', 'save'] as const) {
+      for (const refuse of ['attach', 'attach-failed'] as const) {
         const { writer, calls } = fakeWriter({ refuse });
         const saved = await saveClip(partly(), deps({ writer }));
         expect(saved.outcome).toMatchObject({
@@ -747,6 +749,17 @@ describe('saving a screenshot', () => {
         expect(calls.map((c) => c.call)).not.toContain('deleteNode');
         expect(calls.map((c) => c.call)).not.toContain('newPageDraft');
       }
+    });
+
+    it('says its page changed if the server has a newer draft of it', async () => {
+      const { writer, calls } = fakeWriter({ refuse: 'save' });
+      const saved = await saveClip(partly(), deps({ writer }));
+      expect(saved.outcome).toMatchObject({
+        ok: false,
+        code: 'failed',
+        message: expect.stringContaining('Its page changed since WikiStow made it'),
+      });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'save']);
     });
 
     it('keeps it if the screenshot is gone, making nothing', async () => {
@@ -907,6 +920,57 @@ describe('a lock while an offline clip saves', () => {
     expect((page as QueuedPage).newPage).toBeFalsy();
     const { payload } = page as QueuedPage;
     expect(payload.markdown).toContain(`![Screenshot](attachment:${payload.attachments[0]!.id})`);
+  });
+
+  it('leaves the page a lock cut short as the person changed it, rather than write over it', async () => {
+    const store = memoryKeptStore();
+    const main = mainCopy();
+    const first = screenshotClip();
+    const locked = await unlock(store, { lockAfterAttach: true });
+    await saveClip(first, deps({ writer: locked.writer, made: main.made, convert: plainText }));
+    // Unlocked, the person writes in the page before the clip is saved again.
+    const again = await unlock(store);
+    const { pageId, spaceId: at } = main.copy()!;
+    const drafts = again.writer.draft({ spaceId: at, pageId }, { seen: null });
+    const basedOn = (await drafts.waitingHead())!;
+    await drafts.save({ basedOn, payload: newPayload({ title: 'Mine', markdown: 'My words\n' }) });
+    const after = await saveClip(
+      { ...first, made: main.copy() },
+      deps({ writer: again.writer, made: main.made, convert: plainText }),
+    );
+    expect(after.outcome).toMatchObject({ ok: false, code: 'failed' });
+    const [page, ...others] = await pages(again.kept);
+    expect(others).toEqual([]);
+    expect((page as QueuedPage).payload).toMatchObject({ title: 'Mine', markdown: 'My words\n' });
+  });
+
+  it('finds the screenshot saved already when a reload came just after, adding no other', async () => {
+    const store = memoryKeptStore();
+    const told: ClipMade[] = [];
+    const { kept, writer } = await unlock(store);
+    const first = screenshotClip();
+    const before = await saveClip(
+      first,
+      deps({ writer, made: async (page) => void told.push(page), convert: plainText }),
+    );
+    expect(before.outcome).toMatchObject({ ok: true });
+    const [saved] = (await pages(kept)) as QueuedPage[];
+    // Main heard it was made partly, but not yet that it is whole.
+    const partly = told.find((page) => page.partial)!;
+    const after = await saveClip({ ...first, made: partly }, deps({ writer, convert: plainText }));
+    expect(after.outcome).toMatchObject({ ok: true, pageId: partly.pageId });
+    const [page, ...others] = await pages(kept);
+    expect(others).toEqual([]);
+    expect((page as QueuedPage).payload.attachments).toEqual(saved!.payload.attachments);
+  });
+
+  it('keeps the properties of the page a lock cut short when it adds the screenshot', async () => {
+    const { kept, after } = await saveAcrossLock(screenshotClip(), plainText, {
+      today: '2026-11-14',
+    });
+    expect(after.outcome).toMatchObject({ ok: true });
+    const [page] = await pages(kept);
+    expect((page as QueuedPage).payload.markdown).toContain('clipped: 2026-11-13');
   });
 
   it('says a text clip’s images a lock stopped weren’t saved, keeping them as links', async () => {

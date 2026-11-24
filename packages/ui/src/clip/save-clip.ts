@@ -16,9 +16,11 @@ import {
   QueueClosed,
   RevisionId,
   linkSpans,
+  splitFrontmatter,
   type AttachmentRef,
   type LinkSpans,
   type PageWriter,
+  type WaitingChange,
 } from '@wikistow/client';
 import type { ClipImage, ClipMade, ClipOutcome, DesktopClip } from '@wikistow/contracts';
 import {
@@ -335,6 +337,10 @@ async function pageText(
 }
 
 const KEPT = 'Its page keeps your note and link.';
+const CHANGED =
+  'Its page changed since WikiStow made it, so the screenshot wasn’t added. Check whether it shows it.';
+
+const bodyOf = (markdown: string) => splitFrontmatter(markdown).body;
 
 /**
  * Add the screenshot to its page made partly before a reload or a lock:
@@ -350,8 +356,47 @@ async function finishPartly(
   if (!shot) return failed('failed', `WikiStow couldn’t read this screenshot. ${KEPT}`);
   const text = await pageText(clip, shot, deps);
   if ('outcome' in text) return text;
+  const title = clipTitle(clip);
   const { spaceId, pageId, path } = made;
   const page = { spaceId, pageId };
+  const done: Saved = {
+    outcome: {
+      ok: true,
+      spaceId,
+      pageId,
+      title,
+      path,
+      images: { saved: 1, skipped: 0 },
+      faithful: text.faithful,
+    },
+    place: null,
+  };
+  const drafts = deps.writer.draft(page, { seen: null });
+  // Its change waiting on this device, read before anything is written, so
+  // a save into it since is a conflict (`seen`).
+  let head: RevisionId | null;
+  let waiting: WaitingChange | null;
+  try {
+    head = await drafts.waitingHead();
+    waiting = await drafts.waitingChange();
+  } catch {
+    return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+  }
+  if (waiting) {
+    const { payload } = waiting;
+    const body = bodyOf(payload.markdown);
+    // Saved with the screenshot already, just before a reload: done.
+    if (
+      payload.title === title &&
+      payload.attachments.some((a) => body === bodyOf(text.shown(a.id)))
+    ) {
+      await deps.made?.({ spaceId, pageId, path }).catch(() => {});
+      return done;
+    }
+    // Changed since it was made, as the person can while another clip
+    // saves first: theirs, not written over. Its properties may change.
+    if (payload.title !== title || body !== bodyOf(text.first)) return failed('failed', CHANGED);
+  }
   let ref: AttachmentRef;
   try {
     ref = await deps.writer.attach(page, {
@@ -367,35 +412,25 @@ async function finishPartly(
       ? failed('too-large', `This screenshot is larger than your WikiStow server takes. ${KEPT}`)
       : failed('failed', `${SHOT_FAILED} ${KEPT}`);
   }
+  // On its change waiting here, keeping the properties it has there, or
+  // else on the first draft it was made with: a draft saved on the server
+  // since, by the person or by this save before a reload, is a conflict.
+  const basedOn = head ?? made.revisionId;
+  if (!basedOn) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+  const shown = text.shown(ref.id);
+  const markdown = waiting
+    ? (splitFrontmatter(waiting.payload.markdown).frontmatter ?? '') + bodyOf(shown)
+    : shown;
   try {
-    const drafts = deps.writer.draft(page, { seen: null });
-    // On its change waiting here, the clip's own, as this comes as soon as
-    // the app loads or unlocks, or else on the first draft it was made
-    // with: a draft saved on the server since is a conflict, not written over.
-    const basedOn = (await drafts.waitingHead()) ?? made.revisionId;
-    if (!basedOn) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
     await drafts.save({
       basedOn,
-      payload: {
-        ...newPayload({ title: clipTitle(clip), markdown: text.shown(ref.id) }),
-        attachments: [ref],
-      },
+      payload: { ...newPayload({ title, markdown }), attachments: [ref] },
     });
   } catch (error) {
     if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
+    if (error instanceof ApiError && error.code === 'stale-head') return failed('failed', CHANGED);
     return failed('failed', `${SHOT_FAILED} ${KEPT}`);
   }
   await deps.made?.({ spaceId, pageId, path }).catch(() => {});
-  return {
-    outcome: {
-      ok: true,
-      spaceId,
-      pageId,
-      title: clipTitle(clip),
-      path,
-      images: { saved: 1, skipped: 0 },
-      faithful: text.faithful,
-    },
-    place: null,
-  };
+  return done;
 }
