@@ -207,6 +207,25 @@ describe('its own edits', () => {
     await expect.poll(() => shownText(m)).toContain('The black cat sat down.');
   });
 
+  it('keep a space typed at a block’s end when someone else changes it or the next', async () => {
+    // Read again, the block lost the space, and the next letter typed took its place (#691).
+    const s = session('Beans in May.\n\nCompost in March.\n');
+    const m = await mount(s);
+    type(m, 'May.', ' Water ', 4);
+    s.theirs('sam', (text) => text.insert(text.length - 1, ' Peas'));
+    await expect.poll(() => shownText(m)).toBe('Beans in May. Water Compost in March. Peas');
+    type(m, 'Water', 'd', 6);
+    s.theirs('sam', (text) => text.insert(0, 'Big '));
+    await expect.poll(() => shownText(m)).toBe('Big Beans in May. Water dCompost in March. Peas');
+    type(m, 'Water', 'aily. ', 7);
+    m.handle.read();
+    s.theirs('sam', (text) => text.insert(0, 'Two '));
+    await expect.poll(() => shownText(m)).toContain('Two Big');
+    type(m, 'daily.', '!', 7);
+    m.handle.read();
+    expect(s.text.toJSON()).toBe('Two Big Beans in May. Water daily. !\n\nCompost in March. Peas\n');
+  });
+
   it('keep an emoji whole on a CRLF page', async () => {
     const s = session('Smile 😀 here.\r\n\r\nNext.\r\n');
     const m = await mount(s);
