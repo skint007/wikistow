@@ -294,6 +294,10 @@ These were decided without Scott, in writing question 11's answer. Each can be c
 - **Copying out is allowed**, as it writes only in the other space. Changes queued offline wait, sealed on the device, rather than being dropped.
 - **A closed space counts as having no version that counts for writing**, so every rule that writes under, rotates from or seals a version of it stops by the existing writing check, and agents refuse with `space-closed`.
 
+## Parked (2026-11-24)
+
+**Scott parked #327 on 2026-11-24** (question 12 below, "Park #327"). The ADR stays proposed and unmerged. It should be picked up again once the protocol has an owner-signed list of a space's owners, which would make the open case visible in a signed record. Until then, replacing lost keys through recovery remains the only path. Thirty-two review rounds (31 to 62 in protocol-review.md, numbered after ADR 0019's) are logged. The decisions in questions 1 to 11 stand for when the work resumes. The two choices in **Closing a space** made without Scott (removing the declined owner, and leaving not reopening the space) still need his confirmation then.
+
 ## Open after rounds 59 to 62 (2026-11-24)
 
 Four review rounds ran after question 11's answer without meeting the stopping rule (protocol-review.md, rounds 59 to 62), with 4, 2, 3 and 3 distinct Highs, none Critical. Closing the space held where it reads the contacts record: floors and `sealedFrom` are gone, and the record test agrees on every device and agent and with every merge row. Every High came from one case: a co-owner who adds the declined person, after the decline, at a key that then holds every key of the space. The record can't show that, so the rules learn of it from the space's owner statements, and each way of doing so (recording the statement's key in `owners`, closing on any key the decline makes a key change, reading statements before each write, taking signers at any key of their chain) produced the next round's Highs. Round 62's findings are open.
