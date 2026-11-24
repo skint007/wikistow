@@ -105,6 +105,39 @@ function hadIt(text: Y.Text, run: OwnRun, at: number, after: boolean): boolean {
   return inRun(run, item.rightOrigin);
 }
 
+/**
+ * Whether `run` went in beside what someone else put in from `from` to
+ * `to` in `text` after this app had it: Yjs put its first character after
+ * one of theirs, or its last before one.
+ */
+function ownHadIt(text: Y.Text, run: OwnRun, { from, to }: { from: number; to: number }): boolean {
+  const doc = text.doc;
+  if (!doc) return false;
+  const placeOf = (id: Y.ID | null) =>
+    id &&
+    Y.createAbsolutePositionFromRelativePosition(
+      Y.createRelativePositionFromJSON({ item: id }),
+      doc,
+    )?.index;
+  const within = (at: number | null | undefined) => at != null && at >= from && at < to;
+  const [first, last] = [run.start.item, run.end.item];
+  const firstItem = first && Y.getItem(doc.store, first);
+  const lastItem = last && Y.getItem(doc.store, last);
+  return (
+    (firstItem instanceof Y.Item &&
+      firstItem.id.clock === first?.clock &&
+      within(placeOf(firstItem.origin))) ||
+    (lastItem instanceof Y.Item && within(placeOf(lastItem.rightOrigin)))
+  );
+}
+
+/** Whether `run`'s tags don't all close in it, as one end of a tag over several words. */
+const endOfTag = (run: string) => {
+  const tags = run.match(/<\/?[A-Za-z][^<>]*>/g) ?? [];
+  const closing = tags.filter((tag) => tag.startsWith('</')).length;
+  return closing * 2 !== tags.length;
+};
+
 /** `text`'s words as one string with spaces either side, for a match of whole words. */
 const spaced = (text: string) => ` ${text.trim().split(/\s+/).join(' ')} `;
 
@@ -306,23 +339,36 @@ export class VisualBinding {
         continue;
       }
       const own = body.slice(from, to);
-      const words = spaced(wordsOf(own));
-      if (words === '  ') continue;
+      const words = wordsOf(own);
+      if (words.trim() === '') continue;
       let gone: { from: number; to: number } | null = null;
       for (const theirs of added) {
         if (theirs.to !== from && theirs.from !== to) continue;
-        if (hadIt(text, run, theirs.from === to ? theirs.from : theirs.to - 1, theirs.from === to))
-          continue;
-        // Formatting, as theirs must be: words with marks or tags, or, as
-        // when both take a mark off, none, as this run has none.
+        const after = theirs.from === to;
+        if (hadIt(text, run, after ? theirs.from : theirs.to - 1, after)) continue;
+        // Formatting, as theirs must be: words with marks or tags; or, as
+        // when both take a mark off, none, as this run has none; or any,
+        // when this run went in beside theirs, written before the editor
+        // showed it, as only this app can tell then.
         const put = body.slice(theirs.from, theirs.to);
-        const their = spaced(wordsOf(put));
-        const marked = wordsOf(put) !== put;
-        // The same words: the second goes. Some of theirs, whole: this one
-        // goes, and only ever this one, so text of theirs never does.
-        if (their === words && (marked || wordsOf(own) === own))
-          gone = theirs.from === to ? theirs : { from, to };
-        else if (marked && their.includes(words)) gone = { from, to };
+        const their = wordsOf(put);
+        const marked = their !== put;
+        // The same words, exactly, so nothing else put in beside them goes
+        // with them: the second goes. More words than these, whole, theirs
+        // with these among them: this one goes, and only ever this one, so
+        // text of theirs never does.
+        if (their === words && (marked || words === own || ownHadIt(text, run, theirs))) {
+          // One end of a tag over several words beside a whole run: the
+          // whole one goes, so the tag keeps both ends. Else the second.
+          const [mineEnd, theirEnd] = [endOfTag(own), endOfTag(put)];
+          const theirsGoes = mineEnd !== theirEnd ? mineEnd : after;
+          gone = theirsGoes ? theirs : { from, to };
+        } else if (
+          marked &&
+          spaced(their) !== spaced(words) &&
+          spaced(their).includes(spaced(words))
+        )
+          gone = { from, to };
         if (gone) break;
       }
       if (!gone) continue;
@@ -374,9 +420,10 @@ export class VisualBinding {
     this.#again = false;
     // Left, its typing goes nowhere: nothing goes in over it.
     if (!this.#body.active()) return;
-    this.#settleRuns();
-    // The editor's own edit, before others' changes go in over it.
+    // The editor's own edit, before others' changes go in over it, and
+    // before a run goes, which would take an edit in it with it.
     this.write();
+    this.#settleRuns();
     const text = this.#body.text.toJSON();
     if (text === this.#held) {
       // As changes that changed nothing it shows leave it: the same again.

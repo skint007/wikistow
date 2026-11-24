@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Live editing: two people formatting the same words in the visual editor at once, as one highlights a word while the other colours it, no longer leaves tags that cross or break, which the page then showed as raw HTML. The words keep the formatting of one of them. (#PR)
+- Live editing: two people formatting the same word in the visual editor at once, as one highlights it while the other colours it, no longer leaves tags that cross or break, which the page then showed as raw HTML. The word keeps the formatting of one of them. (#PR)
 
 ## 0.30.2 - 2026-11-23
 

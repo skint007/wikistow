@@ -765,8 +765,8 @@ describe('two people formatting the same text at once (#720)', () => {
       '<mark data-color="red">world</mark>',
       red('span', '<mark>world</mark>'),
     ],
-    // A word, and the words around it.
-    ['big world', 'big **world**', '==big world=='],
+    // A word, and a tag over it and the word before.
+    ['big world', 'big **world**', red('mark', 'big world')],
     // Both take the same mark off.
     ['**world** and', 'world and', 'world and'],
   ])('from %s, settles each way of formatting it to one', async (was, mine, theirs) => {
@@ -825,7 +825,98 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
+  it('keeps what a third person put in beside the run that goes', async () => {
+    for (const aFirst of orders) {
+      const [a, b] = start('Hello world there.\n', aFirst);
+      // Carol, from the same text, starts a paragraph after "world".
+      const carol = new Y.Doc();
+      Y.applyUpdate(carol, Y.encodeStateAsUpdate(a.doc));
+      carol.getText('body').insert(11, '\n\n');
+      a.editor.shown = 'Hello **world** there.\n';
+      b.editor.shown = 'Hello ==world== there.\n';
+      a.binding.write();
+      b.binding.write();
+      for (const s of [a, b]) Y.applyUpdate(s.doc, Y.encodeStateAsUpdate(carol), 'remote');
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(['Hello **world**\n\n there.\n', 'Hello ==world==\n\n there.\n']).toContain(bodyOf(a));
+    }
+  });
+
+  it('writes an edit in its run before the run goes', async () => {
+    for (const aFirst of orders) {
+      const [a, b] = start('Hello world there.\n', aFirst);
+      a.editor.shown = 'Hello **world** there.\n';
+      b.editor.shown = 'Hello ==world== there.\n';
+      a.binding.write();
+      b.binding.write();
+      send(a, b);
+      // Before Bea's editor takes Al's in, she takes the "l" out.
+      b.editor.shown = 'Hello ==word== there.\n';
+      await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(bodyOf(a)).toContain('==word==');
+    }
+  });
+
+  it('settles a run written before the editor showed theirs', async () => {
+    for (const aFirst of orders) {
+      const [a, b] = start('Hello **world** there.\n', aFirst);
+      a.editor.shown = 'Hello world there.\n';
+      a.binding.write();
+      send(a, b);
+      // Bea highlights it as her editor still shows it, bold.
+      b.editor.shown = 'Hello ==**world**== there.\n';
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(['Hello world there.\n', 'Hello ==**world**== there.\n']).toContain(bodyOf(a));
+    }
+  });
+
+  it('formats words apart as runs apart, leaving the words between', async () => {
+    for (const aFirst of orders) {
+      const [a, b] = start('one middle three\n', aFirst);
+      a.editor.shown = '**one** middle **three**\n';
+      b.editor.shown = 'one three\n';
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe('**one** **three**\n');
+      expect(bodyOf(b)).toBe('**one** **three**\n');
+    }
+  });
+
+  it('keeps an edit among the words someone marks at once as they made it', async () => {
+    for (const [mine, theirs, merged] of [
+      [
+        'The ==quick brown fox jumps over the== dog.\n',
+        'The quick red fox jumps over the dog.\n',
+        'The ==quick red fox jumps over the== dog.\n',
+      ],
+      [
+        `The ${red('mark', 'quick brown fox')} jumps.\n`,
+        'The quick fox jumps.\n',
+        `The ${red('mark', 'quick fox')} jumps.\n`,
+      ],
+    ] as const)
+      for (const aFirst of orders) {
+        const [a, b] = start(mine.replace(/==|<[^>]*>/g, ''), aFirst);
+        a.editor.shown = mine;
+        b.editor.shown = theirs;
+        a.binding.write();
+        b.binding.write();
+        await exchange();
+        expect(bodyOf(a)).toBe(merged);
+        expect(bodyOf(b)).toBe(merged);
+      }
+  });
+
   it('types a mark alone by character, as in code', () => {
+    expect(ownChanges('a `world` b\n', 'a `<em>world` b\n')).toEqual([
+      { from: 3, remove: 0, insert: '<em>' },
+    ]);
     expect(ownChanges('x foo_bar y\n', 'x foo__bar y\n')).toEqual([
       { from: 6, remove: 0, insert: '_' },
     ]);

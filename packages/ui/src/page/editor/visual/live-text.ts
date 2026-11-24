@@ -97,12 +97,14 @@ type Stretch = { from: number; to: number; nowFrom: number; nowTo: number; chang
  * now `now`, with formatting put in as runs (#720). A stretch of whole
  * words, parted by spaces outside HTML tags, whose words stay the same
  * (`wordsOf`) while two marks or more change, as a mark has two ends, or a
- * tag does, goes in as one run; formatted stretches together on a line as
- * one. So two people formatting the same words at once, whatever marks
- * each adds or takes off, each put in a whole run in place of the same
- * characters, which the binding settles to one, where by character the
- * changes interleave into tags neither wrote. Typing, and one mark typed,
- * as `_` in code, go in by character as before.
+ * tag does (outside code), goes in as one run: of a tag over several
+ * words, each end's word its own. So two people formatting the same words
+ * at once, whatever marks each adds or takes off, each put in a whole run
+ * in place of the same characters, which the binding settles to one,
+ * where by character the changes interleave into tags neither wrote.
+ * Typing, one mark typed, as `_` in code, and a mark over several words,
+ * whose ends are a mark each, go in by character as before, so what
+ * someone else does among the words a mark covers stays as they did it.
  */
 function inRuns(changes: TextChange[], was: string, now: string, at: number): TextChange[] {
   const parts = partsOf(was);
@@ -128,36 +130,23 @@ function inRuns(changes: TextChange[], was: string, now: string, at: number): Te
     const words = wordsOf(was.slice(stretch.from, stretch.to));
     return words !== '' && words === wordsOf(now.slice(stretch.nowFrom, stretch.nowTo));
   };
+  // A tag, or two marks or more, changed in it: the whole formatting of its words.
+  const tags = (text: string) =>
+    text
+      .replace(/`[^`\n]*`/g, '')
+      .match(TAG)
+      ?.join('') ?? '';
+  const whole = (s: Stretch) =>
+    s.changes.length >= 2 || tags(was.slice(s.from, s.to)) !== tags(now.slice(s.nowFrom, s.nowTo));
+  const run = (stretch: Stretch): TextChange => ({
+    from: stretch.from + at,
+    remove: stretch.to - stretch.from,
+    insert: now.slice(stretch.nowFrom, stretch.nowTo),
+    run: true,
+  });
   const out: TextChange[] = [];
-  let group: Stretch[] = [];
-  const tags = (text: string) => text.match(TAG)?.join('') ?? '';
-  const flush = () => {
-    const stretches = group;
-    group = [];
-    const [first, last] = [stretches[0], stretches.at(-1)];
-    if (!first || !last) return;
-    const all = stretches.flatMap((stretch) => stretch.changes);
-    const tagged = stretches.some(
-      (s) => tags(was.slice(s.from, s.to)) !== tags(now.slice(s.nowFrom, s.nowTo)),
-    );
-    if (all.length < 2 && !tagged) return void out.push(...all);
-    out.push({
-      from: first.from + at,
-      remove: last.to - first.from,
-      insert: now.slice(first.nowFrom, last.nowTo),
-      run: true,
-    });
-  };
-  for (const stretch of stretches) {
-    const last = group.at(-1);
-    if (last && was.slice(last.to, stretch.from).includes('\n')) flush();
-    if (formatted(stretch)) group.push(stretch);
-    else {
-      flush();
-      out.push(...stretch.changes);
-    }
-  }
-  flush();
+  for (const stretch of stretches)
+    out.push(...(formatted(stretch) && whole(stretch) ? [run(stretch)] : stretch.changes));
   if (!out.some((change) => change.run)) return changes;
   // Only as the changes were: each run makes what they made.
   const local = out.map((change) => ({ ...change, from: change.from - at }));
