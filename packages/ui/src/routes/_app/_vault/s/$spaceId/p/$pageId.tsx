@@ -108,6 +108,7 @@ import {
 } from '../../../../../../page/reading-changes';
 import {
   applyChanges,
+  madeIn,
   onlyTicked,
   originOf,
   pageFlushing,
@@ -785,12 +786,16 @@ function PageBody({
             markdown: shownMarkdown,
             rights,
             // What it was made on, as shown now: offline, a change made before
-            // another tab changed the page is left out (#700).
+            // another tab changed the page is left out (#700). A tick keeps the
+            // text it was made in, as its offset may be another task's in newer text (#703).
             change: (made: ReadingChange) =>
-              reading.add(made, { version: change?.version ?? null, publishedOn: revisionId }),
+              reading.add(madeIn(made, shownMarkdown, readMarkdown ?? shownMarkdown), {
+                version: change?.version ?? null,
+                publishedOn: revisionId,
+              }),
           }
         : null,
-    [model.view, shownMarkdown, reading, rights, change?.version, revisionId],
+    [model.view, shownMarkdown, readMarkdown, reading, rights, change?.version, revisionId],
   );
   // A copy names its source only inside its payload: a label, never a link,
   // and named only once this app has checked it against the source.

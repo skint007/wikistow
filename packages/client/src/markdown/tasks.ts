@@ -15,11 +15,19 @@ import { wikilinkFromMarkdown, wikilinkSyntax } from './wikilink.ts';
 //
 // Offsets are UTF-16, into the whole Markdown.
 
-/** A task item as ticked: where its list item starts, its line's text after the box, and whether it's done. */
-export type TaskChange = { offset: number; line: string; checked: boolean };
+/** A task item: where its list item starts, its line's text after the box, and whether it's done. */
+type Task = { offset: number; line: string; checked: boolean };
+
+/**
+ * A task item as ticked, and where that's known, what it was ticked in
+ * (`madeIn`): the whole Markdown, and whether more than one task had its
+ * line there. In other text, its offset may be another task with the same
+ * line (#703).
+ */
+export type TaskChange = Task & { madeIn?: { markdown: string; repeated: boolean } };
 
 /** A task item found in a page's Markdown. */
-export type TaskItem = TaskChange & {
+export type TaskItem = Task & {
   /** Where the character between its brackets is: a space, `x` or `X`. */
   mark: number;
 };
@@ -115,13 +123,19 @@ export function forgetTaskItems() {
  * `markdown` with the task `change` names ticked (`checked`) or not. It is
  * the task item at `change.offset` if its line is still `change.line`,
  * never a box in code that now starts where a task did (#700); otherwise
- * the only task item with that line. A task already as asked is left as
- * it is, `[X]` included, so a change made twice changes nothing more. A
- * task that is gone, or whose line more than one task has, is refused
+ * the only task item with that line. Where `markdown` isn't the text it
+ * was ticked in (`change.madeIn`), a line more than one task has, there or
+ * here, is refused: someone may have swapped two sections meanwhile,
+ * putting another task with that line where it was, or leaving only the
+ * other one (#703). Any change counts, a tick included, as two sections
+ * may differ only in what is ticked, though not a box's `[X]` for `[x]`.
+ * A task already as asked is left as it is, `[X]` included, so a change
+ * made twice changes nothing more. A task that is gone, or whose line more
+ * than one task has where the offset can't tell them apart, is refused
  * with why. `items` gives the task items, by default `taskIndex(markdown)`:
  * those of a text this one differs from only in what is ticked hold for
- * it too, their boxes as this text has them, as ticking moves no block,
- * so changes made one after another parse the page once.
+ * it too, their boxes as this text has them, as ticking moves no block, so
+ * changes made one after another parse the page once.
  */
 export function setTask(
   markdown: string,
@@ -130,21 +144,41 @@ export function setTask(
 ): TaskEdit {
   // Whether its box is ticked in this text, which may have ticked it since the items were found.
   const now = (item: TaskItem): TaskItem => ({ ...item, checked: markdown[item.mark] !== ' ' });
+  const named = change.line === '' ? 'That task' : `The task “${change.line}”`;
+  const same = () => [...items().values()].filter((item) => item.line === change.line);
+  const { madeIn } = change;
+  // Changed since, with its line on more than one task where it was ticked, or here.
+  const unclear = (here: () => number) =>
+    madeIn !== undefined &&
+    !sameText(madeIn.markdown, markdown, items()) &&
+    (madeIn.repeated || here() > 1);
+  // Said as it is now: on the page more than once, or only when it was ticked.
+  const changedSince = (here: number) =>
+    ({
+      ok: false,
+      reason:
+        here > 1
+          ? `${named} is on the page more than once, and the page changed since it was ticked.`
+          : `${named} was on the page more than once when it was ticked, and the page has changed since.`,
+    }) as const;
   const there = items().get(change.offset);
-  let task = there?.line === change.line ? now(there) : null;
-  if (!task) {
-    const same = [...items().values()].filter((item) => item.line === change.line);
-    if (same.length !== 1) {
-      const named = change.line === '' ? 'That task' : `The task “${change.line}”`;
+  let task: TaskItem | null = null;
+  if (there?.line === change.line) {
+    if (unclear(() => same().length)) return changedSince(same().length);
+    task = now(there);
+  } else {
+    const found = same();
+    if (found.length !== 1) {
       return {
         ok: false,
         reason:
-          same.length === 0
+          found.length === 0
             ? `${named} isn’t on the page any more.`
             : `${named} is on the page more than once now.`,
       };
     }
-    task = same[0] ? now(same[0]) : null;
+    if (unclear(() => 1)) return changedSince(1);
+    task = found[0] ? now(found[0]) : null;
   }
   if (!task || task.checked === change.checked) return { ok: true, markdown };
   const mark = change.checked ? 'x' : ' ';
@@ -152,6 +186,34 @@ export function setTask(
     ok: true,
     markdown: markdown.slice(0, task.mark) + mark + markdown.slice(task.mark + 1),
   };
+}
+
+/**
+ * Whether `before` is `markdown`, but for boxes written `[X]` in one and
+ * `[x]` in the other: one written `[X]`, unticked and ticked again in a
+ * batch, is saved as it was, while the page showed `[x]` (#700). Its
+ * boxes are where `items`, `markdown`'s task items, have them.
+ */
+function sameText(before: string, markdown: string, items: ReadonlyMap<number, TaskItem>): boolean {
+  if (before === markdown) return true;
+  if (before.length !== markdown.length) return false;
+  let marks: Set<number> | null = null;
+  for (let i = 0; i < before.length; i++) {
+    const was = before[i];
+    const is = markdown[i];
+    if (was === is) continue;
+    if (!((was === 'X' && is === 'x') || (was === 'x' && is === 'X'))) return false;
+    marks ??= new Set([...items.values()].map(({ mark }) => mark));
+    if (!marks.has(i)) return false;
+  }
+  return true;
+}
+
+/** How many task items in `markdown` have `line`, as `taskIndex` finds them. */
+export function tasksWithLine(markdown: string, line: string): number {
+  let count = 0;
+  for (const item of taskIndex(markdown).values()) if (item.line === line) count++;
+  return count;
 }
 
 /**

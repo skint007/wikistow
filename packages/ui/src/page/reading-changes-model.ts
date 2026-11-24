@@ -7,6 +7,7 @@ import {
   setPageProperty,
   setTask,
   taskIndex,
+  tasksWithLine,
   splitFrontmatter,
   summarizeChange,
   type ChangeSummary,
@@ -45,8 +46,32 @@ export type ReadingChange =
  */
 export type MadeOn = { version: number | null; publishedOn: string };
 
+/**
+ * `change` as made in `shown`, the page as the person saw it: a tick keeps
+ * that text, and whether more than one task had its line there (#703).
+ * They're counted in `read`, the text `shown` is made from by the changes
+ * queued, which has the same tasks, as ticks and properties move none
+ * between lines, and which is parsed once however many ticks are made.
+ */
+export function madeIn(change: ReadingChange, shown: string, read: string): ReadingChange {
+  if (change.kind !== 'task') return change;
+  const repeated = tasksWithLine(read, change.line) > 1;
+  return { ...change, madeIn: { markdown: shown, repeated } };
+}
+
 /** A change left out, as it no longer applies, and why. */
 export type Dropped = { change: ReadingChange; reason: string };
+
+/**
+ * `change` left out for `reason`: a tick without the text it was made in
+ * (`madeIn`), as what a flush left out is kept to be said after the page
+ * is left, and the page's whole text mustn't stay with it.
+ */
+export function leftOut(change: ReadingChange, reason: string): Dropped {
+  if (change.kind !== 'task' || change.madeIn === undefined) return { change, reason };
+  const { madeIn: _, ...rest } = change;
+  return { change: rest, reason };
+}
 
 /**
  * Who may make changes while reading, or why not: `hint` says it beside a
@@ -142,7 +167,7 @@ export function applyChanges(
   const items = () => taskIndex(parsed);
   for (const change of changes) {
     const made = applyChange(markdown, change, items);
-    if (!made.ok) dropped.push({ change, reason: made.reason });
+    if (!made.ok) dropped.push(leftOut(change, made.reason));
     else {
       markdown = made.markdown;
       if (change.kind === 'property') parsed = markdown;

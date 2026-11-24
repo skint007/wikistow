@@ -2,7 +2,7 @@ import { ParserReady, parserCtx, remarkCtx, schemaCtx } from '@milkdown/kit/core
 import type { MilkdownPlugin } from '@milkdown/kit/ctx';
 import type { Node, Schema } from '@milkdown/kit/prose/model';
 import { ParserState, type MarkdownNode, type RemarkParser } from '@milkdown/kit/transformer';
-import type { Root } from 'mdast';
+import type { Parent, Root } from 'mdast';
 
 // Where each top-level block of a document was read from (ADR 0015
 // decision 3, step 2), so a block nobody edited is written back as its
@@ -45,6 +45,32 @@ function lineStart(markdown: string, at: number): number {
 }
 
 /**
+ * `tree`'s paragraphs and headings with the spaces that end them in
+ * `markdown` as text again. Markdown leaves them out, but the writer keeps
+ * them as typed (`config.ts`), so a block the editor wrote reads back as it
+ * showed. Without them, a block read again in a live session, as one
+ * beside someone else's change is, lost the space just typed at its end,
+ * and the next letter typed took its place (#691).
+ */
+function keepEndSpaces(tree: Parent, markdown: string) {
+  for (const child of tree.children) {
+    if (!('children' in child)) continue;
+    if (child.type === 'paragraph' || child.type === 'heading') {
+      const last = child.children.at(-1);
+      const from = last?.position?.end.offset;
+      if (from === undefined) continue;
+      let to = from;
+      while (markdown[to] === ' ') to++;
+      const next = markdown[to];
+      if (to === from || (next !== undefined && next !== '\n' && next !== '\r')) continue;
+      const spaces = markdown.slice(from, to);
+      if (last?.type === 'text') last.value += spaces;
+      else child.children.push({ type: 'text', value: spaces });
+    } else keepEndSpaces(child, markdown);
+  }
+}
+
+/**
  * Milkdown's reading of Markdown, as the editor's own parser does it, noting
  * where each top-level block came from: a node of the tree read makes most
  * often one block, whose span is its position. One that makes none leaves
@@ -54,6 +80,7 @@ function lineStart(markdown: string, at: number): number {
 function reading(schema: Schema, remark: RemarkParser) {
   return (markdown: string): Node => {
     const tree = remark.runSync(remark.parse(markdown), markdown) as Root;
+    keepEndSpaces(tree, markdown);
     const state = new ParserState(schema);
     // As the document's own runner does (`injectRoot`), a child at a time.
     state.openNode(schema.topNodeType);

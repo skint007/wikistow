@@ -7,6 +7,7 @@ import {
   taskAt,
   taskItems,
   taskIndex,
+  tasksWithLine,
   type TaskItem,
 } from '../src/index.ts';
 
@@ -149,6 +150,83 @@ describe('ticking a task', () => {
     expect(setTask(fenced, change)).toEqual({
       ok: false,
       reason: 'The task “bread” isn’t on the page any more.',
+    });
+  });
+
+  describe('a line more than one task has, ticked in text that has changed since (#703)', () => {
+    const PAGE = '## Mum\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n- [ ] Call\n';
+    // Bob's section and Mum's swapped: Bob's `Call` now starts where Mum's did.
+    const SWAPPED = '## Bob\n- [ ] Call\n\n## Mum\n- [ ] Call\n- [ ] Tidy\n';
+    /** The tick of the task `line` at `offset`, made in `markdown`. */
+    const made = (markdown: string, line: string, offset: number) => ({
+      offset,
+      line,
+      checked: true,
+      madeIn: { markdown, repeated: tasksWithLine(markdown, line) > 1 },
+    });
+    const mums = made(PAGE, 'Call', PAGE.indexOf('- [ ] Call'));
+    const bobs = made(PAGE, 'Call', PAGE.lastIndexOf('- [ ] Call'));
+    const refused = {
+      ok: false,
+      reason:
+        'The task “Call” is on the page more than once, and the page changed since it was ticked.',
+    };
+
+    it('is refused where the offset may now be another task with that line', () => {
+      expect(SWAPPED.indexOf('- [ ] Call')).toBe(mums.offset);
+      expect(setTask(SWAPPED, mums)).toEqual(refused);
+    });
+
+    it('is refused where the sections swapped differ only in what is ticked', () => {
+      const page = '## A\n- [x] Notes\n- [ ] Call\n\n## A\n- [ ] Notes\n- [ ] Call\n';
+      const swapped = '## A\n- [ ] Notes\n- [ ] Call\n\n## A\n- [x] Notes\n- [ ] Call\n';
+      expect(setTask(swapped, made(page, 'Call', page.indexOf('- [ ] Call')))).toEqual(refused);
+    });
+
+    it('is refused where it was on more than one task as ticked, though one is left now', () => {
+      // Swapped, and Mum's renamed: Bob's, the only `Call`, starts where hers did.
+      const renamed = SWAPPED.replace('## Mum\n- [ ] Call', '## Mum\n- [ ] Text');
+      expect(renamed.indexOf('- [ ] Call')).toBe(mums.offset);
+      const once = {
+        ok: false,
+        reason:
+          'The task “Call” was on the page more than once when it was ticked, and the page has changed since.',
+      };
+      expect(setTask(renamed, mums)).toEqual(once);
+      // Mum's gone: Bob's is the only one, elsewhere.
+      expect(setTask('## Bob\n\n- [ ] Call\n', mums)).toEqual(once);
+    });
+
+    it('is ticked by its offset in the text it was ticked in', () => {
+      expect(setTask(PAGE, bobs)).toEqual({
+        ok: true,
+        markdown: '## Mum\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n- [x] Call\n',
+      });
+      // After the person's own ticks before it, which its text holds.
+      const mine = setTask(PAGE, mums);
+      if (!mine.ok) throw new Error(mine.reason);
+      expect(setTask(mine.markdown, made(mine.markdown, 'Call', bobs.offset))).toEqual({
+        ok: true,
+        markdown: '## Mum\n- [x] Call\n- [ ] Tidy\n\n## Bob\n- [x] Call\n',
+      });
+    });
+
+    it('is ticked by its offset, or found by its line, where no task shares it', () => {
+      const tidy = made(PAGE, 'Tidy', PAGE.indexOf('- [ ] Tidy'));
+      expect(tidy.madeIn.repeated).toBe(false);
+      // A word changed elsewhere, the same length: the offset still holds.
+      const edited = PAGE.replace('## Bob', '## Bub');
+      expect(setTask(edited, tidy)).toEqual({
+        ok: true,
+        markdown: edited.replace('- [ ] Tidy', '- [x] Tidy'),
+      });
+      expect(setTask(SWAPPED, tidy)).toEqual({
+        ok: true,
+        markdown: SWAPPED.replace('- [ ] Tidy', '- [x] Tidy'),
+      });
+      // Shared only now, by a task added since: the offset can't tell them apart.
+      const added = `${PAGE}- [ ] Tidy\n`;
+      expect(setTask(added, tidy).ok).toBe(false);
     });
   });
 

@@ -99,7 +99,7 @@ export async function trashNode(
       .update(nodes)
       .set({ trashId: row.id })
       .where(and(anyId(nodes.id, ids), eq(nodes.spaceId, input.spaceId)));
-    await endLinks(tx, ids);
+    await endLinks(tx, ids, input.accountId);
     // A write already past its access check, waiting on these rows, then
     // fails rather than landing in the trash.
     await bumpPermissions(tx, input.spaceId, ids);
@@ -406,7 +406,7 @@ export async function purgeTrash(
 // Delete a held trash row's nodes for good; the caller holds the space.
 async function purgeHeld(tx: Database, row: { spaceId: string; nodeId: string }) {
   const at = { spaceId: row.spaceId, nodeId: row.nodeId };
-  return removeSubtree(tx, row.spaceId, [row.nodeId], await holdSubtree(tx, at));
+  return removeSubtree(tx, row.spaceId, [row.nodeId], await holdSubtree(tx, at), null);
 }
 
 /**
