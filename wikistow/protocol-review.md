@@ -1694,6 +1694,36 @@ Round 55 reviewed round 54's revision (2962fbf) with the three briefs, fresh rev
 
 **Outcome.** Round 55 found a High, so it doesn't meet the stopping rule. Every finding is fixed but M55-2, accepted as an availability cost the person confirms. Round 56 repeats the three briefs against this revision.
 
+## Round 56: identity key rotation, narrowed, tenth review
+
+Round 56 reviewed round 55's revision (08718e0) with the three briefs, fresh reviewers given the text, the log of rounds 38 to 55, the dropped rule and the list of what earlier rounds settled: the member and encoding briefs as Claude subagents. **The server brief's Codex (gpt-6.2-sol) agent was refused** by its provider's content filter at its start, worded as in round 55, which it had run. The server brief was then given once, unchanged, to a Claude subagent, as in round 54. The round found no Critical finding, 1 High, 4 Medium, 16 Low and no Info (21 in all). Every reviewer found the exception gone and round 55's fixes holding, and the member brief found no way for a removed member, an agent or the old key's holder to gain owner authority or new keys beyond the accepted risks. The one High was in round 55's finishing rule: a share counted as done once anyone the app writes with had rotated it, so a co-owner's rotation that landed first dropped the person's removals without a word.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S56-1 | 56 | High | 4.6 finishing; 7.5 | A share counted as done once a co-owner's rotation landed above the version the person rotated from, so a member the person left out, whom the co-owner kept, read everything saved after, with finishing shown complete. | Fixed: a share is done only once the app holds its own envelope, sealed with its current key, of a version above every version its retired keys sealed; when someone else's rotation landed first, it plans again and shows the dialog again. Same as E56-L5 and M56-1. |
+| S56-2 | 56 | Medium | 8.6 decline row; 8.5 | The decline's restored pin was read from version history the server doesn't keep: replaced versions keep only their signed header. | Fixed: a device declines from the pin it kept from before the follow its notice reports, and the change carries that key; a device that keeps none offers only to compare fingerprints. Same as E56-L1. |
+| S56-3 | 56 | Medium | 4.6 **A space the person owns alone**; 10 | Leaving live publications out of the copy needs a copy mode §10 doesn't have. | Fixed: the app lists those pages and offers to detach them first, which the person may do as the space's owner (§13); the copy runs once none is attached. |
+| E56-F1 | 56 | Medium | 8.4 | Which envelopes get a floor was ambiguous, and an unresolvable envelope from an ordinary co-owner could get a permanent one. | Fixed: only envelopes sealed by an ID with a `wikistow.declined` entry are tested, and each floor names that ID. |
+| E56-F2 | 56 | Medium | 8.4; 8.6 | Floors outlived the distrust behind them: confirming the key again left the person and their agents unable to write there. | Fixed: a write that drops an ID's declined entries (a pin, a confirmed key, a follow) drops its floors too, and "add a floor" skips an ID with no entry. |
+| S56-4 | 56 | Low | 8.4 | The reader's current version could be raised by envelopes that count for opening only, bringing back M54-3 while the server serves them. | Fixed: for a device, the highest version that counts for writing; for an agent, the highest its person sealed to it with their current key. |
+| S56-5 | 56 | Low | 4.6 | "Become an owner" could make an own owner entry where the person was never an owner. | Fixed: offered only where the record holds an own entry at a key the keyring holds, or the person created the space. |
+| S56-6 | 56 | Low | 4.6 | A space whose own `removedOwners` entry the person didn't confirm was both closed to owner actions and offered the copy. | Fixed: the "owns alone" test needs the app to be an owner by its own record. Same as M56-4. |
+| E56-L1 | 56 | Low | 8.6 | Which follow a decline undoes was circular. | Fixed with S56-2. |
+| E56-L2 | 56 | Low | 4.6 | The "owns alone" test's third branch didn't leave out `removedOwners`, and a pending re-add's key read as added again. | Fixed. |
+| E56-L3 | 56 | Low | 4.6 **The person's own app** | A sentence still said only a co-owner's add brings the own ID back. | Fixed. |
+| E56-L4 | 56 | Low | 8.4; 8.6 | `floors` parsing, an absent extension and the "grows" trigger were loose. | Fixed. |
+| E56-L5 | 56 | Low | 4.6 finishing | Same as S56-1. | Fixed with S56-1. |
+| E56-L6 | 56 | Low | 8.5 | A known-format `wikistow.declined` that doesn't parse has no way out but an update. | Accepted: it fails closed, as an unknown format does, and a fresh start keeps the extension. |
+| E56-L7 | 56 | Low | ADR | The ADR's summary of "owns alone" was incomplete. | Fixed. |
+| M56-1 | 56 | Low | 4.6 finishing | Same as S56-1, a co-owner's version sealed to the old key. | Fixed with S56-1. |
+| M56-2 | 56 | Low | 6.5 step 2; 4.6 | In a space the person created, an own ID the old key put on `removedOwners` could lead to first sight's co-owner dialog naming a stranger. | Fixed: the person's app never runs that dialog in a space it created; only "become an owner" applies there. |
+| M56-3 | 56 | Low | 4.6 | The warning didn't say that leaving "become an owner" unconfirmed is for good in a space the person owns alone. | Fixed. |
+| M56-4 | 56 | Low | 4.6; 10 | Same as S56-6. | Fixed with S56-6. |
+| M56-5 | 56 | Low | 4.6 | The statement's `contacts.version` tells anyone who may look the person up how many versions their record has had. | Accepted as metadata of the kind A7 accepts, and stated. |
+| M56-6 | 56 | Low | ADR | Decision 2 still said "share again", and didn't mention "become an owner" or detaching. | Fixed. |
+
+**Outcome.** Round 56 found a High, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed but E56-L6 and M56-5, accepted. Round 57 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
