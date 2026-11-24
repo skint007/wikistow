@@ -1483,13 +1483,13 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
-  it('leaves a list item after its fence as main does, as the fence may not have ended', async () => {
+  it('settles a list item after its fence, which the reader ends', async () => {
     const above = '- ```\n  literal\n  ```\n\n  ';
     const [was, mine, theirs] = [line('world'), line(hi('world')), line(red('span', 'world'))].map(
       (text) => `${above}${text}`,
     ) as [string, string, string];
     for (const aLower of orders)
-      expect(await merged(was, mine, theirs, aLower)).toBe(byCharacter(was, mine, theirs, aLower));
+      expect(await merged(was, mine, theirs, aLower)).toBe(aLower ? theirs : mine);
   });
 
   it('repairs once when the other formatted before its editor took this one in', async () => {
@@ -1735,6 +1735,77 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
+  it('keeps what main keeps: code below a list item’s fence the reader ended', async () => {
+    const fence = '```';
+    const tag = '<span data-color="red">a</span>';
+    const edits = (page: string) =>
+      [page, page.replace('"red"', '"blue"'), page.replace('data-color', 'data-colour')] as const;
+    for (const [was, mine, theirs] of [
+      // The list's fence ends with its item; the page's that follows holds the line.
+      [
+        `- list\n\n  ${fence}\n  list code\n\n${fence}\n\nSee <mk value> here.\n\n${fence}\n`,
+        `- list\n\n  ${fence}\n  list code\n\n${fence}\n\nSee <mrk value> here.\n\n${fence}\n`,
+        `- list\n\n  ${fence}\n  list code\n\n${fence}\n\nSee <mak value> here.\n\n${fence}\n`,
+      ],
+      edits(`- item\n  ${fence}\n  a\n\n${fence}\nx\n\n${tag}\n${fence}\n`),
+      // Three spaces is outside an item whose text starts at four: the page's fence.
+      edits(
+        `1.  item\n\n    ${fence}\n    a\n    ${fence}\n\n   ${fence}\nx\n\n${tag}\n${fence}\n`,
+      ),
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('keeps a third person’s change to a link’s address beside the tags, the link highlighted', async () => {
+    const page = `See [${hi('score')}](old)world there.\n`;
+    for (const third of [500, 3_000])
+      for (const aLower of orders) {
+        const [a, b] = start(page, aLower);
+        const c = { doc: docOf('', third, a.doc) };
+        a.editor.shown = page.replace('world', hi('world'));
+        b.editor.shown = page.replace('world', red('span', 'world', 'blue'));
+        a.binding.write();
+        b.binding.write();
+        const body = c.doc.getText('body');
+        const at = body.toJSON().indexOf('old');
+        body.delete(at, 3);
+        body.insert(at, 'new');
+        await exchange([a, b, c]);
+        for (const s of [a, b, c]) expect(bodyOf(s), `${third} ${aLower}`).toContain('(new)');
+      }
+  });
+
+  it('keeps what main keeps: a tag farther into a link’s title', async () => {
+    const page = 'See [a](x "title <mk value>") here.\n';
+    const [mine, theirs] = [page.replace('<mk', '<mrk'), page.replace('<mk', '<mak')];
+    for (const aLower of orders)
+      expect(await merged(page, mine, theirs, aLower)).toBe(
+        byCharacter(page, mine, theirs, aLower),
+      );
+  });
+
+  it('settles crossed tags though the other deleted a word that names a colour', async () => {
+    const was = 'Hello world and red.\n';
+    const mine = `Hello ${hi('world')} and red.\n`;
+    const theirs = `Hello ${red('span', 'world', 'blue')} and.\n`;
+    for (const aLower of orders)
+      expect(await merged(was, mine, theirs, aLower)).toBe(
+        aLower ? theirs : `Hello ${hi('world')} and.\n`,
+      );
+  });
+
+  it('settles crossed tags in a long paragraph with quotes', async () => {
+    const above = 'This is one line. '.repeat(70);
+    const page = (run: string) => `${above}Hello "${run}" there.\n`;
+    for (const aLower of orders)
+      expect(
+        await merged(page('world'), page(hi('world')), page(red('span', 'world')), aLower),
+      ).toBe(aLower ? page(red('span', 'world')) : page(hi('world')));
+  });
+
   it('leaves a block broken when the one to repair it is gone', async () => {
     const [a, b] = start(line('world'), true);
     a.editor.shown = line(hi('world'));
@@ -1843,6 +1914,11 @@ describe('whether a block reads cleanly', () => {
         (n: number) => '<mark data-color="red">**x** `y`</mark>\n'.repeat(n / 10),
       ],
       ['colours', (n: number) => '<mark data-color="red">x</mark>'.repeat(n)],
+      [
+        'closing tags written otherwise inside many colours',
+        (n: number) =>
+          `x <span data-color="blue">${'<mark data-color="red">'.repeat(n)}${'</span bogus>'.repeat(n)}${'</mark>'.repeat(n)}</span>`,
+      ],
     ] as const) {
       const short = time(line(2_000));
       // Eight times as long takes about eight times as long; by its square, 64.

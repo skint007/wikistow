@@ -273,8 +273,13 @@ function scanned(block: string): Reading | null {
     // A backtick or tilde may start code, and `$` maths, whose text is no HTML.
     if (char === 96 || char === 126 || char === 36) code = true;
     else if (char === 10 && CODE_OR_HTML.test(block.slice(at + 1, at + 5))) code = true;
+    // After a link's `](` or a definition's `]:`, a tag may be in its address
+    // or title, as `[a](x "title <mark>")`, which is text.
+    else if (char === 93 && (block[at + 1] === '(' || block[at + 1] === ':')) code = true;
     const tag = tagAt(block, at);
     if (!tag) {
+      // Other HTML, whose attributes may hold what looks like a tag.
+      if (char === 60 && /[A-Za-z/!?]/.test(block[at + 1] ?? '')) code = true;
       if (open.length > 0 && MARKING.has(block[at] as string)) unsure = true;
       continue;
     }
@@ -284,9 +289,6 @@ function scanned(block: string): Reading | null {
       else at += 6;
       continue;
     }
-    // Right after `(`, it may be a link's address, as `[a](<Mark Twain.md>)`.
-    // Or, right after a quote, its title, as `[a](x "<mark>")`.
-    if (block[at - 1] === '(' || block[at - 1] === '"' || block[at - 1] === "'") code = true;
     const end = block.slice(at, at + LONGEST_TAG).indexOf('>');
     const named = end < 0 ? null : COLOR_TAG.exec(block.slice(at, at + end + 1));
     const key = `${tag.name}:${named?.[2] ?? ''}`;
@@ -421,13 +423,19 @@ function addressAfter(text: string, at: number, to: number): number {
 
 /**
  * Whether the text of the link whose `](` is at `address` in `text` holds
- * a tag's start, as one the merge put a link's address after, not a link
- * of its own before the tag, as `[score](old)<mark>`.
+ * the start of one of `tags`, as one the merge put a link's address after,
+ * not a link of its own before the tag, as `[score](old)<mark>`, nor one
+ * whose own tags pair soundly, as `[<mark>score</mark>](old)<mark>`.
  */
-function tagInLinkText(text: string, address: number, from: number): boolean {
+function tagInLinkText(
+  text: string,
+  address: number,
+  from: number,
+  tags: readonly Span[],
+): boolean {
   for (let i = address - 1; i >= Math.max(from, address - LINK_AT_MOST); i--) {
     if (text[i] === '[' || text[i] === ']') return false;
-    if (text[i] === '<' && (tagAt(text, i) || splitTagAt(text, i))) return true;
+    if (text[i] === '<' && overlapsAny(tags, i, i + 1)) return true;
   }
   return false;
 }
@@ -481,9 +489,13 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
     const { name, closing } = named0;
     const written = line.slice(tag.from, tag.to);
     if (closing) {
-      // Those it crosses are taken off as it's found, so each is looked at once.
-      const at = (opened.get(name) ?? 0) > 0 ? open.findLastIndex((o) => o.name === name) : -1;
-      if (written !== `</${name}>` || at < 0) {
+      // Only one written as the editor writes it looks for what it closes,
+      // and those it crosses are taken off as it's found, so each is looked at once.
+      const at =
+        written === `</${name}>` && (opened.get(name) ?? 0) > 0
+          ? open.findLastIndex((o) => o.name === name)
+          : -1;
+      if (at < 0) {
         bad.push(tag);
         continue;
       }
@@ -583,15 +595,25 @@ function conflictOn(text: string, from: number, to: number): Conflict | null {
 /** What doesn't read cleanly: its tags, and those with the marks beside them. */
 type Conflict = { tags: Span[]; spans: Span[] };
 
-/** `tags`, tags of `text` from `from` to `to`, each with the marks right beside it, those that meet made one. */
-function besideOf(text: string, tags: readonly Span[], from: number, to: number): Span[] {
+/**
+ * `tags`, tags of `text` from `from` to `to`, each with the marks right
+ * beside it, those that meet made one; and a link's address before one,
+ * where the link's text holds one of `linked`.
+ */
+function besideOf(
+  text: string,
+  tags: readonly Span[],
+  from: number,
+  to: number,
+  linked: readonly Span[] = tags,
+): Span[] {
   const spans: Span[] = [];
   for (const tag of tags) {
     let start = tag.from;
     // A link's address before a tag, as `[<mark>world](x.md)</mark>`.
     if (text[start - 1] === ')') {
       const address = addressBefore(text, start - 1, from);
-      if (address >= 0 && tagInLinkText(text, address, from)) start = address;
+      if (address >= 0 && tagInLinkText(text, address, from, linked)) start = address;
     }
     for (let run = markRun(text, start, -1, from); run > 0; run = markRun(text, start, -1, from))
       start -= run;
@@ -697,116 +719,194 @@ function linesOf(text: string, from: number, to: number): Span[] {
   return lines;
 }
 
-/** What a fence's line stands in: the page itself, a quote, or a list item (or code indented). */
-type Container = 'page' | 'quote' | 'list';
-
-/**
- * A fence's or a math block's line, `text` from `at` to `end`: its run of
- * backticks or tildes, or `$$`, after spaces, quote markers and list
- * markers; what it stands in; and whether nothing follows the run; or
- * null. One look at each character.
- */
-function fenceOn(
+/** What a line of `text` from `at` to `end` starts with, past spaces, tabs and quote and list markers. */
+function lineStartOf(
   text: string,
   at: number,
   end: number,
-): { run: string; container: Container; bare: boolean } | null {
+): { indent: number; marked: boolean; rest: number } {
   let i = at;
-  let container: Container = 'page';
-  // Columns of spaces and tabs, a tab as four.
-  const spaces = () => {
-    let columns = 0;
-    for (; i < end && (text[i] === ' ' || text[i] === '\t'); i++)
-      columns += text[i] === '\t' ? 4 : 1;
-    return columns;
-  };
+  let marked = false;
   for (;;) {
-    if (spaces() > 3 && container === 'page') container = 'list';
+    while (i < end && (text[i] === ' ' || text[i] === '\t')) i++;
     const char = text[i];
     if (char === '>') {
       i++;
-      if (container === 'page') container = 'quote';
+      marked = true;
       continue;
     }
-    if ((char === '-' || char === '*' || char === '+') && /[ \t]/.test(text[i + 1] ?? '')) {
+    const after = i + 1 >= end ? '' : (text[i + 1] as string);
+    if ((char === '-' || char === '*' || char === '+') && (after === '' || /[ \t]/.test(after))) {
       i++;
-      if (container === 'page') container = 'list';
+      marked = true;
       continue;
     }
     let digits = i;
     while (digits < end && digits - i < 9 && /[0-9]/.test(text[digits] as string)) digits++;
-    if (digits > i && /[.)]/.test(text[digits] ?? '') && /[ \t]/.test(text[digits + 1] ?? '')) {
+    const next = digits + 1 >= end ? '' : (text[digits + 1] as string);
+    if (digits > i && /[.)]/.test(text[digits] ?? '') && (next === '' || /[ \t]/.test(next))) {
       i = digits + 1;
-      if (container === 'page') container = 'list';
+      marked = true;
       continue;
     }
     break;
   }
-  const char = text[i];
-  if (char !== '`' && char !== '~' && char !== '$') return null;
-  let runEnd = i;
-  while (runEnd < end && text[runEnd] === char) runEnd++;
-  const length = runEnd - i;
-  if (length < (char === '$' ? 2 : 3)) return null;
-  let rest = runEnd;
-  while (rest < end && (text[rest] === ' ' || text[rest] === '\t' || text[rest] === '\r')) rest++;
-  return { run: text.slice(i, runEnd), container, bare: rest === end };
+  let indent = at;
+  while (indent < end && (text[indent] === ' ' || text[indent] === '\t')) indent++;
+  return { indent: indent - at, marked, rest: i };
 }
 
-/** How many `$` the line of `text` from `at` to `end` ends with, but for spaces after. */
-function dollarsAtEnd(text: string, at: number, end: number): number {
-  let i = end;
-  while (i > at && /[ \t\r]/.test(text[i - 1] as string)) i--;
-  let run = 0;
-  while (i - run > at && text[i - run - 1] === '$') run++;
-  return run;
+/** The run of backticks, tildes or `$` at `at` in `text`, before `end`: its length, if a fence's or maths' could be. */
+function runAt(text: string, at: number, end: number): number {
+  const char = text[at];
+  if (char !== '`' && char !== '~' && char !== '$') return 0;
+  let run = at;
+  while (run < end && text[run] === char) run++;
+  return run - at >= (char === '$' ? 2 : 3) ? run - at : 0;
 }
 
-/** Whether the line of `text` from `at` goes on in `container`: quoted, or indented. */
-function goesOn(text: string, at: number, end: number, container: Container): boolean {
-  let i = at;
-  while (i < end && i - at < 4 && text[i] === ' ') i++;
-  if (container === 'quote') return text[i] === '>';
-  if (container === 'list') return isBlank(text, at, end) || text[at] === ' ' || text[at] === '\t';
-  return true;
+// A line starting with a colour's tag, or one closing, and more after it: a
+// paragraph's, as no HTML block starts with that.
+const TAG_THEN_TEXT = /^(?:<(?:span|mark) data-color="[a-z]+">|<\/(?:span|mark)>)\S/;
+
+/**
+ * Where in `tree`, read from `text`, code, maths or HTML lies, from `from`
+ * on: each node's type and its place from `from`, as one string; or null
+ * where one starts before `from` and goes on past it.
+ */
+function codeFrom(tree: Nodes, from: number): string[] | null {
+  const out: string[] = [];
+  const stack: Nodes[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (
+      (node.type === 'code' ||
+        node.type === 'inlineCode' ||
+        node.type === 'math' ||
+        node.type === 'inlineMath' ||
+        node.type === 'html') &&
+      start !== undefined &&
+      end !== undefined &&
+      end > from
+    ) {
+      if (start < from) return null;
+      out.push(`${node.type}:${start - from}:${end - from}`);
+    }
+    if ('children' in node) for (const child of node.children) stack.push(child);
+  }
+  return out.sort();
+}
+
+/** `text` read, or null if the reader fails. */
+function treeOf(text: string): Nodes | null {
+  try {
+    return parseMarkdown(text);
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Whether places of `text`, asked in order, lie in a code fence or a math
- * block left open above them, read once from the top: a block between
- * blank lines may be part of one, whose text is no Markdown. A fence in a
- * quote ends at the first line that isn't quoted, and one in a list item
- * at the first, not blank, that isn't indented; one on the page closes
- * only on a run of its own with nothing after it, on the page.
+ * Whether blocks of `text`, asked in order, read in their place on the
+ * page as they read alone: not in a code fence, maths or HTML left open
+ * above them, with the code, maths and HTML in them the same. Read once
+ * from the top, by line. The scan is sure only of a fence that starts at a
+ * line's very start, on the page, of backticks or tildes, and of its
+ * closing line. Any other line that may start a fence, maths or an HTML
+ * block, as one in a list item or a quote, or indented, leaves it unsure
+ * until the reader reads the page from where it was last sure, at most
+ * 1 KB of it, and finds nothing open; where that's too long, the blocks
+ * are taken as not reading alone.
  */
-class Fences {
+class Context {
   readonly #text: string;
   #at = 0;
-  #open: { run: string; container: Container } | null = null;
+  // A fence the scan is sure of, left open: its character and length.
+  #fence: { char: string; length: number } | null = null;
+  // The start of the last line the scan was sure of, with nothing open
+  // above it, and whether it has been unsure since.
+  #sure = 0;
+  #unsure = false;
+  // How much the reader last read to find it sure again, to read twice as much the next time.
+  #tried = 0;
+  #blank = true;
+
   constructor(text: string) {
     this.#text = text;
   }
-  inside(place: number): boolean {
+
+  /** Whether the line at `at`, ending at `end`, starts the page's own text after a blank line: no list item or quote goes on past it. */
+  #plain(at: number, end: number): boolean {
+    if (!this.#blank || at >= end) return false;
+    const { indent, marked, rest } = lineStartOf(this.#text, at, end);
+    const char = this.#text[at] as string;
+    return indent === 0 && !marked && runAt(this.#text, rest, end) === 0 && char !== '<';
+  }
+
+  /** Whether nothing the reader reads from the line the scan was sure of is open at `at`. */
+  #nothingOpen(at: number): boolean {
+    const tree = treeOf(this.#text.slice(this.#sure, lineEnd(this.#text, at)));
+    return tree !== null && codeFrom(tree, at - this.#sure) !== null;
+  }
+
+  #scan(place: number): void {
     const text = this.#text;
     while (this.#at < place) {
-      const end = lineEnd(text, this.#at);
-      let open = this.#open;
-      if (open && !goesOn(text, this.#at, end, open.container)) open = null;
-      const fence = fenceOn(text, this.#at, end);
-      // Maths ends on a line ending in a run of `$` as long as its own, as `x$$` or `$$ x $$`.
-      if (open?.run[0] === '$' && dollarsAtEnd(text, this.#at, end) >= open.run.length) open = null;
-      else if (fence && !open) {
-        // `$$` with more on its line is math within the line.
-        if (fence.run[0] !== '$' || fence.bare) open = fence;
-      } else if (fence?.bare && open && open.container === 'page' && fence.container === 'page') {
-        // One in a quote or a list item ends with it: what looks like its end may be its text.
-        if (fence.run[0] === open.run[0] && fence.run.length >= open.run.length) open = null;
-      }
-      this.#open = open;
+      const at = this.#at;
+      const end = lineEnd(text, at);
       this.#at = end + 1;
+      const blank = isBlank(text, at, end);
+      if (!blank && this.#plain(at, end)) {
+        if (!this.#unsure && !this.#fence) this.#sure = at;
+        else if (
+          this.#unsure &&
+          end - this.#sure <= READ_AT_MOST &&
+          at - this.#sure >= this.#tried * 2
+        ) {
+          this.#tried = at - this.#sure;
+          if (this.#nothingOpen(at)) {
+            this.#unsure = false;
+            this.#sure = at;
+            this.#tried = 0;
+          }
+        }
+      }
+      this.#blank = blank;
+      if (this.#unsure || blank) continue;
+      const fence = this.#fence;
+      if (fence) {
+        // Its closing line: up to three spaces, then a run as long, alone.
+        let i = at;
+        while (i < end && i - at < 3 && text[i] === ' ') i++;
+        let run = i;
+        while (run < end && text[run] === fence.char) run++;
+        if (run - i >= fence.length && isBlank(text, run, end)) this.#fence = null;
+        continue;
+      }
+      const { indent, marked, rest } = lineStartOf(text, at, end);
+      const run = runAt(text, rest, end);
+      const char = text[rest];
+      if (run > 0) {
+        const info = text.slice(rest + run, end);
+        if (indent === 0 && !marked && char !== '$' && !(char === '`' && info.includes('`')))
+          this.#fence = { char: char as string, length: run };
+        else this.#unsure = true;
+      } else if (char === '<' && !TAG_THEN_TEXT.test(text.slice(rest, rest + LONGEST_TAG + 1)))
+        this.#unsure = true;
     }
-    const open = this.#open;
-    return open !== null && goesOn(text, place, lineEnd(text, place), open.container);
+  }
+
+  /** Whether `block`, the next asked, reads in its place as it reads alone. */
+  alone(block: Span): boolean {
+    this.#scan(block.from);
+    if (!this.#unsure) return this.#fence === null;
+    if (block.to - this.#sure > READ_AT_MOST) return false;
+    const context = treeOf(this.#text.slice(this.#sure, block.to));
+    const alone = treeOf(this.#text.slice(block.from, block.to));
+    if (!context || !alone) return false;
+    const there = codeFrom(context, block.from - this.#sure);
+    return there !== null && there.join() === codeFrom(alone, 0)?.join();
   }
 }
 
@@ -1045,7 +1145,8 @@ function undoneOn(
   kept: readonly Span[],
   held: string,
 ): TextChange[] {
-  const tags = besideOf(mine, colourTagsOf(mine), 0, mine.length);
+  // A link before a tag in it is its own, as all its tags pair.
+  const tags = besideOf(mine, colourTagsOf(mine), 0, mine.length, []);
   // How far `mine` is behind `body`, before the change in turn.
   let shift = 0;
   const out: TextChange[] = [];
@@ -1115,27 +1216,32 @@ function applied(text: string, at: number, changes: readonly TextChange[]): stri
   return out + text.slice(from);
 }
 
-/** The words of `text`, runs of letters and digits, outside its tags unless `raw`, counted. */
-function wordsOf(text: string, raw = false): Map<string, number> {
+/**
+ * The words of `text`, runs of letters and digits, outside its tags,
+ * counted; with `loose`, also those in a tag not written as the editor
+ * writes a colour's, as letters of a word a merge took into one.
+ */
+function wordsOf(text: string, loose = false): Map<string, number> {
   const words = new Map<string, number>();
   let from = 0;
   const count = (part: string) => {
     for (const word of part.match(/[\p{L}\p{N}]+/gu) ?? [])
       words.set(word, (words.get(word) ?? 0) + 1);
   };
-  if (!raw)
-    for (const tag of tagsIn(text, 0, text.length, true)) {
-      count(text.slice(from, tag.from));
-      from = tag.to;
-    }
+  for (const tag of tagsIn(text, 0, text.length, true)) {
+    count(text.slice(from, tag.from));
+    const written = text.slice(tag.from, tag.to);
+    if (loose && !COLOR_TAG.test(written) && !/^<\/(?:span|mark)>$/.test(written)) count(written);
+    from = tag.to;
+  }
   count(text.slice(from));
   return words;
 }
 
 /**
  * Whether `result` has each word of `mine` as often as both it and
- * `merged` have it, in `merged` counting what's in its tags too, as a
- * word a merge took for letters of one.
+ * `merged` have it, in `merged` counting what's in its tags not written as
+ * a colour's too, as a word a merge took for letters of one.
  */
 function keepsWords(mine: string, merged: string, result: string): boolean {
   const there = wordsOf(merged, true);
@@ -1174,7 +1280,7 @@ export function repairs(
   const theirs = map().theirs();
   if (theirs.length === 0) return [];
   const candidates: Candidate[] = [];
-  const fences = new Fences(body);
+  const context = new Context(body);
   let next = 0;
   for (const block of blocksOf(
     body,
@@ -1193,7 +1299,7 @@ export function repairs(
     if (readingOf(mine) !== 'clean') continue;
     const reading = readingOf(shown);
     if (reading !== 'broken') continue;
-    if (fences.inside(block.from)) continue;
+    if (!context.alone(block)) continue;
     candidates.push({ block, shown, mine, theirs: inside });
   }
   if (candidates.length === 0) return [];
