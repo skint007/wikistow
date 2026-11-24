@@ -52,9 +52,11 @@ export type MadeOn = { version: number | null; publishedOn: string };
  * They're counted in `read`, the text `shown` is made from by the changes
  * queued, which has the same tasks, as ticks and properties move none
  * between lines, and which is parsed once however many ticks are made.
+ * A tick that already says what it was made in keeps that: one made on
+ * the body as it showed while a newer text was read (#728).
  */
 export function madeIn(change: ReadingChange, shown: string, read: string): ReadingChange {
-  if (change.kind !== 'task') return change;
+  if (change.kind !== 'task' || change.madeIn !== undefined) return change;
   const repeated = tasksWithLine(read, change.line) > 1;
   return { ...change, madeIn: { markdown: shown, repeated } };
 }
@@ -153,6 +155,83 @@ export function applyChange(
   return edit.ok
     ? edit
     : { ok: false, reason: `${change.key} couldn’t be changed: ${edit.reason}` };
+}
+
+const BOX_MARKS = new Set([' ', 'x', 'X']);
+
+/**
+ * The bodies a page showed on this device as this person's changes were
+ * made in it, since a text not of their making came (#728). A body drawn
+ * from one of them has the tasks of the text shown, where it has them, as
+ * ticks and properties move no task in the body; another, though it
+ * differs only in what is ticked, may have two same-named tasks swapped.
+ * A flush of this person's changes keeps them: the text it published is
+ * one of them. Each is kept as where its boxes differ from the first, so
+ * however many are kept, they hold no page text but that one.
+ */
+export class ShownBodies {
+  #first: string | null = null;
+  #shown = new Set<string>();
+  // The text read last, and what of it was made since: only changes queued after those are made again.
+  #read: string | null = null;
+  #made: readonly ReadingChange[] = [];
+  #markdown = '';
+  #parsed = '';
+
+  /** The page shows `read` with `changes` made: each body on the way is kept. */
+  see(read: string, changes: readonly ReadingChange[]) {
+    if (read !== this.#read) {
+      const body = splitFrontmatter(read).body;
+      const key = this.#key(body);
+      if (key === null || !this.#shown.has(key)) {
+        this.#first = body;
+        this.#shown = new Set(['']);
+      }
+      this.#read = read;
+      this.#made = [];
+    }
+    const more =
+      changes.length >= this.#made.length &&
+      this.#made.every((change, at) => change === changes[at]);
+    if (!more || this.#made.length === 0) {
+      this.#made = [];
+      this.#markdown = read;
+      this.#parsed = read;
+    }
+    for (const change of changes.slice(this.#made.length)) {
+      const made = applyChange(this.#markdown, change, () => taskIndex(this.#parsed));
+      if (!made.ok) continue;
+      this.#markdown = made.markdown;
+      if (change.kind === 'property') this.#parsed = made.markdown;
+      else {
+        const key = this.#key(splitFrontmatter(made.markdown).body);
+        if (key !== null) this.#shown.add(key);
+      }
+    }
+    this.#made = changes;
+  }
+
+  /** Whether the page showed `body` as this person's changes were made. */
+  has(body: string): boolean {
+    const key = this.#key(body);
+    return key !== null && this.#shown.has(key);
+  }
+
+  /** Where `body`'s boxes differ from the first body's, or null where more than boxes do. */
+  #key(body: string): string | null {
+    const first = this.#first;
+    if (first === null || first.length !== body.length) return null;
+    if (first === body) return '';
+    let key = '';
+    for (let at = 0; at < body.length; at++) {
+      const was = first[at]!;
+      const is = body[at]!;
+      if (was === is) continue;
+      if (!BOX_MARKS.has(was) || !BOX_MARKS.has(is)) return null;
+      key += `${at}${is},`;
+    }
+    return key;
+  }
 }
 
 /** `markdown` with each of `changes` made, in order, and those that no longer apply. */

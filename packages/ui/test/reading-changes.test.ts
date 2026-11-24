@@ -23,6 +23,7 @@ import {
   type Flushed,
   type MadeOn,
   type ReadingChange,
+  ShownBodies,
 } from '../src/page/reading-changes-model.ts';
 
 const LIST = '---\nservings: 4\n---\n- [ ] milk\n- [ ] bread\n- [x] eggs\n';
@@ -816,5 +817,58 @@ describe('an offline draft made only of ticks (#695)', () => {
       markdown: fenced,
       dropped: [{ change: bread, reason: 'The task “bread” isn’t on the page any more.' }],
     });
+  });
+});
+
+describe('the bodies a page showed as this person’s changes were made (#728)', () => {
+  const read = '---\ntitle: Calls\n---\n- [ ] Call\n- [ ] Call\n';
+  const first: ReadingChange = {
+    kind: 'task',
+    offset: read.indexOf('- [ ] Call'),
+    line: 'Call',
+    checked: true,
+  };
+  const then: ReadingChange = {
+    kind: 'task',
+    offset: read.lastIndexOf('- [ ] Call'),
+    line: 'Call',
+    checked: true,
+  };
+  const set: ReadingChange = { kind: 'property', key: 'title', value: 'Phone calls' };
+
+  it('are the body read and each with the queued changes made, in order', () => {
+    const shown = new ShownBodies();
+    shown.see(read, [first, then, set]);
+    expect(shown.has('- [ ] Call\n- [ ] Call\n')).toBe(true);
+    expect(shown.has('- [x] Call\n- [ ] Call\n')).toBe(true);
+    expect(shown.has('- [x] Call\n- [x] Call\n')).toBe(true);
+    expect(shown.has('- [ ] Call\n- [x] Call\n')).toBe(false);
+  });
+
+  it('stay as a flush of them publishes, and go as a text not of this person’s making comes', () => {
+    const shown = new ShownBodies();
+    shown.see(read, [first]);
+    shown.see(read, [first, then]);
+    // The flush published the first tick, and the second waits.
+    const published = applyChanges(read, [first]).markdown;
+    shown.see(published, [then]);
+    expect(shown.has('- [ ] Call\n- [ ] Call\n')).toBe(true);
+    // Another tab ticked the second only: it differs only in what is ticked, but isn't one shown.
+    shown.see('- [ ] Call\n- [x] Call\n', []);
+    expect(shown.has('- [ ] Call\n- [ ] Call\n')).toBe(false);
+    expect(shown.has('- [ ] Call\n- [x] Call\n')).toBe(true);
+  });
+
+  it('keep the first however many are ticked one after another', () => {
+    const page = Array.from({ length: 40 }, () => '- [ ] Call\n').join('');
+    const shown = new ShownBodies();
+    const ticks: ReadingChange[] = [];
+    for (let at = 0; at < 40; at++) {
+      ticks.push({ kind: 'task', offset: at * 11, line: 'Call', checked: true });
+      shown.see(page, [...ticks]);
+    }
+    expect(shown.has(page)).toBe(true);
+    expect(shown.has(page.replaceAll('[ ]', '[x]'))).toBe(true);
+    expect(shown.has(page.replace('[ ]', '[X]'))).toBe(false);
   });
 });
