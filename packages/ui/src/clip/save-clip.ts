@@ -19,6 +19,7 @@ import {
   noAnswer,
   splitFrontmatter,
   type AttachmentRef,
+  type FolderId,
   type LinkSpans,
   type PagePayload,
   type PageWriter,
@@ -67,8 +68,8 @@ export type SaveClipDeps = {
     head: RevisionId;
     payload: PagePayload;
   }>;
-  /** Whether the person put a page in the trash on this device, waiting to be sent. */
-  trashWaiting?: (pageId: PageId) => Promise<boolean>;
+  /** Whether the person put a page or folder in the trash on this device, waiting to be sent. */
+  trashWaiting?: (id: PageId | FolderId) => Promise<boolean>;
   /** Main's fetch of one of the clip's images (`DesktopBridge.clipImage`). */
   image: (url: string) => Promise<ClipImage>;
   /** Today, as `clipped` says it. */
@@ -401,8 +402,11 @@ async function finishPartly(
   const standing = async (): Promise<{ stands: Stands | null } | Saved | 'gone'> => {
     let stands: Stands | null = null;
     try {
-      // In the trash here, which the server hasn't heard yet: as one gone.
+      // In the trash here, or in a folder there, which the server hasn't
+      // heard yet: as one gone, so the clip's folder is looked for again.
+      const { folderId } = clip.folder;
       if (await deps.trashWaiting?.(pageId)) return 'gone';
+      if (folderId && (await deps.trashWaiting?.(folderId))) return 'gone';
       const head = await drafts.waitingHead();
       const entry = await drafts.entryNow();
       if (entry) {

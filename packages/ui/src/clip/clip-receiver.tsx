@@ -275,9 +275,11 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
         spans,
         made: (page) => bridge.clipMade(next.id, page),
         current: (page) => currentDraft(ctx, page),
-        trashWaiting: async (pageId) =>
-          (await ctx.keptContent?.queue.waiting(pageId))?.some((one) => one.kind === 'delete') ??
-          false,
+        // One the server refused stays, and the page with it.
+        trashWaiting: async (id) =>
+          (await ctx.keptContent?.queue.waiting(id))?.some(
+            (one) => one.kind === 'delete' && !one.failure,
+          ) ?? false,
         image: (url) => bridge.clipImage(next.id, url),
         today: localDay(),
         choose: (_clip, title) =>

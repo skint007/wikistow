@@ -917,6 +917,21 @@ describe('saving a screenshot', () => {
       expect(attaching.calls).toEqual([]);
     });
 
+    it('looks for its folder again if the person put that in the trash here meanwhile', async () => {
+      const { writer, calls } = fakeWriter();
+      const saved = await saveClip(
+        partly(),
+        deps({
+          writer,
+          trashWaiting: async (id) => id === folderId,
+          // As the tree shows it once the folder is in the trash.
+          places: async () => ({ places: [], unread: new Set() }),
+        }),
+      );
+      expect(saved.outcome).toMatchObject({ ok: false, code: 'no-folder' });
+      expect(calls).toEqual([]);
+    });
+
     it('leaves its change waiting here alone if another window saved into it meanwhile', async () => {
       const { first } = await written();
       const { writer, calls } = fakeWriter({
@@ -1180,7 +1195,7 @@ describe('a lock while an offline clip saves', () => {
     const revisionId = newId(RevisionId);
     const { kept, writer } = await unlock(memoryKeptStore());
     await writer.deleteNode({ spaceId, nodeId: pageId, node: 'page', name: 'Clip' });
-    const trashWaiting = async (id: PageId) =>
+    const trashWaiting = async (id: PageId | FolderId) =>
       (await kept.queue.waiting(id)).some((one) => one.kind === 'delete');
     const saved = await saveClip(
       {
