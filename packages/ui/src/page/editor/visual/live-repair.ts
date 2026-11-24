@@ -86,14 +86,19 @@ export function wrote(
   const from = Y.getState(doc.store, writing.client);
   put();
   const to = Y.getState(doc.store, writing.client);
-  // What went in longer ago than a repair looks back is forgotten.
+  // What went in longer ago than a repair looks back is forgotten, oldest first.
   const since = (c: Clocks) => now - c.at <= REPAIR_MS;
-  writing.put = writing.put.filter(since);
+  const forget = (clocks: Clocks[]) => {
+    let old = 0;
+    while (old < clocks.length && !since(clocks[old] as Clocks)) old++;
+    if (old > 0) clocks.splice(0, old);
+  };
+  forget(writing.put);
   if (to > from)
     writing.put.push({ client: writing.client, clock: from, length: to - from, at: now });
   if (!writing.deleted && now - writing.full > REPAIR_MS) writing.deleted = [];
   if (!writing.deleted) return;
-  writing.deleted = writing.deleted.filter(since);
+  forget(writing.deleted);
   for (const [client, items] of transaction.deleteSet.clients)
     for (const { clock, len } of items) {
       if (writing.deleted.length >= DELETIONS) {
@@ -152,6 +157,18 @@ function tagAt(text: string, at: number): { name: 'span' | 'mark'; closing: bool
     return isNameChar(text.charCodeAt(start + 4)) ? null : { name, closing };
   }
   return null;
+}
+
+/** Whether `text` at `at` starts `<`, then up to four marks, then a tag's name: a tag split by a merge. */
+function splitTagAt(text: string, at: number): boolean {
+  if (text.charCodeAt(at) !== 60 || escaped(text, at)) return false;
+  let i = at + 1;
+  if (text[i] === '/') i++;
+  const start = i;
+  while (i - start < 4 && (PAIRED.has(text[i] as string) || SINGLE.has(text[i] as string))) i++;
+  if (i === start) return false;
+  const name = text.slice(i, i + 4).toLowerCase();
+  return (name === 'mark' || name === 'span') && !isNameChar(text.charCodeAt(i + 4));
 }
 
 /** Whether `text` holds a tag named `span` or `mark` (`tagAt`), which may not read cleanly. */
@@ -299,11 +316,15 @@ export function readingOf(block: string): Reading {
 /** Whether `block` reads cleanly (`readingOf`). */
 export const readsCleanly = (block: string) => readingOf(block) === 'clean';
 
-/** Each tag named `span` or `mark` in `text` from `from` to `to`, in order, none overlapping. */
-function tagsIn(text: string, from: number, to: number): Span[] {
+/**
+ * Each tag named `span` or `mark` in `text` from `from` to `to`, in order,
+ * none overlapping; `loose`, also one with marks put in between its `<`
+ * and its name (`<**mark`), as a merge can leave it.
+ */
+function tagsIn(text: string, from: number, to: number, loose = false): Span[] {
   const spans: Span[] = [];
   for (let at = text.indexOf('<', from); at >= 0 && at < to; at = text.indexOf('<', at + 1)) {
-    if (!tagAt(text, at)) continue;
+    if (!tagAt(text, at) && !(loose && splitTagAt(text, at))) continue;
     const end = text.slice(at + 1, Math.min(to, at + LONGEST_TAG)).indexOf('>');
     const tagEnd = end < 0 ? Math.min(to, at + 6) : at + end + 2;
     spans.push({ from: at, to: tagEnd });
@@ -312,9 +333,32 @@ function tagsIn(text: string, from: number, to: number): Span[] {
   return spans;
 }
 
-// Marks a formatting change may put beside a tag: emphasis, a strike, a
-// highlight, a link's brackets, code and maths.
-const BESIDE = new Set('*_~=[]`$');
+// Marks a formatting change may put beside a tag: bold, a strike or a
+// highlight as two of a kind, a link's brackets, code and maths.
+const PAIRED = new Set('*_~=');
+const SINGLE = new Set('[]`$');
+// How far past a link's text its address is looked for.
+const LINK_AT_MOST = 256;
+
+/**
+ * How many characters of a mark lie beside `at` in `text`, going `way`
+ * (-1 before, 1 after) and not past `limit`: a run of two or more of `*`,
+ * `_`, `~` or `=`, or one of `[`, `]`, a backtick or `$`; else 0. A single
+ * `*` or `=` may as well be text, as `score=`.
+ */
+function markRun(text: string, at: number, way: 1 | -1, limit: number): number {
+  const first = way === 1 ? at : at - 1;
+  const char = text[first];
+  if (char === undefined || (way === 1 ? first >= limit : first < limit)) return 0;
+  if (SINGLE.has(char)) return 1;
+  if (!PAIRED.has(char)) return 0;
+  let run = 0;
+  for (let i = first; way === 1 ? i < limit : i >= limit; i += way) {
+    if (text[i] !== char) break;
+    run++;
+  }
+  return run >= 2 ? run : 0;
+}
 
 /**
  * The tags of `line` that pair as a browser pairs them, and those that
@@ -325,8 +369,13 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
   const open: { name: string; key: string; tag: Span }[] = [];
   const pairs: [Span, Span][] = [];
   const bad: Span[] = [];
-  for (const tag of tagsIn(line, 0, line.length)) {
-    const { name, closing } = tagAt(line, tag.from) as { name: string; closing: boolean };
+  for (const tag of tagsIn(line, 0, line.length, true)) {
+    const named0 = tagAt(line, tag.from);
+    if (!named0) {
+      bad.push(tag);
+      continue;
+    }
+    const { name, closing } = named0;
     const written = line.slice(tag.from, tag.to);
     if (closing) {
       const at = open.findLastIndex((o) => o.name === name);
@@ -365,7 +414,7 @@ function readerBad(line: string): Span[] | null {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if ((node.type === 'html' || node.type === 'text') && start !== undefined && end !== undefined)
-      bad.push(...tagsIn(line, start, end));
+      bad.push(...tagsIn(line, start, end, true));
     const kind = kindOf(node);
     if (kind && at.around.includes(kind) && start !== undefined && end !== undefined)
       bad.push({ from: start, to: line.indexOf('>', start) + 1 }, { from: end - 7, to: end });
@@ -380,7 +429,7 @@ function readerBad(line: string): Span[] | null {
  * What doesn't read cleanly in a block of `text` from `from` to `to`, as
  * the reader would have it: each tag that doesn't pair (`pairsOf`), or
  * that the reader leaves as HTML, and each pair with one of those inside
- * it, each with the marks right beside it (`BESIDE`), as the `**` of bold
+ * it, each with the marks right beside it (`markRun`), as the `**` of bold
  * put on around a highlight. Other tags on the line, which read as a
  * colour, aren't. In order, none overlapping; null where it can't tell.
  */
@@ -412,9 +461,15 @@ function besideOf(text: string, tags: readonly Span[], from: number, to: number)
   const spans: Span[] = [];
   for (const tag of tags) {
     let start = tag.from;
-    while (start > from && BESIDE.has(text[start - 1] as string)) start--;
+    for (let run = markRun(text, start, -1, from); run > 0; run = markRun(text, start, -1, from))
+      start -= run;
     let end = tag.to;
-    while (end < to && BESIDE.has(text[end] as string)) end++;
+    for (let run = markRun(text, end, 1, to); run > 0; run = markRun(text, end, 1, to)) end += run;
+    // A link's address after its text: `](x.md)`.
+    if (text[end - 1] === ']' && text[end] === '(') {
+      const close = text.slice(end, Math.min(to, end + LINK_AT_MOST)).indexOf(')');
+      if (close >= 0) end += close + 1;
+    }
     const last = spans.at(-1);
     if (last && last.to >= start) last.to = Math.max(last.to, end);
     else spans.push({ from: Math.max(start, last?.to ?? start), to: end });
@@ -598,12 +653,8 @@ class Fences {
       if (fence && !open) {
         // `$$` with more on its line is math within the line.
         if (fence.run[0] !== '$' || fence.bare) open = fence;
-      } else if (
-        fence?.bare &&
-        open &&
-        (fence.container === open.container ||
-          (open.container === 'list' && fence.container === 'page'))
-      ) {
+      } else if (fence?.bare && open && open.container === 'page' && fence.container === 'page') {
+        // One in a quote or a list item ends with it: what looks like its end may be its text.
         if (fence.run[0] === open.run[0] && fence.run.length >= open.run.length) open = null;
       }
       this.#open = open;
@@ -719,6 +770,7 @@ function deletedBy(writings: readonly Writing[], item: Found): number {
  * keeps; else null.
  */
 function repairs1(
+  text: (from: number, to: number) => string,
   items: readonly Found[],
   conflict: Conflict,
   recent: readonly Writing[],
@@ -770,8 +822,15 @@ function repairs1(
     if (item.client > writing.client) return null;
     formatters.add(item.client);
   }
+  // Theirs not in the conflict stays: all of a bystander's, and the other
+  // formatter's plain text, as a sentence it typed on the line offline;
+  // not its pieces of tags or marks the merge left apart.
   const kept = unseen
-    .filter((item) => !formatters.has(item.client))
+    .filter(
+      (item) =>
+        !inOne(item) &&
+        (!formatters.has(item.client) || plain(text(item.at, item.at + item.length))),
+    )
     .map((item) => ({ from: item.at, to: item.at + item.length }));
   // Where it put text in, in that writing.
   const own = items
@@ -782,6 +841,12 @@ function repairs1(
     .map((item) => ({ from: item.at, to: item.at + item.length }));
   return { kept, own, formatters: formatters.size };
 }
+
+// Characters that make HTML or Markdown marks, as pieces of a tag or a mark have.
+const MARKUP = /[<>="*_~[\]()`$\\/]/;
+
+/** Whether `text` is plain: none of the characters of tags or marks in it. */
+const plain = (text: string) => !MARKUP.test(text);
 
 /** The first of `spans`, in order and none overlapping, that ends after `from`. */
 function firstEnding(spans: readonly Span[], from: number): number {
@@ -811,6 +876,7 @@ function overlapsAny(spans: readonly Span[], from: number, to: number): boolean 
  * text they took out, as a word deleted elsewhere on the line.
  */
 function undoneOn(
+  bodyText: string,
   theirs: readonly Theirs[],
   at: number,
   lines: readonly Span[],
@@ -844,6 +910,8 @@ function undoneOn(
       const line = lines[i] as Span;
       if (line.from > change.bodyEnd) break;
       if (change.bodyEnd > change.body) {
+        // What went in across a line break, as a new line, stays whole.
+        if (bodyText.slice(change.body, change.bodyEnd).includes('\n')) break;
         const from = Math.max(change.body, line.from);
         const to = Math.min(change.bodyEnd, line.to);
         if (to > from) takeOut(from, to);
@@ -953,7 +1021,7 @@ export function repairs(
     const failing = linesOf(body, block.from, block.to).filter((line) =>
       overlapsAny(conflict.spans, line.from, line.to + 1),
     );
-    const repairer = repairs1(found, conflict, recent, clients);
+    const repairer = repairs1((a, b) => body.slice(a, b), found, conflict, recent, clients);
     if (!repairer) continue;
     // Others only took text out: only if beside what it put in, made at once, not knowing it.
     const own = merged(repairer.own, []);
@@ -964,9 +1032,21 @@ export function repairs(
       continue;
     // Its own text in the conflict, as its letters of a tag the other took out, for what to put back.
     const conflicts = merged(conflict.spans, own);
-    const changes = undoneOn(inside, block.from, failing, conflicts, mine, repairer.kept, held);
+    const changes = undoneOn(
+      body,
+      inside,
+      block.from,
+      failing,
+      conflicts,
+      mine,
+      repairer.kept,
+      held,
+    );
     const result = applied(shown, block.from, changes);
-    if (changes.length > 0 && readingOf(result) === 'clean') out.push(...changes);
+    // No pieces of the other's tags left as text: no more colours named than it wrote.
+    const named = (text: string) => text.split('data-color').length;
+    if (changes.length > 0 && readingOf(result) === 'clean' && named(result) <= named(mine))
+      out.push(...changes);
   }
   return out;
 }

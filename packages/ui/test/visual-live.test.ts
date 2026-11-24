@@ -1482,17 +1482,13 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
-  it('settles crossed tags in a list item after its fence', async () => {
+  it('leaves a list item after its fence as main does, as the fence may not have ended', async () => {
     const above = '- ```\n  literal\n  ```\n\n  ';
+    const [was, mine, theirs] = [line('world'), line(hi('world')), line(red('span', 'world'))].map(
+      (text) => `${above}${text}`,
+    ) as [string, string, string];
     for (const aLower of orders)
-      expect(
-        await merged(
-          `${above}${line('world')}`,
-          `${above}${line(hi('world'))}`,
-          `${above}${line(red('span', 'world'))}`,
-          aLower,
-        ),
-      ).toBe(`${above}${line(aLower ? red('span', 'world') : hi('world'))}`);
+      expect(await merged(was, mine, theirs, aLower)).toBe(byCharacter(was, mine, theirs, aLower));
   });
 
   it('repairs once when the other formatted before its editor took this one in', async () => {
@@ -1532,6 +1528,61 @@ describe('two people formatting the same text at once (#720)', () => {
         }
       expect(bodyOf(a)).toBe(`Hi world there and ${hi('more')}.\n`);
     }
+  });
+
+  it('keeps what main keeps: a lone `=` beside the tags, code after a fence in a list', async () => {
+    const fenced = '- ```\n  -``\n\n  Hello <mk notes.md> there.\n  ```\n';
+    for (const [was, mine, theirs] of [
+      [line('scoreworld'), line(`score${hi('world')}`), line('score=world')],
+      [fenced, fenced.replace('<mk', '<mrk'), fenced.replace('<mk', '<mak').replace('-``', '-```')],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('keeps a new line the other put in, and what it typed on the line offline', async () => {
+    const was = line('abc def ghi');
+    for (const aLower of orders) {
+      const result = await merged(
+        was,
+        line(`${hi('abc def')} ghi`),
+        line(`abc ${red('span', 'def ghi\nX')}`),
+        aLower,
+      );
+      expect(result).toContain('\nX');
+    }
+    // The other typed a sentence on the line while away, then formatted the word.
+    const away = ' I wrote this offline.';
+    for (const aLower of orders) {
+      const result = await merged(
+        line('world'),
+        line(hi('world')),
+        line(red('span', 'world')).replace('there.', `there.${away}`),
+        aLower,
+      );
+      expect(result).toContain(away);
+      expect(readsCleanly(result)).toBe(true);
+    }
+  });
+
+  it('settles a link or bold put on a word whose tag the merge split after its `<`', async () => {
+    const page = 'See my notes here.\n';
+    for (const [mine, theirs, both] of [
+      [page.replace('my', hi('my')), page.replace('my', '[my](x.md)'), ''],
+      [page.replace('my notes', hi('my notes')), page.replace('my', '**my**'), ''],
+      [
+        page.replace('my notes', hi('my notes')),
+        page.replace('notes', '[notes](x.md)'),
+        page.replace('my notes', hi('my [notes](x.md)')),
+      ],
+    ] as const)
+      for (const aLower of orders) {
+        const result = await merged(page, mine, theirs, aLower);
+        expect(readsCleanly(result), `${result} ${aLower}`).toBe(true);
+        expect([mine, theirs, both]).toContain(result);
+      }
   });
 
   it('leaves a block broken when the one to repair it is gone', async () => {
