@@ -13,7 +13,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Desktop
 
-- Web clipper: a screenshot clip that a reload or a lock cut short adds its screenshot to the page it made, rather than putting that page in the trash and making another. Where you can add pages to a shared folder but not trash them, it no longer leaves two pages, and if adding it fails, the page with your note and link stays. (#681)
+- Web clipper: a screenshot clip that a reload or a lock cut short adds its screenshot to the page it made, rather than putting that page in the trash and making another. Where you can add pages to a shared folder but not trash them, it no longer leaves two pages, and if adding it fails, the page with your note and link stays. (#734)
 
 #### Server
 
