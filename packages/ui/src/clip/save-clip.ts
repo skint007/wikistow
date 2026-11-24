@@ -61,7 +61,7 @@ export type SaveClipDeps = {
    * A page's draft on the server now, its head and what it holds, so a
    * screenshot added to its page made partly writes over nothing the
    * person changed since. Throws as the server answers: `404` for one in
-   * the trash.
+   * the trash. Without it, its first draft is taken as it stands.
    */
   current?: (page: { spaceId: SpaceId; pageId: PageId }) => Promise<{
     head: RevisionId;
@@ -352,6 +352,9 @@ const KEPT = 'Its page keeps your note and link.';
 const CHANGED =
   'Its page changed since WikiStow made it, so the screenshot wasn’t added. Check whether it shows it.';
 
+const OFFLINE =
+  'WikiStow couldn’t see its page offline, so the screenshot wasn’t added. Its page keeps your note and link.';
+
 const bodyOf = (markdown: string) => splitFrontmatter(markdown).body;
 
 /**
@@ -390,10 +393,14 @@ async function finishPartly(
   let stands: { head: RevisionId; payload: PagePayload } | null = null;
   try {
     const head = await drafts.waitingHead();
-    const waiting = await drafts.waitingChange();
-    // A change the server refused, which the person sorts out first.
-    if (waiting && !head) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
-    if (waiting && head) stands = { head, payload: waiting.payload };
+    const entry = await drafts.entryNow();
+    if (entry) {
+      // A change the server refused, which the person sorts out first.
+      if (entry.failure || !head) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+      // Saved into since it was read, as by another window.
+      if (entry.version !== drafts.seen()) return failed('failed', CHANGED);
+      stands = { head, payload: entry.payload };
+    }
   } catch {
     return failed('failed', `${SHOT_FAILED} ${KEPT}`);
   }
@@ -402,9 +409,9 @@ async function finishPartly(
       stands = await deps.current(page);
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) return 'gone';
-      // Offline, it's added on the first draft it was made with, and a
-      // draft saved since makes it a conflict once sent.
-      if (!noAnswer(error)) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+      // Offline, what the server has can't be seen, and its first draft
+      // may be the person's changes, sent from here: nothing is guessed.
+      return failed('failed', noAnswer(error) ? OFFLINE : `${SHOT_FAILED} ${KEPT}`);
     }
   }
   if (stands) {
@@ -438,8 +445,8 @@ async function finishPartly(
       ? failed('too-large', `This screenshot is larger than your WikiStow server takes. ${KEPT}`)
       : failed('failed', `${SHOT_FAILED} ${KEPT}`);
   }
-  // On the page as it stands, keeping all it has but the text, or else
-  // on the first draft it was made with.
+  // On the page as it stands, keeping all it has but the text, or else,
+  // with no `current`, on the first draft it was made with.
   const basedOn = stands?.head ?? made.revisionId;
   if (!basedOn) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
   const shown = text.shown(ref.id);

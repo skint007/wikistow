@@ -234,6 +234,7 @@ function fakeWriter({
   made = [],
   gone = [],
   waiting = null,
+  savedSince = false,
 }: {
   refuse?: 'page' | 'attach' | 'attach-failed' | 'save' | 'delete' | 'delete-forbidden';
   /** Pages made already, which making again is refused as. */
@@ -242,6 +243,8 @@ function fakeWriter({
   gone?: PageId[];
   /** The page's change waiting on this device, and the head it's on: none for one the server refused. */
   waiting?: { head: RevisionId | null; payload: PagePayload } | null;
+  /** Another window saved into the waiting change after its head was read. */
+  savedSince?: boolean;
 } = {}) {
   const calls: { call: string; input: unknown }[] = [];
   const revisionId = newId(RevisionId);
@@ -275,8 +278,14 @@ function fakeWriter({
     draft() {
       return {
         waitingHead: async () => waiting?.head ?? null,
-        waitingChange: async () =>
-          waiting && { version: 1, head: waiting.head, payload: waiting.payload },
+        // Version 1, refused by the server without a head, or saved into after the head was read.
+        entryNow: async () =>
+          waiting && {
+            version: savedSince ? 2 : 1,
+            payload: waiting.payload,
+            failure: waiting.head ? null : { kind: 'gone' },
+          },
+        seen: () => (waiting?.head ? 1 : null),
         save: async (input: DraftSave) => {
           calls.push({ call: 'save', input });
           if (refuse === 'save') throw new ApiError(409, 'stale-head', 'Stale');
@@ -834,7 +843,7 @@ describe('saving a screenshot', () => {
       expect(calls).toEqual([]);
     });
 
-    it('makes it again if the server says it’s gone, and adds it on its first draft offline', async () => {
+    it('makes it again if the server says it’s gone, and adds nothing offline, unseen', async () => {
       const gone = fakeWriter();
       const remade = await saveClip(
         partly(),
@@ -854,8 +863,25 @@ describe('saving a screenshot', () => {
           current: () => Promise.reject(new ApiError(0, 'network', 'No answer')),
         }),
       );
-      expect(added.outcome).toMatchObject({ ok: true, pageId });
-      expect((offline.calls[1]!.input as DraftSave).basedOn).toBe(revisionId);
+      expect(added.outcome).toMatchObject({
+        ok: false,
+        message: expect.stringContaining('couldn’t see its page offline'),
+      });
+      expect(offline.calls).toEqual([]);
+    });
+
+    it('leaves its change waiting here alone if another window saved into it meanwhile', async () => {
+      const { first } = await written();
+      const { writer, calls } = fakeWriter({
+        waiting: { head: revisionId, payload: first },
+        savedSince: true,
+      });
+      const saved = await saveClip(partly(), deps({ writer }));
+      expect(saved.outcome).toMatchObject({
+        ok: false,
+        message: expect.stringContaining('Its page changed since WikiStow made it'),
+      });
+      expect(calls).toEqual([]);
     });
 
     it('says its page changed if the server has a newer draft of it', async () => {
@@ -1005,9 +1031,10 @@ describe('a lock while an offline clip saves', () => {
     expect((page as QueuedPage).payload.markdown).toContain('![Screenshot](attachment:');
   });
 
-  it('adds the screenshot to a page made partly that was sent, putting nothing in the trash', async () => {
+  it('keeps a page made partly that was sent, putting nothing in the trash and making no other', async () => {
     // Sent before going offline: a trash waiting here would be refused once
-    // sent, to a person who can add pages but not trash them (#681).
+    // sent, to a person who can add pages but not trash them (#681). Its
+    // draft on the server can't be seen offline, so nothing is written on it.
     const pageId = newId(PageId);
     const revisionId = newId(RevisionId);
     const { kept, writer } = await unlock(memoryKeptStore());
@@ -1016,17 +1043,14 @@ describe('a lock while an offline clip saves', () => {
         ...screenshotClip(),
         made: { spaceId, pageId, revisionId, path: 'Home / News', partial: true },
       },
-      deps({ writer, convert: plainText }),
+      deps({
+        writer,
+        convert: plainText,
+        current: () => Promise.reject(new ApiError(0, 'network', 'No answer')),
+      }),
     );
-    expect(saved.outcome).toMatchObject({ ok: true, pageId, images: { saved: 1, skipped: 0 } });
-    const entries = await kept.queue.entries();
-    expect(entries.filter((entry) => entry.kind !== 'page')).toEqual([]);
-    const [page, ...others] = await pages(kept);
-    expect(others).toEqual([]);
-    expect(page).toMatchObject({ id: pageId, basedOn: revisionId });
-    expect((page as QueuedPage).newPage).toBeFalsy();
-    const { payload } = page as QueuedPage;
-    expect(payload.markdown).toContain(`![Screenshot](attachment:${payload.attachments[0]!.id})`);
+    expect(saved.outcome).toMatchObject({ ok: false, code: 'failed' });
+    expect(await kept.queue.entries()).toEqual([]);
   });
 
   it('leaves the page a lock cut short as the person changed it, rather than write over it', async () => {

@@ -160,9 +160,14 @@ async function currentDraft(ctx: ClientContext, page: { spaceId: SpaceId; pageId
   const { heads } = await pageOperations.loadPage(ctx, page.pageId);
   // None for someone who may no longer change it: theirs to make again.
   if (!heads.draftHead) throw new ApiError(404, 'not-found', 'You can’t change this page');
-  const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', heads.draftHead, {
-    fresh: true,
-  });
+  // A draft the server has but can't serve isn't a page gone, which is made again.
+  const draft = await pageOperations
+    .openRevisionOf(ctx, page, 'draft', heads.draftHead, { fresh: true })
+    .catch((error: unknown) => {
+      throw error instanceof ApiError && error.status === 404
+        ? new Error('Its draft can’t be read', { cause: error })
+        : error;
+    });
   return { head: heads.draftHead, payload: revisePayload(draft.opened, {}) };
 }
 
