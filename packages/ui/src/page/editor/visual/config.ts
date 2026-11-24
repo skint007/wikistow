@@ -397,13 +397,39 @@ const isLink = (wrap: Wrap) => wrap.node.type === 'link';
 // Marks that hold a space at their ends: a link's text, and a colour's HTML.
 const SPACED = new Set(['link', 'textColor', 'colorHighlight']);
 
+// Spaces the guard reads as spaces, which show no marks, at a text's start or end.
+const PLAIN_SPACES = `[ \\t\\r\\n${HELD_SPACE}]+`;
+const PLAIN_START = new RegExp(`^${PLAIN_SPACES}`);
+const PLAIN_END = new RegExp(`${PLAIN_SPACES}$`);
+
+// Whether `nodes`, read from their start (`first`) or end, and past line
+// breaks and plain spaces (`PLAIN_SPACES`), come to another space, as a
+// no-break space is, which shows the marks it's in; null if they come to
+// nothing.
+function markedSpaceAt(nodes: readonly Tree[], first: boolean): boolean | null {
+  for (const node of first ? nodes : nodes.toReversed()) {
+    if (node.type === 'break') continue;
+    if (node.type === 'text') {
+      const text = (node.value ?? '').replace(first ? PLAIN_START : PLAIN_END, '');
+      if (text) return /\s/.test(first ? text[0]! : text.at(-1)!);
+      continue;
+    }
+    const inner = node.children ? markedSpaceAt(node.children, first) : false;
+    if (inner !== null) return inner;
+  }
+  return null;
+}
+
 // `wrap` around `children`, with the spaces and line breaks they start
 // and end with outside it, as Milkdown puts spaces: a delimiter beside a
 // space isn't one, nor beside a line break. A space held for Milkdown
 // (`HELD_SPACE`) goes out too, but of a link or a colour's HTML, which can
 // hold it, as it can a no-break space or another of Unicode's, which
-// Milkdown leaves in. `writable` takes a mark off a line break at its run's end, but
-// `nest` may end a mark sooner, before a link it would cut.
+// Milkdown leaves in. `writable` takes a mark off a line break at its
+// run's end, but `nest` may end a mark sooner, before a link it would
+// cut. A line break stays in where moving it out would end the mark
+// beside a space that shows it (`markedSpaceAt`), which `writable` would
+// take the mark off when next written.
 function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[] {
   const inside = [...children];
   // The spaces and line breaks at one end, across text nodes of only
@@ -413,6 +439,8 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
     for (;;) {
       const node = first ? inside[0] : inside.at(-1);
       if (node?.type === 'break') {
+        const rest = first ? inside.slice(1) : inside.slice(0, -1);
+        if (markedSpaceAt(rest, first)) break;
         inside.splice(first ? 0 : -1, 1);
         if (first) taken.push(node);
         else taken.unshift(node);

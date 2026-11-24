@@ -209,13 +209,31 @@ describe('marks that overlap partly', () => {
       ],
       '[a **b**](u)\\\n**c d** e\n',
     );
-    // A colour's HTML keeps the no-break space before the break, which
-    // Milkdown leaves in, as it does at its end.
+    // But not where the mark would then end beside a no-break space, which
+    // shows it, as no delimiter can sit beside one; nor out of a colour's
+    // HTML around one, which a mark around the colour then ends beside.
+    await writes(
+      'a b\\\n\u00a0c d e\n',
+      [
+        ['link', 1, 4, { href: 'u' }],
+        ['strong', 3, 7],
+      ],
+      '[a **b**](u)**\\\n\u00a0c** d e\n',
+    );
     await writes(
       'a <span data-color="red">b\u00a0\\\nc d</span> e\n',
       [['link', 6, 11, { href: 'u' }]],
-      'a <span data-color="red">b\u00a0</span>\\\n[<span data-color="red">c d</span> e](u)\n',
+      'a <span data-color="red">b\u00a0\\\n</span>[<span data-color="red">c d</span> e](u)\n',
     );
+    await writes(
+      'a <span data-color="red">b\u00a0\\\nc d</span> e\n',
+      [
+        ['strong', 1, 7],
+        ['link', 6, 11, { href: 'u' }],
+      ],
+      '**a <span data-color="red">b\u00a0\\\n</span>**[<span data-color="red">**c** d</span> e](u)\n',
+    );
+    // A colour's HTML keeps a no-break space at its end, which Milkdown leaves in.
     await writes(
       'a <span data-color="red">b\u00a0</span> e\n',
       [],
