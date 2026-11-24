@@ -355,6 +355,9 @@ const CHANGED =
 const OFFLINE =
   'WikiStow couldn’t see its page offline, so the screenshot wasn’t added. Its page keeps your note and link.';
 
+/** The server's own answer that a page is gone, or not the person's: not one a proxy wrote. */
+const isGone = (error: unknown) => error instanceof ApiError && error.code === 'not-found';
+
 const bodyOf = (markdown: string) => splitFrontmatter(markdown).body;
 
 /**
@@ -412,7 +415,7 @@ async function finishPartly(
       try {
         stands = await deps.current(page);
       } catch (error) {
-        if (error instanceof ApiError && error.status === 404) return 'gone';
+        if (isGone(error)) return 'gone';
         // Offline, what the server has can't be seen, and its first draft
         // may be the person's changes, sent from here: nothing is guessed.
         return failed('failed', noAnswer(error) ? OFFLINE : `${SHOT_FAILED} ${KEPT}`);
@@ -449,7 +452,7 @@ async function finishPartly(
   } catch (error) {
     // Locked again: it waits for the next unlock, as before.
     if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
-    if (error instanceof ApiError && error.status === 404) return 'gone';
+    if (isGone(error)) return 'gone';
     return error instanceof ApiError && error.status === 413
       ? failed('too-large', `This screenshot is larger than your WikiStow server takes. ${KEPT}`)
       : failed('failed', `${SHOT_FAILED} ${KEPT}`);

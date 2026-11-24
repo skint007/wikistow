@@ -901,6 +901,22 @@ describe('saving a screenshot', () => {
       expect(refused.calls.map((c) => c.call)).toEqual(['attach']);
     });
 
+    it('keeps it if a 404 isn’t the server’s own, making no other', async () => {
+      const proxy = new ApiError(404, 'unreadable-response', 'Not JSON');
+      const read = fakeWriter();
+      const unread = await saveClip(
+        partly(),
+        deps({ writer: read.writer, current: () => Promise.reject(proxy) }),
+      );
+      expect(unread.outcome).toMatchObject({ ok: false, code: 'failed' });
+      expect(read.calls).toEqual([]);
+      const attaching = fakeWriter();
+      const writer = { ...attaching.writer, attach: () => Promise.reject(proxy) } as PageWriter;
+      const unattached = await saveClip(partly(), deps({ writer }));
+      expect(unattached.outcome).toMatchObject({ ok: false, code: 'failed' });
+      expect(attaching.calls).toEqual([]);
+    });
+
     it('leaves its change waiting here alone if another window saved into it meanwhile', async () => {
       const { first } = await written();
       const { writer, calls } = fakeWriter({
