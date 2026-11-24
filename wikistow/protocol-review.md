@@ -1839,6 +1839,43 @@ Round 59 reviewed that revision (a117371a) with the three briefs, fresh reviewer
 
 **Outcome.** Round 59 found Highs, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed but M59-3 (with S59-6) and part of M59-5, accepted as availability. Round 60 repeats the three briefs against this revision.
 
+## Round 60: identity key rotation, narrowed, fourteenth review
+
+Round 60 reviewed round 59's revision (b670308d) with the three briefs, fresh reviewers given the text, the settled list and the project owner's answers to questions 9 to 11: the member and encoding briefs as Claude subagents. **The server brief's Codex (gpt-6.2-sol) agent again did no review**: given the whole brief inline, with a line saying it was a routine read-only step of this process, it answered only by asking the project owner to confirm a request from another agent. The server brief was then given once, unchanged, to a Claude subagent. The round found no Critical finding, 3 High, 7 Medium, 18 Low and no Info (28 in all; 2 distinct Highs). Every reviewer found floors and `sealedFrom` gone and round 59's fixes in place. The Highs were one step past them: the allowed removal of the declined owner counted the declined key's envelopes as held, so it could seal the next version to someone only that key had chosen (E60-F1, M60-1, S60-2); and a co-owner's re-add at a later key of the declined chain, not itself in `removed`, didn't close the space (S60-1).
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| E60-F1 | 60 | High | 8.4 exception; 4.6 **Removing a rotated owner instead**; 7.6 step 2 | A declined key left in `owners` counted as held in the allowed removal, so its envelopes either added their recipients to `E` or, read by §8.2, made the removal impossible. | Fixed: in every removal a key in `removed` counts as not held; in the allowed removal its envelopes verify for the writing check only and add nobody to `E`, so the members only it gave keys to are shown unticked and wait. Same as M60-1 and S60-2. |
+| M60-1 | 60 | High | 8.4; 4.6 | Same as E60-F1, with a member the old key's holder chose. | Fixed with E60-F1. |
+| S60-1 | 60 | High | 6.5 step 5; 8.4 | A re-add at a later key of the declined chain (the old key's holder rotating again) wasn't in `removed`, so step 5 didn't record it and the space stayed open. | Fixed: step 5, the merge row and the agents' check take any key the decline makes a key change (any key but the pin and its earlier keys), recording it in `owners` and adding it to `removed`. |
+| E60-F2 | 60 | Medium | 6.5 steps 4 and 5; 8.4; 8.6 | Devices skipped statements naming an ID on `removedOwners`, agents didn't, so they disagreed. | Fixed: both record or close on such a statement, signed at the signer's current key by an owner not on `removedOwners`, whether or not the named ID is on it. Same as S60-3. |
+| E60-F3 | 60 | Medium | 8.6 pin row; 8.3 | A first-sight pin of the declined key took it out of `removed` and opened the space. | Fixed: first sight never pins a key of an ID with a `wikistow.declined` entry; any key of theirs is then a key change, and confirming it, even with no pin, is "confirm a changed key". Same as M60-4. |
+| S60-2 | 60 | Medium | 8.4; 7.6 step 2 | Same as E60-F1. | Fixed with E60-F1. |
+| S60-3 | 60 | Medium | 6.5 step 4; 8.6 | Same as E60-F2, after the person removed the owner first. | Fixed with E60-F2. A removal merged before the decline leaves the space open, as the person removed that owner and rotated away from the key. |
+| S60-4 | 60 | Medium | 8.4; 6.5 step 5 | A device closed only once its step 5 write landed. | Fixed: it treats the space as closed from the moment it verifies the statement, and devices and agents read the statements before their first write after the space's versions change; a server withholding them is A2. Same as M60-7. |
+| S60-5 | 60 | Medium | 8.4; 8.6 unpin row | An unpin after a decline closed spaces no dialog named, with no warning left to confirm. | Fixed: the unpin dialog names them, and with E60-F3 every key of that ID is a key change whose confirmation opens them. |
+| M60-2 | 60 | Medium | 8.4 | Once the declined owner is removed, the space still bars every owner action. | Accepted: availability, the cost question 11 names; the record alone can't tell that the removal's rotations landed. |
+| E60-L1 | 60 | Low | 4.6 **Owners** | It said a removed key is never recorded. | Fixed. |
+| E60-L2 | 60 | Low | 4.6 **Adding a rotated owner again** | A pending re-add at a key later declined kept prompting. | Fixed: the pending test leaves out keys in `removed`, and a closed space gets none of §4.6's offers. |
+| E60-L3 | 60 | Low | 8.4; 9.5; ADR | "From the record alone" left out agents' statement check. | Fixed in wording. Same as S60-8. |
+| E60-L4 | 60 | Low | ADR | The "write nothing" bullet contradicted its exception. | Fixed. Same as M60-9 and S60-7. |
+| E60-L5 | 60 | Low | CONTEXT.md | The definition left out a re-add recorded after the decline. | Fixed. |
+| E60-L6 | 60 | Low | 8.4; 5.10 | Leaving a live session on closure didn't say what happens to unsaved typing. | Fixed: it sends the leave and keeps that typing queued on the device. Same as part of S60-10. |
+| M60-3 | 60 | Low | 6.5 **Writing**; 8.4 | "No sealing owners" made the allowed removal impossible. | Fixed: its sealing owners are worked out as if the space weren't closed, but for the removed owner. Same as S60-6. |
+| M60-4 | 60 | Low | 8.4; 8.6 | After an unpin, no confirmation could open the space. | Fixed with E60-F3. |
+| M60-5 | 60 | Low | 8.4 | Ending a public link, which seals nothing, is barred. | Accepted: the project owner's "write nothing"; another owner or publisher can end it. |
+| M60-6 | 60 | Low | 9.3 | The CLI read the record once per command. | Fixed: before each write. Same as part of S60-8. |
+| M60-7 | 60 | Low | 6.5 step 5 | Same as S60-4. | Fixed with S60-4. |
+| M60-8 | 60 | Low | 8.4; ADR | Owners reached through the declined key's statements stay accepted after the space opens again. | Accepted: settled (owners reached through a re-added owner's statements stay accepted after a decline), and A5. |
+| M60-9 | 60 | Low | ADR | Same as E60-L4. | Fixed with E60-L4. |
+| S60-6 | 60 | Low | 6.5 | Same as M60-3. | Fixed with M60-3. |
+| S60-7 | 60 | Low | ADR | Same as E60-L4. | Fixed with E60-L4. |
+| S60-8 | 60 | Low | 9.3; 9.4; 9.5 | Same as E60-L3 and M60-6. | Fixed with them. |
+| S60-9 | 60 | Low | 4.6 | §4.6's offers didn't leave out closed spaces. | Fixed: none is made there. |
+| S60-10 | 60 | Low | 8.4; 10 | Copying out can need detaching a live publication, which a closed space bars; and E60-L6. | Fixed in wording: copying out goes as far as §10 allows without a write in the space. |
+
+**Outcome.** Round 60 found Highs, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed but M60-2, M60-5 and M60-8, accepted. Round 61 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
