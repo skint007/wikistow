@@ -1120,6 +1120,35 @@ Round 36 ran the three briefs again, with fresh reviewers given the same materia
 
 **Outcome.** Round 36 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but S36-2's part about apps older than the release before rotation, accepted in A15. Round 37 repeats the three briefs against this revision.
 
+## Round 37: identity key rotation, seventh review
+
+Round 37 ran the three briefs again, with fresh reviewers given the same material and the log of rounds 31 to 36, against the round 36 revision (f43c3f4): the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent. It found no Critical finding, 4 High, 5 Medium, 10 Low and 1 Info (20 in all). The statement's bytes, the chain, the keyring and the contacts cutoff held again. Round 36's fixes held where they reached: chosen owners in owned spaces, members stranded by a removed owner, the removal from a version the app can't open, first sight through a retired key's envelope, the resend after a lost answer, agents sealed above the write floor and the decline after a pending follow. The Highs were an owner confirming a key inside a session already open, a device whose **I didn't** the server could undo by serving the old state again, the agents an app runs, which only the old key's payload names, and a decline that a withheld statement turned into a silent no-op. Section numbers are protocol.md's after the fixes.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S37-1 | 37 | High | 4.6 **Live sessions in the owner region**; 5.10 | The `sealedToKeys` check ran on joining and on following; an owner already in a session who confirmed the rotated owner's new key, with the server not ending it, kept typing to the old key. | Fixed: §4.6. An app leaves on a confirmed key change too, and the release before rotation carries that; A15 says older apps can stay in such a session. |
+| S37-2 | 37 | High | 4.6 **When someone else rotated**; 5.6 | After **I didn't**, a server serving the old key, wrapper and record again matched the device's anchor, so the device signed and sealed again. | Fixed: §4.6 and ADR decision 4. **I didn't** records the successor key beside the anchor, and the device signs and seals nothing until it unlocks at that key or after it. |
+| S37-3 | 37 | Medium | 4.6 **Using an earlier key**; 8.2 | "Enrolled at or before the cutoff" can't be read from the current record. | Fixed with E37-L3. |
+| S37-4 | 37 | Medium | 4.6 **Owners**; 6.5 step 2 | A co-owner who rotated before opening the space had only a statement naming their old key, so the pending co-owner dialog couldn't name its adder. | Fixed: §4.6. Step 2 takes statements naming a held key version for the co-owner dialog as for any adder; envelopes to one count for opening only. Same as M37-3. |
+| S37-5 | 37 | Low | A15 | A15 still described the review before S36-1. | Fixed. Same as M37-8 and E37-L2. |
+| M37-1 | 37 | High | 4.6 route, **Agents**; 9.8 | The server can't tell the agents an app runs from others, and the app knows them only from the old key's `wikistow.appAgents`, so a thief who removed an entry got that agent offered, with no machine to check, and kept if ticked. | Accepted: A15 names it, and §4.6 makes it the app's rule, not the server's check. A server-side mark from approval would be a new mechanism, and agents approved before it would still lack it. |
+| M37-2 | 37 | Medium | 4.6 finishing | "Chosen" wasn't limited to spaces the person owns, so in spaces they're a member of every owner counted for opening only. | Fixed: §4.6. It applies in spaces the server lists them as an owner of. |
+| M37-3 | 37 | Medium | 4.6 **Owners** | Same as S37-4: "for opening" read as covering statements too. | Fixed with S37-4. |
+| M37-4 | 37 | Medium | 4.6; 7.9 | A member left unticked waited like anyone else, so a plain **Give access** brought back an account only the old key vouched for. | Fixed: §4.6. The server keeps why and by whom they were left out, `GET /api/me/waiting` reports it, and **Give access** shows it. |
+| M37-5 | 37 | Low | 4.6 finishing | The dialog marked an owner remove only before working acceptance out through the owners kept in it. | Fixed: it works it out again first. |
+| M37-6 | 37 | Low | 4.6 | The first new-key version put agents only the server knew of into `revokedAgents`, so their old-key enrollments verified. | Fixed with E37-L3. |
+| M37-7 | 37 | Low | 4.6 | "Without a `waiting` list" couldn't tell an older app's request from an empty list. | Fixed: a body with no `waiting` property; current apps always send it. |
+| M37-8 | 37 | Low | A15 | Same as S37-5. | Fixed with S37-5. |
+| E37-F1 | 37 | High | 8.6; 8.4 | Whether the newer pin descends from the restored key was undefined; a server withholding a statement made the decline fall to `removed` only, counted as held, and the declining device kept sealing to the thief's key. | Fixed: §8.6. Descent is decided on a valid chain from key version 1; when it can't be fetched, the merge stops and asks, and never falls back to `removed` only. |
+| E37-L1 | 37 | Low | 4.6 | After a refusal that stored nothing, the kept hash could never be dropped. | Fixed: a definite refusal drops it, and a retry is a new statement with new keys. |
+| E37-L2 | 37 | Low | A15 | Same as S37-5. | Fixed with S37-5. |
+| E37-L3 | 37 | Low | 4.6 **Using an earlier key**, **Agents**, finishing | The agent and owner rules read the cutoff version's contents, which the server doesn't keep. | Fixed: `revokedAgents` gains only the cutoff version's agents not kept, server-only agents are never named, and "enrolled at or before" is dropped; the owners accepted by the cutoff read as the current record's `owners`, which only grows. |
+| E37-L4 | 37 | Low | 4.6 route | The route listed a check on app-run agents the server can't make. | Fixed with M37-1. |
+| E37-L5 | 37 | Low | 4.6; 8.5 | After a restore that lost the rotation, the device had no way forward, and sign-out's effect on the anchor was unstated. | Fixed: it offers to rotate again to the same keys from its kept keyring; the anchor stays until the device forgets what it kept. |
+| E37-L6 | 37 | Info | 8.6 | Which key a decline restores on a device that didn't follow was unnamed. | Fixed: the pin in its kept copy of the record, or else the key just below the current pin. |
+
+**Outcome.** Round 37 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but M37-1, accepted in A15. Round 38 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
