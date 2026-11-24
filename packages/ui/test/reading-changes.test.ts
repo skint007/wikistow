@@ -51,6 +51,13 @@ function tickIn(madeIn: string, line: string, nth: number): ReadingChange {
 const REPEATED =
   'The task “Call” is on the page more than once, and the page changed since it was ticked.';
 
+/** `tick` as a flush says it left it out: without the page's text, which mustn't stay with it. */
+function leftOutTick(tick: ReadingChange) {
+  if (tick.kind !== 'task') throw new Error('Not a tick');
+  const { madeIn: _, ...rest } = tick;
+  return { change: rest, reason: REPEATED };
+}
+
 const stale = () => new ApiError(409, 'stale-head', 'Someone saved since you loaded the page');
 
 /**
@@ -375,10 +382,9 @@ describe('a flush of a tick on a line two tasks have (#703)', () => {
       // Saved by someone after the click: the flush starts again on their text.
       page.savesFirst(swap, { publishes });
       const mums = tickIn(CALLS, 'Call', 0);
-      expect(await flushChanges(page.operations, [mums])).toEqual({
-        outcome: 'unchanged',
-        dropped: [{ change: mums, reason: REPEATED }],
-      });
+      const flushed = await flushChanges(page.operations, [mums]);
+      expect(flushed).toEqual({ outcome: 'unchanged', dropped: [leftOutTick(mums)] });
+      expect(flushed.dropped[0]?.change).not.toHaveProperty('madeIn');
       // Bob's `Call` stays as it was, and so does Mum's.
       expect(page.draft()).toBe(swapped);
       expect(page.state.published).toEqual([]);
@@ -753,7 +759,7 @@ describe('an offline draft made only of ticks (#695)', () => {
     const mums = tickIn(CALLS, 'Call', 0);
     expect(applyChanges(swap(CALLS), [mums])).toEqual({
       markdown: swap(CALLS),
-      dropped: [{ change: mums, reason: REPEATED }],
+      dropped: [leftOutTick(mums)],
     });
     // In the text it was clicked in, its own ticks since included, it holds.
     const bobs = tickIn(CALLS, 'Call', 1);

@@ -200,12 +200,20 @@ describe('ticking a task', () => {
         ok: true,
         markdown: SWAPPED.replace('- [ ] Tidy', '- [x] Tidy'),
       });
-      // One `Call` gone: the other is the only one.
-      const one = '## Mum\n- [ ] Call\n- [ ] Tidy\n';
-      expect(setTask(one, { ...mums, madeIn: PAGE })).toEqual({
-        ok: true,
-        markdown: '## Mum\n- [x] Call\n- [ ] Tidy\n',
-      });
+    });
+
+    it('is refused where it was on more than one task as ticked, though one is left now', () => {
+      const refused = {
+        ok: false,
+        reason:
+          'The task “Call” is on the page more than once, and the page changed since it was ticked.',
+      };
+      // Swapped, and Mum's renamed: Bob's, the only `Call`, starts where hers did.
+      const renamed = SWAPPED.replace('## Mum\n- [ ] Call', '## Mum\n- [ ] Text');
+      expect(renamed.indexOf('- [ ] Call')).toBe(mums.offset);
+      expect(setTask(renamed, { ...mums, madeIn: PAGE })).toEqual(refused);
+      // Mum's gone: Bob's is the only one, elsewhere.
+      expect(setTask('## Bob\n- [ ] Call\n', { ...mums, madeIn: PAGE })).toEqual(refused);
     });
 
     it('is refused where a box became other text the same length', () => {

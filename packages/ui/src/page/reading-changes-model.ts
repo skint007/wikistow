@@ -49,6 +49,17 @@ export type MadeOn = { version: number | null; publishedOn: string };
 export type Dropped = { change: ReadingChange; reason: string };
 
 /**
+ * `change` left out for `reason`: a tick without the text it was made in
+ * (`madeIn`), as what a flush left out is kept to be said after the page
+ * is left, and the page's whole text mustn't stay with it.
+ */
+export function leftOut(change: ReadingChange, reason: string): Dropped {
+  if (change.kind !== 'task' || change.madeIn === undefined) return { change, reason };
+  const { madeIn: _, ...rest } = change;
+  return { change: rest, reason };
+}
+
+/**
  * Who may make changes while reading, or why not: `hint` says it beside a
  * checkbox that can't be ticked, and is null where nothing needs saying.
  */
@@ -142,7 +153,7 @@ export function applyChanges(
   const items = () => taskIndex(parsed);
   for (const change of changes) {
     const made = applyChange(markdown, change, items);
-    if (!made.ok) dropped.push({ change, reason: made.reason });
+    if (!made.ok) dropped.push(leftOut(change, made.reason));
     else {
       markdown = made.markdown;
       if (change.kind === 'property') parsed = markdown;

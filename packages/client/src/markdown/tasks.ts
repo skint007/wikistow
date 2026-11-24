@@ -123,16 +123,17 @@ export function forgetTaskItems() {
  * the task item at `change.offset` if its line is still `change.line`,
  * never a box in code that now starts where a task did (#700); otherwise
  * the only task item with that line. Where `markdown` isn't the text it
- * was ticked in (`change.madeIn`), what is ticked aside, the offset holds
- * only for a line no other task has: two sections swapped meanwhile may
- * have put another task with the same line there (#703). A task already
- * as asked is left as it is, `[X]` included, so a change made twice
- * changes nothing more. A task that is gone, or whose line more than one
- * task has where the offset can't tell them apart, is refused with why.
- * `items` gives the task items, by default `taskIndex(markdown)`: those of
- * a text this one differs from only in what is ticked hold for it too,
- * their boxes as this text has them, as ticking moves no block, so changes
- * made one after another parse the page once.
+ * was ticked in (`change.madeIn`), what is ticked aside, a line more than
+ * one task has, there or here, is refused: two sections swapped meanwhile
+ * may have put another task with that line where it was, or left only
+ * the other one (#703). A task already as asked is left as it is, `[X]`
+ * included, so a change made twice changes nothing more. A task that is
+ * gone, or whose line more than one task has where the offset can't tell
+ * them apart, is refused with why. `items` gives the task items, by
+ * default `taskIndex(markdown)`: those of a text this one differs from
+ * only in what is ticked hold for it too, their boxes as this text has
+ * them, as ticking moves no block, so changes made one after another
+ * parse the page once.
  */
 export function setTask(
   markdown: string,
@@ -142,19 +143,25 @@ export function setTask(
   // Whether its box is ticked in this text, which may have ticked it since the items were found.
   const now = (item: TaskItem): TaskItem => ({ ...item, checked: markdown[item.mark] !== ' ' });
   const named = change.line === '' ? 'That task' : `The task “${change.line}”`;
-  const same = () => [...items().values()].filter((item) => item.line === change.line);
+  const sameIn = (found: ReadonlyMap<number, TaskItem>) =>
+    [...found.values()].filter((item) => item.line === change.line);
+  const { madeIn } = change;
+  // Changed beyond what is ticked, with its line on more than one task where it was ticked, or here.
+  const unclear = (here: number) =>
+    madeIn !== undefined &&
+    !ticksApart(madeIn, markdown, items()) &&
+    (here > 1 || sameIn(taskIndex(madeIn)).length > 1);
+  const changedSince = {
+    ok: false,
+    reason: `${named} is on the page more than once, and the page changed since it was ticked.`,
+  } as const;
   const there = items().get(change.offset);
   let task: TaskItem | null = null;
   if (there?.line === change.line) {
-    const { madeIn } = change;
-    if (madeIn !== undefined && !ticksApart(madeIn, markdown, items()) && same().length > 1)
-      return {
-        ok: false,
-        reason: `${named} is on the page more than once, and the page changed since it was ticked.`,
-      };
+    if (unclear(sameIn(items()).length)) return changedSince;
     task = now(there);
   } else {
-    const found = same();
+    const found = sameIn(items());
     if (found.length !== 1) {
       return {
         ok: false,
@@ -164,6 +171,7 @@ export function setTask(
             : `${named} is on the page more than once now.`,
       };
     }
+    if (unclear(1)) return changedSince;
     task = found[0] ? now(found[0]) : null;
   }
   if (!task || task.checked === change.checked) return { ok: true, markdown };
