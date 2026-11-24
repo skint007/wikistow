@@ -200,7 +200,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       });
     } catch (error) {
       // Locked meanwhile, offline: the page, made partly, waits for the
-      // unlock to put it in the trash and save the clip again (#670).
+      // unlock to add the screenshot to it (#670, #681).
       if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
       // A page that was to show a screenshot, without it, isn't the clip:
       // it goes in the trash, and the extension says why.
