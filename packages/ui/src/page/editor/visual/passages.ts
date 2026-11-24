@@ -145,9 +145,14 @@ export const textSelected = ({ selection }: EditorState) =>
 /** What the selection in `state` quotes, or null with no text selected. */
 export function quoteIn(state: EditorState): QuoteAt | null {
   if (!textSelected(state)) return null;
-  const { selection } = state;
+  // A selection of several ranges, as of cells in a table, whose `from`
+  // and `to` are one cell's, quotes from its first to its last as the page
+  // reads, which may take in a cell beside them that isn't selected.
+  const { ranges } = state.selection;
+  const from = Math.min(...ranges.map((range) => range.$from.pos));
+  const to = Math.max(...ranges.map((range) => range.$to.pos));
   const own = ownTextOf(state.doc);
-  const offsets = offsetsOf(own, selection.from, selection.to);
+  const offsets = offsetsOf(own, from, to);
   return offsets ? quoteAt(own.text, offsets.from, offsets.to) : null;
 }
 

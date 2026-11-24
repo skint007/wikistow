@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- In the visual editor, Comment over cells selected in a table quotes them from the first to the last, as the page reads, rather than only the last cell. (#PR)
+
 ## 0.30.2 - 2026-11-23
 
 ### Highlights
