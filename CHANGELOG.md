@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Ticking a task while reading: where two tasks share a line, such as two sections each with a `Call` task, and the page changed in the seconds before the tick was saved, the tick is left out and the page says why, rather than maybe landing on the other task. A tick on a line no other task has is saved as before. (#PR)
+- Ticking a task while reading: where two tasks share a line, such as two sections each with a `Call` task, and anyone changed the page in the seconds before the tick was saved, the tick is left out and the page says why, rather than maybe landing on the other task. A tick on a line no other task has is saved as before. (#729)
 
 ## 0.30.2 - 2026-11-23
 
