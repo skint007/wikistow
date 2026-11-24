@@ -617,7 +617,11 @@ export async function endLapsedWhere(tx: Database, where: Lapsing, actor: string
     .filter((copy) => !ending.has(copy.pageId))
     .filter((copy) => !publishers.has(personPage(copy.uploadedBy, copy.pageId)))
     .map((copy) => copy.id);
-  const ended = await endLinksAndCopies(tx, { linkIds: lapsed.map((link) => link.id), copyIds });
+  const ended = await endLinksAndCopies(
+    tx,
+    { linkIds: lapsed.map((link) => link.id), copyIds },
+    actor,
+  );
   const endedIds = new Set(ended.links.map((link) => link.id));
   for (const link of lapsed) {
     if (endedIds.has(link.id)) {

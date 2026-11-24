@@ -11,6 +11,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Live editing: a draft someone saved elsewhere while the app was getting back into a lost session is no longer missed when the app goes on without joining again, as when it had nothing of the person's to keep. The editor showed the old draft, and **Publish** published one the person never saw. (#722)
 - In the visual editor, Comment over cells selected in a table quotes them from the first to the last, as the page reads, rather than only the last cell. (#721)
 
+#### Server
+
+- Suspending someone no longer fails while that person unpublishes a page, turns its public link off, changes who can publish, deletes a space or moves a page to another space, where it ended a public link they shared or a copy they uploaded. (#724)
+
 ## 0.30.2 - 2026-11-23
 
 ### Highlights
