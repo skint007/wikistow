@@ -259,3 +259,11 @@ These were decided without Scott, where the narrowing left a gap. Each can be ch
 - **The person's own app records itself at the new key** in the spaces it owns, in the first contacts version at the new key, and drops its own ID from every `removedOwners` there, so an entry the old key wrote can't keep it out of its own spaces. It keeps accepting the other owners its record accepts, and reviews none (A15).
 - **The rotation dialog names the spaces with other owners**, and says their shares pause for everyone but the person until a co-owner adds them again.
 - **Owners the person added with the old key** are reached, by an app that works out a space's owners afresh after the rotation (a new member or co-owner), only through other owners' statements, since an earlier key's owner statement accepts nobody. Where none reaches them, that app neither opens nor writes under what they seal, and an owner's app can't seal in the space (`unaccepted-owner`). This is as after any key change today, and costs availability, not confidentiality; signing those statements again is what the narrowing dropped.
+
+## Open after rounds 40 to 45 (2026-11-24)
+
+Six review rounds ran on the narrowed scope without meeting the stopping rule (protocol-review.md, rounds 40 to 45). The narrowing itself held in every round. Every High after round 40 was in one rule, decided above without Scott: that a member's app follows a rotated owner who is the only owner it accepts, and in the re-add and removal records built around it. Round 45's findings are open.
+
+10. **Keep the rule that members follow a rotated sole owner, or drop it?**
+    - *Keep it:* more rounds on the records that hold it (`via`, the re-add marks, agents on a decline; round 45 names the next fixes). Members of a space the person alone owns keep working after the rotation.
+    - *Drop it:* a rotated owner is an owner again only when a co-owner adds them, everywhere. The re-add and removal rules stay, and most of what rounds 40 to 45 found goes with the rule. The cost: in a space the person alone owns, members open nothing new after the person rotates, and the person shares again from a new space.

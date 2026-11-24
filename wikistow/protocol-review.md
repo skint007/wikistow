@@ -1362,6 +1362,42 @@ Round 44 reviewed round 43's revision (05c486b) with the three briefs, fresh rev
 
 **Outcome.** Round 44 found Highs, so it doesn't meet the stopping rule. Every finding is fixed. Round 45, the sixth after the narrowing and the last this run allows, repeats the three briefs against this revision.
 
+## Round 45: identity key rotation, narrowed, sixth review
+
+Round 45 reviewed round 44's revision (df44918) with the three briefs, fresh reviewers given the narrowed text, the log of rounds 31 to 44 and the list of what earlier rounds accepted: the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent, whose first run was refused by its provider's content filter and whose one retry, worded as a plain consistency check, ran. It found no Critical finding, 9 High, 8 Medium, 8 Low and no Info (25 in all). Every reviewer again found the narrowing itself consistent. Every High was in the exception where the person is a member's only accepted owner, or in the re-add and removal records around it: `via` lost in a contacts merge or on owners reached in a later run, a stale sole-owner acceptance merged over a co-owner another device recorded, agents that a decline doesn't stop, and a removal that can't tell which keys a re-add wrote. **These findings are open, not fixed**: this is the sixth round after the narrowing, the last this run allows, and the outcome column gives the fix each points to, for the project owner's decision below.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S45-1 | 45 | High | 4.6 **A space whose only accepted owner is the person**; 6.5; 8.6 | A device's queued acceptance of an owner reached through the person's new key, merged after another device's decline, restored that owner; and an owner reached in a later run through one marked `via` got no `via`, so a decline left it. | Open. The "accept an owner" change carries `via`, is a no-op when its `via` key is in `removed`, and `via` passes to owners reached through a `via` entry. Same as E45-F1, E45-F2 and M45-2. |
+| S45-2 | 45 | High | 4.6; 8.6; A15 | A sole-owner acceptance one device prepared was merged over a co-owner another device had recorded meanwhile, so the record accepted the new key though it had reached the co-owner. | Open. The merge checks the exception's test again against the newer record, and drops the acceptance if it fails. |
+| S45-3 | 45 | High | 4.6; 8.4; 9.4 | Ending agents' picks on a decline checked only who sealed the current version, so an agent kept writing under a version an owner reached through the declined key sealed, through a confirmed group too. | Open. A decline ends every agent grant, picks and groups, in each share where the person holds a version sealed by a declined key or an owner reached through one, and a pick again seals nothing at or below those versions. Same as E45-F3 and M45-1. |
+| E45-F1 | 45 | High | 8.6; 4.6 | Same as S45-1, the merge. | Open, with S45-1. |
+| E45-F2 | 45 | High | 4.6; 6.5 step 5 | Same as S45-1, later runs. | Open, with S45-1. |
+| E45-F3 | 45 | High | 8.4; 8.6; 9.4 | Same as S45-3, groups and picking again. | Open, with S45-3. |
+| E45-F4 | 45 | High | 4.6 **Removing a rotated owner instead**; 8.6 | "The latest key held before any re-add" can't be worked out from the record, so a removal on another device may leave a key a re-add wrote in `owners`, to choose `E`. | Open. Entries a re-add writes are marked, as `via` marks the exception's, and a removal moves every marked key. Same as M45-5. |
+| M45-1 | 45 | High | 8.4; 9.4; 6.8 | Same as S45-3. | Open, with S45-3. |
+| M45-2 | 45 | High | 8.6; 8.2 | Same as S45-1, and "accept an owner" isn't a confirmed write. | Open, with S45-1; and it becomes a confirmed write. |
+| S45-4 | 45 | Medium | 4.6 | A co-owner who re-added a rotated owner and then rotated left a member who was offline throughout with no owner it accepts at a current key. | Open: an availability cost of the same kind the ADR accepts for two owners who both rotate. |
+| S45-5 | 45 | Medium | 4.6 **Adding a rotated owner again** | A finished re-add became pending again in a third owner's app once the adder rotated. | Open. The test takes a statement the adder signed at a key that is now earlier as ending it. Same as E45-L4. |
+| S45-6 | 45 | Medium | 4.6; 6.5 | The gate's "a statement names it" kept a former co-owner out of the exception for good, and the person's own rotation cleared its `removedOwners` entry. | Open. The gate reads only own entries not on `removedOwners`, and the rotation clears the own ID only where the server lists the person as an owner. Same as E45-F5, E45-F6 and M45-3. |
+| S45-7 | 45 | Medium | 4.6 **Shares left at an earlier key**; 7.6 | Rotating a self-removed rotated owner's share recorded nothing in `openOnly`, so a later co-owner add couldn't cover the version between. | Open. That rotation records their later key in `openOnly`, as a removal does. |
+| E45-F5 | 45 | Medium | 4.6 | Same as S45-6, the statement clause. | Open, with S45-6. |
+| E45-F6 | 45 | Medium | 4.6; 7.6 | Same as S45-6, the own ID on `removedOwners`, never cleared on a re-add and cleared everywhere on rotation. | Open, with S45-6. |
+| E45-F7 | 45 | Medium | 4.6; 8.4 | After a decline, the exception could read the restored pin as the latest key to accept as an owner. | Open. The exception never fires for an ID with a `wikistow.declined` entry naming its pin. |
+| M45-3 | 45 | Medium | 4.6 | Same as S45-6. | Open, with S45-6. |
+| S45-8 | 45 | Low | 4.6; 6.8 | The pause's two statements have different conditions for a removed owner or a declined key. | Open: §6.8 to name §4.6's. |
+| E45-L1 | 45 | Low | 8.2 | `via` has no parse rule, and `openOnly` entries may carry it. | Open. |
+| E45-L2 | 45 | Low | 4.6 | The rule for `E` doesn't exclude a key also in `openOnly`. | Open. |
+| E45-L3 | 45 | Low | 4.6 | The exception's step 3 needs a key accepted before its write lands. | Open: it runs on the acceptance in hand. |
+| E45-L4 | 45 | Low | 4.6 | Same as S45-5. | Open, with S45-5. |
+| M45-4 | 45 | Low | 4.6 | "Remove instead" doesn't say a re-add another device sent may land first. | Open: the dialog says so. |
+| M45-5 | 45 | Low | 4.6; 8.6 | Same as E45-F4. | Open, with E45-F4. |
+| M45-6 | 45 | Low | 4.6 | The own entry the release before rotation records rests on statements the server serves. | Open: it records it when the app signs its co-owner-dialog statement. |
+
+**Outcome.** Round 45 found Highs, so it doesn't meet the stopping rule, and its findings are open.
+
+**After rounds 40 to 45.** Six rounds ran on the narrowed scope (2026-11-24), with 5, 2, 4, 4, 6 and 9 High findings, and none Critical; rounds 41 and 43 ran without the server brief, which its provider refused twice each. In every round, all three reviewers found the narrowing itself sound: nothing was left of the owner re-signing, the owners review or the removal route, "a rotation doesn't carry ownership" held across opening, writing, sealing, live sessions and the person's own app, and the statement, the chain, the keyring and the contacts cutoff held throughout. After round 40, every High was in one place: the exception that lets a member follow a rotated owner who is the only owner it accepts, and the re-add and removal records that rounds 40 to 44 built around it to keep it from firing where a co-owner could still vouch. Rounds 42 to 44 each replaced or removed part of that machinery (a server rule, a check before rotating, re-wrapping, replacing envelopes), and each round's new Highs came from what replaced it. The rounds stop here unmet, for the project owner to decide whether to keep that exception, or to drop it and accept that members of a space the person alone owns open nothing new there after the person rotates.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
