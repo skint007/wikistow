@@ -1759,6 +1759,46 @@ Round 57 reviewed round 56's revision (53efa1f) with the three briefs, fresh rev
 
 **Outcome.** Round 57 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but S57-8 and E57-L3, accepted as availability. Round 58, the sixth after the drop and the last this run allows, repeats the three briefs against this revision.
 
+## Round 58: identity key rotation, narrowed, twelfth review
+
+Round 58 reviewed round 57's revision (c95f063) with the three briefs, fresh reviewers given the text, the log of rounds 38 to 57 and the list of what earlier rounds settled: the member and encoding briefs as Claude subagents. **The server brief's Codex (gpt-6.2-sol) agent was refused** by its provider's content filter partway through; its last message named a conflict it had found, that a rotation is meant to end floors while the standing rule adds one on the new version (logged here as E58-F3, which the encoding brief found too). The server brief was then given once, unchanged, to a Claude subagent. The round found no Critical finding, 4 High, 8 Medium, 17 Low and no Info (29 in all; 2 distinct Highs). Every reviewer found the exception gone, the text for spaces the person owns alone consistent, and round 57's fixes to finishing, the pending re-add, the kept pin and the co-owner dialog holding. Every High and most Mediums were in round 57's decline floors and `sealedFrom`: where the declined key was an accepted owner, an honest co-owner seals each new version to it, so `sealedFrom` (which names only who sealed the person's envelope) doesn't stop an agent given that version, and a device writes before its own floor is stored. **These findings are open, not fixed**: this is the sixth round after the drop, the last this run allows, and the outcome column gives the fix each points to, for the project owner's decision below.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| E58-F1 | 58 | High | 9.4 **Who sealed it**; 8.4 | Where the declined key was an accepted owner, a co-owner's version sealed to it after the decline passes the agent's `sealedFrom` check (its sealer is the co-owner) and sits above the floor, so the agent writes where the declined key reads, until a device adds a floor, which can be days. | Open. The agent writes nothing in a space whose record holds an `owners` entry at a key in `removed` with a declined entry, from the record alone. Same as M58-1 and S58-1. |
+| E58-F2 | 58 | High | 8.4 | "The floor that counts" reads stored floors, so a device saves, moves or joins a live session under a version before its own floor write lands. | Open. A floor a device has worked out counts at once, stored or not. |
+| M58-1 | 58 | High | 9.4; 8.4 | Same as E58-F1. | Open, with E58-F1. |
+| S58-1 | 58 | High | 8.4; 9.4 | Same as E58-F1, with a server leaving one envelope out of the declining device's fetch. | Open, with E58-F1; or floors also at the highest version any agent's `sealedFrom` names and at each device's **No going back** mark. |
+| E58-F3 | 58 | Medium | 8.4; 8.6 | Owner-case floors have no end: read as standing, every later version is floored and the space is closed for good; read as once, later versions go unfloored. | Open. Owner-case floors cover the versions made while that key was a listed owner, and end once an owner verifies a version with no envelope to it. Same as M58-2 and S58-3, and the conflict the refused Codex run named. |
+| E58-F4 | 58 | Medium | 8.2; 8.6; 9.4 | `sealedFrom` has no parse rules, set key, merge row or confirmed-write listing, two entries for one version are undefined, and agents' existing versions have no entries. | Open. Parse and merge rules, every entry must pass, and a backfill at unlock. Same as M58-3, M58-4, S58-4 and S58-5. |
+| E58-F5 | 58 | Medium | 8.5; 8.6 | The kept pin still depends on each device's history, so one **Not them?** gives different results on two devices. | Open. The record keeps where the unreviewed run of follows starts. |
+| M58-2 | 58 | Medium | 8.4 | Same as E58-F3, for a co-owner who removes the declined owner. | Open, with E58-F3. |
+| M58-3 | 58 | Medium | 9.4 | Same as E58-F4, every existing agent stopping on upgrade. | Open, with E58-F4. |
+| S58-2 | 58 | Medium | 8.4 | Owner-case floors sit at the highest version only, so a reader the server keeps below it ignores them. | Open. Floor every version the person holds in that space. |
+| S58-3 | 58 | Medium | 8.4 | Same as E58-F3. | Open, with E58-F3. |
+| S58-4 | 58 | Medium | 9.4; 8.2 | Same as E58-F4, existing agents. | Open, with E58-F4. |
+| E58-L1 | 58 | Low | 8.4; 8.6 | Floors outlive entries, so devices stop adding floors still owed once the entries drop. | Open. |
+| E58-L2 | 58 | Low | 8.6 | The pin and confirm rows don't say they drop floors whose key leaves `removed`. | Open. |
+| E58-L3 | 58 | Low | 8.4 | The owner case reads only `owners`, not a declined key moved to `openOnly`. | Open. |
+| E58-L4 | 58 | Low | 8.4 | `entries` and `floors` use `{id, keyHash}` for opposite things. | Open. |
+| E58-L5 | 58 | Low | 4.6 **The person's own app** | "An own entry by the cutoff" can't be checked, as the server keeps only replaced versions' headers. | Open: an own entry at a retired key in the current record. Same as S58-8. |
+| E58-L6 | 58 | Low | 4.6; 8.4; 9.4 | "Floor" names both a rotated member's floor and a decline floor. | Open. |
+| E58-L7 | 58 | Low | ADR | The ADR says a decline removes "the followed key, and any later key". | Open. |
+| M58-4 | 58 | Low | 8.2; 8.6 | Same as E58-F4. | Open, with E58-F4. |
+| M58-5 | 58 | Low | 4.6 **Shares left at an earlier key** | An agent keeps writing under a version an owner's earlier key sealed, which its person's app no longer writes under. | Open, within A15; the agent could refuse a `sealedFrom` entry at an earlier key of its sealer. |
+| M58-6 | 58 | Low | 4.6 | Nothing records "they left", so "become an owner" is offered for good. | Open. |
+| S58-5 | 58 | Low | 8.2; 8.6 | Same as E58-F4. | Open, with E58-F4. |
+| S58-6 | 58 | Low | 8.4 | "Stop writing where the declined keys could read" promises more than the record can show. | Open: state the narrower goal. |
+| S58-7 | 58 | Low | 8.4; 8.5 | A server serving an agent the contacts version from before the decline keeps it from ever seeing it. | Open: name it in A15. |
+| S58-8 | 58 | Low | 4.6 | Same as E58-L5. | Open, with E58-L5. |
+| S58-9 | 58 | Low | ADR | The ADR still says any keyring key accepts the person as a space's first owner. | Open. |
+| S58-10 | 58 | Low | 4.6 | "Become an owner" at later unlocks still takes a first name record under a retired key. | Open: the same cutoff. |
+| S58-11 | 58 | Low | 4.6 finishing | A pending co-owner statement withheld until after the rotation leaves the space neither pending nor declined. | Open. |
+
+**Outcome.** Round 58 found Highs, so it doesn't meet the stopping rule, and its findings are open.
+
+**After rounds 53 to 58.** Six rounds ran after the project owner dropped the sole-owner rule (2026-11-24), with 6, 6, 1, 1, 6 and 4 High findings (4, 4, 1, 1, 6 and 2 distinct), and none Critical; rounds 54, 56 and 58 ran their server brief on a substitute Claude reviewer after Codex's provider refused it. Dropping the rule held: no reviewer found any text left of it, and members never accept the new key without a co-owner. Rounds 53 and 54 found Highs in what the drop added, the offer to share a space again, which became a copy shared with nobody, and that held from round 55 on. Rounds 55 and 56 found one High each, in the way back for an own ID on `removedOwners` and in finishing's completion rule, both fixed and holding since. From round 53 on, the rest of the Highs came from one place: a decline of a key that a co-owner's re-add had made an accepted owner, and how it stops the person's agents, which can't tell who sealed a version, from writing where that key reads. Each round's floors fix (a decline ending picks, then floors, floors as a standing rule, floors per space, `sealedFrom`) produced the next round's Highs. The rounds stop here unmet, for the project owner to decide question 11 in the ADR.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
