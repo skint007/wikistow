@@ -1724,6 +1724,41 @@ Round 56 reviewed round 55's revision (08718e0) with the three briefs, fresh rev
 
 **Outcome.** Round 56 found a High, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed but E56-L6 and M56-5, accepted. Round 57 repeats the three briefs against this revision.
 
+## Round 57: identity key rotation, narrowed, eleventh review
+
+Round 57 reviewed round 56's revision (53efa1f) with the three briefs, fresh reviewers given the text, the log of rounds 38 to 56 and the list of what earlier rounds settled: the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent, its brief shortened to round 56's changes and the settled list, which its provider ran the first time. It found no Critical finding, 6 High, 5 Medium, 15 Low and no Info (26 in all). Every reviewer found the exception gone. Five of the six Highs were in decline floors, the server brief's four and the member brief's one: a role change's replacement envelope hid that a declined owner made a version, live sessions ignored floors, a floor confirmed away while the key that sealed it stayed declined, and an agent given a version just before a decline. The sixth was finishing taking another device's rotation for its own, and a pending re-add's key counting once an earlier key's statement ended the prompts. The floors are rebuilt on one fact: a key the record accepted as an owner held every key of the space, so a decline floors every share there; and agents are now told who sealed each version they hold.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S57-1 | 57 | High | 4.6 finishing; 5.10 | Finishing counted a share done on any envelope of the person's current key, so another device's rotation that kept a member this device left out passed as its own. | Fixed: done only when the fetched version opens to the folder keys this device made, as §5.10 recognises a lost answer; anything else plans again. |
+| S57-2 | 57 | High | 4.6 **Adding a rotated owner again** | A statement signed with an earlier key ended the pending state, and with it the re-add key's opening-only status, so a retired key could make it an owner. | Fixed: an earlier key's statement only stops the prompts; the key counts beyond opening only once a statement naming it is served at a current key. |
+| S57-3 | 57 | High | 8.4; 9.4 | A version another device sealed to an agent just before the decline had no floor yet when the agent read the decline, so it wrote under it. | Fixed: the record names who sealed each version given to an agent (`sealedFrom`), and the agent writes under none whose sealer key is in `removed`. |
+| S57-4 | 57 | High | 8.4; 6.4; 7.4 | A role change replaced the person's envelope of a version a declined owner made, so no floor was found for it. | Fixed: where the record accepted the declined key as an owner of a space, every share there gets a floor at the highest version the person holds. |
+| S57-5 | 57 | High | 8.4; 5.10 | Floors stopped saves but not joining or staying in a live session. | Fixed: they stop live sessions too. |
+| M57-1 | 57 | High | 8.4; 8.6 | Confirming any key of the ID dropped its floors, though the key that sealed the floored version stayed in `removed`, so the agent wrote there again. | Fixed: each floor names its key, and goes only when that key leaves `removed`. |
+| S57-6 | 57 | Medium | 8.6 | A delayed floor merged into a different, later decline. | Fixed with M57-1: "add a floor" skips a floor whose key isn't in `removed`. |
+| S57-7 | 57 | Medium | 8.4; 6.4 | An unverifiable envelope naming a declined ID set a permanent floor. | Fixed: it is refused, sets no floor, and stops sealing to agents in that share until it resolves. |
+| S57-8 | 57 | Medium | 4.6; 10; 13 | Detaching a live publication before the copy can need an owner-region write that an unaccepted co-owner blocks. | Accepted: availability, in a space with a rotated co-owner nobody added again; the source's publisher can end the publication, and the rest of the space stays readable. |
+| E57-F1 | 57 | Medium | 8.5; 8.6 | One kept pin per ID, overwritten at each move, made the same decline restore different keys on different devices. | Fixed: the kept pin is the one from before the earliest follow not yet confirmed or declined. |
+| E57-F2 | 57 | Medium | 6.5 step 2; 4.6 | Whether an own `owners` entry counts as having accepted an owner decided whether the co-owner dialog could run in the person's own space. | Fixed: the person's app never runs it where its record holds an own entry at a keyring key, or the first name record verifies under one. |
+| S57-9 | 57 | Low | 4.6 | The "owns alone" test counted a pending re-add's key in one clause and not the other. | Fixed. |
+| E57-L1 | 57 | Low | 8.4; 8.6 | Floors for an ID with no entry had conflicting rules. | Fixed with M57-1. |
+| E57-L2 | 57 | Low | 8.4 | Which keys a floor test reads wasn't recoverable from the record. | Fixed with M57-1: floors name their key. |
+| E57-L3 | 57 | Low | 8.6 | Merging a decline over a confirmed newer pin depends on whether the chain is served. | Accepted: availability, the server choosing between two safe outcomes. |
+| E57-L4 | 57 | Low | 8.6 | The removal merge kept the key the change named, not the earliest the newer record holds. | Fixed. |
+| E57-L5 | 57 | Low | 8.6 | "Holds the change" wasn't defined for partial no-ops. | Fixed for "add a floor"; for "add a co-owner" with a key in `removed` it is a no-op, which doesn't hold, and the app asks again. |
+| E57-L6 | 57 | Low | 8.4 | Wrong section for IDs. | Fixed. |
+| E57-L7 | 57 | Low | 4.6 | The "owns alone" list wasn't worked out again after the dialog's own writes. | Fixed. |
+| E57-L8 | 57 | Low | 4.6 | "Than one it held for them before" read as device history. | Fixed: another key the record holds. |
+| E57-L9 | 57 | Low | 4.6 | Two statements for one key version weren't defined by what is compared. | Fixed: by signed bytes. |
+| M57-2 | 57 | Low | 4.6 | A pending co-owner dialog can't run after the rotation. | Fixed: the rotation dialog runs it first. |
+| M57-3 | 57 | Low | 4.6 | "Become an owner" was offered only in the rotation dialog. | Fixed: at each later unlock too, until confirmed or declined. |
+| M57-4 | 57 | Low | 4.6; 10 | The copy re-signs everything the space holds, which the dialog understated. | Fixed in wording. |
+| M57-5 | 57 | Low | 4.6; 6.5 step 1 | A retired key's first name record, served after the rotation, made the person's app an owner of any space. | Fixed: a retired key counts there only where the record held an own entry by the rotation's cutoff. |
+| M57-6 | 57 | Low | 4.6 | "Sealed it" could read as by or to the retired keys. | Fixed with S57-1. |
+
+**Outcome.** Round 57 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but S57-8 and E57-L3, accepted as availability. Round 58, the sixth after the drop and the last this run allows, repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
