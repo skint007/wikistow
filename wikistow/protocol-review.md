@@ -1149,6 +1149,33 @@ Round 37 ran the three briefs again, with fresh reviewers given the same materia
 
 **Outcome.** Round 37 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but M37-1, accepted in A15. Round 38 repeats the three briefs against this revision.
 
+## Round 38: identity key rotation, eighth review
+
+Round 38 ran the three briefs again, with fresh reviewers given the same material and the log of rounds 31 to 37, against the round 37 revision (9275589): the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent. It found no Critical finding, 4 High, 1 Medium, 12 Low and 1 Info (18 in all). The member and encoding briefs found no High; all four came from the server brief. The statement, the chain, the keyring and the contacts cutoff held again, and round 37's fixes held where they reached. The Highs were in round 37's own additions: the retry after a restore signed whatever head the restored server served, the waiting reason was the server's word, the block on an unexpected successor came only after the person chose, and a tab learned a new pin from another tab without checking its open session again. Section numbers are protocol.md's after the fixes.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S38-1 | 38 | High | 4.6 **When someone else rotated**; 8.5 | The rotate-again offer after a reported restore used the restored contacts head as the cutoff, so a head the old key forged after the real rotation was signed into a new statement and carried into the new key's record. | Fixed: §4.6. The device keeps the version its statement named, and rotates again only from that version or one it chains down to; otherwise it stays read-only. |
+| S38-2 | 38 | High | 4.6 **Using an earlier key**; 7.9 | The waiting reason was the server's to report, so it could list a member left unconfirmed as an ordinary one, and another owner's **Give access** sealed to them. | Fixed: §4.6 and ADR decision 6. An owner's app that can't verify a member through a writing-set owner's envelope of the current version says no owner it accepts vouched for them, whatever the server reports, and seals only on a confirmed new grant, on every path that seals. Same as M38-1. |
+| S38-3 | 38 | High | 4.6 **When someone else rotated** | Only **I didn't** recorded the successor, so closing the prompt and a replay of the old state let the device sign at the old key again. | Fixed: §4.6 and ADR decision 4. The device records the successor before it shows the prompt. |
+| S38-4 | 38 | High | 4.6 **Live sessions in the owner region**; 5.10 | A tab that learned an owner's new key from another tab's contacts write kept typing in a session sealed to the old key. | Fixed: §4.6. The `sealedToKeys` check holds for staying in a session too, checked again before each message once the record has changed. |
+| M38-1 | 38 | Medium | 4.6; 7.8; 7.9 | Same as S38-2, on the paths other than **Give access**, and across the member's own rotation. | Fixed with S38-2; the reason stays through the member's rotation. |
+| M38-2 | 38 | Low | 4.6; ADR decision 10 | An older owner's app that confirmed a rotated member's key removed them in its next rotation, and "a request" didn't fit bodies with several rotations. | Fixed: the server also refuses `removed` for such a member from a rotation entry with no `rekeyed`, and both checks are per rotation entry. |
+| M38-3 | 38 | Low | 4.6 finishing; A15 | A server that stops listing the person as an owner of a space they own leaves it unreviewed. | Accepted: A15. |
+| M38-4 | 38 | Low | 4.6 finishing | "Chosen" didn't exempt the person. | Fixed: they are always chosen, and not listed. |
+| M38-5 | 38 | Low | 4.6 **Owners**; 6.5 step 2 | "For opening only" read as limiting the sealer's acceptance, which the record can't hold and which stranded the member. | Fixed: such an envelope accepts its sealer as first sight does; the envelope counts for opening only. |
+| M38-6 | 38 | Low | 9.6; 4.6 | Agents' routes didn't include the rotation and earlier-row routes the CLI needs to follow its person. | Fixed: §9.6 names them. |
+| E38-L1 | 38 | Low | 8.6 | "Its kept copy" of the record was the synced one after a follow. | Fixed: the copy from before it first took a pin on this chain above the restored key. |
+| E38-L2 | 38 | Low | 4.6; 8.5 | What survives a reported restore, and what the rotate-again request sends, were unstated. | Fixed with S38-1. |
+| E38-L3 | 38 | Low | A15; 8.5 | A reported restore rolls contacts' pins back after they met the new key. | Fixed in A15: it says so, with a restore notice on every device. |
+| E38-L4 | 38 | Low | 4.6 route | The resend rule wasn't ordered before the route's other checks, which fail on a resend. | Fixed: it compares with the stored statement first. |
+| E38-L5 | 38 | Low | 8.4; 4.6 | Statements served past the directory's current key had two readings. | Fixed: a chain ends at the directory's key, and more is a key change. |
+| E38-L6 | 38 | Low | 8.6 | A follow that no-ops for want of a pin read as a key change. | Fixed: it is first sight then. |
+| E38-L7 | 38 | Low | 4.6 **Owners** | Statements were matched by key version only. | Fixed: by `owner.keyHash`. |
+| E38-I1 | 38 | Info | 8.4; 8.5 | An unknown-format `wikistow.declined` the old key wrote blocks the rotation with an update that doesn't exist. | Fixed in wording: the message says the record may have been written with a leaked key. Rotating first, which A15 accepts, is worse. |
+
+**Outcome.** Round 38 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but M38-3, accepted in A15. Round 39 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
