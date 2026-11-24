@@ -8,7 +8,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- Live editing: a draft someone saved elsewhere while the app was getting back into a lost session is no longer missed when the app goes on without joining again, as when it had nothing of the person's to keep. The editor showed the old draft, and **Publish** published one the person never saw. (#722)
 - A public link's copy lists the other pages in its query tables by when the server saved them, not by this device's clock, for pages published from this device too. A device whose clock ran fast or slow could list them out of order. (#725)
+
+#### Server
+
+- Suspending someone no longer fails while that person unpublishes a page, turns its public link off, changes who can publish, deletes a space or moves a page to another space, where it ended a public link they shared or a copy they uploaded. (#724)
 
 ## 0.30.2 - 2026-11-23
 
