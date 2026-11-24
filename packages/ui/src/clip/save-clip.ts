@@ -500,16 +500,18 @@ type QueueEntries = Parameters<typeof queueOperations.withQueued>[2];
 /**
  * Whether page `pageId` is out of its space's `tree` only for a trash among
  * the queue's `entries`, its own or a folder's above it. One the server
- * refused doesn't count: the page stays.
+ * refused doesn't count: the page stays. Without the tree, only its own
+ * trash is known.
  */
 export function hiddenByTrash(
-  tree: QueueTree,
+  tree: QueueTree | null,
   spaceId: SpaceId,
   entries: QueueEntries,
   pageId: PageId,
 ): boolean {
   const trash = (entry: QueueEntries[number]) => entry.kind === 'delete' && entry.failure === null;
-  if (!entries.some(trash)) return false;
+  if (entries.some((entry) => trash(entry) && entry.id === pageId)) return true;
+  if (!tree || !entries.some(trash)) return false;
   const shows = (shown: QueueTree) => shown.pages.some((one) => one.id === pageId);
   // The queue's tree hides what any trash names, refused or not.
   const others = entries.filter((entry) => entry.kind !== 'delete');

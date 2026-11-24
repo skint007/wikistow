@@ -169,10 +169,14 @@ async function trashedHere(ctx: ClientContext, page: { spaceId: SpaceId; pageId:
   try {
     const entries = await queue.entries();
     if (!entries.some((one) => one.kind === 'delete' && one.spaceId === page.spaceId)) return false;
-    const tree = await spaceOperations.loadTree(ctx, page.spaceId).catch((error: unknown) => {
-      if (!noAnswer(error)) throw error;
-      return keptOperations.keptTree(ctx, page.spaceId);
-    });
+    // Without its tree, as when its space isn't kept offline, only the page's own trash counts.
+    const tree = await spaceOperations
+      .loadTree(ctx, page.spaceId)
+      .catch((error: unknown) => {
+        if (!noAnswer(error)) throw error;
+        return keptOperations.keptTree(ctx, page.spaceId);
+      })
+      .catch(() => null);
     return hiddenByTrash(tree, page.spaceId, entries, page.pageId);
   } catch {
     return false;

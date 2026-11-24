@@ -364,6 +364,14 @@ describe('a page in the trash on this device', () => {
     expect(hiddenByTrash(tree, spaceId, [trashOf(chosen)], newId(PageId))).toBe(false);
   });
 
+  it('is by its own, even where its space’s tree can’t be read', () => {
+    expect(hiddenByTrash(null, spaceId, [trashOf(pageId)], pageId)).toBe(true);
+    expect(hiddenByTrash(null, spaceId, [trashOf(chosen)], pageId)).toBe(false);
+    expect(hiddenByTrash(null, spaceId, [trashOf(pageId, { kind: 'forbidden' })], pageId)).toBe(
+      false,
+    );
+  });
+
   it('is by one waiting beside another the server refused', () => {
     const refused = trashOf(pageId, { kind: 'forbidden' });
     expect(hiddenByTrash(tree, spaceId, [refused, trashOf(chosen)], pageId)).toBe(true);
