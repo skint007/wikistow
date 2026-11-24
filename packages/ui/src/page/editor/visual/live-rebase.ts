@@ -97,46 +97,28 @@ type Change = { readonly inserts: Ranges; readonly deletes: Ranges };
 const change = (): Change => ({ inserts: new Map(), deletes: new Map() });
 
 /**
- * How `b` stands to `a` in `text`. They meet where something each put in
- * or took out stands beside the other's, with no character between them
- * that neither touched; changes to the same word apart, as one to its
- * first letter and one to its last, don't. `b` is within `a` where it
- * changed text between the first and last of `a`'s changes without
- * meeting them.
+ * Whether `a` and `b` changed the same text in `text`: something each put
+ * in or took out stands beside the other's, with no character between
+ * them that neither touched. Changes to the same word apart, as one to its
+ * first letter and one to its last, don't meet.
  */
-export function relation(text: Y.Text, a: Change, b: Change): { meet: boolean; within: boolean } {
-  let [inA, inB, start] = [false, false, -1];
-  let [aFirst, aLast] = [-1, -1];
-  // The runs that hold only `b`'s, by where they start and end.
-  const alone: [number, number][] = [];
-  let meet = false;
-  let at = 0;
-  const close = (end: number) => {
-    if (inB && !inA) alone.push([start, end]);
-    if (inA && inB) meet = true;
-    [inA, inB, start] = [false, false, -1];
-  };
-  for (let item = text._start; item; item = item.right, at++) {
+export function meet(text: Y.Text, a: Change, b: Change): boolean {
+  let [inA, inB] = [false, false];
+  for (let item = text._start; item; item = item.right) {
     const { client, clock } = item.id;
     const hit = (c: Change) =>
       touches(c.inserts, client, clock, item.length) ||
       touches(c.deletes, client, clock, item.length);
     const [hitA, hitB] = [hit(a), hit(b)];
     if (!hitA && !hitB) {
-      if (!item.deleted && item.countable) close(at);
+      if (!item.deleted && item.countable) [inA, inB] = [false, false];
       continue;
-    }
-    if (start < 0) start = at;
-    if (hitA) {
-      if (aFirst < 0) aFirst = at;
-      aLast = at;
     }
     inA ||= hitA;
     inB ||= hitB;
+    if (inA && inB) return true;
   }
-  close(at);
-  const within = alone.some(([from, to]) => from > aFirst && to <= aLast);
-  return { meet, within };
+  return false;
 }
 
 /** The runs of `client`'s IDs from `clock`, `len` of them, each in `ranges` or not. */
@@ -164,8 +146,6 @@ function parts(ranges: Ranges, client: number, clock: number, len: number) {
 type Write = {
   /** What the editor makes again, as it gave it. */
   readonly intent: unknown;
-  /** Text inside its formatting reads as it's written, as code: without it, it would read otherwise. */
-  readonly literal: boolean;
   /** Holds this write alone, as `item`. */
   readonly undo: Y.UndoManager;
   readonly item: StackItem;
@@ -185,10 +165,7 @@ type Write = {
   readonly gone: Ranges;
   /** Clients whose change made alongside it meets it, and when that came first. */
   readonly met: Map<number, number>;
-  /**
-   * Someone's change made with it in meets it, or anyone's typed inside
-   * code it made or unmade: they wrote over its text, so it's never taken out.
-   */
+  /** Someone's change made with it in meets it: they wrote over its text, so it's never taken out. */
   built: boolean;
 };
 
@@ -214,7 +191,9 @@ export class OwnFormatting {
   /**
    * Make one of the editor's writes, `write`, which calls `mark` with its
    * transaction; and if it's formatting alone (`intent`), keep it to make
-   * again. Any other is as the person's own change (`own`).
+   * again. Not code (`literal`): text in code reads as written and outside
+   * it as Markdown, so taking it out would change what others typed beside
+   * or inside it. Any other is as the person's own change (`own`).
    */
   capture(
     intent: unknown,
@@ -226,7 +205,7 @@ export class OwnFormatting {
     let made: Y.Transaction | null = null;
     let captured: Y.Transaction | null = null;
     const undo =
-      doc && intent !== null && rebases <= MAX_REBASES
+      doc && intent !== null && !literal && rebases <= MAX_REBASES
         ? new Y.UndoManager(this.#text, {
             captureTimeout: 0,
             captureTransaction: (transaction) => transaction === captured,
@@ -254,7 +233,6 @@ export class OwnFormatting {
     addAll(own.deletes, item.deletions);
     this.#writes.push({
       intent,
-      literal,
       undo,
       item,
       kept: item.deletions,
@@ -284,11 +262,7 @@ export class OwnFormatting {
     const doc = this.#doc;
     if (!doc) return;
     const theirs = this.#changeOf(transaction, doc.clientID);
-    const touched = (write: Write) => {
-      const { meet, within } = relation(this.#text, write.own, theirs);
-      return meet || (within && write.literal);
-    };
-    if (this.#writes.some(touched)) this.clear();
+    if (this.#writes.some((write) => meet(this.#text, write.own, theirs))) this.clear();
   }
 
   /** Someone else's change to `text`, as it went in, with what came with it. */
@@ -308,15 +282,10 @@ export class OwnFormatting {
     for (const write of this.#writes) {
       // Made with this write in: its items go out in one message, so having
       // one is having all. Over its text, it stays as it is.
-      const { meet, within } = relation(this.#text, write.own, made);
-      // Typed inside code it made or unmade, maybe with it in, maybe not,
-      // nothing can tell: taken out, it would change what that typing means.
-      const inside = within && write.literal;
       if (known > write.from) {
-        write.built ||= meet || inside;
+        write.built ||= meet(this.#text, write.own, made);
         continue;
       }
-      write.built ||= inside;
       const theirs = this.#theirs(write, client);
       for (const [c, list] of made.inserts)
         for (const r of list) add(theirs.inserts, c, r.clock, r.len);
@@ -324,9 +293,10 @@ export class OwnFormatting {
         for (const r of list) add(theirs.deletes, c, r.clock, r.len);
       if (update) addAll(write.gone, update.ds);
       // A change that only takes text out shows nothing of what its writer
-      // had, however long after it came: it merges as Yjs merges it.
-      const typed = theirs.inserts.size > 0;
-      if (typed && !write.met.has(client) && relation(this.#text, write.own, theirs).meet)
+      // had, however long after it came: it merges as Yjs merges it, even
+      // after typing of theirs made alongside.
+      const typed = made.inserts.size > 0;
+      if (typed && !write.met.has(client) && meet(this.#text, write.own, theirs))
         write.met.set(client, now);
     }
   }

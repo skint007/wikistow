@@ -47,7 +47,8 @@ export type BoundEditor = {
   intent?(): unknown;
   /**
    * Whether text inside `intent`'s formatting reads as it's written, as in
-   * code, which it would read otherwise without it.
+   * code, which it would read otherwise without it: such formatting is
+   * never made again.
    */
   literal?(intent: unknown): boolean;
   /** Make `intents`, in order, over the text it shows now, as the person's own edit. */
@@ -254,7 +255,7 @@ export class VisualBinding {
     const intent = this.#editor.intent?.() ?? null;
     const rebases = this.#rebases;
     this.#rebases = 0;
-    const literal = intent !== null && (this.#editor.literal?.(intent) ?? true);
+    const literal = intent !== null && (this.#editor.literal?.(intent) ?? false);
     this.#formatting.capture(intent, { rebases, literal }, (mark) =>
       this.#body.edit(() => {
         const doc = text.doc;

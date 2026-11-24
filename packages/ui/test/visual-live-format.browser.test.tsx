@@ -470,4 +470,35 @@ describe('formatting made alongside someone else’s', () => {
       expect(end).toBe(main);
     });
   }
+
+  it('never makes code formatting again, as typing beside it would read otherwise', async () => {
+    const page = 'Run npm now.\n';
+    const a = await person(page, 2);
+    const b = sourcePerson(page, 1);
+    toggle('npm', 'code')(a);
+    typeSource(b, 'Run npm&amp; now.\n');
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('leaves a deletion made after it as main does, after typing of theirs made alongside', async () => {
+    const page = 'It is very very good.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    toggle('very good', 'bold')(a);
+    typing('good.', 5, 0, ' Really.')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    send(b, a);
+    send(a, b);
+    await shows(b, a.text.toJSON());
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    typing('It is very', 6, 5, '')(b);
+    await expect.poll(() => b.log.length).toBe(2);
+    const main = merged(page, [a, b], [1, 2]);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
 });
