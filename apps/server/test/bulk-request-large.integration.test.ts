@@ -86,11 +86,12 @@ describe('bulk-request-large', () => {
   });
 });
 
-/** The lines carry no names or content of the library. */
-function expectNoContent(lines: unknown[], spaceId: SpaceId) {
-  const text = JSON.stringify(lines);
+/** The lines carry no names or content of the library, outside the space's ID. */
+function expectNoContent(lines: Record<string, unknown>[], spaceId: SpaceId) {
+  expect(lines.every((line) => line['spaceId'] === spaceId)).toBe(true);
+  // A random ID could hold a short title such as `Plan`.
+  const text = JSON.stringify(lines.map((line) => ({ ...line, spaceId: undefined })));
   for (const secret of [SPACE, ABOVE, 'Shared', 'Plan', 'published words', 'draft words']) {
     expect(text).not.toContain(secret);
   }
-  expect(text).toContain(spaceId);
 }
