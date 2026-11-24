@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- Ticking a task while reading: a box ticked just before a newer text of the page shows, such as one another tab published, no longer ticks whichever task the newer text has in its place. Where two tasks share a line, such as two sections each with a `Call` task, the tick is left out and the page says why, as it does for a tick made just before the page changed. (#PRNUM)
+- Ticking a task while reading: a box ticked just before a newer text of the page shows, such as one another tab published, no longer ticks whichever task the newer text has in its place. Where two tasks share a line, such as two sections each with a `Call` task, the tick is left out and the page says why, as it does for a tick made just before the page changed. (#742)
 
 ## 0.30.3 - 2026-11-24
 
