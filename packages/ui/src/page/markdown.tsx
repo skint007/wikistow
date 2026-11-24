@@ -305,7 +305,10 @@ function OwnCodeBlock({ node, ...props }: ComponentProps<'pre'> & ExtraProps) {
 /**
  * The whole text the body's tree was read from, where the page shown is
  * another, still being read, and not just that text with boxes ticked
- * since: its offsets may be other tasks' there (#728). Null otherwise.
+ * since: its offsets may be other tasks' there (#728). Empty where no
+ * whole text has that body, as when the frontmatter went and the body
+ * starts with what reads as frontmatter: then no box can be ticked. Null
+ * where the tree is the text shown's.
  */
 const ReadFrom = createContext<string | null>(null);
 
@@ -326,14 +329,18 @@ const TaskBox: NonNullable<Components['input']> = ({ node, ...props }) => {
   const older = use(ReadFrom);
   const at = node?.properties[TASK];
   const offset = at === undefined ? null : Number(at);
-  const task = here && offset !== null ? taskAt(older ?? here.markdown, offset) : null;
+  const shown = here && offset !== null ? taskAt(here.markdown, offset) : null;
+  const task = older === null ? shown : offset !== null ? taskAt(older, offset) : null;
   if (!here || !task || offset === null) return <input {...props} />;
   const { rights, change } = here;
   const hint = rights.allowed ? undefined : (rights.hint ?? undefined);
+  // As the text shown has it, ticks queued since included, where it has
+  // that line there: else a second click wouldn't undo the first.
+  const checked = shown?.line === task.line ? shown.checked : task.checked;
   return (
     <input
       type="checkbox"
-      checked={task.checked}
+      checked={checked}
       disabled={!rights.allowed}
       aria-label={props['aria-label'] ?? 'Done'}
       aria-description={hint}
@@ -505,14 +512,16 @@ export function Markdown({
   // The whole text the tree was read from, as its task offsets count, which
   // may be an older body than the one shown while that's read.
   const readFrom = read.data ? (frontmatter ?? '') + read.data.body : source;
-  const start = bodyStart(readFrom);
+  // Only if it splits into that body again, as `taskAt` and `taskIndex` split it.
+  const whole = !read.data || splitFrontmatter(readFrom).body === read.data.body;
+  const start = whole ? bodyStart(readFrom) : bodyStart(source);
   const here = use(ReadingChanges);
   const shownText = here?.markdown ?? null;
-  const older = useMemo(
-    () =>
-      tree && shownText !== null && !ticksSince(readFrom, shownText, tree, start) ? readFrom : null,
-    [tree, shownText, readFrom, start],
-  );
+  const older = useMemo(() => {
+    if (!tree || shownText === null) return null;
+    if (!whole) return '';
+    return ticksSince(readFrom, shownText, tree, start) ? null : readFrom;
+  }, [tree, shownText, readFrom, whole, start]);
   const hash = useLocation({ select: (location) => location.hash });
   // A link to a heading of this page arrives before its body is read: it
   // goes there once the body first shows, and as the hash changes, but not

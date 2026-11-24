@@ -1,4 +1,4 @@
-import { type ClientContext, type PageId, type SpaceId } from '@wikistow/client';
+import { splitFrontmatter, type ClientContext, type PageId, type SpaceId } from '@wikistow/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -222,7 +222,7 @@ describe('a task’s checkbox in the reader', () => {
   it('ticks in the text shown while a read of it with only boxes ticked since waits', async () => {
     const page = '- [ ] Call\n  Mum\n- [ ] Call\n  Bob\n';
     const { box, changes, queue } = await render(page, { allowed: true });
-    vi.spyOn(pageReader, 'run').mockImplementation(() => new Promise(() => {}));
+    hold(() => true);
     await act(async () => box('Call Mum').click());
     // Bob's is ticked before Mum's tick is read: it's made in the text with Mum's ticked.
     await act(async () => box('Call Bob').click());
@@ -237,4 +237,39 @@ describe('a task’s checkbox in the reader', () => {
       dropped: [],
     });
   });
+
+  it('shows a tick at once, and undoes it, while a newer text that moves no task waits to be read', async () => {
+    const before = '- [ ] milk\n';
+    const added = '- [ ] milk\n\nAnd more.\n';
+    const { box, queue, shown } = await render(before, { allowed: true });
+    hold((input) => input !== before);
+    await shown(added);
+    await act(async () => box('milk').click());
+    expect(box('milk').checked).toBe(true);
+    await act(async () => box('milk').click());
+    expect(box('milk').checked).toBe(false);
+    expect(applyChanges(added, queue)).toEqual({ markdown: added, dropped: [] });
+  });
+
+  it('can’t be ticked while a newer text waits whose body no longer splits as it did', async () => {
+    // Without its frontmatter, the old body's first lines would read as frontmatter.
+    const before = '---\ntitle: Calls\n---\n---\n- [ ] Call Mum\n---\n# B\n- [ ] Call Bob\n';
+    const after = '- [ ] Call Mum\n---\n# B\n- [ ] Call Bob\n';
+    const { box, changes, shown } = await render(before, { allowed: true });
+    hold((input) => input === splitBody(after));
+    await shown(after);
+    expect(box('Call Mum').disabled).toBe(true);
+    await act(async () => box('Call Mum').click());
+    expect(changes).toEqual([]);
+  });
 });
+
+/** Every read of a body `held` says waits, until the test ends. */
+function hold(held: (input: unknown) => boolean) {
+  const run = pageReader.run.bind(pageReader);
+  vi.spyOn(pageReader, 'run').mockImplementation((job, input, options) =>
+    held(input) ? new Promise(() => {}) : run(job, input, options),
+  );
+}
+
+const splitBody = (markdown: string) => splitFrontmatter(markdown).body;
