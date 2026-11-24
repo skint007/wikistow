@@ -330,12 +330,17 @@ export class VisualBinding {
     // theirs again over it: what they send next goes in, not the merge.
     if (this.#formatting.due) {
       // Unless Yjs's merge already reads as their text with its formatting
-      // made again, or their text alone would read worse.
-      const pending = this.#formatting.pending();
-      const body = this.#body.text.toJSON();
-      if (pending && this.#editor.keeps?.(body, pending.text, pending.intents))
+      // made again, or their text alone would read worse: then the next due
+      // write, if any, is looked at in turn.
+      while (this.#formatting.due) {
+        const pending = this.#formatting.pending();
+        const body = this.#body.text.toJSON();
+        if (!pending || !this.#editor.keeps?.(body, pending.text, pending.intents)) {
+          this.#rebase();
+          break;
+        }
         this.#formatting.settle();
-      else this.#rebase();
+      }
     } else {
       const until = this.#formatting.waitUntil();
       if (until !== null) return this.#schedule(Math.max(1, until - performance.now()), true);

@@ -72,7 +72,8 @@ export { wikilinkEditorNode } from './wikilink-node';
 const REPORT_MS = 150;
 // A page longer than this isn't checked at once before formatting is made
 // again over someone's change in a live session: its merge stays (#720).
-const KEEPS_MAX = 64_000;
+// Checking 16 KB holds the page's thread for about a tenth of a second.
+const KEEPS_MAX = 16_000;
 const SLICE_MS = 10;
 
 // The idle period the last slice ran in.

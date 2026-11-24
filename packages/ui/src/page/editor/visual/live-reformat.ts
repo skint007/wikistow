@@ -146,6 +146,10 @@ function rawIn(doc: Node): number {
  * range goes inside it, as Yjs placed the text of the other person, the
  * lower client, before this one's tags in the merge it replaces.
  */
+// How each intent's ranges were lined up with a document, as `keeps` reads
+// one document several ways.
+const lined = new WeakMap<Node, Map<unknown, StepMap>>();
+
 function remade(
   tr: Transform,
   intents: readonly unknown[],
@@ -163,14 +167,16 @@ function remade(
       (mark) => !changed.has(mark.type),
       () => false,
     ];
-    let map = StepMap.empty;
-    for (const kept of ways) {
+    const known = lined.get(tr.doc)?.get(intent);
+    let map = known ?? StepMap.empty;
+    for (const kept of known ? [] : ways) {
       map = carried(intent.before, tr.doc, kept);
       const cut = intent.steps.some((step) =>
         [step.from, step.to].some((at) => map.mapResult(at, 1).deleted),
       );
       if (!cut) break;
     }
+    if (!known) lined.set(tr.doc, (lined.get(tr.doc) ?? new Map()).set(intent, map));
     for (const step of intent.steps) {
       const Made = step instanceof AddMarkStep ? AddMarkStep : RemoveMarkStep;
       // Not over a mark of the same kind someone else put on since, as their
@@ -224,7 +230,8 @@ function places(doc: Node, kept: (mark: Mark) => boolean): string[] {
   const marks = (node: Node) =>
     node.marks
       .filter(kept)
-      .map((mark) => `${mark.type.name}${JSON.stringify(mark.attrs)}`)
+      // A link's id is new each time a text is read: it tells nothing.
+      .map((mark) => `${mark.type.name}${JSON.stringify({ ...mark.attrs, id: null })}`)
       .join(' ');
   const walk = (node: Node) =>
     node.forEach((child) => {

@@ -761,4 +761,23 @@ describe('formatting made alongside someone else’s', () => {
     for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
     expect(main).toContain('*A*');
   });
+
+  it('looks at each write in turn when the first one’s merge reads right', async () => {
+    const page = 'Say hello now.\n\nSay **world** now.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    colour('hello', 'highlight', 'red')(a);
+    typing('hello', 0, 1, 'H')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    colour('world', 'highlight', 'red')(a);
+    colour('world', 'text', 'red')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([2, 2]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    const end = a.text.toJSON();
+    expect(b.text.toJSON()).toBe(end);
+    expect(raw(end)).toBe(false);
+    expect(end).toContain('Say <mark data-color="red">Hello</mark> now.');
+  });
 });
