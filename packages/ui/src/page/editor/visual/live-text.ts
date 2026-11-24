@@ -93,8 +93,18 @@ function partsOf(text: string): Uint8Array {
 
 // Where code is: a code span, or a fence's line, in a quote or a list
 // too, which starts or ends a block.
-const CODE_SPAN = /(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/g;
-const FENCE = /^[\s>]*(`{3,}|~{3,})/gm;
+const CODE_SPAN = /(?<![`\\])(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/g;
+const FENCE = /^[ \t>]*(`{3,}|~{3,})(.*)$/gm;
+
+/** Whether `text` ends in a fenced code block: one opened, and not closed by a fence as long or longer of its character. */
+function inFence(text: string): boolean {
+  let open: string | null = null;
+  for (const [, fence = '', rest = ''] of text.matchAll(FENCE)) {
+    if (open === null) open = fence;
+    else if (fence[0] === open[0] && fence.length >= open.length && rest.trim() === '') open = null;
+  }
+  return open !== null;
+}
 
 /**
  * Changes of whole words: from `from` to `to` in the text they change, and
@@ -170,8 +180,8 @@ function inRuns(
   const runs = stretches.filter((s) => formatted(s) && whole(s));
   if (runs.length === 0) return changes;
   // In a fenced block, or one starting or ending here: none at all.
-  const fences = (text: string) => text.match(FENCE)?.length ?? 0;
-  if (fences(was) > 0 || fences(now) > 0 || fences(before.slice(0, at)) % 2 === 1) return changes;
+  const fenced = (text: string) => text.search(FENCE) >= 0;
+  if (fenced(was) || fenced(now) || inFence(before.slice(0, at))) return changes;
   const out: TextChange[] = [];
   for (const stretch of stretches)
     out.push(...(runs.includes(stretch) && !inCode(stretch) ? [run(stretch)] : stretch.changes));
@@ -246,12 +256,7 @@ type Piece = {
   readonly length: number;
   /** In `body` only, or in `held` only, by the editor's own writing rather than someone else's. */
   readonly mine?: true;
-  /** In `body` only: which change of someone else's put it in, as `added` tells them apart. */
-  readonly batch?: number;
 };
-
-// Each of others' changes followed, numbered in turn.
-let batches = 0;
 
 /** A stretch of `held`, and what it is in `body` now. */
 type Segment = {
@@ -274,7 +279,7 @@ function joined(pieces: readonly Piece[]): Piece[] {
   for (const piece of pieces) {
     if (piece.length === 0) continue;
     const last = out.at(-1);
-    if (last?.kind === piece.kind && last.mine === piece.mine && last.batch === piece.batch)
+    if (last?.kind === piece.kind && last.mine === piece.mine)
       out[out.length - 1] = { ...last, length: last.length + piece.length };
     else out.push(piece);
   }
@@ -373,12 +378,9 @@ export class Mapping {
    * As it is once someone else's change, `delta`, in places of `body`, went
    * into `body`: null once it has grown past `MAX_PIECES`, as so many
    * scattered changes would make following each one cost more than a diff.
-   * With `apart`, what it puts in is kept apart from what others put in
-   * beside it, for `added`.
    */
-  remote(delta: Delta, mine = false, apart = false): Mapping | null {
+  remote(delta: Delta, mine = false): Mapping | null {
     const own = mine ? ({ mine: true } as const) : {};
-    const batch = apart ? { batch: ++batches } : {};
     const out: Piece[] = [];
     const rest = new Cursor(this.#pieces);
     // Take `length` of `body` from `rest`, as `take` says, with what of
@@ -406,7 +408,7 @@ export class Mapping {
       else if (op.insert !== undefined) {
         // After what of `held` only lies here.
         while (rest.peek()?.kind === 'held') out.push(rest.take(Infinity));
-        out.push({ kind: 'body', length: lengthOf(op.insert), ...own, ...batch });
+        out.push({ kind: 'body', length: lengthOf(op.insert), ...own });
       }
       if (out.length > MAX_PIECES) return null;
     }
@@ -479,20 +481,6 @@ export class Mapping {
       if (piece.kind !== 'held') b += length;
     }
     return { text: shown, map: new Mapping(pieces) };
-  }
-
-  /**
-   * Where in `body` what others put in, and the editor hasn't taken in, is:
-   * each run of it one change put in, in order.
-   */
-  added(): { from: number; to: number }[] {
-    const out: { from: number; to: number }[] = [];
-    let body = 0;
-    for (const piece of this.#pieces) {
-      if (piece.kind === 'body' && !piece.mine) out.push({ from: body, to: body + piece.length });
-      if (piece.kind !== 'held') body += piece.length;
-    }
-    return out;
   }
 
   get #segments(): Segment[] {

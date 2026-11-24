@@ -71,75 +71,65 @@ const RECHECKS = 2;
 // How long a run it formatted is looked out for, as someone else's
 // formatting of the same words, made before they had it, may yet arrive.
 const RUN_MS = 10_000;
+// How far from its run it looks for theirs, which typing can come between.
+const NEAR = 256;
 
 /** A run the editor formatted, put in whole: where it is in `body`, its first and last character, and when. */
 type OwnRun = { start: Y.RelativePosition; end: Y.RelativePosition; at: number };
 
-// Whether `id`, a character's, is one of `run`'s, which Yjs numbers in turn.
-const inRun = (run: OwnRun, id: Y.ID | null) => {
-  const [first, last] = [run.start.item, run.end.item];
-  return (
-    !!id &&
-    !!first &&
-    !!last &&
-    id.client === first.client &&
-    id.clock >= first.clock &&
-    id.clock <= last.clock
-  );
-};
+/** The ID of the character at `at` in `text`, if there's one there. */
+const idAt = (text: Y.Text, at: number) =>
+  at >= 0 && at < text.length ? Y.createRelativePositionFromTypeIndex(text, at).item : null;
 
-/**
- * Whether the character at `at` in `text`, someone else's, went in beside
- * `run` after they had it, by what Yjs put it in next to: after the run's
- * last character, if it's the first of what they put in after it, or
- * before its first, if it's the last of what they put in before it.
- */
-function hadIt(text: Y.Text, run: OwnRun, at: number, after: boolean): boolean {
-  const id = Y.createRelativePositionFromTypeIndex(text, at).item;
-  const store = text.doc?.store;
-  if (!id || !store) return false;
-  const item = Y.getItem(store, id);
-  if (!(item instanceof Y.Item)) return false;
-  if (!after) return inRun(run, item.rightOrigin);
-  // A part of what they put in, after another part: its own origin says nothing.
-  const origin = item.origin;
-  if (item.id.clock !== id.clock || !origin) return false;
-  // After the run, Yjs puts what's typed after the word it took the place
-  // of, deleted: put in after the run or what's deleted between, they had it.
-  for (let left = item.left; left; left = left.left) {
-    const holds =
-      left.id.client === origin.client &&
-      origin.clock >= left.id.clock &&
-      origin.clock < left.id.clock + left.length;
-    if (holds) return left.deleted || inRun(run, origin);
-    if (!left.deleted) return false;
-  }
-  return false;
+/** What Yjs put the first character of the text from `id` after: null if `id` isn't where something was put in. */
+function originOf(store: Y.Doc['store'], id: Y.ID | null): Y.ID | null {
+  const item = id && Y.getItem(store, id);
+  return item instanceof Y.Item && item.id.clock === id?.clock ? item.origin : null;
 }
 
 /**
- * Whether `run` went in beside what someone else put in from `from` to
- * `to` in `text` after this app had it: Yjs put its first character after
- * one of theirs, or its last before one.
+ * What one client put in, in one go, that has the character at `at` in
+ * `text` at its start (`after`, as beside a run's end) or its end: as far
+ * as Yjs numbers its characters in turn.
  */
-function ownHadIt(text: Y.Text, run: OwnRun, { from, to }: { from: number; to: number }): boolean {
-  const doc = text.doc;
-  if (!doc) return false;
-  const placeOf = (id: Y.ID | null) =>
-    id &&
-    Y.createAbsolutePositionFromRelativePosition(
-      Y.createRelativePositionFromJSON({ item: id }),
-      doc,
-    )?.index;
-  const within = (at: number | null | undefined) => at != null && at >= from && at < to;
+function putIn(text: Y.Text, at: number, after: boolean) {
+  const first = idAt(text, at);
+  if (!first) return null;
+  const follows = (i: number) => {
+    const id = idAt(text, i);
+    return !!id && id.client === first.client && id.clock === first.clock + i - at;
+  };
+  let [from, to] = [at, at + 1];
+  if (after) while (follows(to)) to++;
+  else while (follows(from - 1)) from--;
+  return { from, to, client: first.client, start: idAt(text, from) };
+}
+
+/**
+ * Whether `run` went in beside `theirs`, what someone else put in, after
+ * this app had it: Yjs put its first character after one of theirs, or its
+ * last before one.
+ */
+function ownHadIt(
+  store: Y.Doc['store'],
+  run: OwnRun,
+  theirs: { from: number; to: number; client: number; start: Y.ID | null },
+): boolean {
+  const { start } = theirs;
+  const holds = (id: Y.ID | null) =>
+    !!id &&
+    !!start &&
+    id.client === start.client &&
+    id.clock >= start.clock &&
+    id.clock < start.clock + theirs.to - theirs.from;
   const [first, last] = [run.start.item, run.end.item];
-  const firstItem = first && Y.getItem(doc.store, first);
-  const lastItem = last && Y.getItem(doc.store, last);
+  const firstItem = first && Y.getItem(store, first);
+  const lastItem = last && Y.getItem(store, last);
   return (
     (firstItem instanceof Y.Item &&
       firstItem.id.clock === first?.clock &&
-      within(placeOf(firstItem.origin))) ||
-    (lastItem instanceof Y.Item && within(placeOf(lastItem.rightOrigin)))
+      holds(firstItem.origin)) ||
+    (lastItem instanceof Y.Item && holds(lastItem.rightOrigin))
   );
 }
 
@@ -205,8 +195,7 @@ export class VisualBinding {
       if (this.#pending) this.#pending.map = this.#pending.map?.remote(delta, mine) ?? null;
       if (mine) return;
       const followed = this.#map;
-      // Each change of theirs apart, while a run may be settled with one.
-      this.#map = followed?.remote(delta, false, this.#runs.length > 0) ?? null;
+      this.#map = followed?.remote(delta) ?? null;
       // A run it took out, settling, is nobody else's change.
       if (!this.#settling) {
         this.#theirs++;
@@ -325,25 +314,21 @@ export class VisualBinding {
   }
 
   /**
-   * A run it formatted, beside one someone else put in that reads as the
-   * same words, both whole: they formatted the same text at once, neither
-   * having the other's (#720). The second in `body` goes, which is the
-   * same run for everyone, so whoever takes it out, and however many do,
-   * the text reads as the first one's formatting. Beside one whose words
-   * take in its own, as of a sentence formatted while it formatted a word
-   * in it, its own goes. Only while how `body` changed is followed, to
-   * tell their run from the rest.
+   * A run it formatted, beside a run someone else put in, in one go, with
+   * the same words, which Yjs put after the same character of the word both
+   * took the place of: they formatted the same word at once, neither having
+   * the other's (#720). The second in `body` goes, which is the same run for
+   * everyone, so whoever takes it out, and however many do, the text reads
+   * as the first one's formatting.
    */
   #settleRuns(): void {
     const now = performance.now();
     this.#runs = this.#runs.filter((run) => now - run.at < RUN_MS);
-    if (this.#runs.length === 0 || !this.#map) return;
+    if (this.#runs.length === 0) return;
     const { text } = this.#body;
     const doc = text.doc;
     if (!doc) return;
     const body = text.toJSON();
-    if (this.#map.bodyLength !== body.length) return;
-    const added = this.#map.added();
     const place = (at: Y.RelativePosition) =>
       Y.createAbsolutePositionFromRelativePosition(at, doc)?.index ?? null;
     for (const run of this.#runs.slice()) {
@@ -355,28 +340,41 @@ export class VisualBinding {
       }
       const own = body.slice(from, to);
       const words = wordsOf(own);
+      const origin = originOf(doc.store, run.start.item);
       if (words.trim() === '') continue;
-      let gone: { from: number; to: number } | null = null;
-      for (const theirs of added) {
-        if (theirs.to !== from && theirs.from !== to) continue;
-        const after = theirs.from === to;
-        if (hadIt(text, run, after ? theirs.from : theirs.to - 1, after)) continue;
-        // Formatting, as theirs must be: words with marks or tags; or any,
-        // when this run went in beside theirs, written before the editor
-        // showed it, as only this app can tell then.
-        const put = body.slice(theirs.from, theirs.to);
-        const their = wordsOf(put);
-        const marked = their !== put;
-        // The same words, exactly, so nothing else put in beside them goes
-        // with them.
-        if (their === words && (marked || ownHadIt(text, run, theirs))) {
-          // One end of a tag over several words beside a whole run: the
-          // whole one goes, so the tag keeps both ends. Else the second.
-          const [mineEnd, theirEnd] = [endOfTag(own), endOfTag(put)];
-          const theirsGoes = mineEnd !== theirEnd ? mineEnd : after;
-          gone = theirsGoes ? theirs : { from, to };
+      // Theirs: put in after the same character of the word both took the
+      // place of, neither having the other's, near this run, as typing
+      // Yjs put there too can come between; or right beside it, this run
+      // written there before the editor showed theirs, as only this app
+      // can tell.
+      const together = (after: boolean) => {
+        for (let k = 0; origin && k < NEAR; k++) {
+          const at = after ? to + k : from - 1 - k;
+          const id = idAt(text, at);
+          if (!id) return null;
+          const there = id.client !== doc.clientID && originOf(doc.store, id);
+          if (!there || !Y.compareIDs(there, origin)) continue;
+          const theirs = putIn(text, at, true);
+          if (theirs && wordsOf(body.slice(theirs.from, theirs.to)) === words) return theirs;
         }
-        if (gone) break;
+        return null;
+      };
+      const beside = (after: boolean) => {
+        const theirs = putIn(text, after ? to : from - 1, after);
+        return theirs && ownHadIt(doc.store, run, theirs) ? theirs : null;
+      };
+      let gone: { from: number; to: number } | null = null;
+      for (const after of [true, false]) {
+        const theirs = together(after) ?? beside(after);
+        if (!theirs || theirs.client === doc.clientID) continue;
+        const put = body.slice(theirs.from, theirs.to);
+        if (wordsOf(put) !== words) continue;
+        // One end of a tag over several words beside a whole run: the
+        // whole one goes, so the tag keeps both ends. Else the second.
+        const [mineEnd, theirEnd] = [endOfTag(own), endOfTag(put)];
+        const theirsGoes = mineEnd !== theirEnd ? mineEnd : after;
+        gone = theirsGoes ? theirs : { from, to };
+        break;
       }
       if (!gone) continue;
       this.#runs.splice(this.#runs.indexOf(run), 1);

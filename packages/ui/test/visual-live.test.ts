@@ -765,6 +765,8 @@ describe('two people formatting the same text at once (#720)', () => {
       '<mark data-color="red">world</mark>',
       red('span', '<mark>world</mark>'),
     ],
+    // Both take the same mark off.
+    ['**world** and', 'world and', 'world and'],
     // A word with the punctuation after it, as selected.
     ['world!', red('mark', 'world!'), red('span', 'world!')],
     // A word, and a tag over it and the word before.
@@ -1008,6 +1010,50 @@ describe('two people formatting the same text at once (#720)', () => {
         bodyOf(a),
       );
     }
+  });
+
+  it('settles only runs of the same word, put in at once, whatever else came with them', async () => {
+    for (const aFirst of orders) {
+      // Two words alike, each formatted by one, the hyphen between taken out.
+      const [a, b] = start('Hi world-world.\n', aFirst);
+      a.editor.shown = 'Hi **world**world.\n';
+      b.editor.shown = 'Hi world-==world==.\n';
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(bodyOf(a).match(/world/g)).toHaveLength(2);
+    }
+    for (const aFirst of orders) {
+      // Typing beside the word as each formats it, sent together.
+      const [a, b] = start('Hello world there.\n', aFirst);
+      a.editor.shown = `Hello ${red('span', 'world')} there.\n`;
+      a.binding.write();
+      a.editor.shown = `Hello !${red('span', 'world')} there.\n`;
+      a.binding.write();
+      b.editor.shown = 'Hello ==world== there.\n';
+      b.binding.write();
+      b.editor.shown = 'Hello ==world==? there.\n';
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(bodyOf(a).match(/world/g)).toHaveLength(1);
+      expect(bodyOf(a)).toMatch(/!.*\?/);
+    }
+  });
+
+  it('tells code by its fences and backticks as Markdown does', () => {
+    const runs = (before: string, after: string) =>
+      ownChanges(before, after).some((change) => change.run);
+    // A shorter fence inside a longer one is the block's text.
+    expect(runs('````\n```\nsay world now\n', '````\n```\nsay <em>world</em> now\n')).toBe(false);
+    // Escaped backticks start no code span.
+    expect(
+      runs(
+        'Press \\` then **world** then \\`.\n',
+        `Press \\\` then ${red('mark', '**world**')} then \\\`.\n`,
+      ),
+    ).toBe(true);
   });
 
   it('types a mark alone by character, as in code', () => {
