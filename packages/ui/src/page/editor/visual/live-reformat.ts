@@ -6,7 +6,7 @@
 // carried onto what it shows now, as prosemirror-collab maps its steps.
 import type { Node } from '@milkdown/kit/prose/model';
 import { Plugin, type Transaction } from '@milkdown/kit/prose/state';
-import { AddMarkStep, RemoveMarkStep, StepMap } from '@milkdown/kit/prose/transform';
+import { AddMarkStep, RemoveMarkStep, StepMap, Transform } from '@milkdown/kit/prose/transform';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 import { diffChars } from 'diff';
@@ -81,13 +81,31 @@ export class FormatRecord {
 
 /**
  * `intents`' marks made again over the document `view` shows now, as one
- * edit of the person's own, each over its range carried from the document
- * it was made on. Text put in at either end of a range goes inside it, as
- * Yjs placed the text of the other person, the lower client, before this
- * one's tags in the merge it replaces.
+ * edit of the person's own (`remade`).
  */
 export function reformat(view: EditorView, intents: readonly unknown[]): void {
   const { tr } = view.state;
+  remade(tr, intents);
+  if (tr.docChanged) view.dispatch(tr);
+}
+
+/**
+ * Whether `merged` already reads as `theirs` with `intents`' marks made
+ * again over it, as Yjs's merge of both is right as it is.
+ */
+export function readsAs(merged: Node, theirs: Node, intents: readonly unknown[]): boolean {
+  const tr = new Transform(theirs);
+  remade(tr, intents);
+  return tr.doc.eq(merged);
+}
+
+/**
+ * `intents`' marks made again over `tr`'s document, each over its range
+ * carried from the document it was made on. Text put in at either end of a
+ * range goes inside it, as Yjs placed the text of the other person, the
+ * lower client, before this one's tags in the merge it replaces.
+ */
+function remade(tr: Transform, intents: readonly unknown[]): void {
   for (const intent of intents) {
     if (!isFormatting(intent) || intent.before.type.schema !== tr.doc.type.schema) continue;
     const map = carried(intent.before, tr.doc);
@@ -99,7 +117,6 @@ export function reformat(view: EditorView, intents: readonly unknown[]): void {
       tr.maybeStep(new Made(from, to, step.mark));
     }
   }
-  if (tr.docChanged) view.dispatch(tr);
 }
 
 // A document as one character for each place in it, as ProseMirror counts

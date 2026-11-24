@@ -15,7 +15,8 @@
 //   one of the two, by Yjs client, takes out again and makes again over
 //   the other's (`live-rebase.ts`).
 import * as Y from 'yjs';
-import { OwnFormatting, type RemoteFrom } from './live-rebase';
+import type { RemoteUpdate } from '../source/live';
+import { OwnFormatting } from './live-rebase';
 import { applyTo, Mapping, ownChanges, putInto, type Delta } from './live-text';
 
 /** How a take-in went: in, not by block (read whole), or waiting on a composition. */
@@ -46,6 +47,11 @@ export type BoundEditor = {
   intent?(): unknown;
   /** Make `intents`, in order, over the text it shows now, as the person's own edit. */
   reapply?(intents: readonly unknown[]): void;
+  /**
+   * Whether `merged` reads, as the editor reads it, the same as `theirs`
+   * with `intents` made again over it: then there's nothing to make again.
+   */
+  readsAs?(merged: string, theirs: string, intents: readonly unknown[]): boolean;
 };
 
 /** The shared `body`, as the binding reads and writes it. */
@@ -57,7 +63,7 @@ export type BoundText = {
    * Hear just before someone else's change goes into the document, with
    * who sent it (null: the person) and the change as it came.
    */
-  onBeforeRemote(listener: (senderId: string | null, from?: RemoteFrom) => void): () => void;
+  onBeforeRemote(listener: (senderId: string | null, from?: RemoteUpdate) => void): () => void;
   /** Whether the session still takes the person's changes: not once it has been left. */
   active(): boolean;
 };
@@ -106,7 +112,7 @@ export class VisualBinding {
   readonly #by = new Set<string | null>();
   /** Who sent the change going into the document now, and the change as it came. */
   #sending: string | null = null;
-  #from: RemoteFrom | null = null;
+  #from: RemoteUpdate | null = null;
   /** Its formatting writes it may make again, and what's heard of others' alongside them. */
   readonly #formatting: OwnFormatting;
   /** Formatting taken out of `body` again, to be made again once the editor has taken that in. */
@@ -305,8 +311,14 @@ export class VisualBinding {
     // Its formatting someone else changed alongside: taken out again first,
     // to be made again once it has taken in theirs. Or the other is to make
     // theirs again over it: what they send next goes in, not the merge.
-    if (this.#formatting.due) this.#rebase();
-    else {
+    if (this.#formatting.due) {
+      // Unless Yjs's merge already reads as their text with its formatting made again.
+      const pending = this.#formatting.pending();
+      const body = this.#body.text.toJSON();
+      if (pending && this.#editor.readsAs?.(body, pending.text, pending.intents))
+        this.#formatting.settle();
+      else this.#rebase();
+    } else {
       const until = this.#formatting.waitUntil();
       if (until !== null) return this.#schedule(Math.max(1, until - performance.now()), true);
     }

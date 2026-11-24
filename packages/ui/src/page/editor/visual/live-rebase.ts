@@ -12,6 +12,7 @@
 // made alongside them, judged by what those changes' items show their
 // writer had, and taking the writes out. Nothing here reads Markdown.
 import * as Y from 'yjs';
+import type { RemoteUpdate } from '../source/live';
 
 /** How long after it's written a formatting write may be made again. */
 export const REBASE_MS = 3_000;
@@ -19,9 +20,6 @@ export const REBASE_MS = 3_000;
 export const WAIT_MS = 1_000;
 /** How many times one formatting change is made again, at most. */
 const MAX_REBASES = 3;
-
-/** Someone else's change as it arrives: its Yjs update, and the client its join writes under. */
-export type RemoteFrom = { readonly client: number | null; readonly update: Uint8Array };
 
 type DeleteSet = ReturnType<typeof Y.createDeleteSet>;
 type StackItem = Y.UndoManager['undoStack'][number];
@@ -92,36 +90,49 @@ type Change = { readonly inserts: Ranges; readonly deletes: Ranges };
 const change = (): Change => ({ inserts: new Map(), deletes: new Map() });
 
 /**
- * Whether `a` and `b` changed the same text in `text`: what each put in
- * and took out reaches into the other's, or meets it with nothing left
- * standing between them that neither touched.
+ * Whether `a` and `b` changed the same text in `text`: something each put
+ * in or took out stands beside the other's, with no character between
+ * them that neither touched. Changes to the same word apart, as one to its
+ * first letter and one to its last, don't meet.
  */
 export function meet(text: Y.Text, a: Change, b: Change): boolean {
-  let [aFirst, aLast, bFirst, bLast] = [-1, -1, -1, -1];
-  // Places of the characters neither touched that still stand.
-  const between: number[] = [];
-  let at = 0;
-  for (let item = text._start; item; item = item.right, at++) {
+  let [inA, inB] = [false, false];
+  for (let item = text._start; item; item = item.right) {
     const { client, clock } = item.id;
     const hit = (c: Change) =>
       touches(c.inserts, client, clock, item.length) ||
       touches(c.deletes, client, clock, item.length);
-    const inA = hit(a);
-    const inB = hit(b);
-    if (inA) {
-      if (aFirst < 0) aFirst = at;
-      aLast = at;
+    const [hitA, hitB] = [hit(a), hit(b)];
+    if (!hitA && !hitB) {
+      if (!item.deleted && item.countable) [inA, inB] = [false, false];
+      continue;
     }
-    if (inB) {
-      if (bFirst < 0) bFirst = at;
-      bLast = at;
-    }
-    if (!inA && !inB && !item.deleted && item.countable) between.push(at);
+    inA ||= hitA;
+    inB ||= hitB;
+    if (inA && inB) return true;
   }
-  if (aFirst < 0 || bFirst < 0) return false;
-  if (aFirst <= bLast && bFirst <= aLast) return true;
-  const [from, to] = aLast < bFirst ? [aLast, bFirst] : [bLast, aFirst];
-  return !between.some((place) => place > from && place < to);
+  return false;
+}
+
+/** The runs of `client`'s IDs from `clock`, `len` of them, each in `ranges` or not. */
+function parts(ranges: Ranges, client: number, clock: number, len: number) {
+  const out: { at: number; len: number; inside: boolean }[] = [];
+  let at = clock;
+  const end = clock + len;
+  for (const range of ranges.get(client) ?? []) {
+    if (range.clock + range.len <= at) continue;
+    if (range.clock >= end) break;
+    if (range.clock > at) out.push({ at, len: range.clock - at, inside: false });
+    const stop = Math.min(end, range.clock + range.len);
+    out.push({
+      at: Math.max(at, range.clock),
+      len: stop - Math.max(at, range.clock),
+      inside: true,
+    });
+    at = stop;
+  }
+  if (at < end) out.push({ at, len: end - at, inside: false });
+  return out;
 }
 
 /** One of the editor's formatting writes, while it may be made again. */
@@ -147,6 +158,8 @@ type Write = {
   readonly gone: Ranges;
   /** Clients whose change made alongside it meets it, and when that came first. */
   readonly met: Map<number, number>;
+  /** Someone's change made with it in meets it: they wrote over its text, so it's never taken out. */
+  built: boolean;
 };
 
 /**
@@ -222,6 +235,7 @@ export class OwnFormatting {
       theirs: new Map(),
       gone: new Map(),
       met: new Map(),
+      built: false,
     });
     this.#timer ??= setTimeout(() => {
       this.#timer = null;
@@ -243,7 +257,7 @@ export class OwnFormatting {
   }
 
   /** Someone else's change to `text`, as it went in, with what came with it. */
-  heard(transaction: Y.Transaction, from: RemoteFrom | null): void {
+  heard(transaction: Y.Transaction, from: RemoteUpdate | null): void {
     const doc = this.#doc;
     this.#prune();
     if (!doc || this.#writes.length === 0) return;
@@ -256,8 +270,12 @@ export class OwnFormatting {
     const now = performance.now();
     const made = this.#changeOf(transaction, me);
     for (const write of this.#writes) {
-      // Made with this write in: its items go out in one message, so having one is having all.
-      if (known > write.from) continue;
+      // Made with this write in: its items go out in one message, so having
+      // one is having all. Over its text, it stays as it is.
+      if (known > write.from) {
+        write.built ||= meet(this.#text, write.own, made);
+        continue;
+      }
       const theirs = this.#theirs(write, client);
       for (const [c, list] of made.inserts)
         for (const r of list) add(theirs.inserts, c, r.clock, r.len);
@@ -270,20 +288,20 @@ export class OwnFormatting {
 
   /**
    * Where the writes to make again start: the first kept write a change made
-   * alongside it by a lower client met, if no higher client's met it or any
-   * after it. One a higher client's change met is theirs to make theirs
-   * again over, and they may have written over its text already: it's
-   * never taken out, nor those before it. -1 if none is due.
+   * alongside it by a lower client met, if nothing after it is held. One a
+   * higher client's change met is theirs to make theirs again over, and one
+   * someone wrote over is theirs too: such a write is never taken out, nor
+   * any before it, as they may have written over its text already. -1 if
+   * none is due.
    */
   #first(): number {
     this.#prune();
     const me = this.#doc?.clientID ?? 0;
     const clients = (write: Write) => [...write.met.keys()];
-    const ceded = this.#writes.findLastIndex((write) => clients(write).some((c) => c > me));
-    const first = this.#writes.findIndex(
-      (write, i) => i > ceded && clients(write).some((c) => c < me),
+    const held = this.#writes.findLastIndex(
+      (write) => write.built || clients(write).some((c) => c > me),
     );
-    return first;
+    return this.#writes.findIndex((write, i) => i > held && clients(write).some((c) => c < me));
   }
 
   /** Whether a kept write is to be made again (`rebase`). */
@@ -312,6 +330,54 @@ export class OwnFormatting {
   }
 
   /**
+   * The writes due, as `rebase` would take them out: `text` without them,
+   * as it would be then, and what the editor would make again of them.
+   * Null if none is due.
+   */
+  pending(): { text: string; intents: unknown[] } | null {
+    const first = this.#first();
+    if (first < 0) return null;
+    const writes = this.#writes.slice(first);
+    const me = this.#doc?.clientID ?? 0;
+    const mine: Ranges = new Map();
+    for (const write of writes) add(mine, me, write.from, write.to - write.from);
+    const back: Ranges = new Map();
+    const gone = this.#gone(writes);
+    for (const write of writes) addAll(back, without(write.kept, gone));
+    let text = '';
+    for (let item = this.#text._start; item; item = item.right) {
+      if (!item.countable || !(item.content instanceof Y.ContentString)) continue;
+      const { str } = item.content;
+      const { client, clock } = item.id;
+      for (const part of parts(item.deleted ? back : mine, client, clock, item.length)) {
+        if (part.inside === item.deleted)
+          text += str.slice(part.at - clock, part.at - clock + part.len);
+      }
+    }
+    return { text, intents: writes.map((write) => write.intent) };
+  }
+
+  /** Make none of the writes due again: `text` reads as it would after. */
+  settle(): void {
+    const first = this.#first();
+    if (first >= 0) for (const write of this.#writes.splice(first)) this.#dispose(write);
+  }
+
+  // Whatever someone else took out alongside any of `writes`.
+  #gone(writes: readonly Write[]): Ranges {
+    const gone: Ranges = new Map();
+    for (const write of writes) {
+      for (const [client, list] of write.gone)
+        for (const r of list) add(gone, client, r.clock, r.len);
+      for (const theirs of write.theirs.values()) {
+        for (const [client, list] of theirs.deletes)
+          for (const r of list) add(gone, client, r.clock, r.len);
+      }
+    }
+    return gone;
+  }
+
+  /**
    * Take out again the first write that's due and every kept write after
    * it, in `run`'s transaction, never what others took out alongside them;
    * and what to make again of them, in order, and how many times it has
@@ -322,15 +388,7 @@ export class OwnFormatting {
     if (first < 0) return null;
     const writes = this.#writes.splice(first);
     // Whatever someone else took out alongside any of them stays out.
-    const gone: Ranges = new Map();
-    for (const write of writes) {
-      for (const [client, list] of write.gone)
-        for (const r of list) add(gone, client, r.clock, r.len);
-      for (const theirs of write.theirs.values()) {
-        for (const [client, list] of theirs.deletes)
-          for (const r of list) add(gone, client, r.clock, r.len);
-      }
-    }
+    const gone = this.#gone(writes);
     run(() => {
       for (const write of writes.toReversed()) {
         write.item.deletions = without(write.kept, gone);

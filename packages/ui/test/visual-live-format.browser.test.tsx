@@ -1,10 +1,14 @@
+import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import * as Y from 'yjs';
-import { ownChanges, putInto } from '../src/page/editor/visual/live-text.ts';
 import {
   colour,
-  LOCAL,
+  merged,
   person,
+  range,
+  send,
+  shows,
+  sourcePerson,
+  typeSource,
   raw,
   settle,
   together,
@@ -12,8 +16,8 @@ import {
   typing,
   unmounts,
   type Edit,
-  type Person,
 } from './live-format-people.tsx';
+import { viewOf } from './editor-view.ts';
 
 // Two people formatting the same text at once in a live session, each in a
 // visual editor mounted for real over a Yjs `body` of its own (#720): the
@@ -196,25 +200,8 @@ describe('formatting made alongside someone else’s', () => {
     const page = '**world**\n';
     const a = await person(page, 2);
     // Someone in source mode, under a lower client, colours it by hand.
-    const first = new Y.Doc();
-    first.clientID = 1_000_000;
-    first.getText('body').insert(0, page);
-    const doc = new Y.Doc();
-    doc.clientID = 1;
-    Y.applyUpdate(doc, Y.encodeStateAsUpdate(first));
-    const log: Uint8Array[] = [];
-    doc.on('update', (update: Uint8Array, origin: unknown) => {
-      if (origin === LOCAL) log.push(update);
-    });
-    const typed = '<span data-color="red">**world**</span>\n';
-    doc.transact(() => putInto(doc.getText('body'), ownChanges(page, typed)), LOCAL);
-    const b = {
-      doc,
-      text: doc.getText('body'),
-      before: new Set(),
-      log,
-      sent: new Map(),
-    } as unknown as Person;
+    const b = sourcePerson(page, 1);
+    typeSource(b, '<span data-color="red">**world**</span>\n');
     colour('world', 'highlight', 'red')(a);
     await expect.poll(() => a.text.toJSON()).not.toBe(page);
     await settle([a, b]);
@@ -222,5 +209,89 @@ describe('formatting made alongside someone else’s', () => {
       '<span data-color="red"><mark data-color="red">**world**</mark></span>\n',
     );
     expect(b.text.toJSON()).toBe(a.text.toJSON());
+  });
+
+  // Changes made with the formatting in, which show it only by where they
+  // are, aren't made alongside it: they merge as main's do (#720's reviews).
+  const after: [string, string, Edit, Edit][] = [
+    [
+      'a word un-bolded inside a bolded phrase',
+      'Say one two three now.\n',
+      toggle('one two three', 'bold'),
+      toggle('two', 'bold'),
+    ],
+    [
+      'a recolour inside the highlight',
+      'abcdef\n',
+      colour('abcdef', 'highlight', 'red'),
+      colour('cd', 'highlight', 'blue'),
+    ],
+    [
+      'letters un-bolded inside a bolded word',
+      'Hello world there.\n',
+      toggle('world', 'bold'),
+      toggle('rl', 'bold'),
+    ],
+    [
+      'Enter inside a bolded word',
+      'Hello world there.\n',
+      toggle('world', 'bold'),
+      (p) => {
+        const view = viewOf(p.dom);
+        const [from] = range(view.state.doc, 'rld');
+        act(() => view.dispatch(view.state.tr.split(from)));
+      },
+    ],
+  ];
+  for (const [name, page, a, b] of after) {
+    it(`leaves a change made after it as main does: ${name}`, async () => {
+      const [pa, pb] = [await person(page, 2), await person(page, 1)];
+      a(pa);
+      await expect.poll(() => pa.text.toJSON()).not.toBe(page);
+      send(pa, pb);
+      await shows(pb, pa.text.toJSON());
+      b(pb);
+      await expect.poll(() => pb.log.length).toBeGreaterThan(0);
+      const main = merged(page, [pa, pb], [pa.log.length, pb.log.length]);
+      await settle([pa, pb]);
+      expect(pa.text.toJSON()).toBe(main);
+      expect(pb.text.toJSON()).toBe(main);
+    });
+  }
+
+  it('leaves alone a write a third person changed after it came', async () => {
+    const page = 'Hello <mark data-color="red">world</mark> there.\n';
+    const [a, b, c] = [await person(page, 3), await person(page, 1), await person(page, 2)];
+    colour('world', 'highlight', 'blue')(a);
+    typing('world', 0, 1, 'W')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    send(a, c);
+    await shows(c, a.text.toJSON());
+    // Its editor shows the blue highlight (#743: until it does, an edit writes the red one's text).
+    await expect.poll(() => JSON.stringify(viewOf(c.dom).state.doc.toJSON())).toContain('blue');
+    colour('world', 'highlight', null)(c);
+    await expect.poll(() => c.log.length).toBe(1);
+    const main = merged(page, [a, b, c], [1, 1, 1]);
+    send(c, a);
+    send(b, a);
+    await settle([a, b, c]);
+    for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('leaves alone a write someone changed in source mode after it came', async () => {
+    const page = 'abcdefgh\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    const c = sourcePerson(page, 3);
+    colour('abcdefgh', 'highlight', 'red')(a);
+    typing('d', 0, 1, 'D')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    send(a, c);
+    typeSource(c, c.text.toJSON().replace('red', 'blue'));
+    const main = merged(page, [a, b, c], [1, 1, 1]);
+    send(c, a);
+    send(b, a);
+    await settle([a, b, c]);
+    for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
+    expect(main).toContain('blue');
   });
 });

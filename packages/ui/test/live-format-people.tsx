@@ -106,6 +106,45 @@ export async function person(page: string, id: number): Promise<Person> {
   return { doc, text, live, before, log, sent: new Map(), dom, handle: ref.current };
 }
 
+/** Someone typing in source mode under Yjs client `id`: no editor, `body` alone. */
+export function sourcePerson(page: string, id: number): Person {
+  const first = new Y.Doc();
+  first.clientID = 1_000_000;
+  first.getText('body').insert(0, page);
+  const doc = new Y.Doc();
+  doc.clientID = id;
+  Y.applyUpdate(doc, Y.encodeStateAsUpdate(first));
+  const log: Uint8Array[] = [];
+  doc.on('update', (update: Uint8Array, origin: unknown) => {
+    if (origin === LOCAL) log.push(update);
+  });
+  return { doc, text: doc.getText('body'), before: new Set(), log, sent: new Map() } as never;
+}
+
+/** `p`, in source mode, makes its text `next`, by the smallest change. */
+export function typeSource(p: Person, next: string) {
+  p.doc.transact(() => putInto(p.text, ownChanges(p.text.toJSON(), next)), LOCAL);
+}
+
+/**
+ * As main's binding would end: each person's own messages up to `counts`
+ * of them, merged, with nothing made again.
+ */
+export function merged(page: string, people: readonly Person[], counts: readonly number[]): string {
+  const first = new Y.Doc();
+  first.clientID = 1_000_000;
+  first.getText('body').insert(0, page);
+  const doc = new Y.Doc();
+  Y.applyUpdate(doc, Y.encodeStateAsUpdate(first));
+  people.forEach((p, i) => {
+    for (const update of p.log.slice(0, counts[i])) Y.applyUpdate(doc, update);
+  });
+  return doc.getText('body').toJSON();
+}
+
+/** Wait until `p`'s editor shows `text`, taken in. */
+export const shows = (p: Person, text: string) => expect.poll(() => p.handle.read()).toBe(text);
+
 /** What `from` has sent and `to` hasn't had, as one message. */
 export function send(from: Person, to: Person) {
   const had = from.sent.get(to) ?? 0;

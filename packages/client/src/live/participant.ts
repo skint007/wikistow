@@ -185,13 +185,13 @@ export type ParticipantState =
     }
   | { kind: 'left' };
 
-/** Someone else with the draft open, as the toolbar shows them. */
 /**
  * Someone else's change as it arrives: the Yjs update, and the client its
  * join writes under (null if the join isn't known to write under one).
  */
 export type RemoteUpdate = { readonly client: number | null; readonly update: Uint8Array };
 
+/** Someone else with the draft open, as the toolbar shows them. */
 export type LivePerson = {
   id: IdentityId;
   /** Their joins' editors and cursors, one per tab or window. */
