@@ -218,7 +218,7 @@ Steps 3 and 4 come first. Step 5 needs 3, and step 6 needs 4 and 5.
 
 ## Decided (2026-11-23)
 
-Scott accepted recommendations 1 to 8 below on 2026-11-23.
+Scott accepted every recommendation below on 2026-11-23.
 
 1. **One statement, `identity-key-rotation/v1`, signed by both the old key and the new?** Recommended: yes (decision 1). The old key's signature lets contacts follow; the new key's shows its holder agreed and vouches for the old key, so history signed before stays verifiable by anyone who meets the person later.
 2. **Contacts' apps follow a valid chain without asking, with a notice?** Recommended: yes (decision 3, A). The only real check a contact can make is the fingerprint, which is today's key-change warning; a click that checks nothing adds no safety, and until it came, owner-region saves would stop. A server alone still can't move a pin. The cost is A15: a thief with the old key and the person's session, or the server's help, is followed too.
@@ -228,9 +228,5 @@ Scott accepted recommendations 1 to 8 below on 2026-11-23.
 6. **The keyring keeps the earlier secret keys, to open history, rather than re-sealing history to the new key?** Recommended: keep them (decision 5). They are the leaked keys, so keeping them costs nothing, where re-sealing is the size of adding a co-owner to every space.
 7. **A rotation someone else made first is not undone by the protocol: the person's app says so and stops, and a way to start again with a new identity is a separate issue?** Recommended: yes (decision 4, and A15). Undoing it needs a key the thief doesn't hold, such as an offline rotation key (**Considered options**), which every identity would have to commit to in advance.
 8. **Older apps of the rotated person refuse the new wrapper and ask to update, which needs a release that teaches them so before rotation ships?** Recommended: yes (decision 10). The alternative, ignoring the earlier keys, leaves them unable to open history and to accept themselves as owners, with errors that don't say why.
-
-## Decide
-
-Still open, with a recommendation.
 
 9. **Keep this scope, or narrow it?** Three review rounds found 11, 11 and 9 High findings, none in the statement itself; each came where the last round's fixes reached into the rest of the design (owners, shares, the contacts record, live sessions, agents, devices). The design touches most of the protocol because a person's key is in most of it. Recommended: keep the scope, and continue the rounds after you decide, as live sessions took nine. The narrower option is decision 3's C for owners only (a rotated owner is re-added as a co-owner, as today), which drops re-signing owner statements and the owners dialog, at the cost of the "a rotating owner stays an owner" that #327 asks for.
