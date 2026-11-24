@@ -16,6 +16,8 @@ import { testRuntime } from './plugin-runtime.ts';
 // stick. When it keeps its props is the drawing's (block-drawing).
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+// Only properties change here, which leave the body as it was.
+const shownBefore = () => true;
 
 const PAGE = '---\nservings: 4\nnotes: |\n  Fresh.\n---\nBody\n';
 
@@ -70,7 +72,7 @@ async function mount() {
     });
     return (
       <PluginsContext value={runtime}>
-        <ReadingChanges value={{ markdown, rights: { allowed: true }, change }}>
+        <ReadingChanges value={{ markdown, rights: { allowed: true }, change, shownBefore }}>
           <PageProperties value={read.ok ? read.properties : null}>
             {shown && <ReaderBlock block={shown} source="" page={{ spaceId: 's', pageId: 'p' }} />}
           </PageProperties>
