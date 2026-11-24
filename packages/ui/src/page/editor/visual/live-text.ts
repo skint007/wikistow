@@ -33,9 +33,6 @@ export const wordsOf = (markdown: string) =>
     .replace(TAG, '')
     .replace(/\\([^\n])|==|~~|[*_`]/g, (_, escaped: string | undefined) => escaped ?? '');
 
-// Characters marks are written with, which part no words.
-const MARKS = new Set(['*', '_', '=', '~', '`', '\\', '<', '>']);
-
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
 /** Whether `at` falls between the two halves of a surrogate pair in `text`. */
@@ -77,10 +74,10 @@ function smallest(before: string, after: string, at: number): TextChange | null 
 }
 
 /**
- * Where `text` parts into words: 1 at each space, line break, punctuation
- * mark or symbol, other than those marks are written with, outside an HTML
- * tag, so a tag's attributes stay with the word it marks, and the two
- * halves of `foo-bar` are two words.
+ * Where `text` parts into words: 1 at each space, line break, hyphen, dash
+ * or slash outside an HTML tag, so a tag's attributes stay with the word it
+ * marks, and the two halves of `foo-bar` are two words. Other punctuation
+ * stays with its word, as a selection of `world!` takes it in.
  */
 function partsOf(text: string): Uint8Array {
   const parts = new Uint8Array(text.length);
@@ -89,14 +86,15 @@ function partsOf(text: string): Uint8Array {
     const char = text[i] ?? '';
     if (char === '<' && TAG_HERE.test(text.slice(i, i + 512))) inTag = true;
     else if (char === '>') inTag = false;
-    if (!inTag && !MARKS.has(char) && /[\s\p{P}\p{S}]/u.test(char)) parts[i] = 1;
+    if (!inTag && /[\s\-/\u2010-\u2015]/.test(char)) parts[i] = 1;
   }
   return parts;
 }
 
-// Where code is: a code span, or a fence's line, which starts or ends a block.
-const CODE_SPAN = /(`+)[^`\n]*?\1/g;
-const FENCE = /^ {0,3}(`{3,}|~{3,})/gm;
+// Where code is: a code span, or a fence's line, in a quote or a list
+// too, which starts or ends a block.
+const CODE_SPAN = /(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/g;
+const FENCE = /^[\s>]*(`{3,}|~{3,})/gm;
 
 /**
  * Changes of whole words: from `from` to `to` in the text they change, and
@@ -375,10 +373,12 @@ export class Mapping {
    * As it is once someone else's change, `delta`, in places of `body`, went
    * into `body`: null once it has grown past `MAX_PIECES`, as so many
    * scattered changes would make following each one cost more than a diff.
+   * With `apart`, what it puts in is kept apart from what others put in
+   * beside it, for `added`.
    */
-  remote(delta: Delta, mine = false): Mapping | null {
+  remote(delta: Delta, mine = false, apart = false): Mapping | null {
     const own = mine ? ({ mine: true } as const) : {};
-    const batch = mine ? {} : { batch: ++batches };
+    const batch = apart ? { batch: ++batches } : {};
     const out: Piece[] = [];
     const rest = new Cursor(this.#pieces);
     // Take `length` of `body` from `rest`, as `take` says, with what of

@@ -765,10 +765,10 @@ describe('two people formatting the same text at once (#720)', () => {
       '<mark data-color="red">world</mark>',
       red('span', '<mark>world</mark>'),
     ],
+    // A word with the punctuation after it, as selected.
+    ['world!', red('mark', 'world!'), red('span', 'world!')],
     // A word, and a tag over it and the word before.
     ['big world', 'big **world**', red('mark', 'big world')],
-    // Both take the same mark off.
-    ['**world** and', 'world and', 'world and'],
   ])('from %s, settles each way of formatting it to one', async (was, mine, theirs) => {
     const page = (run: string) => `Hello ${run} there.\n`;
     for (const aFirst of orders) {
@@ -803,6 +803,13 @@ describe('two people formatting the same text at once (#720)', () => {
   it('never takes out a run someone typed beside once they had it', async () => {
     for (const [was, formatted, at, typed, merged] of [
       ['Try a later.\n', 'Try **a** later.\n', 9, 'gain', 'Try **a**gain later.\n'],
+      [
+        'Try world later.\n',
+        'Try **world** later.\n',
+        13,
+        '==world==',
+        'Try **world**==world== later.\n',
+      ],
       // Pasted after it: theirs, put in beside it, had it.
       ['Try a later.\n', 'Try **a** later.\n', 9, ' ==a==', 'Try **a** ==a== later.\n'],
       ['I think so.\n', '**I** think so.\n', 0, 'I', 'I**I** think so.\n'],
@@ -921,7 +928,7 @@ describe('two people formatting the same text at once (#720)', () => {
       }
   });
 
-  it('leaves code as text, and words parted by punctuation apart', async () => {
+  it('leaves code as text, and words parted by a hyphen apart', async () => {
     for (const [was, mine, theirs, merged] of [
       // Literal HTML typed in code, while someone takes a letter out.
       [
@@ -935,6 +942,18 @@ describe('two people formatting the same text at once (#720)', () => {
         '```\nsay <em>world</em> now\n```\n',
         '```\nsay word now\n```\n',
         '```\nsay <em>word</em> now\n```\n',
+      ],
+      [
+        '> ```\n> say world now\n> ```\n',
+        '> ```\n> say <em>world</em> now\n> ```\n',
+        '> ```\n> say word now\n> ```\n',
+        '> ```\n> say <em>word</em> now\n> ```\n',
+      ],
+      [
+        'A `` a ` world `` b.\n',
+        'A `` a ` <em>world</em> `` b.\n',
+        'A `` a ` word `` b.\n',
+        'A `` a ` <em>word</em> `` b.\n',
       ],
       // Each half of a word with a hyphen formatted by one of them.
       ['A foo-bar b.\n', 'A **foo**-bar b.\n', 'A foo-~~bar~~ b.\n', 'A **foo**-~~bar~~ b.\n'],
@@ -1006,7 +1025,7 @@ describe('two people formatting the same text at once (#720)', () => {
       { from: 6, remove: 0, insert: 'big ' },
     ]);
     expect(ownChanges('A world.\n\nB.\n', 'A **world**.\n\nB!\n')).toEqual([
-      { from: 2, remove: 5, insert: '**world**', run: true },
+      { from: 2, remove: 6, insert: '**world**.', run: true },
       { from: 11, remove: 1, insert: '!' },
     ]);
   });

@@ -100,9 +100,21 @@ function hadIt(text: Y.Text, run: OwnRun, at: number, after: boolean): boolean {
   if (!id || !store) return false;
   const item = Y.getItem(store, id);
   if (!(item instanceof Y.Item)) return false;
+  if (!after) return inRun(run, item.rightOrigin);
   // A part of what they put in, after another part: its own origin says nothing.
-  if (after) return item.id.clock === id.clock && inRun(run, item.origin);
-  return inRun(run, item.rightOrigin);
+  const origin = item.origin;
+  if (item.id.clock !== id.clock || !origin) return false;
+  // After the run, Yjs puts what's typed after the word it took the place
+  // of, deleted: put in after the run or what's deleted between, they had it.
+  for (let left = item.left; left; left = left.left) {
+    const holds =
+      left.id.client === origin.client &&
+      origin.clock >= left.id.clock &&
+      origin.clock < left.id.clock + left.length;
+    if (holds) return left.deleted || inRun(run, origin);
+    if (!left.deleted) return false;
+  }
+  return false;
 }
 
 /**
@@ -193,7 +205,8 @@ export class VisualBinding {
       if (this.#pending) this.#pending.map = this.#pending.map?.remote(delta, mine) ?? null;
       if (mine) return;
       const followed = this.#map;
-      this.#map = followed?.remote(delta) ?? null;
+      // Each change of theirs apart, while a run may be settled with one.
+      this.#map = followed?.remote(delta, false, this.#runs.length > 0) ?? null;
       // A run it took out, settling, is nobody else's change.
       if (!this.#settling) {
         this.#theirs++;
@@ -348,8 +361,7 @@ export class VisualBinding {
         if (theirs.to !== from && theirs.from !== to) continue;
         const after = theirs.from === to;
         if (hadIt(text, run, after ? theirs.from : theirs.to - 1, after)) continue;
-        // Formatting, as theirs must be: words with marks or tags; or, as
-        // when both take a mark off, none, as this run has none; or any,
+        // Formatting, as theirs must be: words with marks or tags; or any,
         // when this run went in beside theirs, written before the editor
         // showed it, as only this app can tell then.
         const put = body.slice(theirs.from, theirs.to);
@@ -357,7 +369,7 @@ export class VisualBinding {
         const marked = their !== put;
         // The same words, exactly, so nothing else put in beside them goes
         // with them.
-        if (their === words && (marked || words === own || ownHadIt(text, run, theirs))) {
+        if (their === words && (marked || ownHadIt(text, run, theirs))) {
           // One end of a tag over several words beside a whole run: the
           // whole one goes, so the tag keeps both ends. Else the second.
           const [mineEnd, theirEnd] = [endOfTag(own), endOfTag(put)];
