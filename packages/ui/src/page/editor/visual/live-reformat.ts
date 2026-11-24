@@ -102,10 +102,23 @@ export function reformat(view: EditorView, intents: readonly unknown[]): void {
  */
 export function keeps(merged: Node, theirs: Node, intents: readonly unknown[]): boolean {
   if (rawIn(theirs) > rawIn(merged)) return true;
-  const tr = new Transform(theirs);
-  remade(tr, intents);
-  return tr.doc.eq(merged);
+  // Text typed at either end of a range may have gone inside it or outside,
+  // as Yjs placed it: either reading counts.
+  const ends: Ends[] = [
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ];
+  return ends.some((assoc) => {
+    const tr = new Transform(theirs);
+    remade(tr, intents, assoc);
+    return tr.doc.eq(merged);
+  });
 }
+
+/** Which way each end of a range carried goes when text was typed right there. */
+type Ends = readonly [from: number, to: number];
 
 /** How many pieces of raw HTML `doc` shows. */
 function rawIn(doc: Node): number {
@@ -122,7 +135,7 @@ function rawIn(doc: Node): number {
  * range goes inside it, as Yjs placed the text of the other person, the
  * lower client, before this one's tags in the merge it replaces.
  */
-function remade(tr: Transform, intents: readonly unknown[]): void {
+function remade(tr: Transform, intents: readonly unknown[], ends: Ends = [1, 1]): void {
   for (const intent of intents) {
     if (!isFormatting(intent) || intent.before.type.schema !== tr.doc.type.schema) continue;
     // Lined up by its text and marks, so a word typed beside its copy isn't
@@ -146,7 +159,7 @@ function remade(tr: Transform, intents: readonly unknown[]): void {
       const Made = step instanceof AddMarkStep ? AddMarkStep : RemoveMarkStep;
       // Not over a mark of the same kind someone else put on since, as their
       // highlight inside this app's: theirs stays, as the merge kept it.
-      for (const [from, to] of unclaimed(intent.before, tr.doc, map, step)) {
+      for (const [from, to] of unclaimed(intent.before, tr.doc, map, step, ends)) {
         tr.maybeStep(new Made(from, to, step.mark));
       }
     }
@@ -161,8 +174,9 @@ function unclaimed(
   doc: Node,
   map: StepMap,
   step: AddMarkStep | RemoveMarkStep,
+  ends: Ends,
 ): [number, number][] {
-  const [start, end] = [map.map(step.from, 1), map.map(step.to, 1)];
+  const [start, end] = [map.map(step.from, ends[0]), map.map(step.to, ends[1])];
   if (start >= end) return [];
   const type = step.mark.type;
   const markOf = (node: Node | null | undefined) => type.isInSet(node?.marks ?? []);

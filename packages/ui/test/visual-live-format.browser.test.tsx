@@ -624,4 +624,24 @@ describe('formatting made alongside someone else’s', () => {
       else expect(end).toBe(main);
     });
   }
+
+  for (const [name, format, typed] of [
+    ['bold', 'bold', '*'],
+    ['italic', 'italic', '*'],
+    ['bold', 'bold', '**'],
+  ] as const) {
+    it(`comes out as main does: ${typed} typed in source mode after a word made ${name}`, async () => {
+      const page = 'Say world now.\n';
+      const a = await person(page, 2);
+      const b = sourcePerson(page, 1);
+      toggle('world', format)(a);
+      typeSource(b, page.replace('world', `world${typed}`));
+      await expect.poll(() => a.log.length).toBe(1);
+      const main = merged(page, [a, b], [1, 1]);
+      send(b, a);
+      send(a, b);
+      await settle([a, b]);
+      for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+    });
+  }
 });
