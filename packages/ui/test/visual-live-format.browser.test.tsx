@@ -1,3 +1,4 @@
+import { TextSelection } from '@milkdown/kit/prose/state';
 import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
@@ -18,6 +19,7 @@ import {
   type Edit,
 } from './live-format-people.tsx';
 import { viewOf } from './editor-view.ts';
+import { FORMATS } from '../src/page/editor/visual/formatting.ts';
 import { BESIDE_MS } from '../src/page/editor/visual/live-rebase.ts';
 
 // Two people formatting the same text at once in a live session, each in a
@@ -393,4 +395,79 @@ describe('formatting made alongside someone else’s', () => {
     await settle([a, b]);
     for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
   });
+
+  // Next to text it repeats, the characters it covers are found again by the
+  // shared text's own identity, not by a diff of the text.
+  const repeated: [string, string, Edit, Edit][] = [
+    [
+      'highlight, its first letter doubled',
+      'Say wworld now.\n',
+      colour('world', 'highlight', 'red'),
+      typing('Say w', 4, 1, ''),
+    ],
+    [
+      'bold, its first letter doubled',
+      'Say wworld now.\n',
+      toggle('world', 'bold'),
+      typing('Say w', 4, 1, ''),
+    ],
+    [
+      'code on a doubled word',
+      'Run npm npm now.\n',
+      (p) => {
+        const view = viewOf(p.dom);
+        const [from] = range(view.state.doc, 'npm now');
+        act(() => {
+          view.dispatch(
+            view.state.tr.setSelection(TextSelection.create(view.state.doc, from, from + 3)),
+          );
+          FORMATS.code.run(view.state, view.dispatch);
+        });
+      },
+      typing('Run npm', 4, 4, ''),
+    ],
+    [
+      'bold on a doubled word',
+      'It is very very good.\n',
+      (p) => {
+        const view = viewOf(p.dom);
+        const [from] = range(view.state.doc, 'very good');
+        act(() => {
+          view.dispatch(
+            view.state.tr.setSelection(TextSelection.create(view.state.doc, from, from + 4)),
+          );
+          FORMATS.bold.run(view.state, view.dispatch);
+        });
+      },
+      typing('It is very', 6, 5, ''),
+    ],
+  ];
+  for (const [name, page, a, b] of repeated) {
+    it(`leaves a deletion made after it as main does: ${name}`, async () => {
+      const [pa, pb] = [await person(page, 2), await person(page, 1)];
+      a(pa);
+      await expect.poll(() => pa.text.toJSON()).not.toBe(page);
+      send(pa, pb);
+      await shows(pb, pa.text.toJSON());
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      b(pb);
+      await expect.poll(() => pb.log.length).toBeGreaterThan(0);
+      const main = merged(page, [pa, pb], [pa.log.length, pb.log.length]);
+      await settle([pa, pb]);
+      expect(pa.text.toJSON()).toBe(main);
+      expect(pb.text.toJSON()).toBe(main);
+    });
+  }
+
+  for (const ids of ORDERS) {
+    it(`comes out as main does: a letter typed before it that it starts with, clients ${ids.join(' and ')}`, async () => {
+      const { end, main } = await together(
+        'Hello world there.\n',
+        [colour('world', 'highlight', 'red'), typing('world', 0, 0, 'w')],
+        ids,
+      );
+      expect(raw(main)).toBe(false);
+      expect(end).toBe(main);
+    });
+  }
 });

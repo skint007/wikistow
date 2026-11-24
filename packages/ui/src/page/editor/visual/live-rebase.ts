@@ -323,7 +323,10 @@ export class OwnFormatting {
       for (const [c, list] of made.deletes)
         for (const r of list) add(theirs.deletes, c, r.clock, r.len);
       if (update) addAll(write.gone, update.ds);
-      if (!write.met.has(client) && relation(this.#text, write.own, theirs).meet)
+      // A change that only takes text out shows nothing of what its writer
+      // had, however long after it came: it merges as Yjs merges it.
+      const typed = theirs.inserts.size > 0;
+      if (typed && !write.met.has(client) && relation(this.#text, write.own, theirs).meet)
         write.met.set(client, now);
     }
   }
