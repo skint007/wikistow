@@ -1667,6 +1667,33 @@ Round 54 reviewed round 53's revision (27bbd42) with the three briefs, fresh rev
 
 **Outcome.** Round 54 found Highs, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed, moot or accepted as availability. Round 55 repeats the three briefs against this revision.
 
+## Round 55: identity key rotation, narrowed, ninth review
+
+Round 55 reviewed round 54's revision (2962fbf) with the three briefs, fresh reviewers given the text, the log of rounds 38 to 54, the dropped rule and the list of what earlier rounds accepted: the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent, worded as a consistency check against §2.3 with the accepted list headed "settled", which its provider ran the first time. It found no Critical finding, 1 High, 5 Medium, 12 Low and no Info (18 in all). Every reviewer found the exception gone and the copy into a new space, shared with nobody, consistent with §6.7 and §10; the server brief found no failure of a §2.3 guarantee beyond the accepted risks. The one High was in round 54's way back for an own ID on `removedOwners`, offered only where the person created the space. The Mediums were all in how floors merge and when they are added, and in a live publication blocking the copy.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| M55-1 | 55 | High | 4.6 **Before it sends the rotation**; **Owners**; 6.5 step 4 | "Become an owner" in the rotation dialog was offered only where the person signed the first name record, so in a space they were given and own alone an own ID the old key wrote kept finishing from rotating, and members kept saving under keys the old key holds, while the dialog said they would stop. | Fixed: it is offered in every space the server lists the person as owning, and the dialog says that until they confirm, finishing can't rotate it and its members keep saving under keys the old key holds. |
+| S55-1 | 55 | Medium | 8.4; 8.6 | Floors kept one value per share, the higher, so a floor above the current version, which counts for nothing, hid a lower floor a decline needed. | Fixed: `floors` is a set by share and version, and the highest at or below the reader's current version counts. Same as E55-F1. |
+| S55-2 | 55 | Medium | 4.6 **A space the person owns alone**; 10 | A live publication from another space made §10 refuse the whole copy. | Fixed: live publications are left out of the copy and listed, for the person to publish again. |
+| E55-F1 | 55 | Medium | 8.4; 8.6 | Same as S55-1, with an old-key floor planted before a later decline. | Fixed with S55-1. |
+| E55-F2 | 55 | Medium | 8.6 | Adding a floor had no merge row and wasn't on the confirmed list, so a re-applied write could drop another device's decline entry. | Fixed: an "add a floor" row that touches only `floors`, confirmed, and listed in **Confirmed writes** and **When to write**, with "become an owner" and "remove a rotated owner". Same as S55-3. |
+| E55-F3 | 55 | Medium | 8.4; 8.6 | A decline merged onto a newer record put more keys in `removed` than its floors covered, and nothing added the missing floors. | Fixed: the record's `removed` or `wikistow.declined` growing is a trigger, and a merged decline isn't done until its floors are added. |
+| S55-3 | 55 | Low | 8.6 | Same as E55-F2. | Fixed with E55-F2. |
+| S55-4 | 55 | Low | 8.4; 6.4 | Whether an envelope first met after its sealer was declined is verified for a floor was undefined. | Fixed: for a floor, its signature is verified under the sealer's key on the chain, and one that can't be resolved or verified gets a floor, failing closed. Same as E55-L2. |
+| S55-5 | 55 | Low | 8.5; 8.6 | Two devices could restore different pins for one decline. | Fixed: every device restores the pin from the record's version history before the declined follow; a kept pin is used only when it is that key. |
+| S55-6 | 55 | Low | 4.6 finishing; 7.5 | Finishing had no rule for when a share is done after a lost reply. | Fixed: done once the app verifies a current version above the one it rotated from, sealed with its own current key or by an owner it writes with. |
+| S55-7 | 55 | Low | 4.6; 7.5 step 1 | §7.5 named the owner's removal as its only exception, against §4.6. | Fixed: §7.5 names both. |
+| M55-2 | 55 | Low | 4.6 | "Become an owner" in the rotation dialog can undo a self-removal the server ignored. | Accepted: it needs the person's confirmation, the dialog says to confirm only if they didn't leave, and the cost is the members' pause until a co-owner acts. |
+| M55-3 | 55 | Low | 4.6 | The "owns alone" test didn't require the person to be a listed owner. | Fixed. |
+| M55-4 | 55 | Low | 7.6 | §7.6 still said adding someone again is the only way off `removedOwners`. | Fixed. |
+| E55-L1 | 55 | Low | 4.6 | The "owns alone" test left open entries at removed keys, `openOnly`, pending follows and what shows nobody added them again. | Fixed: each is defined, and the test only chooses what the app says and offers. |
+| E55-L2 | 55 | Low | 8.4 | Same as S55-4. | Fixed with S55-4. |
+| E55-L3 | 55 | Low | 8.4; 6.8 | "The share's current key version, as the app verified it" had no meaning for an agent. | Fixed: for an agent, the highest version its person sealed to it. |
+| E55-L4 | 55 | Low | 4.6; route | The statement's `contacts` could predate the dialog's own writes, or a floor write landing meanwhile. | Fixed: it is read after the dialog's writes; a write landing meanwhile makes the route refuse, and the app builds a new statement. |
+
+**Outcome.** Round 55 found a High, so it doesn't meet the stopping rule. Every finding is fixed but M55-2, accepted as an availability cost the person confirms. Round 56 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
