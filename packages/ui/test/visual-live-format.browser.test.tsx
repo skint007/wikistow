@@ -780,4 +780,124 @@ describe('formatting made alongside someone else’s', () => {
     expect(raw(end)).toBe(false);
     expect(end).toContain('Say <mark data-color="red">Hello</mark> now.');
   });
+
+  // From the final review of PR #745.
+  for (const name of ['italic', 'bold', 'strike', 'highlight'] as const) {
+    it(`comes out as main does: a letter changed beside a word made ${name}, after a bold taken off`, async () => {
+      const page = 'Hello **world** there.\n';
+      const [a, b] = [await person(page, 1), await person(page, 2)];
+      toggle('world', 'bold')(a);
+      toggle('Hello', name)(b);
+      await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+      // Its bold taken off reaches the other, who takes it in, before it
+      // has had theirs.
+      send(a, b);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      typing('Hello', 4, 1, 'a')(a);
+      await expect.poll(() => a.log.length).toBe(2);
+      const main = merged(page, [a, b], [2, 1]);
+      send(a, b);
+      await settle([a, b]);
+      for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+    });
+  }
+
+  it('comes out as main does: a letter changed beside a word struck, after its own highlight taken off', async () => {
+    const page = 'Hello ==world== there.\n';
+    const [a, b] = [await person(page, 1), await person(page, 2)];
+    toggle('Hello', 'strike')(b);
+    await expect.poll(() => b.log.length).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    colour('world', 'highlight', null)(b);
+    await expect.poll(() => b.log.length).toBe(2);
+    typing('Hello', 4, 1, 'a')(a);
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b], [1, 2]);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('comes out as main does: spaces typed in source mode that break an emphasis', async () => {
+    const page = 'Say _world_ now.\n';
+    const a = await person(page, 2);
+    const b = sourcePerson(page, 1);
+    colour('world', 'highlight', 'red')(a);
+    typeSource(b, 'Say _  world_ now.\n');
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('takes out nothing while a word is composed, so closing the editor then loses nothing', async () => {
+    const page = '**world**\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    colour('world', 'highlight', 'red')(a);
+    colour('world', 'text', 'red')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    const main = merged(page, [a, b], [1, 1]);
+    send(a, b);
+    const view = viewOf(a.dom);
+    act(() => {
+      view.focus();
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3)));
+    });
+    act(() => void a.dom.dispatchEvent(new CompositionEvent('compositionstart', { data: '' })));
+    expect(view.composing).toBe(true);
+    send(b, a);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Its editor closed while composing: the first one mounted.
+    unmounts.shift()?.();
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+    expect(main).toContain('<mark data-color="red">');
+  });
+
+  it('keeps the merge in a paragraph of 1 KB or more, which is checked off the thread', async () => {
+    const page = `**world**${' [x](pg0.md)'.repeat(980)}\n`;
+    const a = await person(page, 2);
+    const b = sourcePerson(page, 1);
+    colour('world', 'highlight', 'red')(a);
+    typeSource(b, `<span data-color="red">**world**</span>${page.slice('**world**'.length)}`);
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('holds the page’s thread briefly on a long page of links', async () => {
+    // About 15 KB, 1,200 links.
+    const links = (i: number) => Array.from({ length: 10 }, () => `[x](p${i}.md)`).join(' ');
+    const page = `**world** here.\n\n${Array.from({ length: 120 }, (_, i) => links(i)).join('\n\n')}\n`;
+    const a = await person(page, 2);
+    const b = sourcePerson(page, 1);
+    colour('world', 'highlight', 'red')(a);
+    typeSource(b, page.replace('**world**', '<span data-color="red">**world**</span>'));
+    await expect.poll(() => a.log.length).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The longest the thread is held, as the longest gap between timers.
+    let longest = 0;
+    let last = performance.now();
+    let ticking = true;
+    const tick = () => {
+      const now = performance.now();
+      longest = Math.max(longest, now - last);
+      last = now;
+      if (ticking) setTimeout(tick, 0);
+    };
+    setTimeout(tick, 0);
+    send(b, a);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    ticking = false;
+    await settle([a, b]);
+    expect(b.text.toJSON()).toBe(a.text.toJSON());
+    expect(raw(a.text.toJSON())).toBe(false);
+    // About 0.15 s in Chromium here; before, 0.4 to 0.5 s.
+    expect(longest).toBeLessThan(300);
+  });
 });

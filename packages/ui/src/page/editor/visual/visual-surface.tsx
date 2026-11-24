@@ -505,20 +505,9 @@ function Surface({
     takeIn: (markdown: string, atOnce: boolean, waits: boolean): Taking | Promise<Taking> => {
       const live = editor.current;
       const write = writer.current;
-      const given = origin.current;
-      if (!live || !write || !given) return false;
-      const holds = surface.read();
+      if (!live || !write) return false;
       const mine = ++changes.current;
-      const plan = live.action((ctx) => {
-        const { doc } = ctx.get(editorViewCtx).state;
-        const { page, runs, spans } = write.layout(doc, endsInLine(given.markdown));
-        // Only text it holds as the page does can be compared with it.
-        if (page !== holds) return null;
-        const parse = ctx.get(parserCtx);
-        const made = planBlocks({ doc, page, runs, spans, text: markdown, parse });
-        const transform = { parse, serialize: ctx.get(serializerCtx) };
-        return made && { ...made, doc, transform };
-      });
+      const plan = surface.plan(markdown);
       if (!plan) return false;
       const go = (kept: boolean): Taking => {
         const now = editor.current;
@@ -550,6 +539,33 @@ function Surface({
       return checkFidelity(plan.check)
         .then((fidelity) => go(fidelity.visual))
         .catch((): Taking => false);
+    },
+    /** How `markdown` would be taken in a block at a time (`planBlocks`), if it can be. */
+    plan: (markdown: string) => {
+      const live = editor.current;
+      const write = writer.current;
+      const given = origin.current;
+      if (!live || !write || !given) return null;
+      const holds = surface.read();
+      return live.action((ctx) => {
+        const { doc } = ctx.get(editorViewCtx).state;
+        const { page, runs, spans } = write.layout(doc, endsInLine(given.markdown));
+        // Only text it holds as the page does can be compared with it.
+        if (page !== holds) return null;
+        const parse = ctx.get(parserCtx);
+        const made = planBlocks({ doc, page, runs, spans, text: markdown, parse });
+        const transform = { parse, serialize: ctx.get(serializerCtx) };
+        return made && { ...made, doc, transform };
+      });
+    },
+    /**
+     * Whether `markdown` could be taken in a block at a time at once, as
+     * far as can be told without reading it: the blocks it changes are
+     * under 1 KB (`BLOCK_TIMED`).
+     */
+    fits: (markdown: string) => {
+      const plan = surface.plan(markdown);
+      return !!plan && plan.check.length < BLOCK_TIMED;
     },
     /**
      * Show `markdown`, checked already, at once: a block at a time if that
@@ -730,7 +746,7 @@ function Surface({
       },
       {
         written: () => surface.read(),
-        take: (markdown) => surface.takeIn(markdown, false, true),
+        take: (markdown, atOnce = false) => surface.takeIn(markdown, atOnce, true),
         show: (markdown) => surface.show(markdown, true),
         check: async (markdown) => {
           const fidelity = await checkFidelity(markdown);
@@ -745,18 +761,16 @@ function Surface({
           if (view) reformat(view, intents);
         },
         keeps: (merged, theirs, intents) => {
-          // Their text, the formatting taken out, is to be taken in and
-          // shown before it's made again: one the editor can't show, or too
-          // long to check here at once, keeps the merge.
-          if (theirs.length > KEEPS_MAX) return true;
-          const transform = editor.current?.action((ctx) => ({
-            parse: ctx.get(parserCtx),
-            serialize: ctx.get(serializerCtx),
-          }));
-          if (!transform) return true;
+          // Their text, the formatting taken out, is to be taken in at once
+          // before it's made again: one the editor can't take in so, as
+          // blocks of 1 KB or more, which are checked off the thread, or a
+          // page too long to compare here at once, keeps the merge. The
+          // take-in checks that the editor can show it.
+          if (theirs.length > KEEPS_MAX || !surface.fits(theirs)) return true;
+          const parse = editor.current?.action((ctx) => ctx.get(parserCtx));
+          if (!parse) return true;
           try {
-            if (!fidelityOf(theirs, transform).visual) return true;
-            const [a, b] = [transform.parse(withLf(merged)), transform.parse(withLf(theirs))];
+            const [a, b] = [parse(withLf(merged)), parse(withLf(theirs))];
             return !!a && !!b && keeps(a, b, intents);
           } catch {
             return true;

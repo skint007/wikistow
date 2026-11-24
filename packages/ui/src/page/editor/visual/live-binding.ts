@@ -26,8 +26,11 @@ export type Taking = boolean | 'composing';
 export type BoundEditor = {
   /** Its text as it writes it now, its edits included. */
   written(): string;
-  /** Take `text` in a block at a time (`take`). */
-  take(text: string): Taking | Promise<Taking>;
+  /**
+   * Take `text` in a block at a time (`take`); with `atOnce`, only if that
+   * can be done at once, showing nothing (false) if not.
+   */
+  take(text: string, atOnce?: boolean): Taking | Promise<Taking>;
   /** Show `text`, checked already, read whole: or not yet, if that would touch a block being composed. */
   show(text: string): true | 'composing';
   /** The fidelity check of a whole text, as a page opening has. */
@@ -325,21 +328,35 @@ export class VisualBinding {
     if (!this.#body.active()) return;
     // The editor's own edit, before others' changes go in over it.
     this.write();
-    // Its formatting someone else changed alongside: taken out again first,
-    // to be made again once it has taken in theirs. Or the other is to make
-    // theirs again over it: what they send next goes in, not the merge.
+    // Its formatting someone else changed alongside: taken out again, and
+    // made again over their text at once. Or the other is to make theirs
+    // again over it: what they send next goes in, not the merge.
     if (this.#formatting.due) {
       // Unless Yjs's merge already reads as their text with its formatting
-      // made again, or their text alone would read worse: then the next due
-      // write, if any, is looked at in turn.
+      // made again, or their text alone would read worse, or the editor
+      // can't take their text in at once: then the next due write, if any,
+      // is looked at in turn.
       while (this.#formatting.due) {
         const pending = this.#formatting.pending();
         const body = this.#body.text.toJSON();
-        if (!pending || !this.#editor.keeps?.(body, pending.text, pending.intents)) {
-          this.#rebase();
-          break;
+        if (pending && this.#editor.keeps?.(body, pending.text, pending.intents)) {
+          this.#formatting.settle();
+          continue;
         }
-        this.#formatting.settle();
+        // Their text goes into the editor first, so nothing is taken out
+        // that isn't made again straight after, in this same task: not
+        // while a word is composed there, which may end with the editor
+        // closed, nor over a check off the thread. A composition waits.
+        const took = !pending || this.#takeAtOnce(pending.text);
+        if (took === 'composing') return this.#schedule(COMPOSING_MS);
+        if (!took) {
+          this.#formatting.settle();
+          continue;
+        }
+        this.#rebase();
+        this.#held = this.#editor.written();
+        this.#synced();
+        break;
       }
     } else {
       const until = this.#formatting.waitUntil();
@@ -379,6 +396,16 @@ export class VisualBinding {
     this.#reapplied();
     if (this.#again || this.behind) return this.#schedule();
     this.#caughtUp();
+  }
+
+  // `text` taken in, as the editor would show `body` with its formatting
+  // writes due taken out: at once, or not at all.
+  #takeAtOnce(text: string): boolean | 'composing' {
+    if (text === this.#editor.written()) return true;
+    const taking = this.#editor.take(text, true);
+    // An editor that can't do it at once checks it off the thread: it's
+    // theirs once it's checked, so it's not to be taken out.
+    return taking instanceof Promise ? false : taking;
   }
 
   // Take its formatting writes due out of `body` again, as one change of the person's own.
