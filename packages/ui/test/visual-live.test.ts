@@ -1139,6 +1139,24 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
+  it('reads what’s open above a conflict on a long page quickly, leaving it where it can’t tell', async () => {
+    for (const above of [
+      '- item\n  ```\n  code\n  ```\n\nPara.\n\n'.repeat(2_000),
+      '<pre>\nx\n</pre>\n\nPara.\n\n'.repeat(4_000),
+      '<br>\n\nPara.\n\n'.repeat(8_000),
+    ]) {
+      const [was, mine, theirs] = [
+        line('world'),
+        line(hi('world')),
+        line(red('span', 'world')),
+      ].map((text) => `${above}${text}`) as [string, string, string];
+      const started = Date.now();
+      const result = await merged(was, mine, theirs, false);
+      expect(Date.now() - started).toBeLessThan(1_000);
+      expect([byCharacter(was, mine, theirs, false), mine]).toContain(result);
+    }
+  });
+
   it('repairs many lines of one block in time that grows with their number, not faster', async () => {
     const lines = (n: number, run: (i: number) => string) =>
       Array.from({ length: n }, (_, i) => `Line ${i} ${run(i)} end.`).join('\n') + '\n';
@@ -1804,6 +1822,151 @@ describe('two people formatting the same text at once (#720)', () => {
       expect(
         await merged(page('world'), page(hi('world')), page(red('span', 'world')), aLower),
       ).toBe(aLower ? page(red('span', 'world')) : page(hi('world')));
+  });
+
+  // Every order of three Yjs clients.
+  const threeOrders = [
+    [1_000, 2_000, 3_000],
+    [1_000, 3_000, 2_000],
+    [2_000, 1_000, 3_000],
+    [2_000, 3_000, 1_000],
+    [3_000, 1_000, 2_000],
+    [3_000, 2_000, 1_000],
+  ] as const;
+  // A and B write `mine` and `theirs` of `was` at once, as C changes `body`
+  // by `third`, as in source mode, each with its client of `ids`; what all
+  // three settle to, and what main merges them to with no binding.
+  const withThird = async (
+    was: string,
+    mine: string,
+    theirs: string,
+    third: (body: Y.Text) => void,
+    ids: readonly [number, number, number],
+  ) => {
+    const plain = [docOf(was, ids[0])];
+    plain.push(docOf(was, ids[1], plain[0]), docOf(was, ids[2], plain[0]));
+    putInto((plain[0] as Y.Doc).getText('body'), ownChanges(was, mine));
+    putInto((plain[1] as Y.Doc).getText('body'), ownChanges(was, theirs));
+    third((plain[2] as Y.Doc).getText('body'));
+    for (const from of plain)
+      for (const to of plain) Y.applyUpdate(to, Y.encodeStateAsUpdate(from));
+    for (const s of sides.splice(0)) s.binding.destroy();
+    const a = docOf(was, ids[0]);
+    sides = [side(a), side(docOf(was, ids[1], a))];
+    const c = { doc: docOf(was, ids[2], a) };
+    const [sa, sb] = sides as [Side, Side];
+    sa.editor.shown = mine;
+    sb.editor.shown = theirs;
+    sa.binding.write();
+    sb.binding.write();
+    third(c.doc.getText('body'));
+    await exchange([sa, sb, c]);
+    expect(bodyOf(sb)).toBe(bodyOf(sa));
+    expect(bodyOf(c)).toBe(bodyOf(sa));
+    return { got: bodyOf(sa), main: (plain[0] as Y.Doc).getText('body').toJSON() };
+  };
+  // `body`'s `from` changed to `to`, as by hand.
+  const replace = (from: string, to: string) => (body: Y.Text) => {
+    const at = body.toJSON().indexOf(from);
+    body.delete(at, from.length);
+    body.insert(at, to);
+  };
+
+  it('keeps what main keeps: tag text in HTML, a wikilink, a reference, after a byte order mark or a lone return', async () => {
+    const pages = [
+      '<div title="<mk value>">\nThere.\n</div>\n',
+      'See [[Notes|<mk value>]] there.\n',
+      '﻿```\nIntro\n\nSee <mk value> there.\n```\n',
+      'Intro\r```\n\nSee <mk value> there.\n```\n',
+      'See ![alt <mk value>](x.png) there.\n',
+    ];
+    for (const page of pages)
+      for (const aLower of orders) {
+        const [mine, theirs] = [page.replace('<mk', '<mrk'), page.replace('<mk', '<mak')];
+        expect(await merged(page, mine, theirs, aLower), JSON.stringify(page)).toBe(
+          byCharacter(page, mine, theirs, aLower),
+        );
+      }
+    const page = 'See [x][<mk value>] there.\n';
+    for (const ids of threeOrders) {
+      const { got, main } = await withThird(
+        page,
+        page.replace('<mk', '<mrk'),
+        page.replace('<mk', '<mak'),
+        (body) => body.insert(body.length, '\n[<mark value>]: x\n'),
+        ids,
+      );
+      expect(got, ids.join()).toBe(main);
+    }
+  });
+
+  it('keeps a third person’s change to the address of a link the crossed tags are in', async () => {
+    for (const page of ['See [world](old) there.\n', 'Hello [wor-world](old) there.\n'])
+      for (const ids of threeOrders) {
+        const { got } = await withThird(
+          page,
+          page.replace('world', hi('world')),
+          page.replace('world', red('span', 'world', 'blue')),
+          replace('(old)', '(new)'),
+          ids,
+        );
+        expect(got, `${page} ${ids.join()}`).toContain('](new)');
+      }
+  });
+
+  it('keeps a third person’s change to a link’s title on a line it repairs, and its typing', async () => {
+    const page = 'See [score](old "title <mk value>") and world here.\n';
+    for (const ids of threeOrders) {
+      const { got } = await withThird(
+        page,
+        page.replace('world', hi('world')),
+        page.replace('world', red('span', 'world', 'blue')),
+        (body) => {
+          replace('<mk', '<mark')(body);
+          replace('here.', 'herex.')(body);
+        },
+        ids,
+      );
+      expect(got, ids.join()).toContain('title <mark value>');
+      expect(got, ids.join()).toContain('herex.');
+    }
+    const title = `Hello world [x](u 'a <mark data-color="red">') there.\n`;
+    for (const ids of threeOrders) {
+      const { got } = await withThird(
+        title,
+        title.replace('world', hi('world')),
+        title.replace('world', red('span', 'world', 'blue')),
+        replace('"red">\'', '"blue">\''),
+        ids,
+      );
+      expect(got, ids.join()).toContain(`'a <mark data-color="blue">'`);
+    }
+  });
+
+  it('never leaves half of a mark a third person took off beside the tags', async () => {
+    // Yjs doesn't say whose a deletion is: bold taken off right around the
+    // tags can come back with the repair, whole (a limit), never in part.
+    for (const [page, whole] of [
+      ['Say **world** now.\n', true],
+      ['Say **big**world now.\n', false],
+      ['Say `big`world now.\n', false],
+    ] as const)
+      for (const ids of threeOrders) {
+        const { got } = await withThird(
+          page,
+          page.replace('world', hi('world')),
+          page.replace('world', red('span', 'world', 'blue')),
+          (body) => {
+            const marks = /\*\*|`/;
+            for (let at = body.toJSON().search(marks); at >= 0; at = body.toJSON().search(marks))
+              body.delete(at, body.toJSON()[at] === '`' ? 1 : 2);
+          },
+          ids,
+        );
+        const name = `${page} ${ids.join()}`;
+        if (whole) expect(got.split('**').length % 2, name).toBe(1);
+        else expect(got, name).not.toMatch(/\*\*|`/);
+      }
   });
 
   it('leaves a block broken when the one to repair it is gone', async () => {
