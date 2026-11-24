@@ -77,61 +77,66 @@ const NEAR = 256;
 /** A run the editor formatted, put in whole: where it is in `body`, its first and last character, and when. */
 type OwnRun = { start: Y.RelativePosition; end: Y.RelativePosition; at: number };
 
-/** The ID of the character at `at` in `text`, if there's one there. */
-const idAt = (text: Y.Text, at: number) =>
-  at >= 0 && at < text.length ? Y.createRelativePositionFromTypeIndex(text, at).item : null;
+const same = (a: Y.ID | null, b: Y.ID | null) => (a && b ? Y.compareIDs(a, b) : a === b);
 
-/** What Yjs put the first character of the text from `id` after: null if `id` isn't where something was put in. */
-function originOf(store: Y.Doc['store'], id: Y.ID | null): Y.ID | null {
-  const item = id && Y.getItem(store, id);
-  return item instanceof Y.Item && item.id.clock === id?.clock ? item.origin : null;
+/** Text one client put in, in one go: where it is in `body`, and its first character. */
+type Theirs = { from: number; to: number; first: Y.ID };
+
+/**
+ * From `item`, where something someone put in starts or goes on, the rest
+ * of it to the right, as Yjs numbers its characters in turn: how long it
+ * is, and the first character of `item`.
+ */
+function lengthFrom(item: Y.Item): number {
+  let length = item.length;
+  let last = item;
+  for (let next = item.right; next; next = next.right) {
+    if (next.deleted) continue;
+    if (next.id.client !== last.id.client || next.id.clock !== last.id.clock + last.length) break;
+    length += next.length;
+    last = next;
+  }
+  return length;
 }
 
 /**
- * What one client put in, in one go, that has the character at `at` in
- * `text` at its start (`after`, as beside a run's end) or its end: as far
- * as Yjs numbers its characters in turn.
+ * Near the run from `from` to `to` in `body`, its first and last characters'
+ * items `first` and `last`, the text of another client's that `match`
+ * takes, walking Yjs's items from the run either way: at most `NEAR`
+ * characters, or, with `NEAR` 0, only right beside it.
  */
-function putIn(text: Y.Text, at: number, after: boolean) {
-  const first = idAt(text, at);
-  if (!first) return null;
-  const follows = (i: number) => {
-    const id = idAt(text, i);
-    return !!id && id.client === first.client && id.clock === first.clock + i - at;
-  };
-  let [from, to] = [at, at + 1];
-  if (after) while (follows(to)) to++;
-  else while (follows(from - 1)) from--;
-  return { from, to, client: first.client, start: idAt(text, from) };
+function near(
+  run: { from: number; to: number; first: Y.Item; last: Y.Item; firstId: Y.ID; lastId: Y.ID },
+  within: number,
+  match: (item: Y.Item, theirs: Theirs) => boolean,
+): Theirs | null {
+  // To the right, from the run's last character.
+  let gap = run.last.id.clock + run.last.length - 1 - run.lastId.clock;
+  for (let item = run.last.right; item && gap <= within; item = item.right) {
+    if (item.deleted || !item.countable) continue;
+    const from = run.to + gap;
+    const theirs = { from, to: from + lengthFrom(item), first: item.id };
+    if (match(item, theirs)) return theirs;
+    gap += item.length;
+  }
+  // To the left, from its first.
+  gap = run.firstId.clock - run.first.id.clock;
+  for (let item = run.first.left; item && gap <= within; item = item.left) {
+    if (item.deleted || !item.countable) continue;
+    gap += item.length;
+    const from = run.from - gap;
+    const theirs = { from, to: from + lengthFrom(item), first: item.id };
+    if (match(item, theirs)) return theirs;
+  }
+  return null;
 }
 
-/**
- * Whether `run` went in beside `theirs`, what someone else put in, after
- * this app had it: Yjs put its first character after one of theirs, or its
- * last before one.
- */
-function ownHadIt(
-  store: Y.Doc['store'],
-  run: OwnRun,
-  theirs: { from: number; to: number; client: number; start: Y.ID | null },
-): boolean {
-  const { start } = theirs;
-  const holds = (id: Y.ID | null) =>
-    !!id &&
-    !!start &&
-    id.client === start.client &&
-    id.clock >= start.clock &&
-    id.clock < start.clock + theirs.to - theirs.from;
-  const [first, last] = [run.start.item, run.end.item];
-  const firstItem = first && Y.getItem(store, first);
-  const lastItem = last && Y.getItem(store, last);
-  return (
-    (firstItem instanceof Y.Item &&
-      firstItem.id.clock === first?.clock &&
-      holds(firstItem.origin)) ||
-    (lastItem instanceof Y.Item && holds(lastItem.rightOrigin))
-  );
-}
+/** Whether `id` is one of the characters of `theirs`. */
+const holds = (theirs: Theirs, id: Y.ID | null) =>
+  !!id &&
+  id.client === theirs.first.client &&
+  id.clock >= theirs.first.clock &&
+  id.clock < theirs.first.clock + theirs.to - theirs.from;
 
 /** Whether `run`'s tags don't all close in it, as one end of a tag over several words. */
 const endOfTag = (run: string) => {
@@ -182,6 +187,8 @@ export class VisualBinding {
   #runs: OwnRun[] = [];
   /** It's taking a run out, settling it with someone else's. */
   #settling = false;
+  /** Someone else changed `body` since runs were last settled. */
+  #heard = false;
   #destroyed = false;
 
   constructor(body: BoundText, editor: BoundEditor) {
@@ -198,6 +205,7 @@ export class VisualBinding {
       this.#map = followed?.remote(delta) ?? null;
       // A run it took out, settling, is nobody else's change.
       if (!this.#settling) {
+        this.#heard = true;
         this.#theirs++;
         this.#by.add(this.#sending);
       }
@@ -321,10 +329,12 @@ export class VisualBinding {
    * everyone, so whoever takes it out, and however many do, the text reads
    * as the first one's formatting.
    */
-  #settleRuns(): void {
+  #settleRuns(again = false): void {
     const now = performance.now();
     this.#runs = this.#runs.filter((run) => now - run.at < RUN_MS);
-    if (this.#runs.length === 0) return;
+    // Only once someone else's change came, as theirs would.
+    if (this.#runs.length === 0 || (!again && !this.#heard)) return;
+    this.#heard = false;
     const { text } = this.#body;
     const doc = text.doc;
     if (!doc) return;
@@ -340,41 +350,48 @@ export class VisualBinding {
       }
       const own = body.slice(from, to);
       const words = wordsOf(own);
-      const origin = originOf(doc.store, run.start.item);
       if (words.trim() === '') continue;
-      // Theirs: put in after the same character of the word both took the
-      // place of, neither having the other's, near this run, as typing
-      // Yjs put there too can come between; or right beside it, this run
-      // written there before the editor showed theirs, as only this app
-      // can tell.
-      const together = (after: boolean) => {
-        for (let k = 0; origin && k < NEAR; k++) {
-          const at = after ? to + k : from - 1 - k;
-          const id = idAt(text, at);
-          if (!id) return null;
-          const there = id.client !== doc.clientID && originOf(doc.store, id);
-          if (!there || !Y.compareIDs(there, origin)) continue;
-          const theirs = putIn(text, at, true);
-          if (theirs && wordsOf(body.slice(theirs.from, theirs.to)) === words) return theirs;
-        }
-        return null;
-      };
-      const beside = (after: boolean) => {
-        const theirs = putIn(text, after ? to : from - 1, after);
-        return theirs && ownHadIt(doc.store, run, theirs) ? theirs : null;
-      };
+      const [firstId, lastId] = [run.start.item, run.end.item];
+      const first = firstId && Y.getItem(doc.store, firstId);
+      const last = lastId && Y.getItem(doc.store, lastId);
+      if (!(first instanceof Y.Item) || !(last instanceof Y.Item) || !firstId || !lastId) continue;
+      const mine = { from, to, first, last, firstId, lastId };
+      const unmarked = words === own;
+      const theirsOf = (item: Y.Item, theirs: Theirs) =>
+        item.id.client !== doc.clientID && wordsOf(body.slice(theirs.from, theirs.to)) === words;
+      // Put in where Yjs put this run, after and before the same
+      // characters of the word both took the place of, neither having the
+      // other's, near it, as typing Yjs put there too can come between.
+      // Formatting, as theirs must be, unless this run has no marks either.
+      const together =
+        first.id.clock === firstId.clock && (first.origin || first.rightOrigin)
+          ? near(mine, NEAR, (item, theirs) => {
+              if (!same(item.origin, first.origin) || !same(item.rightOrigin, first.rightOrigin))
+                return false;
+              const put = body.slice(theirs.from, theirs.to);
+              return theirsOf(item, theirs) && (unmarked || wordsOf(put) !== put);
+            })
+          : null;
+      // Or right beside it, this run written there before the editor showed
+      // theirs, as Yjs shows and only this app can tell.
+      const theirs =
+        together ??
+        near(
+          mine,
+          0,
+          (item, them) =>
+            theirsOf(item, them) &&
+            ((first.id.clock === firstId.clock && holds(them, first.origin)) ||
+              holds(them, last.rightOrigin)),
+        );
       let gone: { from: number; to: number } | null = null;
-      for (const after of [true, false]) {
-        const theirs = together(after) ?? beside(after);
-        if (!theirs || theirs.client === doc.clientID) continue;
-        const put = body.slice(theirs.from, theirs.to);
-        if (wordsOf(put) !== words) continue;
+      if (theirs) {
         // One end of a tag over several words beside a whole run: the
         // whole one goes, so the tag keeps both ends. Else the second.
+        const put = body.slice(theirs.from, theirs.to);
         const [mineEnd, theirEnd] = [endOfTag(own), endOfTag(put)];
-        const theirsGoes = mineEnd !== theirEnd ? mineEnd : after;
+        const theirsGoes = mineEnd !== theirEnd ? mineEnd : theirs.from >= to;
         gone = theirsGoes ? theirs : { from, to };
-        break;
       }
       if (!gone) continue;
       this.#runs.splice(this.#runs.indexOf(run), 1);
@@ -386,7 +403,7 @@ export class VisualBinding {
       } finally {
         this.#settling = false;
       }
-      return this.#settleRuns();
+      return this.#settleRuns(true);
     }
   }
 

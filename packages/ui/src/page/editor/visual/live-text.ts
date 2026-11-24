@@ -6,7 +6,7 @@
 // typing stays. Every change starts and ends between whole characters,
 // never inside an emoji's two halves, which Yjs would store as two U+FFFD.
 // A line whose formatting alone changed goes in whole, as one run (#720).
-import { diffChars, diffLines, type ChangeObject } from 'diff';
+import { diffArrays, diffChars, diffLines, type ChangeObject } from 'diff';
 import type * as Y from 'yjs';
 
 /** A change to a text: delete `remove` UTF-16 units at `from`, then insert `insert` there. */
@@ -18,20 +18,28 @@ export type TextChange = {
   readonly run?: true;
 };
 
-// An HTML tag, opening or closing, anywhere, or where a text starts.
-const TAG = /<\/?[A-Za-z][^<>]*>/g;
+// A tag the visual editor writes a mark with, a highlight's or a colour's,
+// opening or closing, not escaped: anywhere, or where a text starts.
+const TAG = /(?<!(?<!\\)(?:\\\\)*\\)<\/?(?:mark|span)(?:\s[^<>]*)?>/g;
 const TAG_HERE = new RegExp(`^${TAG.source}`);
 
 /**
- * The words `markdown` shows, without its formatting: HTML tags, and the
- * marks emphasis, highlights, strikethrough and code are written with,
- * taken out, an escaped character kept as itself. Rough, but the same for
- * the same words however they're formatted, which is all it's for.
+ * The words `markdown` shows, without its formatting: the tags of marks,
+ * and the marks emphasis, highlights, strikethrough and code are written
+ * with, taken out, an escaped character kept as itself. Rough, but the
+ * same for the same words however they're formatted, which is all it's for.
  */
 export const wordsOf = (markdown: string) =>
   markdown
     .replace(TAG, '')
     .replace(/\\([^\n])|==|~~|[*_`]/g, (_, escaped: string | undefined) => escaped ?? '');
+
+// Text as a diff by tokens sees it: a tag, a run of marks, an escape, a
+// run of spaces, a word (as `partsOf` parts them), or one character else.
+const TOKEN = new RegExp(
+  `${TAG.source}|\\\\[\\s\\S]|[*_=~\`]+|\\s+|[^\\s*_=~\`\\\\<\\-/\\u2010-\\u2015]+|[\\s\\S]`,
+  'g',
+);
 
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
@@ -91,19 +99,56 @@ function partsOf(text: string): Uint8Array {
   return parts;
 }
 
-// Where code is: a code span, or a fence's line, in a quote or a list
-// too, which starts or ends a block.
-const CODE_SPAN = /(?<![`\\])(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/g;
-const FENCE = /^[ \t>]*(`{3,}|~{3,})(.*)$/gm;
+// A code span, its opening backticks not escaped, on one line or more
+// with no blank one between; a fence's line, in a quote or a list item too.
+const CODE_SPAN = /(?<!(?<!\\)(?:\\\\)*\\)(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
+const FENCE = /^((?:[ \t]*>)*)([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(`{3,}|~{3,})(.*)$/;
+const fenced = (text: string) => text.split('\n').some((line) => FENCE.test(line));
 
-/** Whether `text` ends in a fenced code block: one opened, and not closed by a fence as long or longer of its character. */
+/**
+ * Whether `text` ends in a fenced code block: one opened and not yet
+ * closed, by a fence as long or longer of its character, or by the end of
+ * the quote or list item it's in.
+ */
 function inFence(text: string): boolean {
-  let open: string | null = null;
-  for (const [, fence = '', rest = ''] of text.matchAll(FENCE)) {
-    if (open === null) open = fence;
-    else if (fence[0] === open[0] && fence.length >= open.length && rest.trim() === '') open = null;
+  let open: { fence: string; depth: number; indent: number } | null = null;
+  for (const line of text.split('\n')) {
+    const quote = /^(?:[ \t]*>)*/.exec(line)?.[0] ?? '';
+    const depth = quote.split('>').length - 1;
+    const rest = line.slice(quote.length);
+    const indent = rest.length - rest.trimStart().length;
+    if (open && (depth < open.depth || (rest.trim() !== '' && indent < open.indent))) open = null;
+    const [, , lead = '', fence = '', info = ''] = FENCE.exec(line) ?? [];
+    if (!fence) continue;
+    if (!open) open = { fence, depth, indent: /[-*+.)]/.test(lead) ? lead.length : 0 };
+    else if (fence[0] === open.fence[0] && fence.length >= open.fence.length && !info.trim())
+      open = null;
   }
   return open !== null;
+}
+
+/**
+ * `now`, the text `was` became, as changes by whole tokens (`TOKEN`) from
+ * `at`: so a word is never lined up with a tag's name, as `mark` with
+ * `<mark`. Null if the diff takes too long.
+ */
+function byTokens(was: string, now: string, at: number): TextChange[] | null {
+  const parts = diffArrays(was.match(TOKEN) ?? [], now.match(TOKEN) ?? [], { timeout: DIFF_MS });
+  if (!parts) return null;
+  const changes: TextChange[] = [];
+  let [from, remove, insert] = [at, 0, ''];
+  for (const part of parts) {
+    const text = part.value.join('');
+    if (part.removed) remove += text.length;
+    else if (part.added) insert += text;
+    else {
+      if (remove > 0 || insert !== '') changes.push({ from, remove, insert });
+      from += remove + text.length;
+      [remove, insert] = [0, ''];
+    }
+  }
+  if (remove > 0 || insert !== '') changes.push({ from, remove, insert });
+  return changes;
 }
 
 /**
@@ -136,7 +181,7 @@ function inRuns(
   const parts = partsOf(was);
   const stretches: Stretch[] = [];
   let shift = 0;
-  for (const change of changes) {
+  for (const change of byTokens(was, now, at) ?? changes) {
     let from = change.from - at;
     let to = from + change.remove;
     while (from > 0 && !parts[from - 1]) from--;
@@ -156,10 +201,23 @@ function inRuns(
     const words = wordsOf(was.slice(stretch.from, stretch.to));
     return words !== '' && words === wordsOf(now.slice(stretch.nowFrom, stretch.nowTo));
   };
-  // A tag, or two marks or more, changed in it: the whole formatting of its words.
+  // A tag, or two characters of marks or more, changed in it, as a mark
+  // has two ends: the whole formatting of its words, not one mark typed.
   const tags = (text: string) => text.match(TAG)?.join('') ?? '';
-  const whole = (s: Stretch) =>
-    s.changes.length >= 2 || tags(was.slice(s.from, s.to)) !== tags(now.slice(s.nowFrom, s.nowTo));
+  const marks = (text: string) => {
+    const count = new Map<string, number>();
+    for (const char of text.replace(TAG, '').replace(/\\[\s\S]/g, ''))
+      if ('*_=~`'.includes(char)) count.set(char, (count.get(char) ?? 0) + 1);
+    return count;
+  };
+  const whole = (s: Stretch) => {
+    const [a, b] = [was.slice(s.from, s.to), now.slice(s.nowFrom, s.nowTo)];
+    if (tags(a) !== tags(b)) return true;
+    const [x, y] = [marks(a), marks(b)];
+    let changed = 0;
+    for (const char of '*_=~`') changed += Math.abs((x.get(char) ?? 0) - (y.get(char) ?? 0));
+    return changed >= 2;
+  };
   const run = (stretch: Stretch): TextChange => ({
     from: stretch.from + at,
     remove: stretch.to - stretch.from,
@@ -180,12 +238,20 @@ function inRuns(
   const runs = stretches.filter((s) => formatted(s) && whole(s));
   if (runs.length === 0) return changes;
   // In a fenced block, or one starting or ending here: none at all.
-  const fenced = (text: string) => text.search(FENCE) >= 0;
   if (fenced(was) || fenced(now) || inFence(before.slice(0, at))) return changes;
-  const out: TextChange[] = [];
-  for (const stretch of stretches)
-    out.push(...(runs.includes(stretch) && !inCode(stretch) ? [run(stretch)] : stretch.changes));
-  if (!out.some((change) => change.run)) return changes;
+  const kept = runs.filter((stretch) => !inCode(stretch));
+  if (kept.length === 0) return changes;
+  // The rest by character, as before, each stretch apart, as the diff of
+  // the whole can line a run's characters up with another stretch's.
+  const out = stretches.flatMap((stretch) =>
+    kept.includes(stretch)
+      ? [run(stretch)]
+      : ownChanges(
+          was.slice(stretch.from, stretch.to),
+          now.slice(stretch.nowFrom, stretch.nowTo),
+          false,
+        ).map((change) => ({ ...change, from: change.from + stretch.from + at })),
+  );
   // Only as the changes were: each run makes what they made.
   const local = out.map((change) => ({ ...change, from: change.from - at }));
   return applyTo(was, local) === now ? out : changes;
@@ -195,11 +261,12 @@ function inRuns(
  * The changes that make `before` read `after`, each the smallest in
  * characters: by a character diff of the lines between the common start and
  * end, so text the editor didn't change, between or within its changes,
- * stays as it is in `body`, and others' changes there with it. A line whose
- * formatting alone changed is one run (`inRuns`). Past `DIFF_MS`, by lines,
- * each run of lines that differ its smallest change; failing that, one span.
+ * stays as it is in `body`, and others' changes there with it. A word
+ * whose formatting alone changed is one run (`inRuns`), unless `runs` is
+ * false. Past `DIFF_MS`, by lines, each run of lines that differ its
+ * smallest change; failing that, one span.
  */
-export function ownChanges(before: string, after: string): TextChange[] {
+export function ownChanges(before: string, after: string, runs = true): TextChange[] {
   if (before === after) return [];
   let { start, endA, endB } = edges(before, after);
   // Whole lines, which the line diff, if it comes to that, lines up.
@@ -243,7 +310,7 @@ export function ownChanges(before: string, after: string): TextChange[] {
     }
   }
   flush(!byChars);
-  return byChars ? inRuns(changes, was, now, start, before) : changes;
+  return byChars && runs ? inRuns(changes, was, now, start, before) : changes;
 }
 
 /**

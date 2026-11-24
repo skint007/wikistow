@@ -765,6 +765,8 @@ describe('two people formatting the same text at once (#720)', () => {
       '<mark data-color="red">world</mark>',
       red('span', '<mark>world</mark>'),
     ],
+    // A word like a tag's name, and the page's first word.
+    ['mark', red('mark', 'mark'), red('span', 'mark')],
     // Both take the same mark off.
     ['**world** and', 'world and', 'world and'],
     // A word with the punctuation after it, as selected.
@@ -1042,9 +1044,49 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
+  it('formats the first word of a page as any other', async () => {
+    for (const aFirst of orders) {
+      const [a, b] = start('I think so.\n', aFirst);
+      a.editor.shown = '**I** think so.\n';
+      b.editor.shown = '==I== think so.\n';
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(['**I** think so.\n', '==I== think so.\n']).toContain(bodyOf(a));
+    }
+  });
+
+  it('keeps the same word pasted where a run went in', async () => {
+    for (const aFirst of orders) {
+      const [a, b] = start('Try word later.\n', aFirst);
+      a.editor.shown = 'Try **word** later.\n';
+      a.binding.write();
+      b.doc.transact(() => b.doc.getText('body').insert(6, 'word'));
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(bodyOf(a).match(/word/g)).toHaveLength(2);
+    }
+  });
+
   it('tells code by its fences and backticks as Markdown does', () => {
     const runs = (before: string, after: string) =>
       ownChanges(before, after).some((change) => change.run);
+    const marked = (page: string) =>
+      runs(page + 'Hello world.\n', page + `Hello ${red('mark', 'world')}.\n`);
+    // In a list item's fence, and after one, or a quote's left open.
+    expect(
+      runs('- ```\n  say world now\n  ```\n', '- ```\n  say <mark>world</mark> now\n  ```\n'),
+    ).toBe(false);
+    expect(marked('- ```\n  x\n  ```\n\n')).toBe(true);
+    expect(marked('> ```\n> x\n\n')).toBe(true);
+    expect(marked('````\n```\n')).toBe(false);
+    // Two backslashes escape each other, not the backtick.
+    expect(runs('A \\\\`say world` b\n', 'A \\\\`say <mark>world</mark>` b\n')).toBe(false);
+    // An autolink, and text like a tag, are no marks.
+    expect(runs('See <https://exmaple.com/a>. Now\n', 'See <https://example.com/a>. Now\n')).toBe(
+      false,
+    );
     // A shorter fence inside a longer one is the block's text.
     expect(runs('````\n```\nsay world now\n', '````\n```\nsay <em>world</em> now\n')).toBe(false);
     // Escaped backticks start no code span.
