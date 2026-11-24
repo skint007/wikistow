@@ -436,11 +436,13 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
   // spaces, as a held space and a soft line break are.
   const take = (first: boolean, edge: RegExp) => {
     const taken: Tree[] = [];
+    // Whether the line breaks at the end shield a marked space, the same
+    // for each of a run of them, as `markedSpaceAt` reads past them.
+    let shields: boolean | null | undefined;
     for (;;) {
       const node = first ? inside[0] : inside.at(-1);
       if (node?.type === 'break') {
-        const rest = first ? inside.slice(1) : inside.slice(0, -1);
-        if (markedSpaceAt(rest, first)) break;
+        if ((shields ??= markedSpaceAt(inside, first))) break;
         inside.splice(first ? 0 : -1, 1);
         if (first) taken.push(node);
         else taken.unshift(node);
@@ -453,6 +455,7 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
         ? node.value.slice(space.length)
         : node.value.slice(0, -space.length || undefined);
       inside.splice(first ? 0 : -1, 1, ...(value ? [{ ...node, value }] : []));
+      shields = undefined;
       const moved = { type: 'text', value: space };
       if (first) taken.push(moved);
       else taken.unshift(moved);
