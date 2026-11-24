@@ -1174,6 +1174,29 @@ describe('a lock while an offline clip saves', () => {
     expect((page as QueuedPage).payload.markdown).toContain('clipped: 2026-11-13');
   });
 
+  it('makes the clip again if the person put its page made partly in the trash here meanwhile', async () => {
+    // Sent, then put in the trash offline: the trash waits to be sent.
+    const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
+    const { kept, writer } = await unlock(memoryKeptStore());
+    await writer.deleteNode({ spaceId, nodeId: pageId, node: 'page', name: 'Clip' });
+    const trashWaiting = async (id: PageId) =>
+      (await kept.queue.waiting(id)).some((one) => one.kind === 'delete');
+    const saved = await saveClip(
+      {
+        ...screenshotClip(),
+        made: { spaceId, pageId, revisionId, path: 'Home / News', partial: true },
+      },
+      deps({ writer, convert: plainText, trashWaiting }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    expect(saved.outcome).not.toMatchObject({ pageId });
+    const [page, ...others] = await pages(kept);
+    expect(others).toEqual([]);
+    expect(page).toMatchObject({ id: (saved.outcome as { pageId: PageId }).pageId });
+    expect((page as QueuedPage).payload.markdown).toContain('![Screenshot](attachment:');
+  });
+
   it('says a text clip’s images a lock stopped weren’t saved, keeping them as links', async () => {
     const store = memoryKeptStore();
     const { kept, writer } = await unlock(store, { lockAfterAttach: true });

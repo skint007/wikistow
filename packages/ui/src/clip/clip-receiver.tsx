@@ -275,6 +275,9 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
         spans,
         made: (page) => bridge.clipMade(next.id, page),
         current: (page) => currentDraft(ctx, page),
+        trashWaiting: async (pageId) =>
+          (await ctx.keptContent?.queue.waiting(pageId))?.some((one) => one.kind === 'delete') ??
+          false,
         image: (url) => bridge.clipImage(next.id, url),
         today: localDay(),
         choose: (_clip, title) =>
