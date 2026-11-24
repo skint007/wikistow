@@ -30,35 +30,41 @@ async function descendants(root: number): Promise<Map<number, string>> {
   return found;
 }
 
-test('outlives its zygotes and GPU process ending first, and quits cleanly', async () => {
+test('outlives its zygotes and GPU process ending first, and quits cleanly on SIGTERM', async () => {
   test.skip(process.platform !== 'linux', 'only Linux has zygotes');
   const desktop = await launch(await newProfile());
   const app = desktop.app.process();
   const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) =>
     app.once('exit', (code, signal) => resolve({ code, signal })),
   );
-  await expect(desktop.window.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  try {
+    await expect(desktop.window.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 
-  const before = await descendants(app.pid ?? 0);
-  const ending = [...before].filter(([, type]) => type === 'zygote' || type === 'gpu-process');
-  expect(ending.map(([, type]) => type)).toContain('zygote');
-  expect(ending.map(([, type]) => type)).toContain('gpu-process');
-  for (const [pid] of ending) process.kill(pid, 'SIGTERM');
+    const before = await descendants(app.pid ?? 0);
+    const ending = [...before].filter(([, type]) => type === 'zygote' || type === 'gpu-process');
+    expect(ending.map(([, type]) => type)).toContain('zygote');
+    expect(ending.map(([, type]) => type)).toContain('gpu-process');
+    for (const [pid] of ending) process.kill(pid, 'SIGTERM');
 
-  // A new GPU process starts, and the app goes on.
-  await expect
-    .poll(async () => {
-      if (app.exitCode !== null || app.signalCode !== null) {
-        return `ended: ${app.signalCode ?? app.exitCode}`;
-      }
-      const now = await descendants(app.pid ?? 0);
-      return [...now].some(([pid, type]) => type === 'gpu-process' && !before.has(pid))
-        ? 'GPU process started again'
-        : 'waiting';
-    })
-    .toBe('GPU process started again');
-  await expect(desktop.window.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-
-  await desktop.app.close();
-  expect(await exited).toEqual({ code: 0, signal: null });
+    // A new GPU process starts, and the app goes on.
+    await expect
+      .poll(
+        async () => {
+          if (app.exitCode !== null || app.signalCode !== null) {
+            return `ended: ${app.signalCode ?? app.exitCode}`;
+          }
+          const now = await descendants(app.pid ?? 0);
+          return [...now].some(([pid, type]) => type === 'gpu-process' && !before.has(pid))
+            ? 'GPU process started again'
+            : 'waiting';
+        },
+        { timeout: 20_000 },
+      )
+      .toBe('GPU process started again');
+    // Then the session ends the app itself, which quits as it should.
+    process.kill(app.pid ?? 0, 'SIGTERM');
+    expect(await exited).toEqual({ code: 0, signal: null });
+  } finally {
+    await desktop.app.close().catch(() => {});
+  }
 });

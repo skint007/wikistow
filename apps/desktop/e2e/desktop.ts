@@ -19,13 +19,13 @@ const CONTAINER_SWITCHES =
 /**
  * The switches every Linux package starts the app with: those the launcher
  * (`packaging/wikistow-desktop`) puts before the person's own, the same on
- * its bundled Electron and on electron44. On Linux the tests start the app
- * with them too.
+ * its bundled Electron and on the system one (electron44). On Linux the
+ * tests start the app with them too.
  */
 export const LAUNCHER_SWITCHES: string[] = (() => {
   const launcher = readFileSync(new URL('../packaging/wikistow-desktop', import.meta.url), 'utf8');
   const found = [
-    ...launcher.matchAll(/exec (?:"\$app\/\$name"|electron44 "\$app\/app\.asar") (.*?)"\$@"/g),
+    ...launcher.matchAll(/exec (?:"\$app\/\$name"|electron\d+ "\$app\/app\.asar") (.*?)"\$@"/g),
   ].map((line) => (line[1] ?? '').trim());
   if (found.length !== 2 || found[0] !== found[1]) {
     throw new Error('The launcher no longer starts both Electrons the same way');
