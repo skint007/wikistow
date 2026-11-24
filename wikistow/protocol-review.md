@@ -1876,6 +1876,42 @@ Round 60 reviewed round 59's revision (b670308d) with the three briefs, fresh re
 
 **Outcome.** Round 60 found Highs, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed but M60-2, M60-5 and M60-8, accepted. Round 61 repeats the three briefs against this revision.
 
+## Round 61: identity key rotation, narrowed, fifteenth review
+
+Round 61 reviewed round 60's revision (aaa80ad2) with the three briefs, fresh reviewers given the text, the settled list and the project owner's answers to questions 9 to 11: the member and encoding briefs as Claude subagents. **The server brief's Codex (gpt-6.2-sol) agent again did no review**, answering only that the request came from a delegated agent and it would wait for direction. The server brief was then given once, unchanged, to a Claude subagent. The round found no Critical finding, 6 High, 7 Medium, 14 Low and no Info (27 in all; 3 distinct Highs). Every reviewer found the "write nothing" list complete but for agents' groups, and round 60's fixes in place. The Highs were again in when and how the closure is detected: adding an owner makes no new key version, so nothing made a device or agent read the statement that closes the space (E61-F1, M61-1, S61-2); a key in both `owners` and `openOnly` counted as `openOnly`, so a recorded closure didn't count (E61-F2, S61-1); and a closing statement whose signer has since rotated counted for nothing (E61-F3).
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| E61-F1 | 61 | High | 8.4; 6.5 step 5; 7.6 | Statements were read only after a version change, and a co-owner's add makes none, so a re-add at a declined key went unnoticed. | Fixed: devices and agents read the space's owner statements before each write in it. Same as M61-1 and S61-2. |
+| M61-1 | 61 | High | 8.4 | Same as E61-F1. | Fixed with E61-F1. |
+| S61-2 | 61 | High | 8.4 | Same as E61-F1, for a fresh add. | Fixed with E61-F1. |
+| E61-F2 | 61 | High | 8.2; 8.4; 8.6 | A closing key also in `openOnly` counted as `openOnly`, which the test ignores, so devices read the space as open. | Fixed: the test counts an `owners` key in `removed` whether or not it is in `openOnly`, and the accept row takes it out of `openOnly`. Same as S61-1. |
+| S61-1 | 61 | High | 8.2; 8.4 | Same as E61-F2. | Fixed with E61-F2. |
+| E61-F3 | 61 | High | 6.5 step 5; 8.4 | A closing statement whose signer rotated since, or wasn't added again, counted for nothing. | Fixed: a closing signer is an owner the record accepts, not removed, signing at any key of a valid chain through a key the record holds for them; closing only takes ability away. Same as M61-3 and S61-5. |
+| E61-F4 | 61 | Medium | 8.6 "remove a rotated owner"; 4.6 | After a confirm dropped the entries, a removal moved declined keys to `openOnly`, which opens. | Fixed: a key in `removed` always stays in `owners` in that removal. |
+| E61-F5 | 61 | Medium | 6.5 step 5; 8.2 | Step 5 puts in `removed` keys the person never saw, so a later genuine rotation through one isn't followed. | Accepted: availability; the person confirms that key after the warning. |
+| M61-2 | 61 | Medium | 9.6; 8.4 | Agents had no route to owner statements or to the keys the check needs. | Fixed: §9.6 lets them fetch the statements of spaces they hold grants in and the rows and chains of the owners named and their signers. |
+| M61-3 | 61 | Medium | 6.5 step 5 | Same as E61-F3, a signer at an unaccepted new key. | Fixed with E61-F3. |
+| M61-4 | 61 | Medium | 8.4 | A co-owner can close another owner's space on purpose by adding someone that owner declined. | Accepted: a co-owner holds every key and can share with anyone; this costs the other owner availability only, and the decline's purpose needs the closure. |
+| S61-3 | 61 | Medium | 6.5 step 5; 8.4 | With an entry that doesn't name the pin, "any key but the pin" took the pin's genuine successor as closing. | Fixed: that wider reading holds only while an entry names the pin or there is no pin; otherwise only keys in `removed` close. Same as E61-L2. |
+| S61-4 | 61 | Medium | 4.6; 8.3 | The release before rotation didn't carry the first-sight rule, so an older device could pin a declined key and open spaces everywhere. | Fixed: it carries it. |
+| E61-L1 | 61 | Low | 8.6 confirm row | A confirm with no pin had no label. | Fixed: the change carries one, with the email check. |
+| E61-L2 | 61 | Low | 8.6 accept row | The closing key was judged by the writing device. | Fixed: judged again against the newer record. |
+| E61-L3 | 61 | Low | 8.4 | Devices and agents used different signer sets. | Fixed with E61-F3: one definition. |
+| E61-L4 | 61 | Low | ADR | The ADR's account of what closes a space was out of date. | Fixed. |
+| E61-L5 | 61 | Low | CONTEXT.md | The definition left out a co-owner's later add. | Fixed. |
+| M61-5 | 61 | Low | 8.4 | The list of offers not made left some out. | Fixed. |
+| M61-6 | 61 | Low | 8.4; 9.4 | Agents' groups weren't barred. | Fixed. Same as S61-6. |
+| M61-7 | 61 | Low | 8.4; 8.6 | A decline merged over a confirmed pin left nothing to confirm. | Fixed: the closed space offers to confirm the current pin again. |
+| S61-5 | 61 | Low | 8.4 | Same as E61-F3. | Fixed with E61-F3. |
+| S61-6 | 61 | Low | 8.4 | Same as M61-6. | Fixed with M61-6. |
+| S61-7 | 61 | Low | 8.4; 13 | A live publication out of a closed space is barred though a copy out isn't. | Accepted: a publication keeps a link to the closed space, and the person can copy instead. |
+| S61-8 | 61 | Low | 7.6 step 2; 8.2 | A plain removal of an owner whose key is in `removed` was undefined. | Fixed: in every removal, envelopes of a key in `removed` verify for the writing check only. |
+| S61-9 | 61 | Low | 8.4 | Confirming another key opens the space without saying a co-owner may still seal to the declined one. | Fixed: the app says so for each space it opens. |
+| S61-10 | 61 | Low | 8.6 accept row | What a marked key does with no entry in the newer record was unclear. | Fixed: an ordinary accept. |
+
+**Outcome.** Round 61 found Highs, and its server brief ran on a substitute reviewer, so it doesn't meet the stopping rule. Every finding is fixed but E61-F5, M61-4 and S61-7, accepted. Round 62, the fourth since question 11 and the last this run allows, repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.

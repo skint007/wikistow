@@ -82,7 +82,7 @@ A person replacing their own identity keys with new ones, as when the old ones m
 _Avoid_: Key reset, re-keying, key change (a key the app can't follow).
 
 **Closed space**
-A space a person's devices and agents only read in, because the person declined the new key of an owner who replaced their keys, where their contacts record holds that key as an owner, accepted before the decline or named by a co-owner after it. It opens again when they confirm a key of that owner. Proposed in ADR 0018.
+A space a person's devices and agents only read in, because the person declined the new key of an owner who replaced their keys, where their contacts record holds that key as an owner, accepted before the decline, or where a co-owner names that person as an owner after it at a key the person hasn't confirmed. It opens again when they confirm a key of that owner. Proposed in ADR 0018.
 _Avoid_: Frozen space, read-only space (reader is a role in a share).
 
 **Shared with me**
