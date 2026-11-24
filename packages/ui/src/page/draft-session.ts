@@ -709,14 +709,13 @@ export class DraftSession {
 
   /** The page's draft head as last loaded: one this session didn't make means someone else saved. */
   noticeHead(head: RevisionId | null) {
-    // In a live session, the session's stream says what the head is; on
-    // the way back into one, what's kept here goes in by block, whatever
-    // saved meanwhile. So for a view showing a change kept for a session,
-    // another tab's maybe, that nothing was typed into: the join puts it in.
-    if (this.#participant || this.#rejoinHold) return;
+    // In a live session, the session's stream says what the head is.
+    if (this.#participant) return;
     // A session left says, as it settles, which drafts are this draft's own:
-    // the page's head heard meanwhile is judged once it has.
-    if (this.#settling) {
+    // the page's head heard meanwhile is judged once it has. On the way back
+    // into one, what's kept here goes in by block, whatever saved meanwhile:
+    // the head heard is judged only if the page's live lock goes without a join.
+    if (this.#settling || this.#rejoinHold) {
       this.#headHeard = { head };
       return;
     }
@@ -1617,6 +1616,8 @@ export class DraftSession {
   // Where the page's change waiting here overlaps the live session: **Merge…**
   // with the draft head, from the base kept beside it, outside the session.
   #overlapping(entry: QueuedPage, head: RevisionId) {
+    // The head the join read is the one to settle with, not one heard before it.
+    this.#headHeard = null;
     this.#releaseRejoinHold();
     if (!this.#live) return;
     // Held while the person settles it: the queue sends what they keep, not this.
@@ -1917,7 +1918,8 @@ export class DraftSession {
 
   // While a session left is settled: saves wait for it, and nothing shows as saved.
   #settling: Promise<void> | null = null;
-  // The page's draft head, as it last told of it while the session settled.
+  // The page's draft head, as it last told of it while the session settled
+  // or the page's live lock was held for the next join.
   #headHeard: { head: RevisionId | null } | null = null;
 
   // Go on from what the session held, as a writer outside it. Whether the
@@ -2183,6 +2185,13 @@ export class DraftSession {
     const release = this.#rejoinHold;
     this.#rejoinHold = null;
     release?.();
+    // Gone without a join: a head heard while it held is judged now, against
+    // the drafts the settle made known, unless a settle still under way judges
+    // it once done. Joined or closed, it goes.
+    if (this.#settling) return;
+    const heard = this.#headHeard;
+    this.#headHeard = null;
+    if (heard && this.#live) this.noticeHead(heard.head);
   }
 
   /**
