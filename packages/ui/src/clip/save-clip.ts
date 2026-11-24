@@ -387,49 +387,58 @@ async function finishPartly(
     place: null,
   };
   const drafts = deps.writer.draft(page, { seen: null });
-  // The page as it stands: its change waiting on this device, read before
-  // anything is written, so a save into it since is a conflict (`seen`),
-  // or else its draft on the server.
-  let stands: { head: RevisionId; payload: PagePayload } | null = null;
-  try {
-    const head = await drafts.waitingHead();
-    const entry = await drafts.entryNow();
-    if (entry) {
-      // A change the server refused, which the person sorts out first.
-      if (entry.failure || !head) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
-      // Saved into since it was read, as by another window.
-      if (entry.version !== drafts.seen()) return failed('failed', CHANGED);
-      stands = { head, payload: entry.payload };
-    }
-  } catch {
-    return failed('failed', `${SHOT_FAILED} ${KEPT}`);
-  }
-  if (!stands && deps.current) {
+  type Stands = { head: RevisionId; payload: PagePayload };
+  /**
+   * The page as it stands, if it's still the clip's: its change waiting on
+   * this device, read so a save into it since is a conflict (`seen`), or
+   * else its draft on the server; or how that ends it.
+   */
+  const standing = async (): Promise<{ stands: Stands | null } | Saved | 'gone'> => {
+    let stands: Stands | null = null;
     try {
-      stands = await deps.current(page);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) return 'gone';
-      // Offline, what the server has can't be seen, and its first draft
-      // may be the person's changes, sent from here: nothing is guessed.
-      return failed('failed', noAnswer(error) ? OFFLINE : `${SHOT_FAILED} ${KEPT}`);
+      const head = await drafts.waitingHead();
+      const entry = await drafts.entryNow();
+      if (entry) {
+        // A change the server refused, which the person sorts out first.
+        if (entry.failure || !head) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+        // Saved into since it was read, as by another window.
+        if (entry.version !== drafts.seen()) return failed('failed', CHANGED);
+        stands = { head, payload: entry.payload };
+      }
+    } catch {
+      return failed('failed', `${SHOT_FAILED} ${KEPT}`);
     }
-  }
-  if (stands) {
-    const { payload } = stands;
-    const body = bodyOf(payload.markdown);
-    // Saved with the screenshot already, just before a reload: done.
-    if (
-      payload.title === title &&
-      payload.attachments.some((a) => body === bodyOf(text.shown(a.id)))
-    ) {
-      await deps.made?.({ spaceId, pageId, path }).catch(() => {});
-      return done;
+    if (!stands && deps.current) {
+      try {
+        stands = await deps.current(page);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return 'gone';
+        // Offline, what the server has can't be seen, and its first draft
+        // may be the person's changes, sent from here: nothing is guessed.
+        return failed('failed', noAnswer(error) ? OFFLINE : `${SHOT_FAILED} ${KEPT}`);
+      }
     }
-    // Changed since it was made, as the person can while another clip
-    // saves first: theirs, not written over. What else they changed, such
-    // as its properties or cover, is kept below.
-    if (payload.title !== title || body !== bodyOf(text.first)) return failed('failed', CHANGED);
-  }
+    if (stands) {
+      const { payload } = stands;
+      const body = bodyOf(payload.markdown);
+      // Saved with the screenshot already, just before a reload: done.
+      if (
+        payload.title === title &&
+        payload.attachments.some((a) => body === bodyOf(text.shown(a.id)))
+      ) {
+        await deps.made?.({ spaceId, pageId, path }).catch(() => {});
+        return done;
+      }
+      // Changed since it was made, as the person can while another clip
+      // saves first: theirs, not written over. What else they changed, such
+      // as its properties or cover, is kept below.
+      if (payload.title !== title || body !== bodyOf(text.first)) return failed('failed', CHANGED);
+    }
+    return { stands };
+  };
+  // Looked at first, so a page done or changed gets no file it won't show.
+  const before = await standing();
+  if (typeof before === 'string' || 'outcome' in before) return before;
   let ref: AttachmentRef;
   try {
     ref = await deps.writer.attach(page, {
@@ -445,6 +454,11 @@ async function finishPartly(
       ? failed('too-large', `This screenshot is larger than your WikiStow server takes. ${KEPT}`)
       : failed('failed', `${SHOT_FAILED} ${KEPT}`);
   }
+  // Looked at again once the file is in, as the queue may have sent the
+  // page meanwhile, or been refused it: the save goes on it as it is now.
+  const now = await standing();
+  if (typeof now === 'string' || 'outcome' in now) return now;
+  const { stands } = now;
   // On the page as it stands, keeping all it has but the text, or else,
   // with no `current`, on the first draft it was made with.
   const basedOn = stands?.head ?? made.revisionId;

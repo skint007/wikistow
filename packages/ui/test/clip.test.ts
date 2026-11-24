@@ -235,6 +235,7 @@ function fakeWriter({
   gone = [],
   waiting = null,
   savedSince = false,
+  whileAttaching,
 }: {
   refuse?: 'page' | 'attach' | 'attach-failed' | 'save' | 'delete' | 'delete-forbidden';
   /** Pages made already, which making again is refused as. */
@@ -245,6 +246,8 @@ function fakeWriter({
   waiting?: { head: RevisionId | null; payload: PagePayload } | null;
   /** Another window saved into the waiting change after its head was read. */
   savedSince?: boolean;
+  /** The waiting change once a file is attached, as the queue sent it or was refused it meanwhile. */
+  whileAttaching?: { waiting: { head: RevisionId | null; payload: PagePayload } | null };
 } = {}) {
   const calls: { call: string; input: unknown }[] = [];
   const revisionId = newId(RevisionId);
@@ -263,6 +266,7 @@ function fakeWriter({
       file: { name: string; mediaType: string; bytes: Uint8Array },
     ) {
       calls.push({ call: 'attach', input: file.name });
+      if (whileAttaching) waiting = whileAttaching.waiting;
       if (gone.includes(page.pageId)) throw new ApiError(404, 'not-found', 'Not found');
       if (refuse === 'attach') throw new ApiError(413, 'payload-too-large', 'Too large');
       if (refuse === 'attach-failed') throw new Error('Gone');
@@ -868,6 +872,33 @@ describe('saving a screenshot', () => {
         message: expect.stringContaining('couldn’t see its page offline'),
       });
       expect(offline.calls).toEqual([]);
+    });
+
+    it('looks at the page again once the screenshot is in, as the queue may send it meanwhile', async () => {
+      const { first } = await written();
+      // Sent while the screenshot went in, with the person's words in it, under its first draft.
+      const edited = { ...first, markdown: `${first.markdown}My words\n` };
+      const sent = fakeWriter({
+        waiting: { head: revisionId, payload: first },
+        whileAttaching: { waiting: null },
+      });
+      const saved = await saveClip(
+        partly(),
+        deps({ writer: sent.writer, current: async () => ({ head: revisionId, payload: edited }) }),
+      );
+      expect(saved.outcome).toMatchObject({
+        ok: false,
+        message: expect.stringContaining('Its page changed since WikiStow made it'),
+      });
+      expect(sent.calls.map((c) => c.call)).toEqual(['attach']);
+      // Refused by the server meanwhile: the person sorts that out first.
+      const refused = fakeWriter({
+        waiting: { head: revisionId, payload: first },
+        whileAttaching: { waiting: { head: null, payload: first } },
+      });
+      const stopped = await saveClip(partly(), deps({ writer: refused.writer }));
+      expect(stopped.outcome).toMatchObject({ ok: false, code: 'failed' });
+      expect(refused.calls.map((c) => c.call)).toEqual(['attach']);
     });
 
     it('leaves its change waiting here alone if another window saved into it meanwhile', async () => {
