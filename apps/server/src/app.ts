@@ -191,6 +191,7 @@ export function createApp({
     limits: config.limits,
     contentLimits: config.contentLimits,
     minKdf: config.minKdf,
+    bulkLarge: config.bulkLarge,
     log,
   });
   // The database names each space whose tree changes (`listenForTreeChanges`).

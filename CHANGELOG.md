@@ -11,6 +11,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - Ticking a task while reading: a box ticked just before a newer text of the page shows, such as one another tab published, no longer ticks whichever task the newer text has in its place. Where two tasks share a line, such as two sections each with a `Call` task, the tick is left out and the page says why, as it does for a tick made just before the page changed. (#742)
 - In the visual editor, bold, italic or strikethrough that starts or ends beside a no-break space (Option+Space on a Mac) no longer sends the page to source mode. The space is saved as typed, outside the mark, as an ordinary space is. (#744)
 
+#### Server
+
+- The server logs a `bulk-request-large` warning when making a share, a move, ending a share or adding an owner sends more than 32 MiB, half the 64 MiB a request may carry, or takes more than 30 seconds. The line names the route, the body's size, the time taken and the space, so you see a library outgrowing one request before sharing it fails. (#735)
+
 ## 0.30.3 - 2026-11-24
 
 ### Highlights

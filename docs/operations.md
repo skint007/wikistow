@@ -20,6 +20,8 @@ Until that account exists, anyone who can reach the server can claim it. Create 
 
 The server closes a connection that sends and takes nothing for 60 seconds, such as a client that stopped reading a large file. A reverse proxy in front of it needs a read timeout well over 15 seconds, about the longest an AI reply goes without sending anything. Proxy defaults, such as nginx's 60 seconds, are.
 
+Making a share, a move, ending a share and adding an owner may each send up to 64 MiB, which must arrive within 60 seconds, and the answer comes back over the same quiet connection. When one sends more than 32 MiB or takes more than 30 seconds in the server, the server logs `bulk-request-large` with the route, the body's size in bytes (`bodyBytes`), the time taken (`transactionMs`) and the space's ID. A library that keeps logging it is getting near the limit of one request.
+
 ## Serve over HTTP/2
 
 Browsers edit a page live with others (ADR 0015) only when the app's requests reach the server over HTTP/2 or later: each tab with a draft open holds three streams, and over HTTP/1.1 a browser allows six connections per server, so two windows would leave none for saves. Over HTTP/1.1 the app edits as before, one person at a time. Serve HTTP/2 at the TLS proxy in front of the server; with nginx, `http2 on;` in the `server` block. The desktop app isn't limited this way.
