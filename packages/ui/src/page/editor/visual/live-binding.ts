@@ -20,7 +20,7 @@ import {
   ownChanges,
   putInto,
   endOfTag,
-  runShaped,
+  outsideOf,
   wordsOf,
   type Delta,
   type TextChange,
@@ -351,11 +351,14 @@ export class VisualBinding {
       const last = lastId && Y.getItem(doc.store, lastId);
       if (!(first instanceof Y.Item) || !(last instanceof Y.Item) || !firstId || !lastId) continue;
       const mine = { from, to, first, last, firstId, lastId };
-      // Another's run of the same word: shaped as one, tags at its ends,
-      // with exactly the same words.
+      // Another's run of the same word: exactly the same words, a tag of a
+      // mark in it, and the same Markdown around its tags, as both took the
+      // place of the same old word, and typing beside one changes it.
       const theirsOf = (item: Y.Item, theirs: Theirs) => {
         const put = body.slice(theirs.from, theirs.to);
-        return item.id.client !== doc.clientID && runShaped(put) && wordsOf(put) === words;
+        if (item.id.client === doc.clientID || wordsOf(put) !== words) return false;
+        const outside = outsideOf(put);
+        return outside !== null && outside === outsideOf(own);
       };
       // Put in where Yjs put this run, after and before the same
       // characters of the word both took the place of, neither having the

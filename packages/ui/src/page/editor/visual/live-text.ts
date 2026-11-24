@@ -37,7 +37,7 @@ export const wordsOf = (markdown: string) =>
 // Text as a diff by tokens sees it: a tag, a run of marks, an escape, a
 // run of spaces, a word (as `partsOf` parts them), or one character else.
 const TOKEN = new RegExp(
-  `${TAG.source}|\\\\[\\s\\S]|[*_=~\`]+|\\s+|[^\\s*_=~\`\\\\<\\-/\\u2010-\\u2015]+|[\\s\\S]`,
+  `${TAG.source}|\\\\[\\s\\S]|[*_=~\`]+|\\s+|[^\\s*_=~\`\\\\<\\-/|\\u2010-\\u2015]+|[\\s\\S]`,
   'g',
 );
 
@@ -82,10 +82,11 @@ function smallest(before: string, after: string, at: number): TextChange | null 
 }
 
 /**
- * Where `text` parts into words: 1 at each space, line break, hyphen, dash
- * or slash outside an HTML tag, so a tag's attributes stay with the word it
- * marks, and the two halves of `foo-bar` are two words. Other punctuation
- * stays with its word, as a selection of `world!` takes it in.
+ * Where `text` parts into words: 1 at each space, line break, hyphen, dash,
+ * slash or table cell's `|` outside an HTML tag, so a tag's attributes stay
+ * with the word it marks, and the two halves of `foo-bar` are two words.
+ * Other punctuation stays with its word, as a selection of `world!` takes
+ * it in.
  */
 function partsOf(text: string): Uint8Array {
   const parts = new Uint8Array(text.length);
@@ -94,7 +95,7 @@ function partsOf(text: string): Uint8Array {
     const char = text[i] ?? '';
     if (char === '<' && TAG_HERE.test(text.slice(i, i + 512))) inTag = true;
     else if (char === '>') inTag = false;
-    if (!inTag && /[\s\-/\u2010-\u2015]/.test(char)) parts[i] = 1;
+    if (!inTag && /[\s\-/|\u2010-\u2015]/.test(char)) parts[i] = 1;
   }
   return parts;
 }
@@ -102,7 +103,8 @@ function partsOf(text: string): Uint8Array {
 // A code span, its opening backticks not escaped, on one line or more
 // with no blank one between; a fence's line, in a quote or a list item too.
 const CODE_SPAN = /(?<!(?<!\\)(?:\\\\)*\\)(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
-const FENCE = /^((?:[ \t]*>)*)([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(`{3,}|~{3,})(.*)$/;
+const FENCE =
+  /^((?:[ \t]*>)*)((?:[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:[ \t]*>)*)*[ \t]*)(`{3,}|~{3,})(.*)$/;
 const fenceOf = (line: string) => {
   const [, , lead = '', fence = '', info = ''] = FENCE.exec(line.replace(/\r$/, '')) ?? [];
   // A backtick fence's info string has no backtick: ```code``` is a code span.
@@ -115,20 +117,22 @@ export const endOfTag = (run: string) => {
   return tags.filter((tag) => tag.startsWith('</')).length * 2 !== tags.length;
 };
 
-// A tag of a mark where a text ends.
-const TAG_END = new RegExp(`(?:${TAG.source})$`);
-
 /**
- * Whether `text` is shaped as the run of a highlight or colour is: a tag
- * of a mark at each end, or, one end of a tag over several words, at one.
+ * What a run has outside its tags of marks, before the first and after the
+ * last, less letters, digits, spaces, stops and brackets: the marks
+ * around the word, as a bold's `**`, which two runs of one word share,
+ * whatever their selections took in, and typing a mark beside one
+ * changes. Null if it has no tag.
  */
-export const runShaped = (text: string) => {
-  // Less punctuation outside its tags, as a selection of `world` leaves the `!`.
-  const inner = text.replace(/^[^\p{L}\p{N}\s<>*_=~`\\]+|[^\p{L}\p{N}\s<>*_=~`\\]+$/gu, '');
-  return endOfTag(inner)
-    ? TAG_HERE.test(inner) || TAG_END.test(inner)
-    : TAG_HERE.test(inner) && TAG_END.test(inner);
-};
+export function outsideOf(run: string): string | null {
+  const tags = [...run.matchAll(TAG)];
+  const [first, last] = [tags[0], tags.at(-1)];
+  if (!first || !last) return null;
+  const outside = run.slice(0, first.index) + '|' + run.slice(last.index + last[0].length);
+  let kept = '';
+  for (const char of outside) if (!/[\p{L}\p{N}\s.,;:!?'"‘’“”…()[\]{}]/u.test(char)) kept += char;
+  return kept;
+}
 const fenced = (text: string) => text.split('\n').some((line) => fenceOf(line));
 
 /**
@@ -137,31 +141,29 @@ const fenced = (text: string) => text.split('\n').some((line) => fenceOf(line));
  * the quote or list item it's in.
  */
 function inFence(text: string, next = ''): boolean {
-  let open: { fence: string; depth: number; indent: number } | null = null;
+  let open: { fence: string; depth: number; width: number } | null = null;
+  // Whether `line` is still in the quote or list item the open fence is in:
+  // as many `>` before it, and, out of a quote, as far in as the fence.
+  const within = (line: string) => {
+    const lead = /^[ \t>]*/.exec(line)?.[0] ?? '';
+    if (!open || line.trim() === '') return true;
+    const depth = lead.split('>').length - 1;
+    return depth >= open.depth && (open.depth > 0 || lead.length >= open.width);
+  };
   // Whole lines only: what follows the last break is the line being read.
-  for (const line of text.split('\n').slice(0, -1)) {
-    const quote = /^(?:[ \t]*>)*/.exec(line)?.[0] ?? '';
-    const depth = quote.split('>').length - 1;
-    const rest = line.slice(quote.length);
-    const indent = rest.length - rest.trimStart().length;
-    if (open && (depth < open.depth || (rest.trim() !== '' && indent < open.indent))) open = null;
+  for (const raw of text.split('\n').slice(0, -1)) {
+    const line = raw.replace(/\r$/, '');
+    if (!within(line)) open = null;
     const found = fenceOf(line);
     if (!found) continue;
-    const { lead, fence, info } = found;
-    if (!open) open = { fence, depth, indent: /[-*+.)]/.test(lead) ? lead.length : 0 };
+    const { fence, info } = found;
+    const width = line.indexOf(fence);
+    if (!open) open = { fence, depth: line.slice(0, width).split('>').length - 1, width };
     else if (fence[0] === open.fence[0] && fence.length >= open.fence.length && !info.trim())
       open = null;
   }
-  if (!open) return false;
   // Ended by the next line, as a quote's or a list item's end ends it.
-  const line = next.split('\n', 1)[0]?.replace(/\r$/, '') ?? '';
-  const quote = /^(?:[ \t]*>)*/.exec(line)?.[0] ?? '';
-  const rest = line.slice(quote.length);
-  const indent = rest.length - rest.trimStart().length;
-  return !(
-    quote.split('>').length - 1 < open.depth ||
-    (rest.trim() !== '' && indent < open.indent)
-  );
+  return open !== null && within(next.split('\n', 1)[0]?.replace(/\r$/, '') ?? '');
 }
 
 /**

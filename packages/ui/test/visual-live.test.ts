@@ -1106,6 +1106,35 @@ describe('two people formatting the same text at once (#720)', () => {
     expect(
       runs('> ```\n> x\nHello world.\n', `> \`\`\`\n> x\nHello ${red('mark', 'world')}.\n`),
     ).toBe(true);
+    // A quote in a list item.
+    expect(
+      runs(
+        '- > ```\n  > say world now\n  > ```\n',
+        '- > ```\n  > say <mark>world</mark> now\n  > ```\n',
+      ),
+    ).toBe(false);
+  });
+
+  it('settles runs of a word in bold, a link or a table cell', async () => {
+    const [hi, co] = [red('mark', 'world'), red('span', 'world')];
+    for (const [was, around] of [
+      ['Say **big world** now.\n', (run: string) => `Say **big ${run}** now.\n`],
+      [
+        'Say [world](https://x.test) now.\n',
+        (run: string) => `Say [${run}](https://x.test) now.\n`,
+      ],
+      ['|foo|world|\n', (run: string) => `|foo|${run}|\n`],
+    ] as const)
+      for (const aFirst of orders) {
+        const [a, b] = start(was, aFirst);
+        a.editor.shown = around(hi);
+        b.editor.shown = around(co);
+        a.binding.write();
+        b.binding.write();
+        await exchange();
+        expect(bodyOf(a)).toBe(bodyOf(b));
+        expect([around(hi), around(co)]).toContain(bodyOf(a));
+      }
   });
 
   it('formats the first word of a page as any other', async () => {
