@@ -33,6 +33,24 @@ function task(markdown: string, line: string, checked: boolean): ReadingChange {
   return { kind: 'task', offset: item.offset, line, checked };
 }
 
+// Two sections that each hold a `Call` task, and the page with them swapped,
+// Bob's `Call` now starting where Mum's did (#703).
+const CALLS = '## Mum\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n- [ ] Call\n';
+const swap = (markdown: string) => {
+  const [mum = '', bob = ''] = markdown.split('\n\n');
+  return `${bob.trimEnd()}\n\n${mum}\n`;
+};
+
+/** The tick of the `nth` task `line` in `madeIn`, the text it was clicked in. */
+function tickIn(madeIn: string, line: string, nth: number): ReadingChange {
+  const item = taskItems(madeIn).filter((found) => found.line === line)[nth];
+  if (!item) throw new Error(`No task “${line}” number ${nth}`);
+  return { kind: 'task', offset: item.offset, line, checked: true, madeIn };
+}
+
+const REPEATED =
+  'The task “Call” is on the page more than once, and the page changed since it was ticked.';
+
 const stale = () => new ApiError(409, 'stale-head', 'Someone saved since you loaded the page');
 
 /**
@@ -344,6 +362,54 @@ describe('a flush', () => {
         change: { kind: 'task', offset: 0, line: 'jam', checked: true },
         reason: 'The task “jam” isn’t on the page any more.',
       },
+    ]);
+  });
+});
+
+describe('a flush of a tick on a line two tasks have (#703)', () => {
+  it('leaves it out where someone swapped their sections between the click and the flush', async () => {
+    const swapped = swap(CALLS);
+    expect(swapped.indexOf('- [ ] Call')).toBe(CALLS.indexOf('- [ ] Call'));
+    for (const publishes of [false, true]) {
+      const page = server(CALLS);
+      // Saved by someone after the click: the flush starts again on their text.
+      page.savesFirst(swap, { publishes });
+      const mums = tickIn(CALLS, 'Call', 0);
+      expect(await flushChanges(page.operations, [mums])).toEqual({
+        outcome: 'unchanged',
+        dropped: [{ change: mums, reason: REPEATED }],
+      });
+      // Bob's `Call` stays as it was, and so does Mum's.
+      expect(page.draft()).toBe(swapped);
+      expect(page.state.published).toEqual([]);
+    }
+  });
+
+  it('ticks the one clicked where the page changed only in what is ticked', async () => {
+    const page = server(CALLS);
+    page.savesFirst((draft) => draft.replace('- [ ] Tidy', '- [X] Tidy'), { publishes: true });
+    expect(await flushChanges(page.operations, [tickIn(CALLS, 'Call', 1)])).toEqual({
+      outcome: 'published',
+      dropped: [],
+    });
+    expect(page.state.published).toEqual([
+      '## Mum\n- [ ] Call\n- [X] Tidy\n\n## Bob\n- [x] Call\n',
+    ]);
+  });
+
+  it('ticks each clicked in a batch, a value set before them included', async () => {
+    const page = server(CALLS);
+    const size = { kind: 'property', key: 'size', value: 'big' } as const;
+    // Shown with the value set, then with Bob's `Call` ticked.
+    const sized = applyChanges(CALLS, [size]).markdown;
+    const bobs = tickIn(sized, 'Call', 1);
+    const mums = tickIn(applyChanges(sized, [bobs]).markdown, 'Call', 0);
+    expect(await flushChanges(page.operations, [size, bobs, mums])).toEqual({
+      outcome: 'published',
+      dropped: [],
+    });
+    expect(page.state.published).toEqual([
+      '---\nsize: big\n---\n## Mum\n- [x] Call\n- [ ] Tidy\n\n## Bob\n- [x] Call\n',
     ]);
   });
 });
@@ -680,6 +746,23 @@ describe('an offline draft made only of ticks (#695)', () => {
     expect(tickedBack(big, { ...big, markdown: again })).toBe(true);
     expect(tickedBack(big, { ...big, markdown: '- [ ] milk\n- [ ] eggs\n' })).toBe(false);
     expect(tickedBack(big, { ...big, title: 'Shops' })).toBe(false);
+  });
+
+  // As the device's draft is ticked: in the text this device keeps for the page.
+  it('leaves out a tick on a line two tasks have, where the draft swapped them since the click (#703)', () => {
+    const mums = tickIn(CALLS, 'Call', 0);
+    expect(applyChanges(swap(CALLS), [mums])).toEqual({
+      markdown: swap(CALLS),
+      dropped: [{ change: mums, reason: REPEATED }],
+    });
+    // In the text it was clicked in, its own ticks since included, it holds.
+    const bobs = tickIn(CALLS, 'Call', 1);
+    expect(
+      applyChanges(CALLS, [bobs, tickIn(applyChanges(CALLS, [bobs]).markdown, 'Call', 0)]),
+    ).toEqual({
+      markdown: '## Mum\n- [x] Call\n- [ ] Tidy\n\n## Bob\n- [x] Call\n',
+      dropped: [],
+    });
   });
 
   // A box in code that now starts where a task was is left out (#700).

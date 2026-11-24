@@ -785,9 +785,13 @@ function PageBody({
             markdown: shownMarkdown,
             rights,
             // What it was made on, as shown now: offline, a change made before
-            // another tab changed the page is left out (#700).
+            // another tab changed the page is left out (#700). A tick keeps the
+            // text it was made in, as its offset may be another task's in newer text (#703).
             change: (made: ReadingChange) =>
-              reading.add(made, { version: change?.version ?? null, publishedOn: revisionId }),
+              reading.add(made.kind === 'task' ? { ...made, madeIn: shownMarkdown } : made, {
+                version: change?.version ?? null,
+                publishedOn: revisionId,
+              }),
           }
         : null,
     [model.view, shownMarkdown, reading, rights, change?.version, revisionId],

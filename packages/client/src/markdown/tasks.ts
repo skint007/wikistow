@@ -15,11 +15,18 @@ import { wikilinkFromMarkdown, wikilinkSyntax } from './wikilink.ts';
 //
 // Offsets are UTF-16, into the whole Markdown.
 
-/** A task item as ticked: where its list item starts, its line's text after the box, and whether it's done. */
-export type TaskChange = { offset: number; line: string; checked: boolean };
+/** A task item: where its list item starts, its line's text after the box, and whether it's done. */
+type Task = { offset: number; line: string; checked: boolean };
+
+/**
+ * A task item as ticked, and `madeIn`, the whole Markdown it was ticked
+ * in, where that's known: in other text, its offset may be another task
+ * with the same line (#703).
+ */
+export type TaskChange = Task & { madeIn?: string };
 
 /** A task item found in a page's Markdown. */
-export type TaskItem = TaskChange & {
+export type TaskItem = Task & {
   /** Where the character between its brackets is: a space, `x` or `X`. */
   mark: number;
 };
@@ -115,13 +122,17 @@ export function forgetTaskItems() {
  * `markdown` with the task `change` names ticked (`checked`) or not. It is
  * the task item at `change.offset` if its line is still `change.line`,
  * never a box in code that now starts where a task did (#700); otherwise
- * the only task item with that line. A task already as asked is left as
- * it is, `[X]` included, so a change made twice changes nothing more. A
- * task that is gone, or whose line more than one task has, is refused
- * with why. `items` gives the task items, by default `taskIndex(markdown)`:
- * those of a text this one differs from only in what is ticked hold for
- * it too, their boxes as this text has them, as ticking moves no block,
- * so changes made one after another parse the page once.
+ * the only task item with that line. Where `markdown` isn't the text it
+ * was ticked in (`change.madeIn`), what is ticked aside, the offset holds
+ * only for a line no other task has: two sections swapped meanwhile may
+ * have put another task with the same line there (#703). A task already
+ * as asked is left as it is, `[X]` included, so a change made twice
+ * changes nothing more. A task that is gone, or whose line more than one
+ * task has where the offset can't tell them apart, is refused with why.
+ * `items` gives the task items, by default `taskIndex(markdown)`: those of
+ * a text this one differs from only in what is ticked hold for it too,
+ * their boxes as this text has them, as ticking moves no block, so changes
+ * made one after another parse the page once.
  */
 export function setTask(
   markdown: string,
@@ -130,21 +141,30 @@ export function setTask(
 ): TaskEdit {
   // Whether its box is ticked in this text, which may have ticked it since the items were found.
   const now = (item: TaskItem): TaskItem => ({ ...item, checked: markdown[item.mark] !== ' ' });
+  const named = change.line === '' ? 'That task' : `The task “${change.line}”`;
+  const same = () => [...items().values()].filter((item) => item.line === change.line);
   const there = items().get(change.offset);
-  let task = there?.line === change.line ? now(there) : null;
-  if (!task) {
-    const same = [...items().values()].filter((item) => item.line === change.line);
-    if (same.length !== 1) {
-      const named = change.line === '' ? 'That task' : `The task “${change.line}”`;
+  let task: TaskItem | null = null;
+  if (there?.line === change.line) {
+    const { madeIn } = change;
+    if (madeIn !== undefined && !ticksApart(madeIn, markdown, items()) && same().length > 1)
+      return {
+        ok: false,
+        reason: `${named} is on the page more than once, and the page changed since it was ticked.`,
+      };
+    task = now(there);
+  } else {
+    const found = same();
+    if (found.length !== 1) {
       return {
         ok: false,
         reason:
-          same.length === 0
+          found.length === 0
             ? `${named} isn’t on the page any more.`
             : `${named} is on the page more than once now.`,
       };
     }
-    task = same[0] ? now(same[0]) : null;
+    task = found[0] ? now(found[0]) : null;
   }
   if (!task || task.checked === change.checked) return { ok: true, markdown };
   const mark = change.checked ? 'x' : ' ';
@@ -152,6 +172,25 @@ export function setTask(
     ok: true,
     markdown: markdown.slice(0, task.mark) + mark + markdown.slice(task.mark + 1),
   };
+}
+
+/**
+ * Whether `before` and `after` are the same text, what is ticked aside:
+ * where they differ, only in boxes of `after`'s task items (`items`, by
+ * where each starts), each still a box. Compared as text, never parsed,
+ * as a box's mark is all ticking changes.
+ */
+function ticksApart(before: string, after: string, items: ReadonlyMap<number, TaskItem>): boolean {
+  if (before === after) return true;
+  if (before.length !== after.length) return false;
+  let marks: Set<number> | null = null;
+  for (let i = 0; i < before.length; i++) {
+    const was = before[i];
+    if (was === after[i]) continue;
+    marks ??= new Set([...items.values()].map(({ mark }) => mark));
+    if (!marks.has(i) || (was !== ' ' && was !== 'x' && was !== 'X')) return false;
+  }
+  return true;
 }
 
 /**

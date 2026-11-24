@@ -152,6 +152,70 @@ describe('ticking a task', () => {
     });
   });
 
+  describe('a line more than one task has, ticked in text that has changed since (#703)', () => {
+    const PAGE = '## Mum\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n- [ ] Call\n';
+    // Bob's section and Mum's swapped: Bob's `Call` now starts where Mum's did.
+    const SWAPPED = '## Bob\n- [ ] Call\n\n## Mum\n- [ ] Call\n- [ ] Tidy\n';
+    const mums = { offset: PAGE.indexOf('- [ ] Call'), line: 'Call', checked: true };
+    const bobs = { offset: PAGE.lastIndexOf('- [ ] Call'), line: 'Call', checked: true };
+
+    it('is refused where the offset may now be another task with that line', () => {
+      expect(SWAPPED.indexOf('- [ ] Call')).toBe(mums.offset);
+      expect(setTask(SWAPPED, { ...mums, madeIn: PAGE })).toEqual({
+        ok: false,
+        reason:
+          'The task “Call” is on the page more than once, and the page changed since it was ticked.',
+      });
+    });
+
+    it('is ticked by its offset where only what is ticked changed', () => {
+      expect(setTask(PAGE, { ...bobs, madeIn: PAGE })).toEqual({
+        ok: true,
+        markdown: '## Mum\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n- [x] Call\n',
+      });
+      // Someone ticked other tasks meanwhile, `[X]` included.
+      const ticked = '## Mum\n- [X] Call\n- [x] Tidy\n\n## Bob\n- [ ] Call\n';
+      expect(setTask(ticked, { ...bobs, madeIn: PAGE })).toEqual({
+        ok: true,
+        markdown: '## Mum\n- [X] Call\n- [x] Tidy\n\n## Bob\n- [x] Call\n',
+      });
+      // Or the person did, in the same batch, before this tick.
+      const mine = setTask(PAGE, { ...mums, madeIn: PAGE });
+      if (!mine.ok) throw new Error(mine.reason);
+      expect(setTask(mine.markdown, { ...bobs, madeIn: mine.markdown })).toEqual({
+        ok: true,
+        markdown: '## Mum\n- [x] Call\n- [ ] Tidy\n\n## Bob\n- [x] Call\n',
+      });
+    });
+
+    it('is ticked by its offset, or found by its line, where no other task has it', () => {
+      const tidy = { offset: PAGE.indexOf('- [ ] Tidy'), line: 'Tidy', checked: true };
+      // A word changed elsewhere, the same length: the offset still holds.
+      const edited = PAGE.replace('## Bob', '## Bub');
+      expect(setTask(edited, { ...tidy, madeIn: PAGE })).toEqual({
+        ok: true,
+        markdown: edited.replace('- [ ] Tidy', '- [x] Tidy'),
+      });
+      expect(setTask(SWAPPED, { ...tidy, madeIn: PAGE })).toEqual({
+        ok: true,
+        markdown: SWAPPED.replace('- [ ] Tidy', '- [x] Tidy'),
+      });
+      // One `Call` gone: the other is the only one.
+      const one = '## Mum\n- [ ] Call\n- [ ] Tidy\n';
+      expect(setTask(one, { ...mums, madeIn: PAGE })).toEqual({
+        ok: true,
+        markdown: '## Mum\n- [x] Call\n- [ ] Tidy\n',
+      });
+    });
+
+    it('is refused where a box became other text the same length', () => {
+      // `[ ]` on Mum's `Call` is now `[?]`: no longer a task, the texts differ beyond a tick.
+      const changed = '## Mum\n- [?] Call\n- [ ] Tidy\n\n## Bob\n- [ ] Call\n- [ ] Call\n';
+      const madeIn = '## Mum\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n- [ ] Call\n- [ ] Call\n';
+      expect(setTask(changed, { ...bobs, madeIn }).ok).toBe(false);
+    });
+  });
+
   it('takes the task items found before ticking for the text after, the page parsed once', () => {
     const before = Array.from({ length: 30 }, (_, i) => `- [ ] item ${i}\n`).join('');
     // A heading added above since they were made: each is found by its line, in the same items.
