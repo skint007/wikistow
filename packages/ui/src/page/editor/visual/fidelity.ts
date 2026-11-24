@@ -100,9 +100,9 @@ const isBreak = (item: Shown | undefined) =>
  * can hold on them (`holds`). Links are numbered in turn, so one written
  * as two, or two as one, doesn't show the same. A no-break space, or
  * another of Unicode's, shows as itself, as Markdown keeps it, but with no
- * marks, as an ASCII space: no delimiter can sit beside one either, so one
- * at a mark's end is written without it (`writable`), as Milkdown writes
- * the rest (#730).
+ * marks, as an ASCII space does, in code too: no delimiter can sit beside
+ * one either, so one at a mark's end is written outside it (`writable`,
+ * `around`), save in a link or a colour's HTML, which hold it (#730).
  */
 function inline(block: Node): Shown[] {
   const shown: Shown[] = [];
