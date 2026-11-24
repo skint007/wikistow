@@ -41,6 +41,11 @@ const PAGES = [
   'a b\\\nc d e\n',
   'a ` b ` c d\n',
   'ab  cd ef\n',
+  // No-break spaces, which no delimiter can sit beside (#730).
+  'a b\u00a0c d\n',
+  'ab\u00a0\u00a0cd ef\n',
+  'a b\u00a0\\\nc d\n',
+  'a\u00a0b\\\n\u00a0c d e\n',
 ];
 const MARKS = ['strong', 'emphasis', 'strike_through', 'link', 'inlineCode'];
 const COLOURED = [...MARKS, 'highlight', 'highlight', 'text_color'];
@@ -209,16 +214,16 @@ describe('marks that overlap partly', () => {
       ],
       '[a **b**](u)\\\n**c d** e\n',
     );
-    // But not where the mark would then end beside a no-break space, which
-    // shows it, as no delimiter can sit beside one; nor out of a colour's
-    // HTML around one, which a mark around the colour then ends beside.
+    // And past a no-break space, which goes out of the bold too, as no
+    // delimiter can sit beside one (#730). But not out of a colour's HTML
+    // around one, which a mark around the colour would then end beside.
     await writes(
       'a b\\\n\u00a0c d e\n',
       [
         ['link', 1, 4, { href: 'u' }],
         ['strong', 3, 7],
       ],
-      '[a **b**](u)**\\\n\u00a0c** d e\n',
+      '[a **b**](u)\\\n\u00a0**c** d e\n',
     );
     await writes(
       'a <span data-color="red">b\u00a0\\\nc d</span> e\n',
@@ -241,6 +246,25 @@ describe('marks that overlap partly', () => {
     );
   });
 
+  it('write a no-break space at a mark’s end out of it (#730)', async () => {
+    // Bold over `b` and the no-break space, then a link over `c d`.
+    await writes(
+      'a b\u00a0c d\n',
+      [
+        ['strong', 3, 5],
+        ['link', 5, 8, { href: 'u' }],
+      ],
+      'a **b**\u00a0[c d](u)\n',
+    );
+    await writes('a b\u00a0c d\n', [['strong', 3, 5]], 'a **b**\u00a0c d\n');
+    await writes('a b\u00a0c d\n', [['emphasis', 4, 6]], 'a b\u00a0*c* d\n');
+    await writes('a b\u00a0c d\n', [['strike_through', 4, 7]], 'a b\u00a0~~c~~ d\n');
+    // Before a line break.
+    await writes('a b\u00a0\\\nc d\n', [['strong', 3, 6]], 'a **b**\u00a0\\\nc d\n');
+    // Inside the bold, it stays.
+    await writes('a b\u00a0\\\nc d\n', [['strong', 3, 7]], 'a **b\u00a0\\\nc** d\n');
+  });
+
   it('read the same however the marks nest', () => {
     for (const [a, b] of [
       ['~~*d* e~~\n', '*~~d~~* ~~e~~\n'],
@@ -257,6 +281,8 @@ describe('marks that overlap partly', () => {
       ['**<span data-color="blue"> </span>**\n', '<span data-color="blue"> </span>\n'],
       // A mark inside one the same.
       ['**a __b__ c**\n', '**a b c**\n'],
+      // A no-break space shows no marks, as a space doesn't.
+      ['**a**\u00a0**b**\n', '**a\u00a0b**\n'],
       [
         '<span data-color="red">a</span><span data-color="red">b</span>\n',
         '<span data-color="red">ab</span>\n',
@@ -279,6 +305,8 @@ describe('marks that overlap partly', () => {
       ['<span data-color="red">a</span>\n', '<span data-color="blue">a</span>\n'],
       ['**a**\n', '**b**\n'],
       ['a b\n', 'a  b\n'],
+      ['a b\n', 'a\u00a0b\n'],
+      ['a\u00a0\n', 'a\n'],
       ['**a**\\\n**b**\n', '**a b**\n'],
       ['**![x](i)**\n', '![x](i)\n'],
       ['x[](u)\n', 'x\n'],
