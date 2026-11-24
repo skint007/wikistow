@@ -1331,6 +1331,37 @@ Round 43 reviewed round 42's revision (bf1adaa), with fresh reviewers given the 
 
 **Outcome.** Round 43 found Highs, and ran without the server brief, so it doesn't meet the stopping rule. Every finding is fixed, moot or accepted as availability. Round 44 repeats the three briefs against this revision.
 
+## Round 44: identity key rotation, narrowed, fifth review
+
+Round 44 reviewed round 43's revision (05c486b) with the three briefs, fresh reviewers given the narrowed text, the log of rounds 31 to 43 and the list of what earlier rounds accepted: the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent, worded as a review of whether the specification's outcomes match its own goals and accepted limits, which ran the first time. It found no Critical finding, 6 High, 8 Medium, 8 Low and no Info (22 in all). Every reviewer found the narrowing itself consistent, and nothing left of the removed review, re-signing or removal route. All six Highs were in the exception where the person is a member's only accepted owner and in the re-add and removal rules around it: not recording what the exception reached let a second rotation fire it again past a co-owner; a decline didn't reach the member's agents; co-owners from before this text had no own entry for the exception's gate; and a removal merged across devices kept a key a concurrent re-add recorded. Section numbers are protocol.md's after the fixes.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S44-1 | 44 | High | 4.6 **Removing a rotated owner instead**; 8.6 | A removal moved only the keys it carried, so a key another device's retried re-add recorded meanwhile stayed in `owners` and chose `E`. | Fixed: the change names the latest key held before any re-add, and the merge moves every key above it. |
+| S44-2 | 44 | High | 4.6 **A space whose only accepted owner is the person**; A15 | The exception recorded nothing, so after a member reached a co-owner through it, a second rotation of the person, by someone holding the second key, fired it again and dropped the co-owner. | Fixed: what the exception accepts, the keys between and the owners reached, is recorded with `via`, so a recorded co-owner stops it firing again; a decline drops the `via` entries. Same as M44-1. |
+| E44-F1 | 44 | High | 4.6 | Co-owners from before this text have no own entry, so the exception could fire in an owner's app. | Fixed: the gate also excludes an app the server lists, or a served statement names, as an owner, and the release before rotation records the own entry where the app confirmed a co-owner dialog or accepted a statement naming it. |
+| E44-F2 | 44 | High | 4.6; 8.4; 9.4 | Declining a key didn't reach the member's agents, which kept writing under versions it sealed. | Fixed: a decline ends the person's agents' picks in every share whose current version a declined key sealed, until the person picks it again. Same as M44-2. |
+| M44-1 | 44 | High | 4.6; A15 | Same as S44-2. | Fixed with S44-2. |
+| M44-2 | 44 | High | 8.4; 4.6; 9.4 | Same as E44-F2. | Fixed with E44-F2. |
+| S44-3 | 44 | Medium | 4.6 **Adding a rotated owner again** | A finished re-add stayed pending on a key between. | Fixed: the test reads only the latest key held for that owner. |
+| S44-4 | 44 | Medium | 4.6; 6.5 | After a second rotation, members lost history the key between sealed. | Fixed with S44-2: the keys between are recorded. Same as M44-4. |
+| S44-5 | 44 | Medium | 4.6 | First sight skipped the only envelope that gave a rotated member their history. | Fixed: an envelope to the app's own retired key isn't skipped. |
+| E44-F3 | 44 | Medium | 4.6; 7.6 | A former owner's own entry stayed for good, so the exception never fired for it. | Fixed: removing oneself adds one's ID to `removedOwners`, and such an entry doesn't make the app an owner. |
+| E44-F4 | 44 | Medium | 4.6 **Owners** | "A key hash the app holds" had two readings for the exception's acceptances. | Fixed: one the app accepts now, from its record; the exception's are now recorded. |
+| E44-F5 | 44 | Medium | 6.5 step 2 | Whether an entry at a removed key counts as having accepted an owner was unsettled. | Fixed: every entry counts. |
+| M44-3 | 44 | Medium | 4.6 | Without round 41's refusal, a rotated owner could add themself and end a pending re-add. | Fixed: the server again refuses a co-owner add naming the caller, and the pending test ignores the named owner's own statements. |
+| M44-4 | 44 | Medium | 4.6; 6.5 | Same as S44-4. | Fixed with S44-4. |
+| S44-6 | 44 | Low | 6.8; 4.6 | §6.8 applied the pause to rotating from the version below. | Fixed: it may rotate from it. |
+| E44-L1 | 44 | Low | 8.2; 8.6 | An older app's re-add left a key in both `owners` and `openOnly`, which silently didn't take. | Fixed in wording: such a re-add doesn't take and the app asks again; a current app takes the key out of `openOnly`. |
+| E44-L2 | 44 | Low | 4.6 | The pending test's signer and its reading of `openOnly` were undefined. | Fixed: an owner the app accepts at their current key, not on `removedOwners`, and `owners` only. |
+| E44-L3 | 44 | Low | 4.6 | Whether a declined key, or a removed owner's, pauses a share was undefined. | Fixed: neither does. |
+| E44-L4 | 44 | Low | 4.6 | Which key the exception takes while a newer follow is pending was ambiguous. | Fixed: the latest stored, an earlier key until the newer one is stored. |
+| M44-5 | 44 | Low | ADR decision 6 | The ADR said agents take the exception from the record, the protocol that nothing was recorded. | Fixed: it is recorded now, and both say so. |
+| M44-6 | 44 | Low | 4.6; 7.6 | A member promoted through a statement only the exception made acceptable recorded its own entry before its dialog. | Fixed: it records its own entry after any dialog. |
+| M44-7 | 44 | Low | 4.6; 6.8 | The pause didn't cover sealing to agents. | Fixed. |
+
+**Outcome.** Round 44 found Highs, so it doesn't meet the stopping rule. Every finding is fixed. Round 45, the sixth after the narrowing and the last this run allows, repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
