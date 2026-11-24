@@ -1380,19 +1380,21 @@ export async function holdSubtree(
  * `tops`, a node, or what is at the top of a space or of a copy, with the
  * shares rooted in them. Their pages' publications into other spaces
  * end with them (`endPublicationsFrom`), and so do their public links and
- * copies. The hashes of the blobs that went, whose files the caller
- * removes once the transaction commits (`deleteUnlistedFile`).
+ * copies, for `actor`, the account the caller's record of it names, if
+ * any (`endLinks`). The hashes of the blobs that went, whose files the
+ * caller removes once the transaction commits (`deleteUnlistedFile`).
  */
 export async function removeSubtree(
   tx: Database,
   spaceId: string,
   tops: readonly string[],
   ids: readonly string[],
+  actor: string | null,
 ): Promise<string[]> {
   const openingFiles = await endPublicationsFrom(tx, ids);
   // Its pages' public links, copies and the target rows naming them, in
   // their lock order, rather than by the cascade (ADR 0005, decision 5).
-  await endLinks(tx, ids);
+  await endLinks(tx, ids, actor);
   const doomed = await tx.select({ hash: blobs.hash }).from(blobs).where(anyId(blobs.pageId, ids));
   // Envelopes and folder metadata point at their subject by ID, not by
   // foreign key, so they are removed explicitly.
