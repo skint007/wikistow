@@ -1083,23 +1083,36 @@ function repairs1(
     const span = spans[firstEnding(spans, item.at)];
     return span !== undefined && span.from <= item.at && span.to >= end;
   };
-  // A single `$`, backtick or bracket beside a tag, and nothing else of its
-  // writer's there, may be a third person's, as `$` typed before `50`: it
-  // counts only with another of its writer's, as code's two backticks.
+  // A single `$`, backtick or bracket beside a tag may be a third person's,
+  // as `$` typed before `50`: it counts only where its writer has text in
+  // a tag there, or put its other half in the block in the same unseen
+  // change, as code's closing backtick or a link's `](x.md)`.
   const lone = (item: Found) =>
     !item.deleted &&
     item.length === 1 &&
     !overlapsAny(tags, item.at, item.at + 1) &&
     SINGLE.has(text(item.at, item.at + 1));
-  const singles = new Map<number, number>();
+  // New: this app's recent text, or text one of its recent writings hadn't.
+  const isNew = (item: Found) =>
+    putBy(recent, item) >= 0 ||
+    recent.some((w) => item.clock + item.length > (w.seen.get(item.client) ?? 0));
+  const written = new Map<number, string>();
   const more = new Set<number>();
-  for (const item of items)
-    if (!item.deleted && near(item)) {
-      if (lone(item)) singles.set(item.client, (singles.get(item.client) ?? 0) + 1);
-      else more.add(item.client);
-    }
+  for (const item of items) {
+    if (item.deleted || !isNew(item)) continue;
+    const put = text(item.at, item.at + item.length);
+    written.set(item.client, (written.get(item.client) ?? '') + put);
+    if (near(item) && !lone(item)) more.add(item.client);
+  }
+  const halfOf: Record<string, string> = { '[': ']', ']': '[', '`': '`', $: '$' };
+  const paired = (item: Found) => {
+    const char = text(item.at, item.at + 1);
+    const half = halfOf[char] as string;
+    const all = written.get(item.client) ?? '';
+    return half === char ? all.split(char).length > 2 : all.includes(half);
+  };
   const inOne = (item: Found) =>
-    near(item) && (!lone(item) || more.has(item.client) || (singles.get(item.client) ?? 0) >= 2);
+    near(item) && (!lone(item) || more.has(item.client) || paired(item));
   let latest = -1;
   for (const item of items)
     if (inOne(item))
