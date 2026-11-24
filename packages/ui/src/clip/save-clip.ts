@@ -16,11 +16,13 @@ import {
   QueueClosed,
   RevisionId,
   linkSpans,
+  noAnswer,
   splitFrontmatter,
   type AttachmentRef,
   type LinkSpans,
+  type PagePayload,
   type PageWriter,
-  type WaitingChange,
+  type SpaceId,
 } from '@wikistow/client';
 import type { ClipImage, ClipMade, ClipOutcome, DesktopClip } from '@wikistow/contracts';
 import {
@@ -55,6 +57,16 @@ export type SaveClipDeps = {
    * it is made, so a reload finishes it rather than making another.
    */
   made?: (page: ClipMade) => Promise<void>;
+  /**
+   * A page's draft on the server now, its head and what it holds, so a
+   * screenshot added to its page made partly writes over nothing the
+   * person changed since. Throws as the server answers: `404` for one in
+   * the trash.
+   */
+  current?: (page: { spaceId: SpaceId; pageId: PageId }) => Promise<{
+    head: RevisionId;
+    payload: PagePayload;
+  }>;
   /** Main's fetch of one of the clip's images (`DesktopBridge.clipImage`). */
   image: (url: string) => Promise<ClipImage>;
   /** Today, as `clipped` says it. */
@@ -372,18 +384,31 @@ async function finishPartly(
     place: null,
   };
   const drafts = deps.writer.draft(page, { seen: null });
-  // Its change waiting on this device, read before anything is written, so
-  // a save into it since is a conflict (`seen`).
-  let head: RevisionId | null;
-  let waiting: WaitingChange | null;
+  // The page as it stands: its change waiting on this device, read before
+  // anything is written, so a save into it since is a conflict (`seen`),
+  // or else its draft on the server.
+  let stands: { head: RevisionId; payload: PagePayload } | null = null;
   try {
-    head = await drafts.waitingHead();
-    waiting = await drafts.waitingChange();
+    const head = await drafts.waitingHead();
+    const waiting = await drafts.waitingChange();
+    // A change the server refused, which the person sorts out first.
+    if (waiting && !head) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+    if (waiting && head) stands = { head, payload: waiting.payload };
   } catch {
     return failed('failed', `${SHOT_FAILED} ${KEPT}`);
   }
-  if (waiting) {
-    const { payload } = waiting;
+  if (!stands && deps.current) {
+    try {
+      stands = await deps.current(page);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return 'gone';
+      // Offline, it's added on the first draft it was made with, and a
+      // draft saved since makes it a conflict once sent.
+      if (!noAnswer(error)) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+    }
+  }
+  if (stands) {
+    const { payload } = stands;
     const body = bodyOf(payload.markdown);
     // Saved with the screenshot already, just before a reload: done.
     if (
@@ -394,7 +419,8 @@ async function finishPartly(
       return done;
     }
     // Changed since it was made, as the person can while another clip
-    // saves first: theirs, not written over. Its properties may change.
+    // saves first: theirs, not written over. What else they changed, such
+    // as its properties or cover, is kept below.
     if (payload.title !== title || body !== bodyOf(text.first)) return failed('failed', CHANGED);
   }
   let ref: AttachmentRef;
@@ -412,20 +438,20 @@ async function finishPartly(
       ? failed('too-large', `This screenshot is larger than your WikiStow server takes. ${KEPT}`)
       : failed('failed', `${SHOT_FAILED} ${KEPT}`);
   }
-  // On its change waiting here, keeping the properties it has there, or
-  // else on the first draft it was made with: a draft saved on the server
-  // since, by the person or by this save before a reload, is a conflict.
-  const basedOn = head ?? made.revisionId;
+  // On the page as it stands, keeping all it has but the text, or else
+  // on the first draft it was made with.
+  const basedOn = stands?.head ?? made.revisionId;
   if (!basedOn) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
   const shown = text.shown(ref.id);
-  const markdown = waiting
-    ? (splitFrontmatter(waiting.payload.markdown).frontmatter ?? '') + bodyOf(shown)
-    : shown;
+  const payload = stands
+    ? {
+        ...stands.payload,
+        markdown: (splitFrontmatter(stands.payload.markdown).frontmatter ?? '') + bodyOf(shown),
+        attachments: [...stands.payload.attachments, ref],
+      }
+    : { ...newPayload({ title, markdown: shown }), attachments: [ref] };
   try {
-    await drafts.save({
-      basedOn,
-      payload: { ...newPayload({ title, markdown }), attachments: [ref] },
-    });
+    await drafts.save({ basedOn, payload });
   } catch (error) {
     if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
     if (error instanceof ApiError && error.code === 'stale-head') return failed('failed', CHANGED);
