@@ -6,7 +6,14 @@ import type { Page } from '@playwright/test';
 import { showIn, visual } from './editor';
 import { expect, test } from './fixtures';
 import { newFolder, openShared, publishedPageIn, shareFolder } from './sharing';
-import { adminTab, expectSource, fillSource, memberWithVault, waitForSave } from './vault';
+import {
+  adminTab,
+  expectSource,
+  fillSource,
+  memberWithVault,
+  PASSPHRASE,
+  waitForSave,
+} from './vault';
 
 const LIST = '- [ ] milk\n- [ ] bread\n- [ ] eggs\n- [x] jam\n';
 
@@ -253,6 +260,70 @@ async function installCalculator(page: Page) {
   await expect(status).toContainText('installed it on all your devices.');
   await page.goto('/');
 }
+
+/**
+ * A tick on a line two tasks share (#703): it lands on the one clicked,
+ * and is left out, saying why, when the page changed before it was saved,
+ * as another tab swapping the sections that hold them may have put the
+ * other task where the clicked one was.
+ */
+test('a tick on a line two tasks share lands on the one clicked, or is left out once the page changed', async ({
+  page: owner,
+  freshPage,
+  admin,
+}) => {
+  test.setTimeout(240_000);
+  await memberWithVault(owner, await adminTab(freshPage, admin.email));
+  await newFolder(owner, 'Lists');
+  const CALLS = '## Mum\n\n- [ ] Call\n- [ ] Tidy\n\n## Bob\n\n- [ ] Call\n';
+  // Bob's section first: his `Call` starts where Mum's did.
+  const SWAPPED = '## Bob\n\n- [ ] Call\n\n## Mum\n\n- [ ] Call\n- [ ] Tidy\n';
+  const calls = box(owner, 'Call');
+
+  await test.step('with nothing changed meanwhile, the one clicked', async () => {
+    await publishedPageIn(owner, 'Lists', 'Calls', CALLS);
+    await calls.nth(1).check();
+    await expect(owner.getByText('Published v2')).toBeVisible({ timeout: 30_000 });
+    await owner.reload();
+    await expect(owner.getByText('Published v2')).toBeVisible();
+    await expect(calls.nth(0)).not.toBeChecked();
+    await expect(calls.nth(1)).toBeChecked();
+  });
+
+  await test.step('with the sections swapped in another tab before it is saved, left out', async () => {
+    await publishedPageIn(owner, 'Lists', 'More calls', CALLS);
+    const url = owner.url();
+    const pageId = /\/p\/([^/?#]+)/.exec(url)?.[1];
+    if (!pageId) throw new Error(`No page in ${url}`);
+    // The flush starts by loading the page's heads: held until the other tab has saved.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const heads = new RegExp(`/api/pages/${pageId}$`);
+    await owner.route(heads, async (route) => {
+      await held;
+      await route.fallback();
+    });
+    await calls.nth(0).check();
+    const other = await owner.context().newPage();
+    await other.goto(url);
+    await other.getByLabel('Vault passphrase').fill(PASSPHRASE);
+    await other.getByRole('button', { name: 'Unlock' }).click();
+    await other.getByRole('button', { name: 'Edit' }).click();
+    await fillSource(other, SWAPPED);
+    await waitForSave(other);
+    release();
+    await owner.unroute(heads);
+    await expect(
+      owner.getByText(
+        'A change was left out. The task “Call” is on the page more than once, and the page changed since it was ticked.',
+      ),
+    ).toBeVisible({ timeout: 30_000 });
+    // Bob's `Call`, now where Mum's was, stays as it was, and so does hers.
+    await other.reload();
+    await expectSource(other, SWAPPED);
+    await other.close();
+  });
+});
 
 /**
  * A plugin block's field tied to a property (#212): in the reader it sets
