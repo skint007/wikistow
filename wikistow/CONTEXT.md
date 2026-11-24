@@ -81,6 +81,10 @@ _Avoid_: Verified key, safety code.
 A person replacing their own identity keys with new ones, as when the old ones may have leaked, with a statement both keys sign. The people they share with follow it to the new key without the key-change warning, what the person signed before stays theirs, and the shares they're in get new folder keys. An owner who replaces their keys is added again as an owner by a co-owner; in a space they own alone nobody can, so they share again from a new space. Proposed in ADR 0018. Not recovery, which opens the same keys with the recovery key.
 _Avoid_: Key reset, re-keying, key change (a key the app can't follow).
 
+**Closed space**
+A space a person's devices and agents only read in, because the person declined a replaced key that their contacts record had accepted as one of its owners. It opens again when they confirm a key of that owner. Proposed in ADR 0018.
+_Avoid_: Frozen space, read-only space (reader is a role in a share).
+
 **Shared with me**
 The list of shares you are a member of. Each shows the shared folder's name and who shared it, never the names of the folders above it.
 
