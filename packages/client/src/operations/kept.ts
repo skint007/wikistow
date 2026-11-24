@@ -178,6 +178,9 @@ const KeptVersionJson = z.strictObject({
   keyVersion: z.number().int().nullable(),
   // A version kept before times were has none.
   createdAt: z.iso.datetime().nullable().default(null),
+  // Whose clock that is (`OpenedRevision.timeFrom`); one kept before the
+  // two were told apart has no word.
+  timeFrom: z.enum(['server', 'device']).optional(),
 });
 
 /** How much the reader's downloads for pages not kept yet may hold, at most. */
@@ -328,8 +331,8 @@ export class KeptContent {
     try {
       const opened = parsePayload(json.payload);
       if (opened.kind !== 'current') return;
-      const { region, keyVersion, createdAt } = json;
-      return { record, opened, region, keyVersion, createdAt };
+      const { region, keyVersion, createdAt, timeFrom } = json;
+      return { record, opened, region, keyVersion, createdAt, ...(timeFrom && { timeFrom }) };
     } catch {
       return;
     }
@@ -421,8 +424,15 @@ export class KeptContent {
   // What the keeper writes, from within `store.exclusive`.
 
   async keepVersion(opened: OpenedRevision & { opened: { kind: 'current' } }): Promise<void> {
-    const { record, region, keyVersion, createdAt } = opened;
-    const json = { record, payload: opened.opened.payload, region, keyVersion, createdAt };
+    const { record, region, keyVersion, createdAt, timeFrom } = opened;
+    const json = {
+      record,
+      payload: opened.opened.payload,
+      region,
+      keyVersion,
+      createdAt,
+      timeFrom,
+    };
     await this.#writeBytes(versionItem(record.revisionId), utf8(JSON.stringify(json)));
   }
 

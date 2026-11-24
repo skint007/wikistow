@@ -83,6 +83,7 @@ function fakeServer(identity: PrivateIdentity) {
       region: { kind: 'owner' },
       keyVersion: null,
       createdAt: '2026-11-13T09:00:00.000Z',
+      timeFrom: 'server',
     });
     return { revisionId, blobHash };
   }
@@ -214,8 +215,9 @@ describe('keeping pages for offline', () => {
     expect(opened.opened.kind === 'current' && opened.opened.payload.title).toBe(
       `Recipes draft ${SECRET}`,
     );
-    // With when the server took it, as it said when it was kept.
-    expect(opened.createdAt).toBe('2026-11-13T09:00:00.000Z');
+    // With when the server took it, as it said when it was kept, and that
+    // it was the server's word, not this device's clock (#646).
+    expect(opened).toMatchObject({ createdAt: '2026-11-13T09:00:00.000Z', timeFrom: 'server' });
     expect(await pageOperations.downloadBlob(later, recipes.draft.blobHash)).toEqual(
       utf8('image Recipes draft'),
     );
