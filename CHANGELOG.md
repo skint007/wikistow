@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- Live editing: a draft someone saved elsewhere while the app was getting back into a lost session is no longer missed when the app goes on without joining again, as when it had nothing of the person's to keep. The editor showed the old draft, and **Publish** published one the person never saw. (#722)
+
 ## 0.30.2 - 2026-11-23
 
 ### Highlights
