@@ -13,7 +13,7 @@ import {
 import { pageHtml, SYNTAX, TASK, taskLabels, taskMarks } from '@wikistow/client/reader';
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
 import { useLocation } from '@tanstack/react-router';
-import type { InlineCode, Nodes, Root, RootContent } from 'mdast';
+import type { InlineCode, Root, RootContent } from 'mdast';
 import {
   Component,
   createContext,
@@ -304,8 +304,9 @@ function OwnCodeBlock({ node, ...props }: ComponentProps<'pre'> & ExtraProps) {
 
 /**
  * The whole text the body's tree was read from, where the page shown is
- * another, still being read, and not just that text with boxes ticked
- * since: its offsets may be other tasks' there (#728). Empty where no
+ * another, still being read, and not one shown on the way to it as this
+ * person's queued changes were made (`shownBefore`): its offsets may be
+ * other tasks' there (#728). Empty where no
  * whole text has that body, as when the frontmatter went and the body
  * starts with what reads as frontmatter: then no box can be ticked. Null
  * where the tree is the text shown's.
@@ -359,45 +360,6 @@ const TaskBox: NonNullable<Components['input']> = ({ node, ...props }) => {
     />
   );
 };
-
-const BOX_MARKS = new Set([' ', 'x', 'X']);
-
-/**
- * Whether `shown` is `read`, the whole text the body's `tree` was read
- * from (`start` where its body starts), but for boxes ticked or not since,
- * the boxes of the tree's task items: ticking moves no block, so the
- * tree's tasks are where `shown` has them. Compared as text, the tree
- * walked only once they differ, as each tick shown before it's read does.
- */
-function ticksSince(read: string, shown: string, tree: Root, start: number): boolean {
-  if (read === shown) return true;
-  if (read.length !== shown.length) return false;
-  let marks: Set<number> | null = null;
-  for (let i = 0; i < read.length; i++) {
-    const was = read[i]!;
-    const is = shown[i]!;
-    if (was === is) continue;
-    if (!BOX_MARKS.has(was) || !BOX_MARKS.has(is)) return false;
-    marks ??= boxMarks(read, tree, start);
-    if (!marks.has(i)) return false;
-  }
-  return true;
-}
-
-/** Where each task item of `tree` has its box's mark in `markdown`, read without recursion. */
-function boxMarks(markdown: string, tree: Root, start: number): Set<number> {
-  const marks = new Set<number>();
-  const stack: Nodes[] = [tree];
-  for (let node = stack.pop(); node; node = stack.pop()) {
-    const at = node.position?.start.offset;
-    if (node.type === 'listItem' && typeof node.checked === 'boolean' && at !== undefined) {
-      const task = taskAt(markdown, start + at);
-      if (task) marks.add(task.mark);
-    }
-    if ('children' in node) for (const child of node.children) stack.push(child);
-  }
-  return marks;
-}
 
 /** A code block as written, under its language and a button that copies it. */
 function WrittenCode({
@@ -516,12 +478,12 @@ export function Markdown({
   const whole = !read.data || splitFrontmatter(readFrom).body === read.data.body;
   const start = whole ? bodyStart(readFrom) : bodyStart(source);
   const here = use(ReadingChanges);
-  const shownText = here?.markdown ?? null;
+  const drawnFrom = read.data?.body;
   const older = useMemo(() => {
-    if (!tree || shownText === null) return null;
-    if (!whole) return '';
-    return ticksSince(readFrom, shownText, tree, start) ? null : readFrom;
-  }, [tree, shownText, readFrom, whole, start]);
+    if (!here || drawnFrom === undefined || drawnFrom === body || here.shownBefore(drawnFrom))
+      return null;
+    return whole ? readFrom : '';
+  }, [here, drawnFrom, body, whole, readFrom]);
   const hash = useLocation({ select: (location) => location.hash });
   // A link to a heading of this page arrives before its body is read: it
   // goes there once the body first shows, and as the hash changes, but not

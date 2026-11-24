@@ -16,6 +16,7 @@ import { ReadingChanges } from '../src/page/reading-changes.tsx';
 import {
   applyChanges,
   madeIn,
+  shownOnTheWay,
   type ReadingChange,
   type ReadingRights,
 } from '../src/page/reading-changes-model.ts';
@@ -82,7 +83,10 @@ async function render(first: string, rights: ReadingRights | null) {
       queue.push(kept);
       setQueued((before) => [...before, kept]);
     };
-    return <ReadingChanges value={{ markdown, rights, change }}>{body}</ReadingChanges>;
+    const shownBefore = (drawn: string) => shownOnTheWay(source, queued, drawn);
+    return (
+      <ReadingChanges value={{ markdown, rights, change, shownBefore }}>{body}</ReadingChanges>
+    );
   }
   const node: ReactNode = <Reading />;
   const rootRoute = createRootRoute({ component: () => node });
@@ -217,6 +221,21 @@ describe('a task’s checkbox in the reader', () => {
       .poll(() => container.querySelector('input[type=checkbox]')?.getAttribute('aria-label'))
       .toBe('Call Bob');
     expect([box('Call Bob').checked, box('Call Mum').checked]).toEqual([false, false]);
+  });
+
+  it('ticks in the text its tree was read from when the newer one differs only in what is ticked', async () => {
+    // The sections differ only in their Notes' boxes: swapped, the text differs only in boxes too.
+    const before = '## A\n- [ ] Call\n- [x] Notes\n## A\n- [ ] Call\n- [ ] Notes\n';
+    const swapped = '## A\n- [ ] Call\n- [ ] Notes\n## A\n- [ ] Call\n- [x] Notes\n';
+    const { container, changes, queue, shown } = await render(before, { allowed: true });
+    hold((input) => input === swapped);
+    await shown(swapped);
+    const first = container.querySelector<HTMLInputElement>('input[aria-label="Call"]');
+    await act(async () => first?.click());
+    expect(changes.map((change) => change.kind === 'task' && change.madeIn)).toEqual([
+      { markdown: before, repeated: true },
+    ]);
+    expect(applyChanges(swapped, queue).markdown).toBe(swapped);
   });
 
   it('ticks in the text shown while a read of it with only boxes ticked since waits', async () => {

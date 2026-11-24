@@ -23,6 +23,7 @@ import {
   type Flushed,
   type MadeOn,
   type ReadingChange,
+  shownOnTheWay,
 } from '../src/page/reading-changes-model.ts';
 
 const LIST = '---\nservings: 4\n---\n- [ ] milk\n- [ ] bread\n- [x] eggs\n';
@@ -816,5 +817,30 @@ describe('an offline draft made only of ticks (#695)', () => {
       markdown: fenced,
       dropped: [{ change: bread, reason: 'The task “bread” isn’t on the page any more.' }],
     });
+  });
+});
+
+describe('a body shown on the way to the page shown (#728)', () => {
+  const read = '---\ntitle: Calls\n---\n- [ ] Call\n- [ ] Call\n';
+  const second = read.lastIndexOf('- [ ] Call');
+  const first: ReadingChange = {
+    kind: 'task',
+    offset: read.indexOf('- [ ] Call'),
+    line: 'Call',
+    checked: true,
+  };
+  const then: ReadingChange = { kind: 'task', offset: second, line: 'Call', checked: true };
+  const set: ReadingChange = { kind: 'property', key: 'title', value: 'Phone calls' };
+
+  it('is the body read, or with some of the queued changes made, in order', () => {
+    const changes = [first, then, set];
+    expect(shownOnTheWay(read, changes, '- [ ] Call\n- [ ] Call\n')).toBe(true);
+    expect(shownOnTheWay(read, changes, '- [x] Call\n- [ ] Call\n')).toBe(true);
+    expect(shownOnTheWay(read, changes, '- [x] Call\n- [x] Call\n')).toBe(true);
+  });
+
+  it('is no other body, though it differs only in what is ticked', () => {
+    expect(shownOnTheWay(read, [first], '- [ ] Call\n- [x] Call\n')).toBe(false);
+    expect(shownOnTheWay(read, [], '- [x] Call\n- [ ] Call\n')).toBe(false);
   });
 });

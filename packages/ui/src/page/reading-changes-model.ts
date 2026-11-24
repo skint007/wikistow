@@ -157,6 +157,32 @@ export function applyChange(
     : { ok: false, reason: `${change.key} couldn’t be changed: ${edit.reason}` };
 }
 
+/**
+ * Whether `body` is the body of `read` with the first of `changes` made,
+ * none or more, in order: the page as shown on this device as each was
+ * made, its tasks where the text with all of them made has them, as ticks
+ * and properties move no task in the body. Another text, though it differs
+ * only in what is ticked, may have two same-named tasks swapped (#728).
+ */
+export function shownOnTheWay(
+  read: string,
+  changes: readonly ReadingChange[],
+  body: string,
+): boolean {
+  let markdown = read;
+  let parsed = read;
+  const items = () => taskIndex(parsed);
+  if (splitFrontmatter(markdown).body === body) return true;
+  for (const change of changes) {
+    const made = applyChange(markdown, change, items);
+    if (!made.ok) continue;
+    markdown = made.markdown;
+    if (change.kind === 'property') parsed = markdown;
+    else if (splitFrontmatter(markdown).body === body) return true;
+  }
+  return false;
+}
+
 /** `markdown` with each of `changes` made, in order, and those that no longer apply. */
 export function applyChanges(
   markdown: string,
