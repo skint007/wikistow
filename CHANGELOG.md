@@ -10,6 +10,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Live editing: a draft someone saved elsewhere while the app was getting back into a lost session is no longer missed when the app goes on without joining again, as when it had nothing of the person's to keep. The editor showed the old draft, and **Publish** published one the person never saw. (#722)
 - In the visual editor, Comment over cells selected in a table quotes them from the first to the last, as the page reads, rather than only the last cell. (#721)
+- A public link's copy lists the other pages in its query tables by when the server saved them, not by this device's clock, for pages published from this device too. A device whose clock ran fast or slow could list them out of order. (#725)
 
 #### Desktop
 

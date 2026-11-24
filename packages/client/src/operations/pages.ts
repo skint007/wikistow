@@ -184,6 +184,7 @@ export function cacheWritten(
       keyVersion: commit.wrap?.keyVersion ?? null,
       // The server's answer carries no time: this device's, as it confirmed.
       createdAt: new Date().toISOString(),
+      timeFrom: 'device',
     },
     generation,
   );
@@ -428,10 +429,22 @@ export type Wanted = { pageId: PageId; audience: Audience };
  * `timed` asks the server again for one held without when it was taken
  * (`OpenedRevision.createdAt`), as one this device kept before times were,
  * and keeps it with its time; if the server doesn't give it, the one held
- * stands in. Only for a caller that would ask the server anyway: offline,
- * it waits for an answer that doesn't come.
+ * stands in. `timed: 'server'` asks again too for one whose time may be
+ * this device's clock (`OpenedRevision.timeFrom`), for what others read:
+ * one this device wrote, or kept before the two were told apart. Only for
+ * a caller that would ask the server anyway: offline, it waits for an
+ * answer that doesn't come.
  */
-export type RevisionOptions = { fresh?: boolean; trash?: boolean; timed?: boolean };
+export type RevisionOptions = { fresh?: boolean; trash?: boolean; timed?: Timed };
+
+/** Which times `fetchRevisions` asks the server for again (`RevisionOptions`). */
+export type Timed = boolean | 'server';
+
+/** Whether `timed` asks the server again for when `opened` was taken. */
+const untimedFor = (timed: Timed, opened: OpenedRevision) =>
+  timed === 'server'
+    ? opened.createdAt === null || opened.timeFrom !== 'server'
+    : timed && opened.createdAt === null;
 
 /** Open now, but throw only to whoever asks for this one. */
 function openedNow(open: () => OpenedRevision): () => OpenedRevision {
@@ -460,10 +473,10 @@ export async function fetchRevisions(
   { fresh = false, trash = false, timed = false }: RevisionOptions = {},
 ): Promise<Map<RevisionId, () => OpenedRevision>> {
   const fetched = new Map<RevisionId, () => OpenedRevision>();
-  // Held here without their time, to ask for again (`timed`).
+  // Held here without the time wanted, to ask for again (`timed`).
   const untimed = new Map<RevisionId, OpenedRevision>();
   const held = (opened: OpenedRevision) => {
-    if (timed && opened.createdAt === null) untimed.set(opened.record.revisionId, opened);
+    if (untimedFor(timed, opened)) untimed.set(opened.record.revisionId, opened);
     else fetched.set(opened.record.revisionId, () => opened);
   };
   const generation = ctx.revisions.generation;
@@ -752,13 +765,13 @@ export const publicationsFor =
  * a newer format, or bind another page are left out, and every one when
  * they can't be fetched, unless `strict`, which throws then instead. Each
  * with when the server took it (`OpenedRevision.createdAt`), asked for
- * where one is held without it with `timed`.
+ * where one is held without it with `timed` (`RevisionOptions`).
  */
 export async function openPublications(
   ctx: ClientContext,
   spaceId: SpaceId,
   pages: readonly { id: PageId; publishedHead: RevisionId }[],
-  { strict = false, timed = false }: { strict?: boolean; timed?: boolean } = {},
+  { strict = false, timed = false }: { strict?: boolean; timed?: Timed } = {},
 ): Promise<Map<PageId, { payload: PagePayload; createdAt: string | null }>> {
   const opened = new Map<PageId, { payload: PagePayload; createdAt: string | null }>();
   if (pages.length === 0) return opened;
