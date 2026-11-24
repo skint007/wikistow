@@ -82,6 +82,14 @@ async function end(
   actor: string | null,
 ) {
   if (links === null && copyIds.length === 0) return { links: [], copies: 0 };
+  // Only for something to end: ending none records nothing, so it waits on
+  // no account. A link can't come meanwhile: turning one on takes the
+  // page's locks, which every caller ending links by page holds.
+  const linked =
+    links && copyIds.length === 0
+      ? await tx.select({ id: publicLinks.id }).from(publicLinks).where(links).limit(1)
+      : null;
+  if (linked?.length === 0) return { links: [], copies: 0 };
   await holdActor(tx, actor);
   const ended = links
     ? await tx.select().from(publicLinks).where(links).orderBy(publicLinks.pageId).for('update')
