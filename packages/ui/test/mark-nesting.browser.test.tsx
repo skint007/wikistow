@@ -271,12 +271,17 @@ describe('marks that overlap partly', () => {
       ],
       '[a ~~b~~](u)~~\\\n\u00a0c~~ d e\n',
     );
-    // A colour keeps a no-break space before a line break at its end, as
+    // A colour keeps a no-break space beside a line break at its end, as
     // it does at its end; an ASCII space goes out with the break.
     await writes(
       'a <mark data-color="red">b\u00a0\\\n</mark>c\n',
       [['strong', 1, 2]],
       '**a** <mark data-color="red">b\u00a0</mark>\\\nc\n',
+    );
+    await writes(
+      'a <mark data-color="red">b\\\n\u00a0</mark>c\n',
+      [['strong', 1, 2]],
+      '**a** <mark data-color="red">b</mark>\\\n<mark data-color="red">\u00a0</mark>c\n',
     );
     await writes(
       'a <mark data-color="red">b \\\n</mark>c\n',

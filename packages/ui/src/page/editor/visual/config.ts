@@ -547,19 +547,11 @@ const RANKED_FIRST = new Set([HIGHLIGHT, TEXT_COLOR]);
 const holdsSpaces = (mark: Mark) =>
   mark.type.name === TEXT_COLOR || (mark.type.name === HIGHLIGHT && mark.attrs['color'] !== null);
 
-/**
- * How many of `spaces`, at the start (`first`) or end of a colour's run,
- * it gives up: none, as its HTML holds them, but a line break and what
- * lies past it, with the ASCII spaces beside the break, which Milkdown
- * would move out of a mark around the colour. Another space, as a
- * no-break space, it keeps on its side of the break (#730).
- */
-function kept(spaces: string, first: boolean): number {
-  const at = first ? spaces.lastIndexOf('\n') : spaces.indexOf('\n');
-  if (at < 0) return 0;
-  if (first) return at + 1 + (/^[ \t]*/.exec(spaces.slice(at + 1))?.[0].length ?? 0);
-  return spaces.length - at + (/[ \t]*$/.exec(spaces.slice(0, at))?.[0].length ?? 0);
-}
+// What a colour's HTML gives up of the spaces at its run's ends, which
+// it holds: each line break, with the ASCII spaces and tabs beside it,
+// which Milkdown would move out of a mark around the colour. Another
+// space, as a no-break space, it keeps on either side of a break (#730).
+const BROKEN = /[ \t]*\n[ \t\n]*/g;
 
 /**
  * `doc` without the marks Markdown can't hold. None on the spaces and line
@@ -602,13 +594,20 @@ function writable(doc: Node): Node {
     });
     for (const { mark, from, to } of runs) {
       const inside = text.slice(from, to);
-      const leading = inside.slice(0, inside.length - inside.trimStart().length);
-      const trailing = inside.slice(inside.trimEnd().length);
-      const [lead, trail] = holdsSpaces(mark)
-        ? [kept(leading, true), kept(trailing, false)]
-        : [leading.length, trailing.length];
-      if (lead > 0) tr.removeMark(start + from, start + from + lead, mark);
-      if (trail > 0 && lead < inside.length) tr.removeMark(start + to - trail, start + to, mark);
+      const lead = inside.length - inside.trimStart().length;
+      const trail = lead < inside.length ? inside.length - inside.trimEnd().length : 0;
+      for (const [at, length] of [
+        [0, lead],
+        [inside.length - trail, trail],
+      ] as const) {
+        const edge = start + from + at;
+        if (!holdsSpaces(mark)) {
+          if (length > 0) tr.removeMark(edge, edge + length, mark);
+          continue;
+        }
+        for (const broken of inside.slice(at, at + length).matchAll(BROKEN))
+          tr.removeMark(edge + broken.index, edge + broken.index + broken[0].length, mark);
+      }
     }
     return false;
   });
