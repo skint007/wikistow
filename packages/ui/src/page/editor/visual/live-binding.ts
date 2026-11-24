@@ -10,8 +10,12 @@
 //   until the composition ends;
 // - a change that reaches past its block is read whole, at most every
 //   second or every twice as long as the last whole read took;
-// - what it can't show, it says, naming who changed it.
+// - what it can't show, it says, naming who changed it;
+// - its formatting, if someone else changed the same text alongside it,
+//   one of the two, by Yjs client, takes out again and makes again over
+//   the other's (`live-rebase.ts`).
 import * as Y from 'yjs';
+import { OwnFormatting, type RemoteFrom } from './live-rebase';
 import { applyTo, Mapping, ownChanges, putInto, type Delta } from './live-text';
 
 /** How a take-in went: in, not by block (read whole), or waiting on a composition. */
@@ -34,6 +38,14 @@ export type BoundEditor = {
   cantShow(by: readonly (string | null)[], reason: string): void;
   /** It shows `body` again, after it couldn't. */
   canShow(): void;
+  /**
+   * Its edit since it was last asked, or since it last took text in, if
+   * that's formatting alone, as something it can make again (`reapply`)
+   * over other text: null if it's anything else, as typing.
+   */
+  intent?(): unknown;
+  /** Make `intents`, in order, over the text it shows now, as the person's own edit. */
+  reapply?(intents: readonly unknown[]): void;
 };
 
 /** The shared `body`, as the binding reads and writes it. */
@@ -41,8 +53,11 @@ export type BoundText = {
   text: Y.Text;
   /** Make the person's own change, in one transaction. */
   edit(change: () => void): void;
-  /** Hear just before someone else's change goes into the document, with who sent it (null: the person). */
-  onBeforeRemote(listener: (senderId: string | null) => void): () => void;
+  /**
+   * Hear just before someone else's change goes into the document, with
+   * who sent it (null: the person) and the change as it came.
+   */
+  onBeforeRemote(listener: (senderId: string | null, from?: RemoteFrom) => void): () => void;
   /** Whether the session still takes the person's changes: not once it has been left. */
   active(): boolean;
 };
@@ -60,6 +75,8 @@ const COMPOSING_MS = 500;
 const RECHECKS = 2;
 
 const MINE = Symbol('visual-binding');
+// Its own formatting writes taken out again, to be made again over others'.
+const UNDONE = Symbol('visual-binding-undone');
 
 /** Text read from `body` for a take-in or a whole read, and how it became `body` since, while that's followed. */
 type Pending = { text: string; map: Mapping | null };
@@ -76,6 +93,8 @@ export class VisualBinding {
   /** The text the editor's document stands for in `body`'s terms. */
   #held: string;
   #timer: ReturnType<typeof setTimeout> | null = null;
+  /** The timer is a wait for someone else's formatting made again (`OwnFormatting.waitUntil`). */
+  #holding = false;
   #wholeAt = -Infinity;
   /** A whole read, or a take-in checked off the thread, is under way. */
   #reading = false;
@@ -85,8 +104,15 @@ export class VisualBinding {
   #blocked = false;
   /** Who changed `body` since the editor last caught up with it; null for the person, from elsewhere. */
   readonly #by = new Set<string | null>();
-  /** Who sent the change going into the document now. */
+  /** Who sent the change going into the document now, and the change as it came. */
   #sending: string | null = null;
+  #from: RemoteFrom | null = null;
+  /** Its formatting writes it may make again, and what's heard of others' alongside them. */
+  readonly #formatting: OwnFormatting;
+  /** Formatting taken out of `body` again, to be made again once the editor has taken that in. */
+  #reapply: { intents: unknown[]; rebases: number } | null = null;
+  /** How many times the formatting being written now has been made again. */
+  #rebases = 0;
   /**
    * How `held` became `body`, followed exactly as Yjs told each change:
    * null where it wasn't, as when the editor took in text it read earlier
@@ -103,32 +129,47 @@ export class VisualBinding {
     this.#body = body;
     this.#editor = editor;
     this.#held = editor.written();
+    this.#formatting = new OwnFormatting(body.text);
+    this.#stops.push(() => this.#formatting.clear());
     this.#synced();
     const observer = (event: Y.YTextEvent, transaction: Y.Transaction) => {
       const delta = event.delta as Delta;
       const mine = transaction.meta.get(MINE) === this;
+      const undone = transaction.meta.get(UNDONE) === this;
       if (this.#pending) this.#pending.map = this.#pending.map?.remote(delta, mine) ?? null;
+      // The person's own from elsewhere in the app, as split view's source
+      // pane; or someone else's. Its own writes it tells of as it makes them.
+      if (transaction.local) {
+        if (!mine && !undone) this.#formatting.own(transaction);
+      } else this.#formatting.heard(transaction, this.#from);
       if (mine) return;
       const followed = this.#map;
       this.#map = followed?.remote(delta) ?? null;
       this.#theirs++;
-      this.#by.add(this.#sending);
-      // Too much to follow: catch up at once, so a diff stands in as briefly as can be.
-      this.#schedule(followed && !this.#map ? 0 : TAKE_MS);
+      // Taken out again, it's to be taken in as anyone's change is, but nobody made it.
+      if (!undone) this.#by.add(this.#sending);
+      // Too much to follow: catch up at once, so a diff stands in as briefly
+      // as can be. Formatting to make again over theirs goes at once too,
+      // before anyone writes over the text it takes out.
+      this.#schedule((followed && !this.#map) || this.#formatting.due ? 0 : TAKE_MS);
     };
     body.text.observe(observer);
     this.#stops.push(() => body.text.unobserve(observer));
     // A sender counts for the one transaction its change goes in with: after
     // its observers, whether it touched `body` or not.
     const doc = body.text.doc;
-    const done = () => void (this.#sending = null);
+    const done = () => {
+      this.#sending = null;
+      this.#from = null;
+    };
     doc?.on('afterTransaction', done);
     this.#stops.push(() => doc?.off('afterTransaction', done));
     this.#stops.push(
-      body.onBeforeRemote((senderId) => {
+      body.onBeforeRemote((senderId, from) => {
         // Its own edit goes in first, as the change of the text it was made on.
         this.write();
         this.#sending = senderId;
+        this.#from = from ?? null;
       }),
     );
     if (body.text.toJSON() !== this.#held) this.#schedule();
@@ -194,14 +235,20 @@ export class VisualBinding {
     const carried = body === this.#held ? changes : mapping.carry(changes);
     const expected = applyTo(body, carried);
     const text = this.#body.text;
-    this.#body.edit(() => {
-      const doc = text.doc;
-      if (!doc) return;
-      doc.transact((transaction) => {
-        transaction.meta.set(MINE, this);
-        putInto(text, carried);
-      });
-    });
+    const intent = this.#editor.intent?.() ?? null;
+    const rebases = this.#rebases;
+    this.#rebases = 0;
+    this.#formatting.capture(intent, rebases, (mark) =>
+      this.#body.edit(() => {
+        const doc = text.doc;
+        if (!doc) return;
+        doc.transact((transaction) => {
+          transaction.meta.set(MINE, this);
+          mark(transaction);
+          putInto(text, carried);
+        });
+      }),
+    );
     // Refused, as by a session left: the page holds it all the same.
     if (text.toJSON() !== expected) return expected;
     this.#held = next;
@@ -219,6 +266,7 @@ export class VisualBinding {
     if (this.#destroyed || this.#reading) return;
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
+    this.#holding = false;
     this.#run();
   }
 
@@ -229,16 +277,19 @@ export class VisualBinding {
     for (const stop of this.#stops.splice(0)) stop();
   }
 
-  #schedule(wait = TAKE_MS) {
+  #schedule(wait = TAKE_MS, holding = false) {
     if (this.#destroyed) return;
     if (this.#reading) return void (this.#again = true);
     if (this.#timer !== null) {
-      // Waiting already, unless this is to go at once.
-      if (wait > 0) return;
+      // Waiting already, unless this is to go at once, or the wait was for
+      // another's formatting made again, which a change may have brought.
+      if (wait > 0 && !this.#holding) return;
       clearTimeout(this.#timer);
     }
+    this.#holding = holding;
     this.#timer = setTimeout(() => {
       this.#timer = null;
+      this.#holding = false;
       this.#run();
     }, wait);
   }
@@ -251,10 +302,19 @@ export class VisualBinding {
     if (!this.#body.active()) return;
     // The editor's own edit, before others' changes go in over it.
     this.write();
+    // Its formatting someone else changed alongside: taken out again first,
+    // to be made again once it has taken in theirs. Or the other is to make
+    // theirs again over it: what they send next goes in, not the merge.
+    if (this.#formatting.due) this.#rebase();
+    else {
+      const until = this.#formatting.waitUntil();
+      if (until !== null) return this.#schedule(Math.max(1, until - performance.now()), true);
+    }
     const text = this.#body.text.toJSON();
     if (text === this.#held) {
       // As changes that changed nothing it shows leave it: the same again.
       this.#map = Mapping.identity(text.length);
+      this.#reapplied();
       return this.#caughtUp();
     }
     const pending: Pending = { text, map: Mapping.identity(text.length) };
@@ -280,8 +340,42 @@ export class VisualBinding {
     if (!took) return this.#whole();
     this.#held = this.#editor.written();
     this.#synced(pending);
+    this.#reapplied();
     if (this.#again || this.behind) return this.#schedule();
     this.#caughtUp();
+  }
+
+  // Take its formatting writes due out of `body` again, as one change of the person's own.
+  #rebase() {
+    const text = this.#body.text;
+    const taken = this.#formatting.rebase((undo) =>
+      this.#body.edit(() =>
+        text.doc?.transact((transaction) => {
+          transaction.meta.set(UNDONE, this);
+          undo();
+        }),
+      ),
+    );
+    if (!taken) return;
+    const was = this.#reapply;
+    this.#reapply = was
+      ? {
+          intents: [...was.intents, ...taken.intents],
+          rebases: Math.max(was.rebases, taken.rebases),
+        }
+      : taken;
+  }
+
+  // The editor has taken in `body` with its formatting taken out again:
+  // it makes it again, over what it shows now, and that's written at once.
+  #reapplied() {
+    const reapply = this.#reapply;
+    this.#reapply = null;
+    if (!reapply || !this.#editor.reapply) return;
+    this.#editor.reapply(reapply.intents);
+    this.#rebases = reapply.rebases;
+    this.write();
+    this.#rebases = 0;
   }
 
   #caughtUp() {
@@ -353,6 +447,7 @@ export class VisualBinding {
         if (this.#editor.show(shown.text) === 'composing') return this.#schedule(COMPOSING_MS);
         this.#held = this.#editor.written();
         this.#synced(shown);
+        this.#reapplied();
         if (this.#again || this.behind) return this.#schedule();
         this.#caughtUp();
       });

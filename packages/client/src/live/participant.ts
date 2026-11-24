@@ -186,6 +186,12 @@ export type ParticipantState =
   | { kind: 'left' };
 
 /** Someone else with the draft open, as the toolbar shows them. */
+/**
+ * Someone else's change as it arrives: the Yjs update, and the client its
+ * join writes under (null if the join isn't known to write under one).
+ */
+export type RemoteUpdate = { readonly client: number | null; readonly update: Uint8Array };
+
 export type LivePerson = {
   id: IdentityId;
   /** Their joins' editors and cursors, one per tab or window. */
@@ -1004,14 +1010,16 @@ export class LiveParticipant {
   /**
    * Hear just before someone else's change goes into the document, so an
    * edit an editor hasn't reported yet goes in first, as the change of the
-   * text it was made on; with who sent it, as the visual editor names them.
+   * text it was made on; with who sent it, as the visual editor names them,
+   * and the change itself with the Yjs client it was made under, as the
+   * visual editor judges whether it was made alongside its own.
    */
-  onBeforeRemote(listener: (senderId: IdentityId) => void): () => void {
+  onBeforeRemote(listener: (senderId: IdentityId, from: RemoteUpdate) => void): () => void {
     this.#beforeRemote.add(listener);
     return () => void this.#beforeRemote.delete(listener);
   }
 
-  readonly #beforeRemote = new Set<(senderId: IdentityId) => void>();
+  readonly #beforeRemote = new Set<(senderId: IdentityId, from: RemoteUpdate) => void>();
 
   /** Hear every change to the document, `local` for this app's own. */
   onChange(listener: (local: boolean) => void): () => void {
@@ -2568,9 +2576,11 @@ export class LiveParticipant {
     if (opened.kind === 'update') {
       // An edit the editor hasn't reported yet goes in first, on the text it was made on.
       if (key(opened) !== key(this.#me)) {
+        const client = this.#joins.clientOf(opened);
+        const from = { client: client ?? null, update: opened.content };
         for (const listener of this.#beforeRemote) {
           try {
-            listener(opened.senderId);
+            listener(opened.senderId, from);
           } catch {
             // A listener's own failure stays its own.
           }

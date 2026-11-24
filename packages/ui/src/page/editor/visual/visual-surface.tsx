@@ -57,6 +57,7 @@ import * as Y from 'yjs';
 import type { LiveSource } from '../source/live';
 import { resolveIn } from '../live-cursor';
 import { VisualBinding, type Taking } from './live-binding';
+import { FormatRecord, reformat } from './live-reformat';
 import { barDecorations, barsOf, blockAt, liveBars, setBars, type BarsHost } from './live-bars';
 
 export { checkFidelity, type Fidelity } from './fidelity';
@@ -653,6 +654,8 @@ function Surface({
       ),
   );
   const [format] = useState(() => new FormatWatch());
+  // The person's formatting, as the live binding makes it again over others' (#720).
+  const [formats] = useState(() => new FormatRecord());
   // Who hears what Find on page finds, while it searches here.
   const findReport = useRef<((found: Found) => void) | null>(null);
   const [findable] = useState(() =>
@@ -731,6 +734,11 @@ function Surface({
         },
         cantShow: (by, reason) => latest.current.onCantShow?.(by, reason),
         canShow: () => latest.current.onCanShow?.(),
+        intent: () => formats.take(),
+        reapply: (intents) => {
+          const view = viewNow();
+          if (view) reformat(view, intents);
+        },
       },
     );
     const stops: (() => void)[] = [];
@@ -839,6 +847,7 @@ function Surface({
         alerts,
         linkKeys(host),
         format.plugin,
+        formats.plugin,
         formatKeys,
         wrapSelection,
         visualFind(() => findReport.current),

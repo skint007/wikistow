@@ -71,14 +71,19 @@ export type LiveSource = {
   /**
    * Hear just before someone else's change goes into the document, with
    * who sent it (null: the person, from another tab or device), so an edit
-   * not yet in it goes in first (the visual editor's).
+   * not yet in it goes in first (the visual editor's); and the change, with
+   * the Yjs client it was made under, as the visual editor judges whether it
+   * was made alongside its own formatting.
    */
-  onBeforeRemote?(listener: (senderId: string | null) => void): () => void;
+  onBeforeRemote?(listener: (senderId: string | null, from?: RemoteUpdate) => void): () => void;
   /** The name a person is shown by, as their caret is. */
   nameOf?(id: string): string;
   /** Whether the session still takes the person's changes: not once it has been left. */
   active?(): boolean;
 };
+
+/** Someone else's change as it arrives: its Yjs update, and the client its join writes under. */
+export type RemoteUpdate = { readonly client: number | null; readonly update: Uint8Array };
 
 // Others' changes, which aren't reported as the person's edits.
 export const remoteChange = Annotation.define<boolean>();

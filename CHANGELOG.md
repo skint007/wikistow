@@ -14,6 +14,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Server
 
 - The server logs a `bulk-request-large` warning when making a share, a move, ending a share or adding an owner sends more than 32 MiB, half the 64 MiB a request may carry, or takes more than 30 seconds. The line names the route, the body's size, the time taken and the space, so you see a library outgrowing one request before sharing it fails. (#735)
+- Live editing: two people formatting the same text in the visual editor at the same moment, as one highlighting a word while the other colours it, no longer leave tags crossed or split in the page, which then showed raw HTML. One of the two apps takes its formatting out again and puts it back on the other person's text as they wrote it, so the page shows both. (#720)
 
 ## 0.30.3 - 2026-11-24
 

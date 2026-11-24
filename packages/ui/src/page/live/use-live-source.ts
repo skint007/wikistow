@@ -88,8 +88,8 @@ export function useLiveSource(
       },
       // The person's own other tabs and devices are the person, named by nobody.
       onBeforeRemote: (listener) =>
-        participant.onBeforeRemote((senderId) =>
-          listener(senderId === ctx.identity.public.id ? null : senderId),
+        participant.onBeforeRemote((senderId, from) =>
+          listener(senderId === ctx.identity.public.id ? null : senderId, from),
         ),
       nameOf: (id) => names.current?.get(id)?.name ?? 'Someone',
       active: () => participant.status().state.kind === 'live',
