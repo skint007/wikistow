@@ -124,6 +124,12 @@ export type Config = {
   limits: { uploadBytes: number; storageBytes: number };
   /** How long a large owner body may take to arrive. */
   bodyDeadlineMs: number;
+  /**
+   * When a bulk request is logged as `bulk-request-large`: past half its
+   * body limit, or a transaction past half the 60-second clocks, unless a
+   * test sets its own.
+   */
+  bulkLarge?: { bytes: number; ms: number };
   /** The AI provider's settings from the environment, which win over the admin page's. */
   ai?: AiEnv;
 };

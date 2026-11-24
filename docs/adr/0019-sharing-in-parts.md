@@ -209,7 +209,7 @@ Parts change when material reaches the server and how long it waits there, not w
 2. **The server** (#328): the tables, the routes, the finish through the four routes, `missing=`, the sweep and the pool. Integration tests: nothing staged reaches a member, an agent or another owner (the content-leak sweep); each row of decision 5's table; a finish sent again; Cancel; expiry; the scope bound; two changes over one subtree. A variant of the sharing-cost benchmark times a finish of 256,000 staged wraps and reports it in `wikistow/benchmarks/sharing.md`.
 3. **The client and the dialogs** (#328): the shared sender, the four operations on it, the progress line and Cancel, the cleanup at unlock, and an e2e test that shares a folder in parts with a part size lowered for the test, saves a page meanwhile, and cancels another.
 
-**First, on its own:** the server's `bulk-request-large` log line (#735), so the operator sees the limit coming (decision 1).
+**First, on its own:** the server's `bulk-request-large` log line (#735), so the operator sees the limit coming (decision 1) (built, PR #741).
 
 Steps 2 and 3 wait until a library passes half the limit (Decided 1), which the log line shows. Step 3 needs step 2. Rounds 31 to 33 (`wikistow/protocol-review.md`) found 1 High in their last round, so Scott chose more rounds (Decided 8). Rounds 34 to 36 each found a High, fixed. Round 37 found none, so the design meets the stopping rule and is accepted; its findings are fixed in wording.
 

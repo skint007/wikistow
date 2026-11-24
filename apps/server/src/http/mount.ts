@@ -39,6 +39,8 @@ type AccountCtx = {
  * takes one, for the handler to hand to its change (`transactOnce`).
  */
 type ContentCtx = { c: Context<AppEnv>; actor: Actor; once?: Once };
+/** What every handler is told of its request's body: its size in bytes, as read. */
+type BodyRead = { bodyBytes: number };
 /** Who an early check (`beforeBody`) is for: a person, or on a content route, their agent. */
 export type EarlyCaller = { accountId: string; agentId?: string | null };
 type RateLimit = { windowSeconds: number; max: number };
@@ -175,7 +177,7 @@ export function createRoutes({
     route: R,
     options: Options,
     authorize: (c: Context<AppEnv>) => Promise<Ctx>,
-    run: (input: RouteInput<R>, ctx: Ctx) => RouteOutput<R> | Promise<RouteOutput<R>>,
+    run: (input: RouteInput<R>, ctx: Ctx & BodyRead) => RouteOutput<R> | Promise<RouteOutput<R>>,
     accountOf: (ctx: Ctx) => string | null,
     /** Who an `Idempotency-Key` is kept for, on routes that take one (`options.idempotent`). */
     idempotentFor?: (ctx: Ctx) => string,
@@ -207,7 +209,9 @@ export function createRoutes({
                 bytes: Math.min(options.bodyLimit, lower ?? options.bodyLimit),
                 deadlineMs: config.bodyDeadlineMs,
               };
-        const body = route.body ? await readJson(c, limit) : undefined;
+        const { body, bytes } = route.body
+          ? await readJson(c, limit)
+          : { body: undefined, bytes: 0 };
         const input = {
           params: parsePart(route.params, c.req.param(), 'params'),
           query: parsePart(route.query, c.req.query(), 'query'),
@@ -219,7 +223,8 @@ export function createRoutes({
             : onceFor(idempotentFor(ctx), key, `${route.method} ${c.req.path}`, body);
         // Every part was just validated by its schema; this only restates that for
         // the compiler, which can't follow optional schemas through RouteInput.
-        const answer = await run(input as RouteInput<R>, once ? { ...ctx, once } : ctx);
+        const read = { ...ctx, bodyBytes: bytes };
+        const answer = await run(input as RouteInput<R>, once ? { ...read, once } : read);
         return c.json(route.response.parse(answer), route.status ?? 200);
       } finally {
         release?.();
@@ -315,7 +320,11 @@ export function createRoutes({
         () => null,
       );
     },
-    account<R extends RouteDef>(route: R, handler: Handler<R, AccountCtx>, options: Options = {}) {
+    account<R extends RouteDef>(
+      route: R,
+      handler: Handler<R, AccountCtx & BodyRead>,
+      options: Options = {},
+    ) {
       register(
         route,
         options,
@@ -340,7 +349,11 @@ export function createRoutes({
      * per person or agent, and a change that says so (`idempotent`) takes
      * an `Idempotency-Key`. Everything else stays for people only.
      */
-    content<R extends RouteDef>(route: R, handler: Handler<R, ContentCtx>, options: Options = {}) {
+    content<R extends RouteDef>(
+      route: R,
+      handler: Handler<R, ContentCtx & BodyRead>,
+      options: Options = {},
+    ) {
       if (options.recentAuth) {
         throw new Error(`${route.path}: content routes take no recent sign-in`);
       }
@@ -483,7 +496,7 @@ export function createRoutes({
         // Validated by the route's own schema; the compiler can't follow the
         // GET or POST route's body schema through `parsed`.
         const body = (
-          route.body ? parsed(route.body, await readJson(c), 'body') : undefined
+          route.body ? parsed(route.body, (await readJson(c)).body, 'body') : undefined
         ) as StreamBody<R>;
         const input = {
           params: parsePart(route.params, c.req.param(), 'params'),
@@ -625,16 +638,14 @@ function parsed<S extends z.ZodType>(schema: S, value: unknown, part: string): z
 async function readJson(
   c: Context<AppEnv>,
   limit?: { bytes: number; deadlineMs: number },
-): Promise<unknown> {
+): Promise<{ body: unknown; bytes: number }> {
   if (!c.req.header('content-type')?.toLowerCase().startsWith('application/json')) {
     throw new ApiError('invalid-request', 'Expected a JSON body');
   }
-  const text =
-    limit === undefined
-      ? await c.req.text()
-      : new TextDecoder().decode(await readLimited(c.req.raw, limit));
+  const raw = limit === undefined ? undefined : await readLimited(c.req.raw, limit);
+  const text = raw === undefined ? await c.req.text() : new TextDecoder().decode(raw);
   try {
-    return JSON.parse(text);
+    return { body: JSON.parse(text), bytes: raw?.byteLength ?? Buffer.byteLength(text) };
   } catch {
     throw new ApiError('invalid-request', 'Body is not valid JSON');
   }
