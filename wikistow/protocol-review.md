@@ -943,7 +943,7 @@ Round 31 is the first review of sending large shares, moves, endings and co-owne
 
 ## Round 32: sharing in parts, second review
 
-Round 32 ran the three briefs again (server, member and concurrency), with fresh reviewers given the same material, against the round 31 revision (988275df). As in round 31, the server and member reviewers were Claude subagents and the concurrency reviewer a different model (GPT). It found no Critical finding, 4 High (3 distinct), 10 Medium and 10 Low. Round 31's fixes held: the check before the finish carries nothing secret, the app's checks before every part stop a hidden rotation or owner removal from reaching a part, new nodes stop a share or move for a new preview, the change's row lock orders a finish with parts, Cancel and the sweep, and Cancel settles a lost finish. Section numbers are protocol.md's after the fixes.
+Round 32 ran the three briefs again (server, member and concurrency), with fresh reviewers given the same material, against the round 31 revision (988275df). As in round 31, the server and member reviewers were Claude subagents and the concurrency reviewer a different model (GPT). It found no Critical finding, 4 High (3 distinct), 8 Medium and 8 Low. Round 31's fixes held: the check before the finish carries nothing secret, the app's checks before every part stop a hidden rotation or owner removal from reaching a part, new nodes stop a share or move for a new preview, the change's row lock orders a finish with parts, Cancel and the sweep, and Cancel settles a lost finish. Section numbers are protocol.md's after the fixes.
 
 | ID | Round | Severity | Section | Finding | Outcome |
 |---|---|---|---|---|---|
