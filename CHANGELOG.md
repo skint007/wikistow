@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- In the visual editor, bold or another mark that ends at a line break, where a link starts inside it and goes on past the break, no longer sends the page to source mode. (#PR)
+- In the visual editor, bold or another mark that ends at a line break, where a link starts inside it and goes on past the break, no longer sends the page to source mode. (#731)
 
 ## 0.30.2 - 2026-11-23
 
