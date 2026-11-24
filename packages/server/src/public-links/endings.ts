@@ -4,7 +4,9 @@
 // them hold the page's locks already (its space, share, node and heads, a
 // delete's locks, or a change of rights's space or share), or for a
 // suspension the account's row, and any account rows before these, so two
-// endings that meet wait for each other instead of deadlocking.
+// endings that meet wait for each other instead of deadlocking. The account
+// that ends them is one of those rows: its audit record, after, needs it
+// (`holdActor`).
 import { and, eq, or, sql, type SQL } from 'drizzle-orm';
 import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
@@ -34,31 +36,53 @@ async function lockTargets(
 }
 
 /**
- * End the links of `pageIds`, any that have one: lock them, their copies,
- * and the target rows of those copies and those naming these pages, then
- * delete them all. The links that ended.
+ * Hold the account `actor`, whose audit record follows an ending, before
+ * any link or copy row: the record's key takes the account's row for key
+ * share, and a suspension holds that row for update while it waits on the
+ * account's links and copies (#679). Taken this early, the ending waits
+ * for a suspension under way, or the suspension for it. Null, an ending no
+ * account records, holds nothing.
  */
-export async function endLinks(tx: Database, pageIds: readonly string[]) {
+async function holdActor(tx: Database, actor: string | null) {
+  if (actor === null) return;
+  await tx.select({ id: users.id }).from(users).where(eq(users.id, actor)).for('key share');
+}
+
+/**
+ * End the links of `pageIds`, any that have one, for `actor` (`holdActor`):
+ * lock them, their copies, and the target rows of those copies and those
+ * naming these pages, then delete them all. The links that ended.
+ */
+export async function endLinks(tx: Database, pageIds: readonly string[], actor: string | null) {
   if (pageIds.length === 0) return [];
-  return (await end(tx, anyOf(publicLinks.pageId, pageIds), [])).links;
+  return (await end(tx, anyOf(publicLinks.pageId, pageIds), [], actor)).links;
 }
 
 /**
  * End the links `linkIds` (by link ID, so one turned off and on again
  * meanwhile stays), with every copy of their pages, and the copies
- * `copyIds`, all locked in one pass in the order above. What ended.
+ * `copyIds`, all locked in one pass in the order above, for `actor`
+ * (`holdActor`). What ended.
  */
 export async function endLinksAndCopies(
   tx: Database,
   { linkIds, copyIds }: { linkIds: readonly string[]; copyIds: readonly string[] },
+  actor: string | null,
 ) {
-  return end(tx, linkIds.length === 0 ? null : anyOf(publicLinks.id, linkIds), copyIds);
+  return end(tx, linkIds.length === 0 ? null : anyOf(publicLinks.id, linkIds), copyIds, actor);
 }
 
 // Lock the links `links` picks, then their pages' copies and `copyIds`,
 // then the target rows of those copies and those naming those pages, and
 // delete them all.
-async function end(tx: Database, links: SQL | null, copyIds: readonly string[]) {
+async function end(
+  tx: Database,
+  links: SQL | null,
+  copyIds: readonly string[],
+  actor: string | null,
+) {
+  if (links === null && copyIds.length === 0) return { links: [], copies: 0 };
+  await holdActor(tx, actor);
   const ended = links
     ? await tx.select().from(publicLinks).where(links).orderBy(publicLinks.pageId).for('update')
     : [];
@@ -188,5 +212,7 @@ export function recordEnded(
  * the link this way too.
  */
 export async function endLinkFor(tx: Database, page: { id: string; spaceId: string }, how: Ended) {
-  for (const link of await endLinks(tx, [page.id])) await recordEnded(tx, link, page.spaceId, how);
+  for (const link of await endLinks(tx, [page.id], how.actor)) {
+    await recordEnded(tx, link, page.spaceId, how);
+  }
 }
