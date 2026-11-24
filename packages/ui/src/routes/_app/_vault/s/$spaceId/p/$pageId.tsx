@@ -113,7 +113,7 @@ import {
   originOf,
   pageFlushing,
   readingRights,
-  shownOnTheWay,
+  ShownBodies,
   type ReadingChange,
   type ReadingQueue,
 } from '../../../../../../page/reading-changes-model';
@@ -777,35 +777,38 @@ function PageBody({
     () => (readMarkdown !== null ? applyChanges(readMarkdown, madeHere).markdown : readMarkdown),
     [readMarkdown, madeHere],
   );
+  // The bodies shown as this person's changes were made, which the reader's
+  // tree may still be drawn from while it reads the text shown (#728).
+  const [shownBodies] = useState(() => new ShownBodies());
   // An older version can't change, but its boxes say why to editors.
-  const readingHere = useMemo(
-    () =>
-      model.view === 'published' && readMarkdown !== null && shownMarkdown !== null
-        ? {
-            markdown: shownMarkdown,
-            rights,
-            shownBefore: (body: string) => shownOnTheWay(readMarkdown, madeHere, body),
-            // What it was made on, as shown now: offline, a change made before
-            // another tab changed the page is left out (#700). A tick keeps the
-            // text it was made in, as its offset may be another task's in newer text (#703).
-            change: (made: ReadingChange) =>
-              reading.add(madeIn(made, shownMarkdown, readMarkdown), {
-                version: change?.version ?? null,
-                publishedOn: revisionId,
-              }),
-          }
-        : null,
-    [
-      model.view,
-      shownMarkdown,
-      readMarkdown,
-      madeHere,
-      reading,
-      rights,
-      change?.version,
-      revisionId,
-    ],
-  );
+  const readingHere = useMemo(() => {
+    if (readMarkdown !== null) shownBodies.see(readMarkdown, madeHere);
+    return model.view === 'published' && readMarkdown !== null && shownMarkdown !== null
+      ? {
+          markdown: shownMarkdown,
+          rights,
+          shownBefore: (body: string) => shownBodies.has(body),
+          // What it was made on, as shown now: offline, a change made before
+          // another tab changed the page is left out (#700). A tick keeps the
+          // text it was made in, as its offset may be another task's in newer text (#703).
+          change: (made: ReadingChange) =>
+            reading.add(madeIn(made, shownMarkdown, readMarkdown), {
+              version: change?.version ?? null,
+              publishedOn: revisionId,
+            }),
+        }
+      : null;
+  }, [
+    model.view,
+    shownMarkdown,
+    readMarkdown,
+    madeHere,
+    shownBodies,
+    reading,
+    rights,
+    change?.version,
+    revisionId,
+  ]);
   // A copy names its source only inside its payload: a label, never a link,
   // and named only once this app has checked it against the source.
   const provenance = payload ? publicationOperations.provenanceOf(payload) : null;

@@ -46,9 +46,9 @@ export type { ReadingChange, ReadingRights };
  * What the published view's body needs to change the page while it's read
  * (`ReadingQueue`): its Markdown as shown, every queued change made in it;
  * whether this person may change it, or why not; the queue's `change`; and
- * whether a body is one the page showed on the way there, the text read
- * with only some of the queued changes made (`shownOnTheWay`), so a body
- * still drawn from it has the tasks shown, where they are (#728).
+ * whether a body is one the page showed as this person's changes were
+ * made (`ShownBodies`), so a body still drawn from it has the tasks shown,
+ * where they are (#728).
  * Null where nothing may change, as in a publish preview.
  */
 export type ReadingChangesHere = {

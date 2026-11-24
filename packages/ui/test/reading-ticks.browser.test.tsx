@@ -16,7 +16,7 @@ import { ReadingChanges } from '../src/page/reading-changes.tsx';
 import {
   applyChanges,
   madeIn,
-  shownOnTheWay,
+  ShownBodies,
   type ReadingChange,
   type ReadingRights,
 } from '../src/page/reading-changes-model.ts';
@@ -51,16 +51,22 @@ afterEach(() => {
  * read, or none; each change is kept in `changes` as the box made it, and
  * queued and made in what's shown, as the page's queue does, with what it
  * was made in (`madeIn`). `arrive` makes the page's text another, as
- * another tab's publication does.
+ * another tab's publication does; `published` publishes the first `count`
+ * changes queued, as a flush does, the rest still queued.
  */
 async function render(first: string, rights: ReadingRights | null) {
   const changes: ReadingChange[] = [];
   const queue: ReadingChange[] = [];
   let arrive = (_source: string) => {};
+  let flush = (_count: number) => {};
   function Reading() {
     const [source, setSource] = useState(first);
     arrive = setSource;
     const [queued, setQueued] = useState<ReadingChange[]>([]);
+    flush = (count) => {
+      setSource(applyChanges(source, queued.slice(0, count)).markdown);
+      setQueued(queued.slice(count));
+    };
     const markdown = applyChanges(source, queued).markdown;
     const body = (
       <Markdown
@@ -83,7 +89,9 @@ async function render(first: string, rights: ReadingRights | null) {
       queue.push(kept);
       setQueued((before) => [...before, kept]);
     };
-    const shownBefore = (drawn: string) => shownOnTheWay(source, queued, drawn);
+    const [bodies] = useState(() => new ShownBodies());
+    bodies.see(source, queued);
+    const shownBefore = (drawn: string) => bodies.has(drawn);
     return (
       <ReadingChanges value={{ markdown, rights, change, shownBefore }}>{body}</ReadingChanges>
     );
@@ -116,7 +124,8 @@ async function render(first: string, rights: ReadingRights | null) {
     return found;
   };
   const shown = (source: string) => act(async () => arrive(source));
-  return { container, changes, queue, box, shown };
+  const published = (count: number) => act(async () => flush(count));
+  return { container, changes, queue, box, shown, published };
 }
 
 describe('a task’s checkbox in the reader', () => {
@@ -236,6 +245,31 @@ describe('a task’s checkbox in the reader', () => {
       { markdown: before, repeated: true },
     ]);
     expect(applyChanges(swapped, queue).markdown).toBe(swapped);
+  });
+
+  it('ticks in the text shown once its own ticks are published while a read of them waits', async () => {
+    const page = '- [ ] Call\n  Mum\n- [ ] Call\n  Bob\n- [ ] Call\n  Ann\n';
+    const { box, changes, queue, published } = await render(page, { allowed: true });
+    hold(() => true);
+    await act(async () => box('Call Mum').click());
+    await act(async () => box('Call Bob').click());
+    // Mum's tick is published, Bob's still waits, and the tree is still the page's before both.
+    await published(1);
+    await act(async () => box('Call Ann').click());
+    expect(changes.map((change) => change.kind === 'task' && change.madeIn)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect([box('Call Mum').checked, box('Call Bob').checked, box('Call Ann').checked]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(applyChanges(page, queue)).toEqual({
+      markdown: '- [x] Call\n  Mum\n- [x] Call\n  Bob\n- [x] Call\n  Ann\n',
+      dropped: [],
+    });
   });
 
   it('ticks in the text shown while a read of it with only boxes ticked since waits', async () => {

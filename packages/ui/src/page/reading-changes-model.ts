@@ -157,30 +157,51 @@ export function applyChange(
     : { ok: false, reason: `${change.key} couldn’t be changed: ${edit.reason}` };
 }
 
+// How many bodies a page keeps as shown: a run of ticks, with a flush or two among them.
+const BODIES_KEPT = 32;
+
 /**
- * Whether `body` is the body of `read` with the first of `changes` made,
- * none or more, in order: the page as shown on this device as each was
- * made, its tasks where the text with all of them made has them, as ticks
- * and properties move no task in the body. Another text, though it differs
- * only in what is ticked, may have two same-named tasks swapped (#728).
+ * The bodies a page showed on this device as this person's changes were
+ * made in it, since a text not of their making came (#728). A body drawn
+ * from one of them has the tasks of the text shown, where it has them, as
+ * ticks and properties move no task in the body; another, though it
+ * differs only in what is ticked, may have two same-named tasks swapped.
+ * A flush of this person's changes keeps them: the text it published is
+ * one of them.
  */
-export function shownOnTheWay(
-  read: string,
-  changes: readonly ReadingChange[],
-  body: string,
-): boolean {
-  let markdown = read;
-  let parsed = read;
-  const items = () => taskIndex(parsed);
-  if (splitFrontmatter(markdown).body === body) return true;
-  for (const change of changes) {
-    const made = applyChange(markdown, change, items);
-    if (!made.ok) continue;
-    markdown = made.markdown;
-    if (change.kind === 'property') parsed = markdown;
-    else if (splitFrontmatter(markdown).body === body) return true;
+export class ShownBodies {
+  readonly #bodies = new Set<string>();
+
+  /** The page shows `read` with `changes` made: each body on the way is kept. */
+  see(read: string, changes: readonly ReadingChange[]) {
+    let markdown = read;
+    let parsed = read;
+    const items = () => taskIndex(parsed);
+    const first = splitFrontmatter(read).body;
+    if (!this.#bodies.has(first)) this.#bodies.clear();
+    this.#keep(first);
+    for (const change of changes) {
+      const made = applyChange(markdown, change, items);
+      if (!made.ok) continue;
+      markdown = made.markdown;
+      if (change.kind === 'property') parsed = markdown;
+      else this.#keep(splitFrontmatter(markdown).body);
+    }
   }
-  return false;
+
+  /** Whether the page showed `body` as this person's changes were made. */
+  has(body: string): boolean {
+    return this.#bodies.has(body);
+  }
+
+  #keep(body: string) {
+    if (this.#bodies.has(body)) return;
+    this.#bodies.add(body);
+    for (const old of this.#bodies) {
+      if (this.#bodies.size <= BODIES_KEPT) break;
+      this.#bodies.delete(old);
+    }
+  }
 }
 
 /** `markdown` with each of `changes` made, in order, and those that no longer apply. */
