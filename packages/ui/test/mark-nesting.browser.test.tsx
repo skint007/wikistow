@@ -45,6 +45,25 @@ const PAGES = [
 const MARKS = ['strong', 'emphasis', 'strike_through', 'link', 'inlineCode'];
 const COLOURED = [...MARKS, 'highlight', 'highlight', 'text_color'];
 
+type Edit = readonly [string, number, number, Record<string, string>?];
+
+/** That `page` with `marks` added in turn is written as `wrote`, and opens again as shown. */
+async function writes(page: string, marks: readonly Edit[], wrote: string) {
+  await loadSyntaxNodes();
+  const t = await transformer();
+  let doc: Node = t.parse(page);
+  for (const [name, from, to, attrs] of marks) {
+    const type = doc.type.schema.marks[name];
+    if (!type) throw new Error(`No mark ${name}`);
+    doc = new Transform(doc).addMark(from, to, type.create(attrs)).doc;
+  }
+  const written = t.serialize(doc);
+  expect(written, page).toBe(wrote);
+  expect(writesAsShown(doc, written, t.parse), written).toBe(true);
+  expect(t.serialize(t.parse(written)), written).toBe(written);
+  expect(fidelityOf(written, t), written).toEqual({ visual: true });
+}
+
 const attrsFor = (name: string, rng: ReturnType<typeof random>) =>
   name === 'link'
     ? { href: `https://example.test/${rng.below(2)}` }
@@ -63,6 +82,7 @@ describe('marks that overlap partly', () => {
       const t = await transformer();
       const rng = random(SEED);
       let checked = 0;
+      const rejected: string[] = [];
       for (const names of [MARKS, COLOURED]) {
         for (let round = 0; round < 750; round++) {
           const page = rng.pick(PAGES);
@@ -83,14 +103,18 @@ describe('marks that overlap partly', () => {
               `${removes ? 'remove' : 'add'} ${JSON.stringify(mark.toJSON())} ${from}–${to}`,
             );
             const written = t.serialize(doc);
-            // What the guard gives up isn't written.
-            if (!writesAsShown(doc, written, t.parse)) continue;
-            checked++;
             const where = `seed ${SEED}, ${JSON.stringify(page)}, after:\n${done.join('\n')}\nwrote ${JSON.stringify(written)}, then ${JSON.stringify(t.serialize(t.parse(written)))}`;
+            // What the guard gives up isn't written, but sends the page to source mode.
+            if (!writesAsShown(doc, written, t.parse)) {
+              rejected.push(where);
+              continue;
+            }
+            checked++;
             expect(fidelityOf(written, t), where).toEqual({ visual: true });
           }
         }
       }
+      expect(rejected).toEqual([]);
       expect(checked).toBeGreaterThan(8_000);
     },
   );
@@ -116,16 +140,6 @@ describe('marks that overlap partly', () => {
   it('keep the marks on spaces in code, as written', async () => {
     await loadSyntaxNodes();
     const t = await transformer();
-    type Edit = readonly [string, number, number, Record<string, string>?];
-    const edit = (page: string, marks: readonly Edit[]) => {
-      let doc: Node = t.parse(page);
-      for (const [name, from, to, attrs] of marks) {
-        const type = doc.type.schema.marks[name];
-        if (!type) throw new Error(`No mark ${name}`);
-        doc = new Transform(doc).addMark(from, to, type.create(attrs)).doc;
-      }
-      return doc;
-    };
     for (const [page, marks, wrote] of [
       // Code from a space on, which bold took off before, parting the code (#658).
       [
@@ -168,15 +182,33 @@ describe('marks that overlap partly', () => {
         'x\\\ny\n',
       ],
     ] as const) {
-      const doc = edit(page, marks);
-      const written = t.serialize(doc);
-      expect(written, page).toBe(wrote);
-      expect(writesAsShown(doc, written, t.parse), written).toBe(true);
-      expect(t.serialize(t.parse(written)), written).toBe(written);
-      expect(fidelityOf(written, t), written).toEqual({ visual: true });
+      await writes(page, marks, wrote);
     }
     // As the editor wrote the first before, which it parted again on writing it.
     expect(fidelityOf('a b *c **d***__`  e  `*`f`*__\n', t)).toEqual({ visual: true });
+  });
+
+  it('end a mark ended before a link off the line break it ends at (#682)', async () => {
+    // Bold over `b`, the break and `c d`, then a link from `c` on past it,
+    // which the bold ends before: the break goes out of the bold, as a
+    // delimiter after one doesn't close it.
+    await writes(
+      'a b\\\nc d e\n',
+      [
+        ['strong', 3, 8],
+        ['link', 5, 10, { href: 'u' }],
+      ],
+      'a **b**\\\n[**c d** e](u)\n',
+    );
+    // Bold opened again after a link it went on past, from the break on.
+    await writes(
+      'a b\\\nc d e\n',
+      [
+        ['link', 1, 4, { href: 'u' }],
+        ['strong', 3, 8],
+      ],
+      '[a **b**](u)\\\n**c d** e\n',
+    );
   });
 
   it('read the same however the marks nest', () => {

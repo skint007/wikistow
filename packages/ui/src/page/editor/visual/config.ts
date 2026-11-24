@@ -397,18 +397,26 @@ const isLink = (wrap: Wrap) => wrap.node.type === 'link';
 // Marks that hold a space at their ends: a link's text, and a colour's HTML.
 const SPACED = new Set(['link', 'textColor', 'colorHighlight']);
 
-// `wrap` around `children`, with the spaces they start and end with
-// outside it, as Milkdown puts them: a delimiter beside a space isn't one.
-// A space held for Milkdown (`HELD_SPACE`) goes out too, but of a link or
-// a colour's HTML, which can hold it.
+// `wrap` around `children`, with the spaces and line breaks they start
+// and end with outside it, as Milkdown puts spaces: a delimiter beside a
+// space isn't one, nor beside a line break. A space held for Milkdown
+// (`HELD_SPACE`) goes out too, but of a link or a colour's HTML, which can
+// hold it. `writable` takes a mark off a line break at its run's end, but
+// `nest` may end a mark sooner, before a link it would cut.
 function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[] {
   const inside = [...children];
-  // The spaces at one end, across text nodes of only spaces, as a held
-  // space and a soft line break are.
+  // The spaces and line breaks at one end, across text nodes of only
+  // spaces, as a held space and a soft line break are.
   const take = (first: boolean, edge: RegExp) => {
     const taken: Tree[] = [];
     for (;;) {
       const node = first ? inside[0] : inside.at(-1);
+      if (node?.type === 'break') {
+        inside.splice(first ? 0 : -1, 1);
+        if (first) taken.push(node);
+        else taken.unshift(node);
+        continue;
+      }
       if (node?.type !== 'text' || !node.value) break;
       const [space = ''] = edge.exec(node.value) ?? [];
       if (!space) break;
