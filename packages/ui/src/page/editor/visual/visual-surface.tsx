@@ -57,7 +57,7 @@ import * as Y from 'yjs';
 import type { LiveSource } from '../source/live';
 import { resolveIn } from '../live-cursor';
 import { VisualBinding, type Taking } from './live-binding';
-import { FormatRecord, literal, readsAs, reformat } from './live-reformat';
+import { FormatRecord, keeps, literal, reformat } from './live-reformat';
 import { barDecorations, barsOf, blockAt, liveBars, setBars, type BarsHost } from './live-bars';
 
 export { checkFidelity, type Fidelity } from './fidelity';
@@ -740,11 +740,11 @@ function Surface({
           const view = viewNow();
           if (view) reformat(view, intents);
         },
-        readsAs: (merged, theirs, intents) => {
+        keeps: (merged, theirs, intents) => {
           const parse = editor.current?.action((ctx) => ctx.get(parserCtx));
           try {
             const [a, b] = [parse?.(withLf(merged)), parse?.(withLf(theirs))];
-            return !!a && !!b && readsAs(a, b, intents);
+            return !!a && !!b && keeps(a, b, intents);
           } catch {
             return false;
           }

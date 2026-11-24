@@ -94,13 +94,26 @@ export function reformat(view: EditorView, intents: readonly unknown[]): void {
 }
 
 /**
- * Whether `merged` already reads as `theirs` with `intents`' marks made
- * again over it, as Yjs's merge of both is right as it is.
+ * Whether Yjs's merge, `merged`, is to stay as it is: it already reads as
+ * `theirs` with `intents`' marks made again over it, or `theirs`, the text
+ * without this app's formatting, shows raw HTML the merge doesn't, as
+ * someone's tags that split this app's mark, which taking it out leaves
+ * unpaired.
  */
-export function readsAs(merged: Node, theirs: Node, intents: readonly unknown[]): boolean {
+export function keeps(merged: Node, theirs: Node, intents: readonly unknown[]): boolean {
+  if (rawIn(theirs) > rawIn(merged)) return true;
   const tr = new Transform(theirs);
   remade(tr, intents);
   return tr.doc.eq(merged);
+}
+
+/** How many pieces of raw HTML `doc` shows. */
+function rawIn(doc: Node): number {
+  let count = 0;
+  doc.descendants((node) => {
+    if (node.type.name === 'html') count++;
+  });
+  return count;
 }
 
 /**
@@ -130,13 +143,46 @@ function remade(tr: Transform, intents: readonly unknown[]): void {
       if (!cut) break;
     }
     for (const step of intent.steps) {
-      const from = map.map(step.from, 1);
-      const to = map.map(step.to, 1);
-      if (from >= to) continue;
       const Made = step instanceof AddMarkStep ? AddMarkStep : RemoveMarkStep;
-      tr.maybeStep(new Made(from, to, step.mark));
+      // Not over a mark of the same kind someone else put on since, as their
+      // highlight inside this app's: theirs stays, as the merge kept it.
+      for (const [from, to] of unclaimed(intent.before, tr.doc, map, step)) {
+        tr.maybeStep(new Made(from, to, step.mark));
+      }
     }
   }
+}
+
+// The ranges of `doc` that `step`'s range in `before` is carried onto by
+// `map`, but for characters with a mark of `step`'s kind they didn't have
+// in `before`.
+function unclaimed(
+  before: Node,
+  doc: Node,
+  map: StepMap,
+  step: AddMarkStep | RemoveMarkStep,
+): [number, number][] {
+  const [start, end] = [map.map(step.from, 1), map.map(step.to, 1)];
+  if (start >= end) return [];
+  const type = step.mark.type;
+  const markOf = (node: Node | null | undefined) => type.isInSet(node?.marks ?? []);
+  const out: [number, number][] = [];
+  const back = map.invert();
+  let open: number | null = null;
+  for (let at = start; at < end; at++) {
+    const now = markOf(doc.nodeAt(at));
+    // Where this character was, if it was there.
+    const there = back.mapResult(at, 1);
+    const was = there.deleted ? null : markOf(before.nodeAt(there.pos));
+    const claimed = !!now && !(was && was.eq(now));
+    if (!claimed) open ??= at;
+    else if (open !== null) {
+      out.push([open, at]);
+      open = null;
+    }
+  }
+  if (open !== null) out.push([open, end]);
+  return out;
 }
 
 // A document as one token for each place in it, as ProseMirror counts

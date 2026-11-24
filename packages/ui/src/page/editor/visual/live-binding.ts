@@ -54,10 +54,11 @@ export type BoundEditor = {
   /** Make `intents`, in order, over the text it shows now, as the person's own edit. */
   reapply?(intents: readonly unknown[]): void;
   /**
-   * Whether `merged` reads, as the editor reads it, the same as `theirs`
-   * with `intents` made again over it: then there's nothing to make again.
+   * Whether Yjs's merge, `merged`, is to stay as it is, as the editor reads
+   * it: it reads the same as `theirs` with `intents` made again over it, or
+   * `theirs` reads worse, as with raw HTML. Then nothing is made again.
    */
-  readsAs?(merged: string, theirs: string, intents: readonly unknown[]): boolean;
+  keeps?(merged: string, theirs: string, intents: readonly unknown[]): boolean;
 };
 
 /** The shared `body`, as the binding reads and writes it. */
@@ -328,10 +329,11 @@ export class VisualBinding {
     // to be made again once it has taken in theirs. Or the other is to make
     // theirs again over it: what they send next goes in, not the merge.
     if (this.#formatting.due) {
-      // Unless Yjs's merge already reads as their text with its formatting made again.
+      // Unless Yjs's merge already reads as their text with its formatting
+      // made again, or their text alone would read worse.
       const pending = this.#formatting.pending();
       const body = this.#body.text.toJSON();
-      if (pending && this.#editor.readsAs?.(body, pending.text, pending.intents))
+      if (pending && this.#editor.keeps?.(body, pending.text, pending.intents))
         this.#formatting.settle();
       else this.#rebase();
     } else {

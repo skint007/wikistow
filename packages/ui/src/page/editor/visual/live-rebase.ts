@@ -369,9 +369,14 @@ export class OwnFormatting {
       if (!item.countable || !(item.content instanceof Y.ContentString)) continue;
       const { str } = item.content;
       const { client, clock } = item.id;
+      const take = (at: number, len: number) => (text += str.slice(at - clock, at - clock + len));
       for (const part of parts(item.deleted ? back : mine, client, clock, item.length)) {
-        if (part.inside === item.deleted)
-          text += str.slice(part.at - clock, part.at - clock + part.len);
+        if (part.inside !== item.deleted) continue;
+        if (!item.deleted) take(part.at, part.len);
+        // Taken out and to come back, unless the writes put it in themselves.
+        else
+          for (const own of parts(mine, client, part.at, part.len))
+            if (!own.inside) take(own.at, own.len);
       }
     }
     return { text, intents: writes.map((write) => write.intent) };

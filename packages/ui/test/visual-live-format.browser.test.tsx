@@ -592,4 +592,36 @@ describe('formatting made alongside someone else’s', () => {
     await settle([a, b]);
     for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
   });
+
+  it('leaves alone a write whose mark someone split after it came', async () => {
+    const page = 'Say abcdefgh now.\n';
+    const [a, b] = [await person(page, 3), await person(page, 2)];
+    const c = sourcePerson(page, 1);
+    colour('abcdefgh', 'highlight', 'red')(a);
+    typeSource(c, 'Say abcdefgh! now.\n');
+    await expect.poll(() => a.log.length).toBe(1);
+    send(a, b);
+    await shows(b, a.text.toJSON());
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    colour('cde', 'highlight', 'blue')(b);
+    await expect.poll(() => b.log.length).toBe(1);
+    const main = merged(page, [a, b, c], [1, 1, 1]);
+    send(b, a);
+    send(c, a);
+    await settle([a, b, c]);
+    for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  for (const ids of ORDERS) {
+    it(`comes out as main does where it's right: a highlight inside another, clients ${ids.join(' and ')}`, async () => {
+      const { end, main } = await together(
+        'Hello world there.\n',
+        [colour('Hello', 'highlight', 'red'), colour('lo', 'highlight', 'blue')],
+        ids,
+      );
+      // In one order Yjs crosses the tags, and that's made right; in the other, it nests them.
+      if (raw(main)) expect(raw(end)).toBe(false);
+      else expect(end).toBe(main);
+    });
+  }
 });
