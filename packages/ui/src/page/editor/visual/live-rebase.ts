@@ -295,8 +295,10 @@ export class OwnFormatting {
       // A change that only takes text out shows nothing of what its writer
       // had, however long after it came: it merges as Yjs merges it, even
       // after typing of theirs made alongside.
+      // Judged by the change that came alone: one of theirs from before
+      // that showed nothing doesn't make a later one meet.
       const typed = made.inserts.size > 0;
-      if (typed && !write.met.has(client) && meet(this.#text, write.own, theirs))
+      if (typed && !write.met.has(client) && meet(this.#text, write.own, made))
         write.met.set(client, now);
     }
   }
@@ -372,10 +374,13 @@ export class OwnFormatting {
     return { text, intents: writes.map((write) => write.intent) };
   }
 
-  /** Make none of the writes due again: `text` reads as it would after. */
+  /**
+   * Make none of the writes due again for what met them so far: `text`
+   * reads as it would after. They're kept, for a change that meets them next.
+   */
   settle(): void {
     const first = this.#first();
-    if (first >= 0) for (const write of this.#writes.splice(first)) this.#dispose(write);
+    if (first >= 0) for (const write of this.#writes.slice(first)) write.met.clear();
   }
 
   // Whatever someone else took out alongside any of `writes`.

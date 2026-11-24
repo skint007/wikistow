@@ -1,5 +1,6 @@
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { act } from 'react';
+import * as Y from 'yjs';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import {
   colour,
@@ -500,5 +501,48 @@ describe('formatting made alongside someone else’s', () => {
     const main = merged(page, [a, b], [1, 2]);
     await settle([a, b]);
     for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('leaves a deletion made after it as main does, before typing of theirs elsewhere', async () => {
+    const page = 'It is very very good.\n\nOther line here.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    toggle('very good', 'bold')(a);
+    await expect.poll(() => a.log.length).toBe(1);
+    send(a, b);
+    await shows(b, a.text.toJSON());
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    typing('It is very', 6, 5, '')(b);
+    await expect.poll(() => b.log.length).toBe(1);
+    send(b, a);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    typing('Other', 0, 0, 'new ')(b);
+    await expect.poll(() => b.log.length).toBe(2);
+    const main = merged(page, [a, b], [1, 2]);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('is made again over a change that meets it after one that read right', async () => {
+    const page = 'world\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    typing('world', 5, 0, '!')(b);
+    await expect.poll(() => b.log.length).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 850));
+    colour('world', 'highlight', 'red')(a);
+    colour('world!', 'text', 'red')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 2]);
+    // B's two messages one after the other: the first reads right as it merges.
+    const [first, second] = b.log;
+    for (const update of [first, second]) {
+      for (const listener of a.before)
+        listener('them', { client: 1, update: update as Uint8Array });
+      Y.applyUpdate(a.doc, update as Uint8Array, 'remote');
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    b.sent.set(a, 2);
+    await settle([a, b]);
+    const [end] = [a.text.toJSON()];
+    expect(b.text.toJSON()).toBe(end);
+    expect(raw(end)).toBe(false);
   });
 });
