@@ -38,6 +38,8 @@ import { fakeScript, testRuntime } from './plugin-runtime.ts';
 // tick is, and the span's text never changes there.
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+// Only properties change here, which leave the body as it was.
+const shownBefore = () => true;
 openVault();
 
 const links: LinkAssist = {
@@ -168,6 +170,7 @@ function mountReader(
             markdown,
             rights: allowed ? { allowed: true } : { allowed: false, hint: null },
             change,
+            shownBefore,
           }}
         >
           <PageProperties value={read.ok ? read.properties : null}>
@@ -351,7 +354,7 @@ describe('a span in the reader’s body', () => {
       });
       return (
         <PluginsContext value={runtime}>
-          <ReadingChanges value={{ markdown, rights: { allowed: true }, change }}>
+          <ReadingChanges value={{ markdown, rights: { allowed: true }, change, shownBefore }}>
             <Markdown
               source={markdown}
               attachments={{

@@ -8,6 +8,7 @@ import {
   bodyStart,
   splitFrontmatter,
   taskAt,
+  tasksWithLine,
 } from '@wikistow/client';
 import { pageHtml, SYNTAX, TASK, taskLabels, taskMarks } from '@wikistow/client/reader';
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
@@ -302,31 +303,59 @@ function OwnCodeBlock({ node, ...props }: ComponentProps<'pre'> & ExtraProps) {
 }
 
 /**
+ * The whole text the body's tree was read from, where the page shown is
+ * another, still being read, and not one shown on the way to it as this
+ * person's queued changes were made (`shownBefore`): its offsets may be
+ * other tasks' there (#728). Empty where no
+ * whole text has that body, as when the frontmatter went and the body
+ * starts with what reads as frontmatter: then no box can be ticked. Null
+ * where the tree is the text shown's.
+ */
+const ReadFrom = createContext<string | null>(null);
+
+/**
  * A task's checkbox (`taskMarks`). Where the page can change while it's
  * read (`ReadingChanges`), it shows the task as the Markdown shown has
  * it, queued changes made, and ticking it queues the change; it is
  * disabled, with a hint saying why when there's a reason to give, where
- * this person can't. Anywhere else, and for a checkbox the page's own HTML
- * holds, it is the reader's disabled box, as written.
+ * this person can't. While a newer text is read, it is the task as the
+ * text it was drawn from has it, and a tick says it was made there
+ * (`madeIn`), so one that may be another task's now is left out, as one
+ * made before the page changed is (#703, #728). Anywhere else, and for a
+ * checkbox the page's own HTML holds, it is the reader's disabled box, as
+ * written.
  */
 const TaskBox: NonNullable<Components['input']> = ({ node, ...props }) => {
   const here = use(ReadingChanges);
+  const older = use(ReadFrom);
   const at = node?.properties[TASK];
   const offset = at === undefined ? null : Number(at);
-  const task = here && offset !== null ? taskAt(here.markdown, offset) : null;
+  const shown = here && offset !== null ? taskAt(here.markdown, offset) : null;
+  const task = older === null ? shown : offset !== null ? taskAt(older, offset) : null;
   if (!here || !task || offset === null) return <input {...props} />;
   const { rights, change } = here;
   const hint = rights.allowed ? undefined : (rights.hint ?? undefined);
+  // As the text shown has it, ticks queued since included, where it has
+  // that line there: else a second click wouldn't undo the first.
+  const checked = shown?.line === task.line ? shown.checked : task.checked;
   return (
     <input
       type="checkbox"
-      checked={task.checked}
+      checked={checked}
       disabled={!rights.allowed}
       aria-label={props['aria-label'] ?? 'Done'}
       aria-description={hint}
       data-hint={hint}
       onChange={(event) =>
-        change({ kind: 'task', offset, line: task.line, checked: event.target.checked })
+        change({
+          kind: 'task',
+          offset,
+          line: task.line,
+          checked: event.target.checked,
+          ...(older !== null && {
+            madeIn: { markdown: older, repeated: tasksWithLine(older, task.line) > 1 },
+          }),
+        })
       }
     />
   );
@@ -362,7 +391,8 @@ function WrittenCode({
 const readTree = (tree: Root) => () => tree;
 
 /**
- * A body as the worker reads it (`markdownJobs.body`), kept a few minutes
+ * A body as the worker reads it (`markdownJobs.body`), with the body it
+ * was read from, as one shows while the next is read; kept a few minutes
  * once nothing shows it (the default `gcTime`), so going back to a page
  * shows it at once, and dropped with the decrypted queries when the vault
  * locks. A read nothing waits for any more is ended with its worker. It
@@ -371,7 +401,10 @@ const readTree = (tree: Root) => () => tree;
 const readQuery = (body: string) =>
   queryOptions({
     queryKey: [PLAIN, 'markdown', body],
-    queryFn: ({ signal }) => pageReader.run('body', body, { budgetMs: READ_BUDGET_MS, signal }),
+    queryFn: async ({ signal }) => ({
+      body,
+      tree: await pageReader.run('body', body, { budgetMs: READ_BUDGET_MS, signal }),
+    }),
     staleTime: 'static',
     networkMode: 'always',
     retry: false,
@@ -435,8 +468,22 @@ export function Markdown({
   );
   const moved = useMovedLinks(attachments.ctx, attachments.page, pages, links);
   const read = useQuery(readQuery(body));
+  const tree = read.data?.tree;
   // Each task's label, from the tree as read: links and references are only placeholders in the HTML.
-  const labels = useMemo(() => (read.data ? taskLabels(read.data) : new Map()), [read.data]);
+  const labels = useMemo(() => (tree ? taskLabels(tree) : new Map()), [tree]);
+  // The whole text the tree was read from, as its task offsets count, which
+  // may be an older body than the one shown while that's read.
+  const readFrom = read.data ? (frontmatter ?? '') + read.data.body : source;
+  // Only if it splits into that body again, as `taskAt` and `taskIndex` split it.
+  const whole = !read.data || splitFrontmatter(readFrom).body === read.data.body;
+  const start = whole ? bodyStart(readFrom) : bodyStart(source);
+  const here = use(ReadingChanges);
+  const drawnFrom = read.data?.body;
+  const older = useMemo(() => {
+    if (!here || drawnFrom === undefined || drawnFrom === body || here.shownBefore(drawnFrom))
+      return null;
+    return whole ? readFrom : '';
+  }, [here, drawnFrom, body, whole, readFrom]);
   const hash = useLocation({ select: (location) => location.hash });
   // A link to a heading of this page arrives before its body is read: it
   // goes there once the body first shows, and as the hash changes, but not
@@ -498,15 +545,17 @@ export function Markdown({
                 <div className="page-body" {...(passages && { [QUOTE_ROOT]: '' })}>
                   {/* Filled as ReactMarkdown reads the body, before the spans render. */}
                   <Held value={held}>
-                    <ReactMarkdown
-                      remarkPlugins={[[readTree, read.data]]}
-                      remarkRehypeOptions={{
-                        handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
-                      }}
-                      rehypePlugins={[[taskMarks, bodyStart(source), labels], pageHtml]}
-                      urlTransform={urlTransform}
-                      components={components}
-                    />
+                    <ReadFrom value={older}>
+                      <ReactMarkdown
+                        remarkPlugins={[[readTree, read.data.tree]]}
+                        remarkRehypeOptions={{
+                          handlers: { ...syntaxHandlers(held), inlineCode: referenceHandler(held) },
+                        }}
+                        rehypePlugins={[[taskMarks, start, labels], pageHtml]}
+                        urlTransform={urlTransform}
+                        components={components}
+                      />
+                    </ReadFrom>
                   </Held>
                 </div>
               </AsWritten>

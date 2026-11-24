@@ -1,4 +1,4 @@
-import { type ClientContext, type PageId, type SpaceId } from '@wikistow/client';
+import { splitFrontmatter, type ClientContext, type PageId, type SpaceId } from '@wikistow/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -9,11 +9,14 @@ import {
 } from '@tanstack/react-router';
 import { act, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vite-plus/test';
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { Markdown } from '../src/page/markdown.tsx';
+import { pageReader } from '../src/page/page-reader.ts';
 import { ReadingChanges } from '../src/page/reading-changes.tsx';
 import {
   applyChanges,
+  madeIn,
+  ShownBodies,
   type ReadingChange,
   type ReadingRights,
 } from '../src/page/reading-changes-model.ts';
@@ -40,17 +43,30 @@ title: Shopping
 const unmounts: (() => void)[] = [];
 afterEach(() => {
   for (const unmount of unmounts.splice(0)) unmount();
+  vi.restoreAllMocks();
 });
 
 /**
- * The reader's body of `source`, with `rights` to change it while it's
- * read, or none; each change is queued in `changes` and made in what's
- * shown, as the page's queue does.
+ * The reader's body of `first`, with `rights` to change it while it's
+ * read, or none; each change is kept in `changes` as the box made it, and
+ * queued and made in what's shown, as the page's queue does, with what it
+ * was made in (`madeIn`). `arrive` makes the page's text another, as
+ * another tab's publication does; `published` publishes the first `count`
+ * changes queued, as a flush does, the rest still queued.
  */
-async function render(source: string, rights: ReadingRights | null) {
+async function render(first: string, rights: ReadingRights | null) {
   const changes: ReadingChange[] = [];
+  const queue: ReadingChange[] = [];
+  let arrive = (_source: string) => {};
+  let flush = (_count: number) => {};
   function Reading() {
+    const [source, setSource] = useState(first);
+    arrive = setSource;
     const [queued, setQueued] = useState<ReadingChange[]>([]);
+    flush = (count) => {
+      setSource(applyChanges(source, queued.slice(0, count)).markdown);
+      setQueued(queued.slice(count));
+    };
     const markdown = applyChanges(source, queued).markdown;
     const body = (
       <Markdown
@@ -69,9 +85,16 @@ async function render(source: string, rights: ReadingRights | null) {
     if (!rights) return body;
     const change = (made: ReadingChange) => {
       changes.push(made);
-      setQueued((before) => [...before, made]);
+      const kept = madeIn(made, markdown, source);
+      queue.push(kept);
+      setQueued((before) => [...before, kept]);
     };
-    return <ReadingChanges value={{ markdown, rights, change }}>{body}</ReadingChanges>;
+    const [bodies] = useState(() => new ShownBodies());
+    bodies.see(source, queued);
+    const shownBefore = (drawn: string) => bodies.has(drawn);
+    return (
+      <ReadingChanges value={{ markdown, rights, change, shownBefore }}>{body}</ReadingChanges>
+    );
   }
   const node: ReactNode = <Reading />;
   const rootRoute = createRootRoute({ component: () => node });
@@ -100,7 +123,9 @@ async function render(source: string, rights: ReadingRights | null) {
     if (!found) throw new Error(`No checkbox “${label}”`);
     return found;
   };
-  return { container, changes, box };
+  const shown = (source: string) => act(async () => arrive(source));
+  const published = (count: number) => act(async () => flush(count));
+  return { container, changes, queue, box, shown, published };
 }
 
 describe('a task’s checkbox in the reader', () => {
@@ -168,4 +193,136 @@ describe('a task’s checkbox in the reader', () => {
     expect(mine?.disabled).toBe(true);
     expect(mine?.hasAttribute('data-task')).toBe(false);
   });
+
+  it('ticks in the text its tree was read from while a newer one waits to be read (#728)', async () => {
+    const before = '- [ ] Call\n  Mum\n- [ ] Call\n  Bob\n';
+    // Another tab swapped them: the task at the first one's offset is Bob's now.
+    const swapped = '- [ ] Call\n  Bob\n- [ ] Call\n  Mum\n';
+    const { box, changes, queue, shown, container } = await render(before, { allowed: true });
+    // The swapped text's read waits, so the tree shows the one before it.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const run = pageReader.run.bind(pageReader);
+    vi.spyOn(pageReader, 'run').mockImplementation(async (job, input, options) => {
+      if (input === swapped) await held;
+      return run(job, input, options);
+    });
+    await shown(swapped);
+    expect(box('Call Mum').checked).toBe(false);
+    await act(async () => box('Call Mum').click());
+    expect(changes).toEqual([
+      {
+        kind: 'task',
+        offset: 0,
+        line: 'Call',
+        checked: true,
+        madeIn: { markdown: before, repeated: true },
+      },
+    ]);
+    // Bob's task, now at that offset, stays as it was, and the tick is left out as #703 says.
+    const made = applyChanges(swapped, queue);
+    expect(made.markdown).toBe(swapped);
+    expect(made.dropped.map(({ reason }) => reason)).toEqual([
+      'The task “Call” is on the page more than once, and the page changed since it was ticked.',
+    ]);
+    await act(async () => release());
+    await expect
+      .poll(() => container.querySelector('input[type=checkbox]')?.getAttribute('aria-label'))
+      .toBe('Call Bob');
+    expect([box('Call Bob').checked, box('Call Mum').checked]).toEqual([false, false]);
+  });
+
+  it('ticks in the text its tree was read from when the newer one differs only in what is ticked', async () => {
+    // The sections differ only in their Notes' boxes: swapped, the text differs only in boxes too.
+    const before = '## A\n- [ ] Call\n- [x] Notes\n## A\n- [ ] Call\n- [ ] Notes\n';
+    const swapped = '## A\n- [ ] Call\n- [ ] Notes\n## A\n- [ ] Call\n- [x] Notes\n';
+    const { container, changes, queue, shown } = await render(before, { allowed: true });
+    hold((input) => input === swapped);
+    await shown(swapped);
+    const first = container.querySelector<HTMLInputElement>('input[aria-label="Call"]');
+    await act(async () => first?.click());
+    expect(changes.map((change) => change.kind === 'task' && change.madeIn)).toEqual([
+      { markdown: before, repeated: true },
+    ]);
+    expect(applyChanges(swapped, queue).markdown).toBe(swapped);
+  });
+
+  it('ticks in the text shown once its own ticks are published while a read of them waits', async () => {
+    const page = '- [ ] Call\n  Mum\n- [ ] Call\n  Bob\n- [ ] Call\n  Ann\n';
+    const { box, changes, queue, published } = await render(page, { allowed: true });
+    hold(() => true);
+    await act(async () => box('Call Mum').click());
+    await act(async () => box('Call Bob').click());
+    // Mum's tick is published, Bob's still waits, and the tree is still the page's before both.
+    await published(1);
+    await act(async () => box('Call Ann').click());
+    expect(changes.map((change) => change.kind === 'task' && change.madeIn)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect([box('Call Mum').checked, box('Call Bob').checked, box('Call Ann').checked]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(applyChanges(page, queue)).toEqual({
+      markdown: '- [x] Call\n  Mum\n- [x] Call\n  Bob\n- [x] Call\n  Ann\n',
+      dropped: [],
+    });
+  });
+
+  it('ticks in the text shown while a read of it with only boxes ticked since waits', async () => {
+    const page = '- [ ] Call\n  Mum\n- [ ] Call\n  Bob\n';
+    const { box, changes, queue } = await render(page, { allowed: true });
+    hold(() => true);
+    await act(async () => box('Call Mum').click());
+    // Bob's is ticked before Mum's tick is read: it's made in the text with Mum's ticked.
+    await act(async () => box('Call Bob').click());
+    // Each made in the text shown, as the tree's tasks are where it has them.
+    expect(changes.map((change) => change.kind === 'task' && change.madeIn)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect([box('Call Mum').checked, box('Call Bob').checked]).toEqual([true, true]);
+    expect(applyChanges(page, queue)).toEqual({
+      markdown: '- [x] Call\n  Mum\n- [x] Call\n  Bob\n',
+      dropped: [],
+    });
+  });
+
+  it('shows a tick at once, and undoes it, while a newer text that moves no task waits to be read', async () => {
+    const before = '- [ ] milk\n';
+    const added = '- [ ] milk\n\nAnd more.\n';
+    const { box, queue, shown } = await render(before, { allowed: true });
+    hold((input) => input !== before);
+    await shown(added);
+    await act(async () => box('milk').click());
+    expect(box('milk').checked).toBe(true);
+    await act(async () => box('milk').click());
+    expect(box('milk').checked).toBe(false);
+    expect(applyChanges(added, queue)).toEqual({ markdown: added, dropped: [] });
+  });
+
+  it('can’t be ticked while a newer text waits whose body no longer splits as it did', async () => {
+    // Without its frontmatter, the old body's first lines would read as frontmatter.
+    const before = '---\ntitle: Calls\n---\n---\n- [ ] Call Mum\n---\n# B\n- [ ] Call Bob\n';
+    const after = '- [ ] Call Mum\n---\n# B\n- [ ] Call Bob\n';
+    const { box, changes, shown } = await render(before, { allowed: true });
+    hold((input) => input === splitBody(after));
+    await shown(after);
+    expect(box('Call Mum').disabled).toBe(true);
+    await act(async () => box('Call Mum').click());
+    expect(changes).toEqual([]);
+  });
 });
+
+/** Every read of a body `held` says waits, until the test ends. */
+function hold(held: (input: unknown) => boolean) {
+  const run = pageReader.run.bind(pageReader);
+  vi.spyOn(pageReader, 'run').mockImplementation((job, input, options) =>
+    held(input) ? new Promise(() => {}) : run(job, input, options),
+  );
+}
+
+const splitBody = (markdown: string) => splitFrontmatter(markdown).body;
