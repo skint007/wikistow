@@ -46,9 +46,8 @@ export type BoundEditor = {
    */
   intent?(): unknown;
   /**
-   * Whether text inside `intent`'s formatting reads as it's written, as in
-   * code, which it would read otherwise without it: such formatting is
-   * never made again.
+   * Whether `intent` is more than formatting, as code, whose text reads as
+   * written, or a link, whose address is text: such is never made again.
    */
   literal?(intent: unknown): boolean;
   /** Make `intents`, in order, over the text it shows now, as the person's own edit. */
@@ -231,6 +230,7 @@ export class VisualBinding {
 
   // `held` is `body`, or what's followed from now on starts from the text the editor took in.
   #synced(from?: Pending) {
+    this.#formatting?.tookIn();
     const body = this.#body.text.toJSON();
     if (this.#held === body) this.#map = Mapping.identity(body.length);
     else if (from && from.text === this.#held) this.#map = from.map;
@@ -344,6 +344,7 @@ export class VisualBinding {
     if (text === this.#held) {
       // As changes that changed nothing it shows leave it: the same again.
       this.#map = Mapping.identity(text.length);
+      this.#formatting.tookIn();
       this.#reapplied();
       return this.#caughtUp();
     }

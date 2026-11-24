@@ -10,6 +10,7 @@ import { AddMarkStep, RemoveMarkStep, StepMap, Transform } from '@milkdown/kit/p
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 import { diffArrays } from 'diff';
+import { unnumbered } from './blocks';
 import { EXTERNAL } from './plugins';
 
 /** Marks added and taken off, each over its range in `before`, the document they were made on. */
@@ -79,9 +80,14 @@ export class FormatRecord {
   }
 }
 
-/** Whether `intent` adds or takes off a mark whose text is code, which reads as written. */
+/**
+ * Whether `intent` adds or takes off a mark that isn't only formatting: code,
+ * whose text reads as written, or a link, whose address is text two people
+ * can each change, which only a merge by characters keeps both of.
+ */
 export const literal = (intent: unknown): boolean =>
-  isFormatting(intent) && intent.steps.some((step) => !!step.mark.type.spec.code);
+  isFormatting(intent) &&
+  intent.steps.some((step) => !!step.mark.type.spec.code || step.mark.type.name === 'link');
 
 /**
  * `intents`' marks made again over the document `view` shows now, as one
@@ -110,11 +116,16 @@ export function keeps(merged: Node, theirs: Node, intents: readonly unknown[]): 
     [-1, 1],
     [-1, -1],
   ];
-  return ends.some((assoc) => {
-    const tr = new Transform(theirs);
-    remade(tr, intents, assoc);
-    return tr.doc.eq(merged);
-  });
+  // And with their marks of the same kind left or painted over, as Yjs
+  // nests two colours with the higher client's inside.
+  return [true, false].some((spare) =>
+    ends.some((assoc) => {
+      const tr = new Transform(theirs);
+      remade(tr, intents, assoc, spare);
+      // Whatever ids each reading gave its links.
+      return unnumbered(tr.doc).eq(unnumbered(merged));
+    }),
+  );
 }
 
 /** Which way each end of a range carried goes when text was typed right there. */
@@ -135,7 +146,12 @@ function rawIn(doc: Node): number {
  * range goes inside it, as Yjs placed the text of the other person, the
  * lower client, before this one's tags in the merge it replaces.
  */
-function remade(tr: Transform, intents: readonly unknown[], ends: Ends = [1, 1]): void {
+function remade(
+  tr: Transform,
+  intents: readonly unknown[],
+  ends: Ends = [1, 1],
+  spare = true,
+): void {
   for (const intent of intents) {
     if (!isFormatting(intent) || intent.before.type.schema !== tr.doc.type.schema) continue;
     // Lined up by its text and marks, so a word typed beside its copy isn't
@@ -159,7 +175,7 @@ function remade(tr: Transform, intents: readonly unknown[], ends: Ends = [1, 1])
       const Made = step instanceof AddMarkStep ? AddMarkStep : RemoveMarkStep;
       // Not over a mark of the same kind someone else put on since, as their
       // highlight inside this app's: theirs stays, as the merge kept it.
-      for (const [from, to] of unclaimed(intent.before, tr.doc, map, step, ends)) {
+      for (const [from, to] of unclaimed(intent.before, tr.doc, map, step, ends, spare)) {
         tr.maybeStep(new Made(from, to, step.mark));
       }
     }
@@ -175,6 +191,7 @@ function unclaimed(
   map: StepMap,
   step: AddMarkStep | RemoveMarkStep,
   ends: Ends,
+  spare: boolean,
 ): [number, number][] {
   const [start, end] = [map.map(step.from, ends[0]), map.map(step.to, ends[1])];
   if (start >= end) return [];
@@ -188,7 +205,7 @@ function unclaimed(
     // Where this character was, if it was there.
     const there = back.mapResult(at, 1);
     const was = there.deleted ? null : markOf(before.nodeAt(there.pos));
-    const claimed = !!now && !(was && was.eq(now));
+    const claimed = spare && !!now && !(was && was.eq(now));
     if (!claimed) open ??= at;
     else if (open !== null) {
       out.push([open, at]);

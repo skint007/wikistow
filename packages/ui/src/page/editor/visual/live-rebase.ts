@@ -25,6 +25,8 @@ export const WAIT_MS = 1_000;
  * counts as the first, as one made alongside comes back within a round trip.
  */
 export const BESIDE_MS = 750;
+/** Stands for others' changes the editor hadn't taken in, as a client lower than any. */
+const UNSEEN = -1;
 /** How many times one formatting change is made again, at most. */
 const MAX_REBASES = 3;
 
@@ -179,6 +181,11 @@ type Write = {
 export class OwnFormatting {
   readonly #text: Y.Text;
   readonly #writes: Write[] = [];
+  /**
+   * Others' changes the editor hasn't taken in yet: a write made meanwhile
+   * was made without them, whatever Yjs places it beside.
+   */
+  #untaken: Change = change();
   /** By client, how far into this client's clocks its changes show it had. */
   readonly #knows = new Map<number, number>();
   #timer: ReturnType<typeof setTimeout> | null = null;
@@ -194,9 +201,10 @@ export class OwnFormatting {
   /**
    * Make one of the editor's writes, `write`, which calls `mark` with its
    * transaction; and if it's formatting alone (`intent`), keep it to make
-   * again. Not code (`literal`): text in code reads as written and outside
-   * it as Markdown, so taking it out would change what others typed beside
-   * or inside it. Any other is as the person's own change (`own`).
+   * again. Not code or a link (`literal`): text in code reads as written
+   * and outside it as Markdown, so taking it out would change what others
+   * typed beside or inside it, and a link's address is text two people can
+   * each change. Any other is as the person's own change (`own`).
    */
   capture(
     intent: unknown,
@@ -249,10 +257,19 @@ export class OwnFormatting {
       met: new Map(),
       built: false,
     });
+    // Made before the editor took in someone's change it meets: alongside
+    // it, as surely as any, and this app's to make again.
+    const written = this.#writes.at(-1) as Write;
+    if (meet(this.#text, written.own, this.#untaken)) written.met.set(UNSEEN, performance.now());
     this.#timer ??= setTimeout(() => {
       this.#timer = null;
       this.#prune();
     }, REBASE_MS + 1);
+  }
+
+  /** The editor has taken in `text` as it is now. */
+  tookIn(): void {
+    this.#untaken = change();
   }
 
   /**
@@ -272,8 +289,14 @@ export class OwnFormatting {
   heard(transaction: Y.Transaction, from: RemoteUpdate | null): void {
     const doc = this.#doc;
     this.#prune();
-    if (!doc || this.#writes.length === 0) return;
+    if (!doc) return;
     const me = doc.clientID;
+    const arrived = this.#changeOf(transaction, me);
+    for (const [c, list] of arrived.inserts)
+      for (const r of list) add(this.#untaken.inserts, c, r.clock, r.len);
+    for (const [c, list] of arrived.deletes)
+      for (const r of list) add(this.#untaken.deletes, c, r.clock, r.len);
+    if (this.#writes.length === 0) return;
     const client = from?.client ?? this.#clientOf(transaction, me);
     if (client === null || client === me) return;
     const update = from ? Y.decodeUpdate(from.update) : null;

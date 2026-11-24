@@ -644,4 +644,73 @@ describe('formatting made alongside someone else’s', () => {
       for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
     });
   }
+
+  for (const ids of ORDERS) {
+    for (const kind of ['highlight', 'text'] as const) {
+      it(`comes out as main does: two ${kind} colours on one word, clients ${ids.join(' and ')}`, async () => {
+        const { end, main } = await together(
+          'Hello world there.\n',
+          [colour('world', kind, 'red'), colour('world', kind, 'blue')],
+          ids,
+        );
+        if (raw(main)) expect(raw(end)).toBe(false);
+        else expect(end).toBe(main);
+      });
+    }
+  }
+
+  it('is made again over a change that came just before the editor took it in', async () => {
+    const page = 'Say **world** now.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    colour('world', 'text', 'red')(b);
+    await expect.poll(() => b.log.length).toBe(1);
+    send(b, a);
+    colour('world', 'highlight', 'red')(a);
+    await settle([a, b]);
+    const end = a.text.toJSON();
+    expect(b.text.toJSON()).toBe(end);
+    expect(raw(end)).toBe(false);
+    expect(end).toContain('<span data-color="red">');
+    expect(end).toContain('<mark data-color="red">');
+  });
+
+  it('never makes a link again, as both people may change its address', async () => {
+    const page = '[world](https://example.test/one)\n';
+    const a = await person(page, 2);
+    const b = sourcePerson(page, 1);
+    const view = viewOf(a.dom);
+    act(() => {
+      const { state } = view;
+      const type = state.schema.marks['link'];
+      const [from, to] = range(state.doc, 'world');
+      const link = type?.isInSet(state.doc.nodeAt(from)?.marks ?? []);
+      if (!type || !link) throw new Error('No link');
+      view.dispatch(
+        state.tr
+          .removeMark(from, to, type)
+          .addMark(from, to, type.create({ ...link.attrs, href: 'https://example.test/two' })),
+      );
+    });
+    typeSource(b, '[world](https://example.test/one?x=y)\n');
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('comes out as main does with a link elsewhere on the page', async () => {
+    const page = 'Say world now.\n\n[More](https://example.test)\n';
+    const a = await person(page, 2);
+    const b = sourcePerson(page, 1);
+    toggle('world', 'bold')(a);
+    typeSource(b, page.replace('world', 'world*'));
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
 });
