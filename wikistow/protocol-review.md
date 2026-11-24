@@ -1304,6 +1304,33 @@ Round 42 reviewed round 41's revision (e11e9ca) with the three briefs, fresh rev
 
 **Outcome.** Round 42 found Highs, so it doesn't meet the stopping rule. Every finding is fixed or moot. Round 43 repeats the three briefs against this revision.
 
+## Round 43: identity key rotation, narrowed, fourth review
+
+Round 43 reviewed round 42's revision (bf1adaa), with fresh reviewers given the narrowed text, the log of rounds 31 to 42 and the list of what earlier rounds accepted: the member and encoding briefs as Claude subagents. **The server brief didn't run.** Its Codex (gpt-6.2-sol) agent was refused by its provider's content filter partway through, and again on the one retry, worded more plainly still, as a consistency check of the ownership rules. So round 43, like round 41, had two of the three briefs, and can't meet the stopping rule whatever it found. The two found no Critical finding, 4 High, 6 Medium, 8 Low and no Info (18 in all). Both found the narrowing itself consistent, and round 42's fixes holding as far as they claimed. The Highs were in what round 42 added: a decline that left owners reached through the declined key, the removal's replacing envelopes going where the server said, "remove instead" from a pending re-add letting the unvouched key choose recipients, and the exception firing on an empty set of owners. The fixes again take mechanisms out: the replacing envelopes are gone, the exception is worked out each time and never recorded, and the raised mark is a check, not a stored mark. Section numbers are protocol.md's after the fixes.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| M43-1 | 43 | High | 4.6 **A space whose only accepted owner is the person**; 8.4 | Declining the followed key left the owners accepted through its statements, so a member kept writing under versions a stranger sealed. | Fixed: what the exception accepts, and what step 3 reaches through it, is worked out each time and never recorded, so a decline takes it all back. |
+| M43-2 | 43 | High | 4.6 **Removing a rotated owner instead** | The removal's replacing envelopes went to whatever members the server named, unverified, with no class bound. | Fixed by removing them: what the removed owner's new key wrapped stays closed to members, the dialog says so, and an owner may save it again. Round 41's M41-4 is accepted as that availability cost. |
+| M43-3 | 43 | High | 4.6; 8.6 | "Remove instead" from a pending re-add kept the unvouched key in `owners`, so its envelopes chose `E`. | Fixed: the removal moves the owner's later keys from `owners` to `openOnly`. |
+| E43-F1 | 43 | High | 4.6 **A space whose only accepted owner is the person** | An empty set of accepted owners passed the test, so a member who had declined a space's only owner accepted any contact who rotated next as its owner. | Fixed: the test needs at least one accepted key, and a key in `removed` still counts, so it blocks. |
+| M43-4 | 43 | Medium | 4.6; 7.6 | Two listed owners a co-owner accepts at no current key can't be removed one at a time, as each removal must seal to the other. | Accepted: an availability cost of the narrowing, added to the ADR's; adding either again, after checking with them, is the way out. |
+| M43-5 | 43 | Medium | 4.6 **Adding a rotated owner again** | The pending test caught the person's own app, and every creator, whom no statement names. | Fixed: it applies only to another owner, recorded at a later key than one held for them before, and counts statements this person signed at any key. |
+| M43-6 | 43 | Medium | 4.6 | The replacing envelopes stranded members who accepted only the new key. | Moot with M43-2. |
+| M43-7 | 43 | Medium | 4.6 **Shares left at an earlier key** | After a rotated owner removed themself, what they saved under the new key was lost to everyone else. | Accepted, as M43-2's cost, and stated in §4.6. |
+| E43-F2 | 43 | Medium | 4.6; 6.8 | The raised mark had two definitions, and the stored one undid S42-7's fix. | Fixed: it is a check worked out each time from the envelopes held, raising no mark. A server that stops serving the envelope brings the app back below it (A2). |
+| E43-F3 | 43 | Medium | 4.6; 8.2; 8.6 | `openOnly` and `owners` could hold the same key, with no rule, and `openOnly` had no parse rules. | Fixed: a key in both counts as `openOnly`, writers keep them apart, "add a co-owner" moves a key back, and §8.2 gives `openOnly`'s format. |
+| M43-8 | 43 | Low | 4.6 | Same as E43-F1. | Fixed with E43-F1. |
+| M43-9 | 43 | Low | 4.6; 7.6 | The "owner by its own state" gate missed co-owners promoted from members. | Fixed: an app that becomes an owner records its own ID, and the gate is that entry. Same as E43-L1. |
+| E43-L1 | 43 | Low | 4.6; 6.5 step 1 | The gate depended on a name record the server can withhold. | Fixed with M43-9. |
+| E43-L2 | 43 | Low | 4.6 | The pending test contradicted its own exit, and an adder who rotated made it pending again. | Fixed with M43-5. |
+| E43-L3 | 43 | Low | 8.6 | The re-add's merge didn't carry the chain or skip `removed`, and wasn't a confirmed write. | Fixed: "add a co-owner" carries the chain, skips `removed`, moves keys out of `openOnly`, and is confirmed. |
+| E43-L4 | 43 | Low | 6.4; 6.5 | A signer's key wasn't bound to its key version now that `owners` can hold several. | Fixed: §4.6 takes the chain's key at `signerKeyVersion` or `sealerKeyVersion`. |
+| E43-L5 | 43 | Low | 4.6 | The replacing envelopes didn't name the recipient's key version. | Moot with M43-2. |
+| E43-L6 | 43 | Low | 4.6; A15 | Filtering `removed` keys out of the test widened it past A15. | Fixed with E43-F1. |
+
+**Outcome.** Round 43 found Highs, and ran without the server brief, so it doesn't meet the stopping rule. Every finding is fixed, moot or accepted as availability. Round 44 repeats the three briefs against this revision.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
