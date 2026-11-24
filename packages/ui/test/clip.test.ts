@@ -363,6 +363,11 @@ describe('a page in the trash on this device', () => {
     expect(hiddenByTrash(tree, spaceId, [], pageId)).toBe(false);
     expect(hiddenByTrash(tree, spaceId, [trashOf(chosen)], newId(PageId))).toBe(false);
   });
+
+  it('is by one waiting beside another the server refused', () => {
+    const refused = trashOf(pageId, { kind: 'forbidden' });
+    expect(hiddenByTrash(tree, spaceId, [refused, trashOf(chosen)], pageId)).toBe(true);
+  });
 });
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);

@@ -511,9 +511,10 @@ export function hiddenByTrash(
   const trash = (entry: QueueEntries[number]) => entry.kind === 'delete' && entry.failure === null;
   if (!entries.some(trash)) return false;
   const shows = (shown: QueueTree) => shown.pages.some((one) => one.id === pageId);
-  const kept = entries.filter((entry) => !trash(entry));
+  // The queue's tree hides what any trash names, refused or not.
+  const others = entries.filter((entry) => entry.kind !== 'delete');
   return (
-    shows(queueOperations.withQueued(tree, spaceId, kept)) &&
-    !shows(queueOperations.withQueued(tree, spaceId, entries))
+    shows(queueOperations.withQueued(tree, spaceId, others)) &&
+    !shows(queueOperations.withQueued(tree, spaceId, [...others, ...entries.filter(trash)]))
   );
 }
