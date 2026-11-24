@@ -132,6 +132,12 @@ type Segment = {
   readonly same: boolean;
 };
 
+/**
+ * A change someone else made, as a stretch of `held` and one of `body`:
+ * text they took out is in `held` only, text they put in in `body` only.
+ */
+export type Theirs = Omit<Segment, 'same'>;
+
 /** A change to `body` as Yjs tells it (`YTextEvent.delta`). */
 export type Delta = readonly { insert?: unknown; delete?: number; retain?: number }[];
 
@@ -360,6 +366,11 @@ export class Mapping {
       body = bodyEnd;
     }
     return (this.#cached = segments);
+  }
+
+  /** Others' changes, in order of place. */
+  theirs(): Theirs[] {
+    return this.#segments.filter((segment) => !segment.same);
   }
 
   /**

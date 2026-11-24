@@ -10,8 +10,12 @@
 //   until the composition ends;
 // - a change that reaches past its block is read whole, at most every
 //   second or every twice as long as the last whole read took;
-// - what it can't show, it says, naming who changed it.
+// - what it can't show, it says, naming who changed it;
+// - a block it wrote that others' formatting at once left not reading
+//   cleanly, it puts back as it wrote it, if it's the one to
+//   (`live-repair.ts`), before it takes the change in.
 import * as Y from 'yjs';
+import { noteDeleted, repairs, WRITINGS, writingOf, type Writing } from './live-repair';
 import { applyTo, Mapping, ownChanges, putInto, type Delta } from './live-text';
 
 /** How a take-in went: in, not by block (read whole), or waiting on a composition. */
@@ -60,6 +64,8 @@ const COMPOSING_MS = 500;
 const RECHECKS = 2;
 
 const MINE = Symbol('visual-binding');
+// Its own change too, putting back a block, which the editor takes in as others'.
+const REPAIR = Symbol('visual-binding-repair');
 
 /** Text read from `body` for a take-in or a whole read, and how it became `body` since, while that's followed. */
 type Pending = { text: string; map: Mapping | null };
@@ -97,6 +103,10 @@ export class VisualBinding {
   #pending: Pending | null = null;
   /** Others' changes to `body`, counted. */
   #theirs = 0;
+  /** Its own writing into `body`, the latest last (`live-repair.ts`). */
+  readonly #writings: Writing[] = [];
+  /** Someone else changed `body` since it last wrote. */
+  #heard = false;
   #destroyed = false;
 
   constructor(body: BoundText, editor: BoundEditor) {
@@ -111,6 +121,9 @@ export class VisualBinding {
       if (mine) return;
       const followed = this.#map;
       this.#map = followed?.remote(delta) ?? null;
+      // A repair goes in as it's made, and is taken in at once.
+      if (transaction.meta.get(REPAIR) === this) return;
+      this.#heard = true;
       this.#theirs++;
       this.#by.add(this.#sending);
       // Too much to follow: catch up at once, so a diff stands in as briefly as can be.
@@ -199,7 +212,7 @@ export class VisualBinding {
       if (!doc) return;
       doc.transact((transaction) => {
         transaction.meta.set(MINE, this);
-        putInto(text, carried);
+        this.#wrote(doc, transaction, () => putInto(text, carried));
       });
     });
     // Refused, as by a session left: the page holds it all the same.
@@ -207,6 +220,32 @@ export class VisualBinding {
     this.#held = next;
     this.#map = expected === next ? Mapping.identity(next.length) : mapping.afterOwn(changes);
     return expected;
+  }
+
+  // `put` its own change into `body`, kept as part of its writing.
+  #wrote(doc: Y.Doc, transaction: Y.Transaction, put: () => void) {
+    const writing = writingOf(doc, this.#writings.at(-1), this.#heard);
+    if (writing !== this.#writings.at(-1)) this.#writings.push(writing);
+    if (this.#writings.length > WRITINGS) this.#writings.shift();
+    this.#heard = false;
+    put();
+    noteDeleted(writing, transaction);
+  }
+
+  // Blocks others' changes, merged with its own, left not reading cleanly,
+  // put back as it wrote them, if it's the one to.
+  #repair() {
+    const text = this.#body.text;
+    const body = text.toJSON();
+    if (this.#writings.length === 0 || body === this.#held) return;
+    const changes = repairs(text, body, this.#held, this.#mapNow(body), this.#writings);
+    if (changes.length === 0) return;
+    this.#body.edit(() =>
+      text.doc?.transact((transaction) => {
+        transaction.meta.set(REPAIR, this);
+        this.#wrote(transaction.doc, transaction, () => putInto(text, changes));
+      }),
+    );
   }
 
   /** Text was given from elsewhere, which `body` holds: catch up with it soon. */
@@ -251,6 +290,7 @@ export class VisualBinding {
     if (!this.#body.active()) return;
     // The editor's own edit, before others' changes go in over it.
     this.write();
+    this.#repair();
     const text = this.#body.text.toJSON();
     if (text === this.#held) {
       // As changes that changed nothing it shows leave it: the same again.

@@ -8,6 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
+- Live editing: when two people put a highlight, a colour, bold or a link on the same words in the visual editor at the same moment, the page no longer ends up with tags that cross or a colour name spliced from both (`gblueen`), shown as raw HTML. The block settles to one person's formatting. Their changes to it that merged cleanly before, such as a capital letter typed in a word someone highlights, merge as before. (#720)
 - Live editing: a draft someone saved elsewhere while the app was getting back into a lost session is no longer missed when the app goes on without joining again, as when it had nothing of the person's to keep. The editor showed the old draft, and **Publish** published one the person never saw. (#722)
 - In the visual editor, Comment over cells selected in a table quotes them from the first to the last, as the page reads, rather than only the last cell. (#721)
 - Live editing: a space typed at the end of a paragraph or heading in the visual editor is no longer lost when someone else changes that block or the one beside it at the same moment, which ran the next word typed into the one before. The visual editor now keeps the spaces a paragraph or heading ends with in the page, as it writes them. (#723)

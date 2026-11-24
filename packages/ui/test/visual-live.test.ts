@@ -8,6 +8,7 @@ import {
   type BoundEditor,
   type Taking,
 } from '../src/page/editor/visual/live-binding.ts';
+import { readsCleanly } from '../src/page/editor/visual/live-repair.ts';
 import { applyTo, Mapping, ownChanges, putInto } from '../src/page/editor/visual/live-text.ts';
 
 // The visual editor in a live session (ADR 0015 decision 3): its own edits
@@ -652,5 +653,385 @@ describe('the binding', () => {
     expect(refusing.write()).toBe('One.\n\nTwo!\n');
     expect(text.toJSON()).toBe('One.\n\nTwo.\n');
     refusing.destroy();
+  });
+});
+
+describe('two people formatting the same text at once (#720)', () => {
+  type Side = { doc: Y.Doc; editor: FakeEditor; binding: VisualBinding; before: Set<() => void> };
+  let sides: Side[] = [];
+
+  const side = (doc: Y.Doc): Side => {
+    const text = doc.getText('body');
+    const before = new Set<() => void>();
+    const editor = new FakeEditor(text.toJSON());
+    const binding = new VisualBinding(
+      {
+        text,
+        edit: (change) => doc.transact(change),
+        onBeforeRemote: (listener) => {
+          const heard = () => listener('them');
+          before.add(heard);
+          return () => void before.delete(heard);
+        },
+        active: () => true,
+      },
+      editor,
+    );
+    return { doc, editor, binding, before };
+  };
+  // What `to` hasn't of `from`'s, as the participant applies it.
+  const send = (from: { doc: Y.Doc }, to: Side | { doc: Y.Doc }) => {
+    const update = Y.encodeStateAsUpdate(from.doc, Y.encodeStateVector(to.doc));
+    if ('before' in to) for (const listener of to.before) listener();
+    Y.applyUpdate(to.doc, update, 'remote');
+  };
+  // Everyone's changes to everyone, until nobody changes anything more.
+  const exchange = async (docs: { doc: Y.Doc }[] = sides) => {
+    for (let i = 0; i < 4; i++) {
+      for (const from of docs) for (const to of docs) if (from !== to) send(from, to);
+      await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
+    }
+  };
+  const bodyOf = (s: { doc: Y.Doc }) => s.doc.getText('body').toJSON();
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  });
+  afterEach(() => {
+    for (const s of sides.splice(0)) s.binding.destroy();
+    vi.useRealTimers();
+  });
+
+  // A doc with `page`, Yjs client `client`.
+  const docOf = (page: string, client: number, from?: Y.Doc) => {
+    const doc = new Y.Doc();
+    doc.clientID = client;
+    if (from) Y.applyUpdate(doc, Y.encodeStateAsUpdate(from));
+    else doc.getText('body').insert(0, page);
+    return doc;
+  };
+  // Two people with `page`, A's Yjs client lower than B's, or higher.
+  const start = (page: string, aLower: boolean) => {
+    for (const s of sides.splice(0)) s.binding.destroy();
+    const a = docOf(page, aLower ? 1_000 : 2_000);
+    const b = docOf(page, aLower ? 2_000 : 1_000, a);
+    sides = [side(a), side(b)];
+    return sides as [Side, Side];
+  };
+  const orders = [true, false];
+  // A and B each write their text of `was` at once, then hear each other's.
+  const merged = async (was: string, mine: string, theirs: string, aLower: boolean) => {
+    const [a, b] = start(was, aLower);
+    a.editor.shown = mine;
+    b.editor.shown = theirs;
+    a.binding.write();
+    b.binding.write();
+    await exchange();
+    expect(bodyOf(b)).toBe(bodyOf(a));
+    expect(a.editor.shown).toBe(bodyOf(a));
+    expect(b.editor.shown).toBe(bodyOf(b));
+    return bodyOf(a);
+  };
+
+  const red = (tag: string, inner: string, color = 'red') =>
+    `<${tag} data-color="${color}">${inner}</${tag}>`;
+  const hi = (inner: string) => red('mark', inner);
+  const line = (run: string) => `Hello ${run} there.\n\nNext.\n`;
+
+  // Each merges correctly by character, as it did before repairs: exactly so, either way round.
+  it.each([
+    ['a capital', line('world'), line(hi('world')), line('World'), line(hi('World'))],
+    ['a typo fixed', line('wrold'), line(hi('wrold')), line('world'), line(hi('world'))],
+    [
+      'typing inside',
+      line('world'),
+      line(hi('world')),
+      line('wonderworld'),
+      line(hi('wonderworld')),
+    ],
+    ['a letter deleted', line('world'), line(hi('world')), line('word'), line(hi('word'))],
+    [
+      'the stop after it deleted',
+      'Hello world. there\n',
+      `Hello ${hi('world')}. there\n`,
+      'Hello world there\n',
+      `Hello ${hi('world')} there\n`,
+    ],
+    [
+      'bold taken off',
+      'Say **world** now.\n',
+      `Say **${hi('world')}** now.\n`,
+      'Say world now.\n',
+      `Say ${hi('world')} now.\n`,
+    ],
+    [
+      'a link’s address changed',
+      line('[world](https://old.test)'),
+      line(hi('[world](https://old.test)')),
+      line('[world](https://new.test)'),
+      line(hi('[world](https://new.test)')),
+    ],
+    [
+      'two letters of a word',
+      line('world'),
+      line(`${hi('w')}orld`),
+      line(`worl${red('span', 'd')}`),
+      line(`${hi('w')}orl${red('span', 'd')}`),
+    ],
+    [
+      'two words with a comma between',
+      'Hello,world there.\n',
+      `${hi('Hello')},world there.\n`,
+      `Hello,${red('span', 'world')} there.\n`,
+      `${hi('Hello')},${red('span', 'world')} there.\n`,
+    ],
+    ['a highlight taken off twice', line(hi('world')), line('world'), line('world'), line('world')],
+    [
+      'a part of what’s highlighted coloured',
+      'Completion: (50%).\n',
+      `Completion: ${hi('(50%)')}.\n`,
+      `Completion: (${red('span', '50')}%).\n`,
+      `Completion: ${hi(`(${red('span', '50')}%)`)}.\n`,
+    ],
+    [
+      'a word typed after it',
+      line('world'),
+      line(hi('world')),
+      line('world big'),
+      line(`${hi('world')} big`),
+    ],
+  ])('merges a highlight with %s as by character', async (_, was, mine, theirs, both) => {
+    for (const aLower of orders) expect(await merged(was, mine, theirs, aLower)).toBe(both);
+  });
+
+  // Each merges by character into HTML neither wrote: the higher client's writing stands.
+  it.each([
+    ['**==world==**', red('mark', '**world**'), red('span', '==**world**==')],
+    ['**world**', red('mark', '**world**'), red('span', '**world**')],
+    ['**world**', '==**world**==', red('span', '**world**')],
+    ['==**world**==', red('mark', '**world**'), red('span', '==**world**==')],
+    ['world', hi('world'), '**world**'],
+    ['world', hi('world'), '[world](https://x.test)'],
+    ['world', hi('world'), hi('world')],
+    [hi('world'), red('mark', 'world', 'blue'), red('mark', 'world', 'green')],
+    ['big world', `${hi('big wo')}rld`, `big w${hi('orld')}`],
+    ['world', hi('world'), red('span', 'world')],
+  ])(
+    'from %s, settles to one side’s writing, never HTML neither wrote',
+    async (was, mine, theirs) => {
+      for (const aLower of orders)
+        expect(await merged(line(was), line(mine), line(theirs), aLower)).toBe(
+          aLower ? line(theirs) : line(mine),
+        );
+    },
+  );
+
+  it('settles to the writing of one who put text in, against one who only took it out', async () => {
+    // Taking text out leaves nothing of the app's own in the block: Yjs
+    // doesn't say whose a deletion was, so only the other can be the one.
+    const [was, mine, theirs] = [line(hi('world')), line('world'), line(red('span', hi('world')))];
+    for (const aLower of orders) expect(await merged(was, mine, theirs, aLower)).toBe(theirs);
+  });
+
+  it('keeps what the other typed farther off in the block, and only that', async () => {
+    const was = 'Hello **world** there.\nAnd more.\n';
+    const mine = `Hello ${red('mark', '**world**')} there.\nAnd more.\n`;
+    // Typed on the next line and just before the word, with the colour.
+    const theirs = `Hello big ${red('span', '**world**')} there.\nAnd more again.\n`;
+    // B's writing stands, all of it.
+    expect(await merged(was, mine, theirs, true)).toBe(theirs);
+    // A's stands, with B's typing on the next line; "big " beside A's highlight goes with B's colour.
+    expect(await merged(was, mine, theirs, false)).toBe(
+      `Hello ${red('mark', '**world**')} there.\nAnd more again.\n`,
+    );
+  });
+
+  it('leaves other blocks, and a third person who changed none of it', async () => {
+    const page = `Hello **world** there.\n\nOther.\n`;
+    for (const aLower of orders) {
+      const [a, b] = start(page, aLower);
+      const c = side(docOf(page, 1_500, a.doc));
+      sides.push(c);
+      a.editor.shown = `Hello ${red('mark', '**world**')} there.\n\nOther.\n`;
+      b.editor.shown = `Hello ${red('span', '**world**')} there.\n\nOther.\n`;
+      c.editor.shown = `Hello **world** there.\n\nOther, said C.\n`;
+      for (const s of sides) s.binding.write();
+      await exchange();
+      const higher = aLower ? 'span' : 'mark';
+      for (const s of sides)
+        expect(bodyOf(s)).toBe(`Hello ${red(higher, '**world**')} there.\n\nOther, said C.\n`);
+    }
+  });
+
+  it('settles formatting that came after the other’s typing reached it', async () => {
+    // B types elsewhere first, which A takes in, then formats as A did.
+    const [a, b] = start(line('**world**'), false);
+    a.editor.shown = line(red('mark', '**world**'));
+    a.binding.write();
+    b.editor.shown = line('**world**').replace('Next.', 'Next!');
+    b.binding.write();
+    send(b, a);
+    await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
+    b.editor.shown = line(red('span', '**world**')).replace('Next.', 'Next!');
+    b.binding.write();
+    await exchange();
+    expect(bodyOf(a)).toBe(line(red('mark', '**world**')).replace('Next.', 'Next!'));
+    expect(bodyOf(b)).toBe(bodyOf(a));
+  });
+
+  it.each([
+    ['at the line’s start', 0],
+    ['beside the highlight', 'Hello '.length],
+    ['after the highlight', `Hello ${hi('world')}`.length],
+  ])(
+    'never undoes colour HTML someone types or pastes by hand %s in a block it formatted',
+    async (_, at) => {
+      const typed = '<span data-color="red">';
+      for (const paste of [false, true]) {
+        const [a] = start(line('world'), false);
+        sides.splice(1).forEach((s) => s.binding.destroy());
+        // C edits the source, with no binding, from a lower client than A's.
+        const c = { doc: docOf('', 500, a.doc) };
+        a.editor.shown = line(hi('world'));
+        a.binding.write();
+        await exchange([a, c]);
+        const expected = (n: number) => {
+          const page = line(hi('world'));
+          return page.slice(0, at) + typed.slice(0, n) + page.slice(at);
+        };
+        if (paste) {
+          c.doc.getText('body').insert(at, typed);
+          await exchange([a, c]);
+          expect(bodyOf(a)).toBe(expected(typed.length));
+          continue;
+        }
+        for (let i = 1; i <= typed.length; i++) {
+          c.doc.getText('body').insert(at + i - 1, typed[i - 1] as string);
+          await exchange([a, c]);
+          expect(bodyOf(a)).toBe(expected(i));
+        }
+      }
+    },
+  );
+
+  it('never puts back a tag someone deleted knowing it was there', async () => {
+    const [a] = start(line('world'), false);
+    sides.splice(1).forEach((s) => s.binding.destroy());
+    const c = { doc: docOf('', 500, a.doc) };
+    a.editor.shown = line(hi('world'));
+    a.binding.write();
+    // C has A's highlight, and takes its end out, before A takes anything in.
+    send(a, c);
+    const body = c.doc.getText('body');
+    body.delete(body.toJSON().indexOf('</mark>'), '</mark>'.length);
+    await exchange([a, c]);
+    expect(bodyOf(a)).toBe(line('<mark data-color="red">world'));
+  });
+
+  it('leaves a block broken when the one to repair it is gone', async () => {
+    const [a, b] = start(line('world'), true);
+    a.editor.shown = line(hi('world'));
+    b.editor.shown = line(red('span', 'world'));
+    a.binding.write();
+    b.binding.write();
+    // B, the higher client, leaves before A's change reaches it.
+    b.binding.destroy();
+    await exchange([a, b]);
+    expect(bodyOf(a)).toBe(
+      line('<mark data-color="red"><span data-color="red">world</mark></span>'),
+    );
+  });
+
+  it('leaves a merge of two docs with no binding as Yjs makes it', () => {
+    // As the issue's test does it: the merge itself is as it was.
+    const was = line('**world**');
+    const a = docOf(was, 1_000);
+    const b = docOf(was, 2_000, a);
+    putInto(a.getText('body'), ownChanges(was, line(red('mark', '**world**'))));
+    putInto(b.getText('body'), ownChanges(was, line(red('span', '**world**'))));
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    expect(a.getText('body').toJSON()).toBe(
+      line('<mark data-color="red"><span data-color="red">**world**</mark></span>'),
+    );
+  });
+
+  it('takes in plain typing on a long page as quickly as before', async () => {
+    const paragraph = (i: number) => `Para ${i} has ${hi('colour')} and **bold** text.`;
+    const page = Array.from({ length: 3_000 }, (_, i) => paragraph(i)).join('\n\n') + '\n';
+    for (const aLower of orders) {
+      const [a, b] = start(page, aLower);
+      // A formatted a word in the middle, which B has.
+      a.editor.shown = page.replace('Para 1500 has', `Para 1500 ${red('span', 'has')}`);
+      a.binding.write();
+      await exchange();
+      const started = Date.now();
+      for (let i = 0; i < 20; i++) {
+        b.editor.shown = b.editor.shown.replace('Para 1500', 'Para 1500x');
+        b.binding.write();
+        send(b, a);
+        await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
+      }
+      process.stderr.write(`long page: ${Date.now() - started} ms\n`);
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(bodyOf(a)).toBe(bodyOf(b));
+    }
+  });
+});
+
+describe('whether a block reads cleanly', () => {
+  it('tells tags crossed, unbalanced, misspelt or one inside its own kind', () => {
+    for (const broken of [
+      '<mark data-color="red"><span data-color="red">world</mark></span>',
+      '<mark data-color="red">world',
+      'world</span>',
+      '<span data-color"red">world</span>',
+      '<mark data-color="gblueen">world</mark>',
+      '<mark data-color="red"><mark data-color="red">world</mark></mark>',
+      '<mark data-color="red">**world</mark>**',
+      '<mark data-color="red">[world</mark>](https://x.test)',
+      'span data-color="red"><world</span>',
+    ])
+      expect(readsCleanly(`Hello ${broken} there.`), broken).toBe(false);
+  });
+
+  it('reads as clean colours nested, beside marks, and tags in code', () => {
+    for (const clean of [
+      'Hello there.',
+      '<mark data-color="red">world</mark>',
+      '<span data-color="red"><mark data-color="red">world</mark></span>',
+      '<mark data-color="red">**world**</mark> and ==this==',
+      '**<mark data-color="red">world</mark>**',
+      '`<mark data-color="red">` in code',
+      'x < y and a <b>tag</b>',
+    ])
+      expect(readsCleanly(`Hello ${clean} there.`), clean).toBe(true);
+  });
+
+  it('reads a pathological line in time that grows with its length, not faster', () => {
+    // Best of three, so a pause elsewhere doesn't count.
+    const time = (text: string) => {
+      let best = Infinity;
+      for (let i = 0; i < 3; i++) {
+        const started = performance.now();
+        readsCleanly(text);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    for (const [name, line] of [
+      [
+        'emphasis beside colours',
+        (n: number) => `${'*a'.repeat(n)} ${'<mark data-color="red">x</mark>'.repeat(n / 100)}`,
+      ],
+      ['tags left open', (n: number) => '<span '.repeat(n)],
+      ['colours inside their own kind', (n: number) => '<mark data-color="red">'.repeat(n)],
+      ['colour names alone', (n: number) => 'data-color'.repeat(n)],
+      ['spaced list markers', (n: number) => '-  '.repeat(n)],
+      ['colours', (n: number) => '<mark data-color="red">x</mark>'.repeat(n)],
+    ] as const) {
+      const short = time(line(2_000));
+      // Eight times as long takes about eight times as long; by its square, 64.
+      expect(time(line(16_000)), name).toBeLessThan(24 * Math.max(short, 1));
+    }
   });
 });
