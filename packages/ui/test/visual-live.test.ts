@@ -996,10 +996,10 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
-  it('settles the same plain highlight put on twice', async () => {
+  it('leaves the same plain highlight put on twice as by character, Markdown, not HTML', async () => {
     for (const aLower of orders)
       expect(await merged(line('world'), line('==world=='), line('==world=='), aLower)).toBe(
-        line('==world=='),
+        byCharacter(line('world'), line('==world=='), line('==world=='), aLower),
       );
   });
 
@@ -1157,6 +1157,138 @@ describe('two people formatting the same text at once (#720)', () => {
     const short = await time(50);
     const result = await time(400);
     expect(result).toBeLessThan(24 * Math.max(short, 5));
+  });
+
+  it('keeps `=` runs and code main keeps', async () => {
+    for (const [was, mine, theirs] of [
+      ['Checksum xy.\n', 'Checksum x===y.\n', 'Checksum x=y.\n'],
+      [line('world'), line(hi('world')), line('world x====y')],
+      // A list item's fence line inside a fence on the page is code.
+      [
+        '```\n- ```\n\nHello world there.\n```\n',
+        '```\n- ```\n\nHello <mark>world</mark> there.\n```\n',
+        '```\n- ```\n\nHello <span>world</span> there.\n```\n',
+      ],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('settles crossed tags in a quote after a quote whose fence it ended', async () => {
+    const above = '> ```\n> code\n\n> ';
+    for (const aLower of orders)
+      expect(
+        await merged(
+          `${above}${line('world')}`,
+          `${above}${line(hi('world'))}`,
+          `${above}${line(red('span', 'world'))}`,
+          aLower,
+        ),
+      ).toBe(`${above}${line(aLower ? red('span', 'world') : hi('world'))}`);
+  });
+
+  it('settles a colour changed as the other takes the highlight off, to the colour', async () => {
+    for (const color of ['blue', 'green', 'purple'])
+      for (const aLower of orders) {
+        const mine = line(red('mark', 'world', color));
+        expect(await merged(line(hi('world')), mine, line('world'), aLower)).toBe(mine);
+      }
+  });
+
+  it('keeps what a third person changes on the line, without the binding or with it', async () => {
+    const page = 'Hello world and the cat.\n';
+    for (const aLower of orders)
+      for (const [client, change, from, to] of [
+        [500, (t: Y.Text) => t.delete(t.toJSON().indexOf(' and'), ' and'.length), ' and', ''],
+        [3_000, (t: Y.Text) => t.delete(t.toJSON().indexOf(' and'), ' and'.length), ' and', ''],
+        [500, (t: Y.Text) => t.insert(t.toJSON().indexOf('.'), '!'), '.', '!.'],
+      ] as const) {
+        const [a, b] = start(page, aLower);
+        const c = { doc: docOf('', client, a.doc) };
+        a.editor.shown = page.replace('world', hi('world'));
+        b.editor.shown = page.replace('world', red('span', 'world'));
+        a.binding.write();
+        b.binding.write();
+        change(c.doc.getText('body'));
+        await exchange([a, b, c]);
+        const expected = page
+          .replace('world', aLower ? red('span', 'world') : hi('world'))
+          .replace(from, to);
+        for (const s of [a, b, c]) expect(bodyOf(s)).toBe(expected);
+      }
+  });
+
+  it('keeps a third person’s word replaced on the line, and typing beside the tags', async () => {
+    for (const [page, theirs] of [
+      ['Hello world and the cat.\n', 'Hello world and the dog.\n'],
+      ['Hello world there.\n', 'Hello big world there.\n'],
+    ] as const)
+      for (const aLower of orders) {
+        const [a, b] = start(page, aLower);
+        const c = side(docOf(page, 3_000, a.doc));
+        sides.push(c);
+        a.editor.shown = page.replace('world', hi('world'));
+        b.editor.shown = page.replace('world', red('span', 'world'));
+        c.editor.shown = theirs;
+        for (const s of sides) s.binding.write();
+        await exchange();
+        const higher = aLower ? red('span', 'world') : hi('world');
+        const typed = theirs.replace('world', higher);
+        // Yjs may put the third's typing beside the tag, inside it or out.
+        const inside = typed.replace(`big ${higher}`, higher.replace('>world', '>big world'));
+        for (const s of sides) expect([typed, inside]).toContain(bodyOf(s));
+        expect(bodyOf(b)).toBe(bodyOf(a));
+      }
+  });
+
+  it('never undoes a deletion made in the source pane while a take-in was under way', async () => {
+    class Slow extends FakeEditor {
+      override take(text: string) {
+        return new Promise<true>((resolve) =>
+          setTimeout(() => {
+            this.shown = text;
+            resolve(true);
+          }, 50),
+        );
+      }
+    }
+    const page = `${line('world')}\nNext.\n`;
+    const a = docOf(page, 2_000);
+    const b = docOf(page, 1_000, a);
+    const text = a.getText('body');
+    const before = new Set<() => void>();
+    const editor = new Slow(page);
+    const binding = new VisualBinding(
+      {
+        text,
+        edit: (change) => a.transact(change),
+        onBeforeRemote: (listener) => {
+          const heard = () => listener('them');
+          before.add(heard);
+          return () => void before.delete(heard);
+        },
+        active: () => true,
+      },
+      editor,
+    );
+    const sideA = { doc: a, editor, binding, before } as unknown as Side;
+    const sideB = side(b);
+    sides.push(sideA, sideB);
+    editor.shown = page.replace('world', hi('world'));
+    binding.write();
+    // B changes the next paragraph; A starts taking it in.
+    b.getText('body').insert(b.getText('body').toJSON().indexOf('Next'), 'The ');
+    send(sideB, sideA);
+    await vi.advanceTimersByTimeAsync(TAKE_MS + 10);
+    // Meanwhile A deletes " there." in the source pane, and B colours the word.
+    text.delete(text.toJSON().indexOf(' there.'), ' there.'.length);
+    sideB.editor.shown = page.replace('world', red('span', 'world')).replace('Next', 'The Next');
+    sideB.binding.write();
+    await exchange([sideA, sideB]);
+    expect(bodyOf(sideA)).not.toContain('there.');
+    expect(bodyOf(sideB)).toBe(bodyOf(sideA));
   });
 
   it('leaves a block broken when the one to repair it is gone', async () => {

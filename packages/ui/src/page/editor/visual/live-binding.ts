@@ -107,8 +107,12 @@ export class VisualBinding {
   readonly #writings: Writing[] = [];
   /** Someone else changed `body` since it last wrote. */
   #heard = false;
-  /** The person changed `body` from elsewhere in this app since it last took a change in. */
-  #elsewhere = false;
+  /**
+   * The person's changes to `body` from elsewhere in this app, as split
+   * view's source pane, counted, and how many of those the editor has taken in.
+   */
+  #local = 0;
+  #localTaken = 0;
   #destroyed = false;
 
   constructor(body: BoundText, editor: BoundEditor) {
@@ -126,7 +130,7 @@ export class VisualBinding {
       // A repair goes in as it's made, and is taken in at once.
       if (transaction.meta.get(REPAIR) === this) return;
       this.#heard = true;
-      if (transaction.local) this.#elsewhere = true;
+      if (transaction.local) this.#local++;
       this.#theirs++;
       this.#by.add(this.#sending);
       // Too much to follow: catch up at once, so a diff stands in as briefly as can be.
@@ -187,8 +191,8 @@ export class VisualBinding {
   }
 
   // `held` is `body`, or what's followed from now on starts from the text the editor took in.
-  #synced(from?: Pending) {
-    this.#elsewhere = false;
+  #synced(from?: Pending, local = this.#local) {
+    this.#localTaken = local;
     const body = this.#body.text.toJSON();
     if (this.#held === body) this.#map = Mapping.identity(body.length);
     else if (from && from.text === this.#held) this.#map = from.map;
@@ -238,10 +242,11 @@ export class VisualBinding {
   // Blocks others' changes, merged with its own, left not reading cleanly,
   // put back as it wrote them, if it's the one to.
   #repair() {
+    // What the person typed elsewhere, as in split view's source pane, isn't anyone's to undo.
+    if (this.#writings.length === 0 || this.#local !== this.#localTaken) return;
     const text = this.#body.text;
     const body = text.toJSON();
-    // What the person typed elsewhere, as in split view's source pane, isn't anyone's to undo.
-    if (this.#writings.length === 0 || body === this.#held || this.#elsewhere) return;
+    if (body === this.#held) return;
     const changes = repairs(
       text,
       body,
@@ -310,6 +315,7 @@ export class VisualBinding {
     }
     const pending: Pending = { text, map: Mapping.identity(text.length) };
     this.#pending = pending;
+    const local = this.#local;
     const taking = this.#editor.take(text);
     if (taking instanceof Promise) {
       this.#reading = true;
@@ -317,20 +323,20 @@ export class VisualBinding {
         .catch(() => false as const)
         .then((took) => {
           this.#reading = false;
-          this.#took(pending, took);
+          this.#took(pending, took, local);
         });
       return;
     }
-    this.#took(pending, taking);
+    this.#took(pending, taking, local);
   }
 
-  #took(pending: Pending, took: Taking) {
+  #took(pending: Pending, took: Taking, local: number) {
     this.#pending = null;
     if (this.#destroyed || !this.#body.active()) return;
     if (took === 'composing') return this.#schedule(COMPOSING_MS);
     if (!took) return this.#whole();
     this.#held = this.#editor.written();
-    this.#synced(pending);
+    this.#synced(pending, local);
     if (this.#again || this.behind) return this.#schedule();
     this.#caughtUp();
   }
@@ -377,6 +383,7 @@ export class VisualBinding {
     const theirs = this.#theirs;
     const pending: Pending = { text, map: Mapping.identity(text.length) };
     this.#pending = pending;
+    const local = this.#local;
     void this.#editor
       .check(text)
       .catch(() => ({ visual: false, reason: null }))
@@ -403,7 +410,7 @@ export class VisualBinding {
         else shown = this.#withOwn(text, pending, heldThen, mapThen);
         if (this.#editor.show(shown.text) === 'composing') return this.#schedule(COMPOSING_MS);
         this.#held = this.#editor.written();
-        this.#synced(shown);
+        this.#synced(shown, local);
         if (this.#again || this.behind) return this.#schedule();
         this.#caughtUp();
       });
