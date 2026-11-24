@@ -1585,6 +1585,72 @@ describe('two people formatting the same text at once (#720)', () => {
       }
   });
 
+  it('keeps what main keeps: tab-indented runs in code, email links, a highlight in a longer one', async () => {
+    const fenced = '```html\nintro\n\nSee <mk notes.md> here.\n```\n';
+    for (const [was, mine, theirs] of [
+      [
+        fenced,
+        fenced.replace('<mk', '<mrk'),
+        fenced.replace('<mk', '<mak').replace('intro', '\t```'),
+      ],
+      [
+        'See <spn@example.com> here.\n',
+        'See <spn@sample.com> here.\n',
+        'See <span@example.com> here.\n',
+      ],
+      [
+        'Say big world today.\n',
+        `Say ${hi('big world today')}.\n`,
+        `Say big ${hi('world')} today.\n`,
+      ],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('settles bold or a link put on a short word, and a word after maths', async () => {
+    for (const aLower of orders)
+      for (const theirs of [line('**a**'), line('[a](notes.md)')]) {
+        const mine = line(hi('a'));
+        expect([mine, theirs]).toContain(await merged(line('a'), mine, theirs, aLower));
+      }
+    const above = '$$\nx$$\n\n';
+    for (const aLower of orders)
+      expect(
+        await merged(
+          `${above}${line('world')}`,
+          `${above}${line(hi('world'))}`,
+          `${above}${line(red('span', 'world'))}`,
+          aLower,
+        ),
+      ).toBe(`${above}${line(aLower ? red('span', 'world') : hi('world'))}`);
+  });
+
+  it('never leaves pieces of the other’s tag in a word, and keeps its sentences', async () => {
+    for (const word of ['notes', 'make', 'some', 'now', 'and'])
+      for (const aLower of orders) {
+        const at = `See my ${word} here and more.\n`;
+        const [mine, theirs] = [
+          at.replace(` ${word} `, ` ${hi(word)} `),
+          at.replace(` ${word} `, ` ${red('span', word)} `),
+        ];
+        expect([mine, theirs], word).toContain(await merged(at, mine, theirs, aLower));
+      }
+    for (const away of [' I wrote (this) offline.', ' See a/b, x = 5.', ' See (draft).'])
+      for (const aLower of orders) {
+        const result = await merged(
+          line('world'),
+          line(hi('world')),
+          line(red('span', 'world')).replace('there.', `there.${away}`),
+          aLower,
+        );
+        expect(result, away).toContain(away);
+        expect(readsCleanly(result)).toBe(true);
+      }
+  });
+
   it('leaves a block broken when the one to repair it is gone', async () => {
     const [a, b] = start(line('world'), true);
     a.editor.shown = line(hi('world'));

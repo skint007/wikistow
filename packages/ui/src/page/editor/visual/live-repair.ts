@@ -88,10 +88,17 @@ export function wrote(
   const to = Y.getState(doc.store, writing.client);
   // What went in longer ago than a repair looks back is forgotten, oldest first.
   const since = (c: Clocks) => now - c.at <= REPAIR_MS;
+  // In order of time: the old ones found by halving, and taken off once
+  // they're half of them, so a long burst of typing costs no more per key.
   const forget = (clocks: Clocks[]) => {
-    let old = 0;
-    while (old < clocks.length && !since(clocks[old] as Clocks)) old++;
-    if (old > 0) clocks.splice(0, old);
+    let low = 0;
+    let high = clocks.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (since(clocks[mid] as Clocks)) high = mid;
+      else low = mid + 1;
+    }
+    if (low * 2 > clocks.length) clocks.splice(0, low);
   };
   forget(writing.put);
   if (to > from)
@@ -134,12 +141,6 @@ const COLOR_TAG = /^<(span|mark) data-color="([a-z]+)">$/;
 // A line that may start code or HTML of its own: four spaces or a tab, or `<`.
 const CODE_OR_HTML = /^(?: {4}| {0,3}\t| {0,3}<)/;
 
-const isNameChar = (code: number) =>
-  (code >= 97 && code <= 122) ||
-  (code >= 65 && code <= 90) ||
-  (code >= 48 && code <= 57) ||
-  code === 45;
-
 /** Whether the character at `at` is escaped, by an odd number of backslashes before it. */
 function escaped(text: string, at: number): boolean {
   let slashes = 0;
@@ -154,9 +155,15 @@ function tagAt(text: string, at: number): { name: 'span' | 'mark'; closing: bool
   const start = at + (closing ? 2 : 1);
   for (const name of NAMES) {
     if (text.slice(start, start + 4).toLowerCase() !== name) continue;
-    return isNameChar(text.charCodeAt(start + 4)) ? null : { name, closing };
+    return endsName(text, start + 4) ? { name, closing } : null;
   }
   return null;
+}
+
+/** Whether a tag's name ends at `at` in `text`: at a space, `>` or `/`, as HTML's do, not as `<span@x.com>`. */
+function endsName(text: string, at: number): boolean {
+  const char = text[at];
+  return char === undefined || char === '>' || char === '/' || /\s/.test(char);
 }
 
 /** Whether `text` at `at` starts `<`, then up to four marks, then a tag's name: a tag split by a merge. */
@@ -164,11 +171,51 @@ function splitTagAt(text: string, at: number): boolean {
   if (text.charCodeAt(at) !== 60 || escaped(text, at)) return false;
   let i = at + 1;
   if (text[i] === '/') i++;
-  const start = i;
-  while (i - start < 4 && (PAIRED.has(text[i] as string) || SINGLE.has(text[i] as string))) i++;
-  if (i === start) return false;
-  const name = text.slice(i, i + 4).toLowerCase();
-  return (name === 'mark' || name === 'span') && !isNameChar(text.charCodeAt(i + 4));
+  // The name's four letters, with up to six marks among them and after
+  // them, as `<m**ark`, and a link's address, as `<m[ark](x.md)`.
+  let name = '';
+  let marks = 0;
+  for (;;) {
+    const char = text[i];
+    if (char === undefined || marks > 6) return false;
+    if (PAIRED.has(char) || SINGLE.has(char)) {
+      marks++;
+      i++;
+      if (char === ']' && text[i] === '(') {
+        const close = text.slice(i, i + LINK_AT_MOST).indexOf(')');
+        if (close < 0) return false;
+        i += close + 1;
+      }
+      continue;
+    }
+    if (name.length === 4) break;
+    name += char.toLowerCase();
+    i++;
+  }
+  return marks > 0 && marks <= 6 && (name === 'mark' || name === 'span') && endsName(text, i);
+}
+
+/**
+ * The tags of `text` that put a colour on twice: two opening tags the same,
+ * one right after the other, and two closing tags the same, one right after
+ * the other, later, as `<mark data-color="red"><mark data-color="red">world</mark></mark>`,
+ * which the editor shows as one. A colour inside a longer one of its own
+ * reads as the longer one, and isn't.
+ */
+function doubled(text: string, from = 0, to = text.length): Span[] {
+  const out: Span[] = [];
+  const tags = tagsIn(text, from, to);
+  for (let i = 0; i + 1 < tags.length; i++) {
+    const [a, b] = [tags[i] as Span, tags[i + 1] as Span];
+    const opening = text.slice(a.from, a.to);
+    if (a.to !== b.from || opening !== text.slice(b.from, b.to) || !COLOR_TAG.test(opening))
+      continue;
+    const name = opening.slice(1, 5);
+    const close = text.indexOf(`</${name}></${name}>`, b.to);
+    if (close < 0 || close >= to) continue;
+    out.push(a, b, { from: close, to: close + 7 }, { from: close + 7, to: close + 14 });
+  }
+  return out.sort((x, y) => x.from - y.from);
 }
 
 /** Whether `text` holds a tag named `span` or `mark` (`tagAt`), which may not read cleanly. */
@@ -215,15 +262,15 @@ function scanned(block: string): Reading | null {
     const end = block.slice(at, at + LONGEST_TAG).indexOf('>');
     const named = end < 0 ? null : COLOR_TAG.exec(block.slice(at, at + end + 1));
     const key = `${tag.name}:${named?.[2] ?? ''}`;
-    // One inside one the same, of the same colour, the editor shows as one.
-    if (!named || !isColor(named[2]) || open.includes(key)) {
+    if (!named || !isColor(named[2])) {
       clean = false;
       continue;
     }
     open.push(key);
     at += end;
   }
-  if (open.length > 0) clean = false;
+  // A colour put on twice the editor shows as one.
+  if (open.length > 0 || doubled(block).length > 0) clean = false;
   // Code may hold any of it; where none can, a tag as written is as read.
   if (code) return null;
   if (!clean) return 'broken';
@@ -242,9 +289,8 @@ function read(block: string): Reading {
   } catch {
     return 'broken';
   }
-  const stack: { node: Nodes; around: readonly string[] }[] = [{ node: tree, around: [] }];
-  for (let at = stack.pop(); at; at = stack.pop()) {
-    const { node } = at;
+  const stack: Nodes[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
     if (node.type === 'html' || node.type === 'text') {
       // As written, so an escaped `\<span` is text as it means to be.
       const start = node.position?.start.offset;
@@ -253,21 +299,10 @@ function read(block: string): Reading {
         start === undefined || end === undefined ? node.value : block.slice(start, end);
       if (suspect(written)) return 'broken';
     }
-    const kind = kindOf(node);
-    if (kind && at.around.includes(kind)) return 'broken';
     if (!('children' in node)) continue;
-    const around = kind ? [...at.around, kind] : at.around;
-    for (const child of node.children) stack.push({ node: child, around });
+    for (const child of node.children) stack.push(child);
   }
-  return 'clean';
-}
-
-/** A highlight or colour as the editor tells them apart: its kind and colour; else null. */
-function kindOf(node: Nodes): string | null {
-  if (node.type === 'highlight') return 'mark:';
-  if (node.type === 'colorHighlight') return `mark:${node.color}`;
-  if (node.type === 'textColor') return `span:${node.color}`;
-  return null;
+  return doubled(block).length > 0 ? 'broken' : 'clean';
 }
 
 /**
@@ -389,11 +424,12 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
     }
     const named = COLOR_TAG.exec(written);
     const key = `${name}:${named?.[2] ?? ''}`;
-    if (!named || !isColor(named[2]) || open.some((o) => o.key === key)) bad.push(tag);
+    if (!named || !isColor(named[2])) bad.push(tag);
     else open.push({ name, key, tag });
   }
   for (const left of open) bad.push(left.tag);
-  return { pairs, bad: bad.sort((a, b) => a.from - b.from) };
+  bad.push(...doubled(line));
+  return { pairs, bad: merged(bad, []) };
 }
 
 /**
@@ -408,21 +444,17 @@ function readerBad(line: string): Span[] | null {
     return null;
   }
   const bad: Span[] = [];
-  const stack: { node: Nodes; around: readonly string[] }[] = [{ node: tree, around: [] }];
-  for (let at = stack.pop(); at; at = stack.pop()) {
-    const { node } = at;
+  const stack: Nodes[] = [tree];
+  for (let node = stack.pop(); node; node = stack.pop()) {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if ((node.type === 'html' || node.type === 'text') && start !== undefined && end !== undefined)
       bad.push(...tagsIn(line, start, end, true));
-    const kind = kindOf(node);
-    if (kind && at.around.includes(kind) && start !== undefined && end !== undefined)
-      bad.push({ from: start, to: line.indexOf('>', start) + 1 }, { from: end - 7, to: end });
     if (!('children' in node)) continue;
-    const around = kind ? [...at.around, kind] : at.around;
-    for (const child of node.children) stack.push({ node: child, around });
+    for (const child of node.children) stack.push(child);
   }
-  return bad.sort((a, b) => a.from - b.from);
+  bad.push(...doubled(line));
+  return merged(bad, []);
 }
 
 /**
@@ -461,6 +493,11 @@ function besideOf(text: string, tags: readonly Span[], from: number, to: number)
   const spans: Span[] = [];
   for (const tag of tags) {
     let start = tag.from;
+    // A link's address before a tag, as `[<mark>world](x.md)</mark>`.
+    if (text[start - 1] === ')') {
+      const open = text.lastIndexOf('](', start - 1);
+      if (open >= Math.max(from, start - LINK_AT_MOST)) start = open;
+    }
     for (let run = markRun(text, start, -1, from); run > 0; run = markRun(text, start, -1, from))
       start -= run;
     let end = tag.to;
@@ -581,10 +618,12 @@ function fenceOn(
 ): { run: string; container: Container; bare: boolean } | null {
   let i = at;
   let container: Container = 'page';
+  // Columns of spaces and tabs, a tab as four.
   const spaces = () => {
-    const start = i;
-    while (i < end && (text[i] === ' ' || text[i] === '\t')) i++;
-    return i - start;
+    let columns = 0;
+    for (; i < end && (text[i] === ' ' || text[i] === '\t'); i++)
+      columns += text[i] === '\t' ? 4 : 1;
+    return columns;
   };
   for (;;) {
     if (spaces() > 3 && container === 'page') container = 'list';
@@ -650,7 +689,14 @@ class Fences {
       let open = this.#open;
       if (open && !goesOn(text, this.#at, end, open.container)) open = null;
       const fence = fenceOn(text, this.#at, end);
-      if (fence && !open) {
+      // Maths ends on a line ending `$$`, as `x$$`.
+      if (
+        open?.run[0] === '$' &&
+        !fence &&
+        /\$\$[ \t\r]*$/.test(text.slice(Math.max(this.#at, end - 40), end))
+      )
+        open = null;
+      else if (fence && !open) {
         // `$$` with more on its line is math within the line.
         if (fence.run[0] !== '$' || fence.bare) open = fence;
       } else if (fence?.bare && open && open.container === 'page' && fence.container === 'page') {
@@ -822,14 +868,24 @@ function repairs1(
     if (item.client > writing.client) return null;
     formatters.add(item.client);
   }
-  // Theirs not in the conflict stays: all of a bystander's, and the other
-  // formatter's plain text, as a sentence it typed on the line offline;
-  // not its pieces of tags or marks the merge left apart.
+  // Theirs not in the conflict stays: all of a bystander's, and what the
+  // other formatter put in before its text there, by Yjs's clock, away
+  // from it, that reads as words, as a sentence it typed on the line
+  // offline. What it put in with or after that, as pieces of its tags the
+  // merge left apart, goes. (Yjs puts a change's last piece in first, so a
+  // write's own pieces can come before by clock: hence the words.)
+  const first = new Map<number, number>();
+  for (const item of unseen)
+    if (formatters.has(item.client) && inOne(item))
+      first.set(item.client, Math.min(first.get(item.client) ?? Infinity, item.clock));
   const kept = unseen
     .filter(
       (item) =>
         !inOne(item) &&
-        (!formatters.has(item.client) || plain(text(item.at, item.at + item.length))),
+        (!formatters.has(item.client) ||
+          (item.clock + item.length <= (first.get(item.client) ?? -Infinity) &&
+            !touchesAny(spans, item.at, item.at + item.length) &&
+            prose(text(item.at, item.at + item.length)))),
     )
     .map((item) => ({ from: item.at, to: item.at + item.length }));
   // Where it put text in, in that writing.
@@ -842,11 +898,16 @@ function repairs1(
   return { kept, own, formatters: formatters.size };
 }
 
-// Characters that make HTML or Markdown marks, as pieces of a tag or a mark have.
-const MARKUP = /[<>="*_~[\]()`$\\/]/;
+// What pieces of a tag or a mark have, and words don't.
+const PIECE = /[<>"`$]|data-|\]\(|\*\*|==|~~|__/;
 
-/** Whether `text` is plain: none of the characters of tags or marks in it. */
-const plain = (text: string) => !MARKUP.test(text);
+/**
+ * Whether `text` reads as words: some, a letter or digit and a space
+ * between, and nothing of a tag's or a mark's pieces. A piece of a change
+ * the merge split, as `md)` of a link's `](x.md)`, is no words.
+ */
+const prose = (text: string) =>
+  /[\p{L}\p{N}]/u.test(text) && /\S\s|\s\S/.test(text) && !PIECE.test(text);
 
 /** The first of `spans`, in order and none overlapping, that ends after `from`. */
 function firstEnding(spans: readonly Span[], from: number): number {
