@@ -10,9 +10,19 @@
 //   until the composition ends;
 // - a change that reaches past its block is read whole, at most every
 //   second or every twice as long as the last whole read took;
-// - what it can't show, it says, naming who changed it.
+// - what it can't show, it says, naming who changed it;
+// - a run it formatted that someone else formatted too, at once, is one
+//   run again: two whole runs side by side, the second goes.
 import * as Y from 'yjs';
-import { applyTo, Mapping, ownChanges, putInto, type Delta } from './live-text';
+import {
+  applyTo,
+  Mapping,
+  ownChanges,
+  putInto,
+  wordsOf,
+  type Delta,
+  type TextChange,
+} from './live-text';
 
 /** How a take-in went: in, not by block (read whole), or waiting on a composition. */
 export type Taking = boolean | 'composing';
@@ -58,6 +68,12 @@ const COMPOSING_MS = 500;
 // A whole read whose text changed while it was checked checks the newer
 // text, at most this many times more, before it shows the one it checked.
 const RECHECKS = 2;
+// How long a run it formatted is looked out for, as someone else's
+// formatting of the same words, made before they had it, may yet arrive.
+const RUN_MS = 10_000;
+
+/** A run the editor formatted, put in whole: where it is in `body`, its first and last character, and when. */
+type OwnRun = { start: Y.RelativePosition; end: Y.RelativePosition; at: number };
 
 const MINE = Symbol('visual-binding');
 
@@ -97,6 +113,8 @@ export class VisualBinding {
   #pending: Pending | null = null;
   /** Others' changes to `body`, counted. */
   #theirs = 0;
+  /** Runs it formatted, within `RUN_MS`. */
+  #runs: OwnRun[] = [];
   #destroyed = false;
 
   constructor(body: BoundText, editor: BoundEditor) {
@@ -206,7 +224,72 @@ export class VisualBinding {
     if (text.toJSON() !== expected) return expected;
     this.#held = next;
     this.#map = expected === next ? Mapping.identity(next.length) : mapping.afterOwn(changes);
+    this.#noteRuns(carried);
     return expected;
+  }
+
+  // Each run of `carried`, just put in, to settle with someone else's of the same words.
+  #noteRuns(carried: readonly TextChange[]) {
+    const { text } = this.#body;
+    const at = performance.now();
+    let shift = 0;
+    for (const change of carried) {
+      const from = change.from + shift;
+      shift += change.insert.length - change.remove;
+      if (!change.run || change.insert === '') continue;
+      const start = Y.createRelativePositionFromTypeIndex(text, from);
+      const end = Y.createRelativePositionFromTypeIndex(text, from + change.insert.length, -1);
+      this.#runs.push({ start, end, at });
+    }
+  }
+
+  /**
+   * A run it formatted, beside one someone else put in that reads as the
+   * same words, both whole: they formatted the same text at once, neither
+   * having the other's (#720). The second in `body` goes, which is the
+   * same run for everyone, so whoever takes it out, and however many do,
+   * the text reads as the first one's formatting. Beside one whose words
+   * take in its own, as of a sentence formatted while it formatted a word
+   * in it, its own goes. Only while how `body` changed is followed, to
+   * tell their run from the rest.
+   */
+  #settleRuns(): void {
+    const now = performance.now();
+    this.#runs = this.#runs.filter((run) => now - run.at < RUN_MS);
+    if (this.#runs.length === 0 || !this.#map) return;
+    const { text } = this.#body;
+    const doc = text.doc;
+    if (!doc) return;
+    const body = text.toJSON();
+    if (this.#map.bodyLength !== body.length) return;
+    const added = this.#map.added();
+    const place = (at: Y.RelativePosition) =>
+      Y.createAbsolutePositionFromRelativePosition(at, doc)?.index ?? null;
+    for (const run of this.#runs.slice()) {
+      const from = place(run.start);
+      const to = place(run.end);
+      if (from === null || to === null || to <= from) {
+        this.#runs.splice(this.#runs.indexOf(run), 1);
+        continue;
+      }
+      const words = wordsOf(body.slice(from, to));
+      let gone: { from: number; to: number } | null = null;
+      for (const theirs of added) {
+        if (theirs.to !== from && theirs.from !== to) continue;
+        const their = wordsOf(body.slice(theirs.from, theirs.to));
+        // The same words: the second goes. Some of theirs: this one goes,
+        // and only ever this one, so typing of theirs never does.
+        if (their === words) gone = theirs.from === to ? theirs : { from, to };
+        else if (words !== '' && their.includes(words)) gone = { from, to };
+        if (gone) break;
+      }
+      if (!gone) continue;
+      this.#runs.splice(this.#runs.indexOf(run), 1);
+      const { from: at, to: end } = gone;
+      // As someone else's change: the editor takes in what's left.
+      this.#body.edit(() => text.delete(at, end - at));
+      return this.#settleRuns();
+    }
   }
 
   /** Text was given from elsewhere, which `body` holds: catch up with it soon. */
@@ -249,6 +332,7 @@ export class VisualBinding {
     this.#again = false;
     // Left, its typing goes nowhere: nothing goes in over it.
     if (!this.#body.active()) return;
+    this.#settleRuns();
     // The editor's own edit, before others' changes go in over it.
     this.write();
     const text = this.#body.text.toJSON();

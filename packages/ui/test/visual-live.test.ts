@@ -654,3 +654,140 @@ describe('the binding', () => {
     refusing.destroy();
   });
 });
+
+describe('two people formatting the same text at once (#720)', () => {
+  type Side = { doc: Y.Doc; editor: FakeEditor; binding: VisualBinding; before: Set<() => void> };
+  let sides: Side[] = [];
+
+  const side = (doc: Y.Doc): Side => {
+    const text = doc.getText('body');
+    const before = new Set<() => void>();
+    const editor = new FakeEditor(text.toJSON());
+    const binding = new VisualBinding(
+      {
+        text,
+        edit: (change) => doc.transact(change),
+        onBeforeRemote: (listener) => {
+          const heard = () => listener('them');
+          before.add(heard);
+          return () => void before.delete(heard);
+        },
+        active: () => true,
+      },
+      editor,
+    );
+    return { doc, editor, binding, before };
+  };
+  // What `to` hasn't of `from`'s, as the participant applies it.
+  const send = (from: Side, to: Side) => {
+    const update = Y.encodeStateAsUpdate(from.doc, Y.encodeStateVector(to.doc));
+    for (const listener of to.before) listener();
+    Y.applyUpdate(to.doc, update, 'remote');
+  };
+  const exchange = async () => {
+    const [a, b] = sides as [Side, Side];
+    for (let i = 0; i < 3; i++) {
+      send(a, b);
+      send(b, a);
+      await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
+    }
+  };
+  const bodyOf = (s: Side) => s.doc.getText('body').toJSON();
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  });
+  afterEach(() => {
+    for (const s of sides.splice(0)) s.binding.destroy();
+    vi.useRealTimers();
+  });
+
+  // Two people with `page`, A's client before B's in Yjs's order, or after.
+  const start = (page: string, aFirst: boolean) => {
+    for (const s of sides.splice(0)) s.binding.destroy();
+    const a = new Y.Doc();
+    a.clientID = aFirst ? 1 : 2;
+    a.getText('body').insert(0, page);
+    const b = new Y.Doc();
+    b.clientID = aFirst ? 2 : 1;
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+    sides = [side(a), side(b)];
+    return sides as [Side, Side];
+  };
+  const orders = [true, false];
+
+  const red = (tag: string, inner: string) => `<${tag} data-color="red">${inner}</${tag}>`;
+  it.each([
+    ['**==world==**', red('mark', '**world**'), red('span', '==**world**==')],
+    ['**world**', red('mark', '**world**'), red('span', '**world**')],
+    ['**world**', '==**world**==', red('span', '**world**')],
+    ['==**world**==', red('mark', '**world**'), red('span', '==**world**==')],
+  ])('from %s, merges as one side’s writing', async (was, mine, theirs) => {
+    const page = (run: string) => `Hello ${run} there.\n\nNext.\n`;
+    for (const aFirst of orders) {
+      const [a, b] = start(page(was), aFirst);
+      a.editor.shown = page(mine);
+      b.editor.shown = page(theirs);
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect([page(mine), page(theirs)]).toContain(bodyOf(a));
+      expect(a.editor.shown).toBe(bodyOf(a));
+      expect(b.editor.shown).toBe(bodyOf(b));
+    }
+  });
+
+  it('keeps typing just before and after a word someone formats meanwhile on its side', async () => {
+    for (const [typed, merged] of [
+      ['Hello big world there.\n', 'Hello big **world** there.\n'],
+      ['Hello world! there.\n', 'Hello **world**! there.\n'],
+      ['Hello worlds there.\n', 'Hello **world**s there.\n'],
+    ] as const)
+      for (const aFirst of orders) {
+        const [a, b] = start('Hello world there.\n', aFirst);
+        a.editor.shown = 'Hello **world** there.\n';
+        b.editor.shown = typed;
+        a.binding.write();
+        b.binding.write();
+        await exchange();
+        expect(bodyOf(a)).toBe(merged);
+        expect(bodyOf(b)).toBe(merged);
+      }
+  });
+
+  it.each([
+    // One inside the other's marks.
+    ['**world**', '**==world==**', red('span', '**world**')],
+    // One inside the other's tag.
+    [
+      '<mark>world</mark>',
+      '<mark data-color="red">world</mark>',
+      red('span', '<mark>world</mark>'),
+    ],
+    // A word, and the words around it.
+    ['big world', 'big **world**', '==big world=='],
+  ])('from %s, settles each way of formatting it to one', async (was, mine, theirs) => {
+    const page = (run: string) => `Hello ${run} there.\n`;
+    for (const aFirst of orders) {
+      const [a, b] = start(page(was), aFirst);
+      a.editor.shown = page(mine);
+      b.editor.shown = page(theirs);
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect([page(mine), page(theirs)]).toContain(bodyOf(a));
+    }
+  });
+
+  it('still types by character in a line someone else formats', () => {
+    expect(ownChanges('Hello world.\n', 'Hello big world.\n')).toEqual([
+      { from: 6, remove: 0, insert: 'big ' },
+    ]);
+    expect(ownChanges('A world.\n\nB.\n', 'A **world**.\n\nB!\n')).toEqual([
+      { from: 2, remove: 6, insert: '**world**.', run: true },
+      { from: 11, remove: 1, insert: '!' },
+    ]);
+  });
+});

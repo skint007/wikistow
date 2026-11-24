@@ -5,6 +5,7 @@
 // carried onto `body` as it is now by a character diff, so both people's
 // typing stays. Every change starts and ends between whole characters,
 // never inside an emoji's two halves, which Yjs would store as two U+FFFD.
+// A line whose formatting alone changed goes in whole, as one run (#720).
 import { diffChars, diffLines, type ChangeObject } from 'diff';
 import type * as Y from 'yjs';
 
@@ -13,7 +14,18 @@ export type TextChange = {
   readonly from: number;
   readonly remove: number;
   readonly insert: string;
+  /** A run whose formatting alone changed, put in whole (`ownChanges`). */
+  readonly run?: true;
 };
+
+/**
+ * The words `markdown` shows, without its formatting: HTML tags and the
+ * characters emphasis, highlights, strikethrough, code and escapes are
+ * written with taken out. Rough, but the same for the same words however
+ * they're formatted, which is all it's for.
+ */
+export const wordsOf = (markdown: string) =>
+  markdown.replace(/<\/?[A-Za-z][^<>]*>/g, '').replace(/[\\*_=~`]/g, '');
 
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
@@ -56,12 +68,77 @@ function smallest(before: string, after: string, at: number): TextChange | null 
 }
 
 /**
+ * The run of `line` that becomes `next`'s, formatting alone changed: from
+ * the first difference to the last, widened to whole words with their
+ * marks, as spaces outside HTML tags part them. So two people formatting
+ * the same word, whatever marks each adds or takes off, replace the same
+ * characters, and two formatting part of a word, or one inside the
+ * other's tags, never splice into each other's.
+ */
+function runOf(line: string, next: string, at: number): TextChange {
+  const { start, endA, endB } = edges(line, next);
+  const parts = new Uint8Array(line.length);
+  let inTag = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '<' && /^<\/?[A-Za-z][^<>]*>/.test(line.slice(i, i + 512))) inTag = true;
+    else if (char === '>') inTag = false;
+    if (!inTag && /\s/.test(char ?? '')) parts[i] = 1;
+  }
+  let from = start;
+  while (from > 0 && !parts[from - 1]) from--;
+  let to = endA;
+  while (to < line.length && !parts[to]) to++;
+  return {
+    from: at + from,
+    remove: to - from,
+    insert: next.slice(from, endB + to - endA),
+    run: true,
+  };
+}
+
+/**
+ * `changes`, of the lines from `at` in a longer text that read `was` and
+ * now `now`, with each line whose formatting alone changed, its words the
+ * same (`wordsOf`), changed as one run (`runOf`, #720). Two people
+ * formatting the same words at once then each put in a whole run of their
+ * own, which the binding settles to one, where by character the changes
+ * interleave into tags neither wrote. As they were if the lines don't
+ * pair up, as the diff lined them up.
+ */
+function inRuns(changes: TextChange[], was: string, now: string, at: number): TextChange[] {
+  const before = was.split('\n');
+  const after = now.split('\n');
+  if (before.length !== after.length) return changes;
+  // Each line's place, from `at`, and its change as a run, if it is one.
+  const lines: { from: number; to: number; run: TextChange | null }[] = [];
+  let from = at;
+  for (const [i, line] of before.entries()) {
+    const next = after[i] ?? '';
+    const to = from + line.length + (i < before.length - 1 ? 1 : 0);
+    const formatted = line !== next && wordsOf(line) === wordsOf(next) && wordsOf(line) !== '';
+    lines.push({ from, to, run: formatted ? runOf(line, next, from) : null });
+    from = to;
+  }
+  if (!lines.some((line) => line.run)) return changes;
+  // The changes on other lines, each by the line it starts on, and the runs.
+  const on = (at: number) =>
+    lines.find((line) => at >= line.from && (at < line.to || (at === line.to && at === from)));
+  const out = changes.filter((change) => !on(change.from)?.run);
+  for (const line of lines) if (line.run) out.push(line.run);
+  const runs = out.toSorted((x, y) => x.from - y.from);
+  // Only if the diff lined the lines up as they pair, as moving text from line to line doesn't.
+  const local = runs.map((change) => ({ ...change, from: change.from - at }));
+  return applyTo(was, local) === now ? runs : changes;
+}
+
+/**
  * The changes that make `before` read `after`, each the smallest in
  * characters: by a character diff of the lines between the common start and
  * end, so text the editor didn't change, between or within its changes,
- * stays as it is in `body`, and others' changes there with it. Past
- * `DIFF_MS`, by lines, each run of lines that differ its smallest change;
- * failing that, one span.
+ * stays as it is in `body`, and others' changes there with it. A line whose
+ * formatting alone changed is one run (`inRuns`). Past `DIFF_MS`, by lines,
+ * each run of lines that differ its smallest change; failing that, one span.
  */
 export function ownChanges(before: string, after: string): TextChange[] {
   if (before === after) return [];
@@ -107,7 +184,7 @@ export function ownChanges(before: string, after: string): TextChange[] {
     }
   }
   flush(!byChars);
-  return changes;
+  return byChars ? inRuns(changes, was, now, start) : changes;
 }
 
 /**
@@ -347,6 +424,17 @@ export class Mapping {
     return { text: shown, map: new Mapping(pieces) };
   }
 
+  /** Where in `body` what others put in, and the editor hasn't taken in, is: each run of it, in order. */
+  added(): { from: number; to: number }[] {
+    const out: { from: number; to: number }[] = [];
+    let body = 0;
+    for (const piece of this.#pieces) {
+      if (piece.kind === 'body' && !piece.mine) out.push({ from: body, to: body + piece.length });
+      if (piece.kind !== 'held') body += piece.length;
+    }
+    return out;
+  }
+
   get #segments(): Segment[] {
     if (this.#cached) return this.#cached;
     const segments: Segment[] = [];
@@ -405,13 +493,18 @@ export class Mapping {
       }
       // The insertion with the first deletion it touches, the rest alone.
       let inserted = false;
+      const run = change.run ? ({ run: true } as const) : {};
       for (const { from, to } of deletes) {
         const here: boolean = !inserted && from === at;
-        carried.push({ from, remove: to - from, insert: here ? change.insert : '' });
+        carried.push({
+          from,
+          remove: to - from,
+          ...(here ? { insert: change.insert, ...run } : { insert: '' }),
+        });
         inserted ||= here;
       }
       if (!inserted && change.insert !== '') {
-        carried.push({ from: at, remove: 0, insert: change.insert });
+        carried.push({ from: at, remove: 0, insert: change.insert, ...run });
       }
     }
     // In order of place; an insertion before a deletion at the same place.
@@ -433,11 +526,30 @@ export function applyTo(text: string, changes: readonly TextChange[]): string {
   return out + text.slice(at);
 }
 
-/** Make `changes`, in order and none overlapping, to `text`: from the last, so each place holds. */
+/**
+ * Make `changes`, in order and none overlapping, to `text`: from the last,
+ * so each place holds. A run goes in at the middle of what it replaces, not
+ * its start (#720): typing someone does just before or after it meanwhile,
+ * put in beside the same character, then stays on its side of the run,
+ * where at either end Yjs could put it on the other. Two people's runs of
+ * the same text, at once, go in at the same place, side by side.
+ */
 export function putInto(text: Y.Text, changes: readonly TextChange[]): void {
+  const runs = changes.some((change) => change.run && change.remove > 1);
+  const now = runs ? text.toJSON() : '';
   for (const change of changes.toReversed()) {
-    if (change.remove > 0) text.delete(change.from, change.remove);
     const insert = change.insert.toWellFormed();
-    if (insert !== '') text.insert(change.from, insert);
+    let middle = change.run && insert !== '' ? change.remove >> 1 : 0;
+    while (middle > 0 && splits(now, change.from + middle)) middle--;
+    if (middle === 0) {
+      if (change.remove > 0) text.delete(change.from, change.remove);
+      if (insert !== '') text.insert(change.from, insert);
+      continue;
+    }
+    // Put in while the characters each side are there: beside a deleted
+    // one, Yjs may put it on either side of what's deleted.
+    text.insert(change.from + middle, insert);
+    text.delete(change.from + middle + insert.length, change.remove - middle);
+    text.delete(change.from, middle);
   }
 }
