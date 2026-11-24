@@ -330,26 +330,53 @@ export class OwnFormatting {
   }
 
   /**
-   * Where the writes to make again start: the first kept write a change made
-   * alongside it by a lower client met, if nothing after it is held. One a
-   * higher client's change met is theirs to make theirs again over, and one
-   * someone wrote over is theirs too: such a write is never taken out, nor
-   * any before it, as they may have written over its text already. -1 if
-   * none is due.
+   * The writes to make again: the first kept write a change made alongside
+   * it by a lower client met, with those that change its text after it
+   * (`#chain`), if none of them is held. One a higher client's change met
+   * is theirs to make theirs again over, and one someone wrote over is
+   * theirs too: such a write is never taken out, nor any its taking out
+   * would take out, as they may have written over its text already. Null
+   * if none is due.
    */
-  #first(): number {
+  #first(): Write[] | null {
     this.#prune();
     const me = this.#doc?.clientID ?? 0;
     const clients = (write: Write) => [...write.met.keys()];
-    const held = this.#writes.findLastIndex(
-      (write) => write.built || clients(write).some((c) => c > me),
-    );
-    return this.#writes.findIndex((write, i) => i > held && clients(write).some((c) => c < me));
+    const held = (write: Write) => write.built || clients(write).some((c) => c > me);
+    for (const [i, write] of this.#writes.entries()) {
+      if (!clients(write).some((c) => c < me)) continue;
+      const writes = this.#chain(i);
+      if (!writes.some(held)) return writes;
+    }
+    return null;
+  }
+
+  /**
+   * The write at `i` and the later ones that change its text, over and over:
+   * taking it out takes them out too, as one may have written over another.
+   * Later writes elsewhere stay as they are.
+   */
+  #chain(i: number): Write[] {
+    const writes = [this.#writes[i] as Write];
+    const own = change();
+    const join = (write: Write) => {
+      for (const [c, list] of write.own.inserts)
+        for (const r of list) add(own.inserts, c, r.clock, r.len);
+      for (const [c, list] of write.own.deletes)
+        for (const r of list) add(own.deletes, c, r.clock, r.len);
+    };
+    join(writes[0] as Write);
+    for (const later of this.#writes.slice(i + 1)) {
+      if (!meet(this.#text, own, later.own)) continue;
+      writes.push(later);
+      join(later);
+    }
+    return writes;
   }
 
   /** Whether a kept write is to be made again (`rebase`). */
   get due(): boolean {
-    return this.#first() >= 0;
+    return this.#first() !== null;
   }
 
   /**
@@ -378,9 +405,8 @@ export class OwnFormatting {
    * Null if none is due.
    */
   pending(): { text: string; intents: unknown[] } | null {
-    const first = this.#first();
-    if (first < 0) return null;
-    const writes = this.#writes.slice(first);
+    const writes = this.#first();
+    if (!writes) return null;
     const me = this.#doc?.clientID ?? 0;
     const mine: Ranges = new Map();
     for (const write of writes) add(mine, me, write.from, write.to - write.from);
@@ -410,8 +436,7 @@ export class OwnFormatting {
    * reads as it would after. They're kept, for a change that meets them next.
    */
   settle(): void {
-    const first = this.#first();
-    if (first >= 0) for (const write of this.#writes.slice(first)) write.met.clear();
+    for (const write of this.#first() ?? []) write.met.clear();
   }
 
   // Whatever someone else took out alongside any of `writes`.
@@ -435,9 +460,9 @@ export class OwnFormatting {
    * been already. Null if none is due.
    */
   rebase(run: (undo: () => void) => void): { intents: unknown[]; rebases: number } | null {
-    const first = this.#first();
-    if (first < 0) return null;
-    const writes = this.#writes.splice(first);
+    const writes = this.#first();
+    if (!writes) return null;
+    for (const write of writes) this.#writes.splice(this.#writes.indexOf(write), 1);
     // Whatever someone else took out alongside any of them stays out.
     const gone = this.#gone(writes);
     run(() => {

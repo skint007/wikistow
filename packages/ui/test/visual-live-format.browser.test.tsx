@@ -713,4 +713,35 @@ describe('formatting made alongside someone else’s', () => {
     await settle([a, b]);
     for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
   });
+
+  for (const order of ['theirs first', 'the recolour first'] as const) {
+    it(`takes out no write of its own elsewhere: ${order}`, async () => {
+      const page = 'Say **world** now.\n\nLook here.\n';
+      const [a, b] = [await person(page, 3), await person(page, 2)];
+      const c = sourcePerson(page, 1);
+      colour('world', 'highlight', 'red')(a);
+      colour('world', 'text', 'red')(b);
+      await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      colour('here', 'highlight', 'red')(a);
+      await expect.poll(() => a.log.length).toBe(2);
+      send(a, c);
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      typeSource(c, c.text.toJSON().replace('red">here', 'blue">here'));
+      if (order === 'theirs first') {
+        send(b, a);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        send(c, a);
+      } else {
+        send(c, a);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        send(b, a);
+      }
+      await settle([a, b, c]);
+      const end = a.text.toJSON();
+      for (const p of [b, c]) expect(p.text.toJSON()).toBe(end);
+      expect(raw(end)).toBe(false);
+      expect(end).toContain('Look <mark data-color="blue">here</mark>.');
+    });
+  }
 });
