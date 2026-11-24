@@ -107,6 +107,8 @@ export class VisualBinding {
   readonly #writings: Writing[] = [];
   /** Someone else changed `body` since it last wrote. */
   #heard = false;
+  /** The person changed `body` from elsewhere in this app since it last took a change in. */
+  #elsewhere = false;
   #destroyed = false;
 
   constructor(body: BoundText, editor: BoundEditor) {
@@ -124,6 +126,7 @@ export class VisualBinding {
       // A repair goes in as it's made, and is taken in at once.
       if (transaction.meta.get(REPAIR) === this) return;
       this.#heard = true;
+      if (transaction.local) this.#elsewhere = true;
       this.#theirs++;
       this.#by.add(this.#sending);
       // Too much to follow: catch up at once, so a diff stands in as briefly as can be.
@@ -185,6 +188,7 @@ export class VisualBinding {
 
   // `held` is `body`, or what's followed from now on starts from the text the editor took in.
   #synced(from?: Pending) {
+    this.#elsewhere = false;
     const body = this.#body.text.toJSON();
     if (this.#held === body) this.#map = Mapping.identity(body.length);
     else if (from && from.text === this.#held) this.#map = from.map;
@@ -236,7 +240,8 @@ export class VisualBinding {
   #repair() {
     const text = this.#body.text;
     const body = text.toJSON();
-    if (this.#writings.length === 0 || body === this.#held) return;
+    // What the person typed elsewhere, as in split view's source pane, isn't anyone's to undo.
+    if (this.#writings.length === 0 || body === this.#held || this.#elsewhere) return;
     const changes = repairs(
       text,
       body,

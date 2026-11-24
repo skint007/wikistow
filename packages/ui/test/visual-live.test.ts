@@ -1035,6 +1035,130 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
+  it('keeps others’ text main keeps: `=` runs, code in a fence, a new paragraph', async () => {
+    for (const [was, mine, theirs] of [
+      // A change elsewhere on the line, and three `=` typed as text.
+      [line('world'), line('world').replace('Hello', 'Hi'), line('world x===y')],
+      [line('world'), line('world').replace('Hello', 'Hi'), line('world ![notes===v2===.png](u)')],
+      // Code under a line that starts with three backticks but doesn't close the fence.
+      [
+        '```\nfirst\n```not a closing fence\n\nXYZ\n\n```\n',
+        '```\nfirst\n```not a closing fence\n\nX!YZ\n\n```\n',
+        '```\nfirst\n```not a closing fence\n\nXY</mark>Z\n\n```\n',
+      ],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('settles crossed tags below a fence that ended with its quote', async () => {
+    const above = '> ```\n> code\n\n';
+    for (const aLower of orders)
+      expect(
+        await merged(
+          `${above}${line('world')}`,
+          `${above}${line(hi('world'))}`,
+          `${above}${line(red('span', 'world'))}`,
+          aLower,
+        ),
+      ).toBe(`${above}${line(aLower ? red('span', 'world') : hi('world'))}`);
+  });
+
+  it('keeps a paragraph the other added after the line it repairs', async () => {
+    const was = 'Hello world there.';
+    for (const aLower of orders) {
+      const mine = `Hello ${hi('world')} there.`;
+      const theirs = `Hello ${red('span', 'world')} there.\n\nNew paragraph!`;
+      const result = await merged(was, mine, theirs, aLower);
+      expect(result).toBe(aLower ? theirs : `${mine}\n\nNew paragraph!`);
+    }
+  });
+
+  it('never puts back what the person deleted in split view’s source pane', async () => {
+    const [a, b] = start(line('world'), false);
+    a.editor.shown = line(hi('world'));
+    b.editor.shown = line(red('span', 'world'));
+    a.binding.write();
+    b.binding.write();
+    // A's own app deletes " there." from the source pane before B's change comes.
+    const body = a.doc.getText('body');
+    body.delete(body.toJSON().indexOf(' there.'), ' there.'.length);
+    await exchange();
+    expect(bodyOf(a)).toContain('Hello');
+    expect(bodyOf(a)).not.toContain('there.');
+    expect(bodyOf(b)).toBe(bodyOf(a));
+  });
+
+  it('repairs once when one took a highlight off after typing the other had', async () => {
+    for (const aLower of orders) {
+      const [a, b] = start(line(hi('world')), aLower);
+      // A types elsewhere on the line, which B takes in.
+      a.editor.shown = line(hi('world')).replace('Hello', 'Hello!');
+      a.binding.write();
+      await exchange();
+      // Then, at once, A takes the highlight off and B colours the word.
+      a.editor.shown = line('world').replace('Hello', 'Hello!');
+      b.editor.shown = line(red('span', hi('world'))).replace('Hello', 'Hello!');
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(b.editor.shown);
+      expect(bodyOf(b)).toBe(bodyOf(a));
+    }
+  });
+
+  it('settles with a third person typing farther along the same line, keeping it', async () => {
+    const page = 'Hello world there.\n';
+    for (const aLower of orders) {
+      const [a, b] = start(page, aLower);
+      const c = side(docOf(page, 3_000, a.doc));
+      sides.push(c);
+      a.editor.shown = page.replace('world', hi('world'));
+      b.editor.shown = page.replace('world', red('span', 'world'));
+      c.editor.shown = page.replace('there.', 'there. New text.');
+      for (const s of sides) s.binding.write();
+      await exchange();
+      const higher = aLower ? red('span', 'world') : hi('world');
+      for (const s of sides) expect(bodyOf(s)).toBe(`Hello ${higher} there. New text.\n`);
+    }
+  });
+
+  it('reads markers above a conflict in time that grows with their number, not faster', async () => {
+    for (const marker of ['* ', '-  ', '> ', '1. ', '- - ']) {
+      const above = `${marker.repeat(40)}x\n\n`;
+      const started = Date.now();
+      await merged(
+        `${above}${line('world')}`,
+        `${above}${line(hi('world'))}`,
+        `${above}${line(red('span', 'world'))}`,
+        false,
+      );
+      expect(Date.now() - started, marker).toBeLessThan(1_000);
+    }
+  });
+
+  it('repairs many lines of one block in time that grows with their number, not faster', async () => {
+    const lines = (n: number, run: (i: number) => string) =>
+      Array.from({ length: n }, (_, i) => `Line ${i} ${run(i)} end.`).join('\n') + '\n';
+    const time = async (n: number) => {
+      const started = performance.now();
+      const real = Date.now();
+      void started;
+      await merged(
+        lines(n, () => 'world'),
+        lines(n, () => hi('world')),
+        lines(n, () => red('span', 'world')),
+        false,
+      );
+      return Date.now() - real;
+    };
+    const short = await time(50);
+    const result = await time(400);
+    expect(result).toBeLessThan(24 * Math.max(short, 5));
+  });
+
   it('leaves a block broken when the one to repair it is gone', async () => {
     const [a, b] = start(line('world'), true);
     a.editor.shown = line(hi('world'));
