@@ -12,6 +12,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - In the visual editor, Comment over cells selected in a table quotes them from the first to the last, as the page reads, rather than only the last cell. (#721)
 - A public link's copy lists the other pages in its query tables by when the server saved them, not by this device's clock, for pages published from this device too. A device whose clock ran fast or slow could list them out of order. (#725)
 - In the visual editor, bold or another mark that ends at a line break, where a link starts inside it and goes on past the break, no longer sends the page to source mode. (#731)
+- Ticking a task while reading: where two tasks share a line, such as two sections each with a `Call` task, and anyone changed the page in the seconds before the tick was saved, the tick is left out and the page says why, rather than maybe landing on the other task. A tick on a line no other task has is saved as before. (#729)
 
 #### Desktop
 
