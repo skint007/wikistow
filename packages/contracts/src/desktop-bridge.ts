@@ -215,8 +215,8 @@ export type DesktopClip = {
  * own and its first draft's (`revisionId`), which a page that loads again
  * makes it under, so it finds it if it was made and makes no second
  * (#486). `partial`: a screenshot's, made with its note and link but not
- * the screenshot yet, which a page that loads again puts in the trash and
- * makes again, rather than finish without its screenshot.
+ * the screenshot yet, under its first draft (`revisionId`), which a page
+ * that loads again adds the screenshot to, rather than finish without it.
  */
 export type ClipMade = {
   spaceId: SpaceId;

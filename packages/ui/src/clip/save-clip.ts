@@ -5,7 +5,8 @@
 // main fetched attached to it (`attach`), then the text pointing at them
 // (`draft`). A clip that stops partway still leaves its text. Main hears
 // the page's ID before it's made, and again once it is (`made`), so a
-// clip a reload cut short makes no second page.
+// clip a reload cut short makes no second page, and a screenshot's page
+// it cut short gets its screenshot.
 import {
   ApiError,
   newId,
@@ -15,9 +16,14 @@ import {
   QueueClosed,
   RevisionId,
   linkSpans,
+  noAnswer,
+  splitFrontmatter,
+  queueOperations,
   type AttachmentRef,
   type LinkSpans,
+  type PagePayload,
   type PageWriter,
+  type SpaceId,
 } from '@wikistow/client';
 import type { ClipImage, ClipMade, ClipOutcome, DesktopClip } from '@wikistow/contracts';
 import {
@@ -52,6 +58,21 @@ export type SaveClipDeps = {
    * it is made, so a reload finishes it rather than making another.
    */
   made?: (page: ClipMade) => Promise<void>;
+  /**
+   * A page's draft on the server now, its head and what it holds, so a
+   * screenshot added to its page made partly writes over nothing the
+   * person changed since. Throws as the server answers: `404` for one in
+   * the trash. Without it, its first draft is taken as it stands.
+   */
+  current?: (page: { spaceId: SpaceId; pageId: PageId }) => Promise<{
+    head: RevisionId;
+    payload: PagePayload;
+  }>;
+  /**
+   * Whether a page is out of its space's tree for a trash waiting on this
+   * device, its own or a folder's above it (`hiddenByTrash`).
+   */
+  trashedHere?: (page: { spaceId: SpaceId; pageId: PageId }) => Promise<boolean>;
   /** Main's fetch of one of the clip's images (`DesktopBridge.clipImage`). */
   image: (url: string) => Promise<ClipImage>;
   /** Today, as `clipped` says it. */
@@ -85,17 +106,14 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   if (clip.mode === 'screenshot' && !shot && (!clip.made || clip.made.making)) {
     return failed('failed', 'WikiStow couldn’t read this screenshot.');
   }
-  // A screenshot's page made before a reload cut it short, without the
-  // screenshot: it isn't the clip, so it goes in the trash, and the clip
-  // is saved again.
+  // A screenshot's page made before a reload or a lock cut it short, with
+  // its note and link but not the screenshot: the screenshot goes in it.
+  // It isn't put in the trash and made again, which leaves two pages where
+  // the person can add pages but not trash them, and none if the new one
+  // fails (#681). One in the trash already is made again.
   if (clip.made?.partial) {
-    const { spaceId, pageId } = clip.made;
-    // One the person, or a failure before the reload, put in the trash
-    // already is gone: the clip is saved again all the same.
-    await deps.writer
-      .deleteNode({ spaceId, nodeId: pageId, node: 'page', name: title, dropChanges: true })
-      .catch(() => {});
-    return saveClip({ ...clip, made: null }, deps);
+    const finished = await finishPartly(clip, clip.made, shot, deps);
+    return finished === 'gone' ? saveClip({ ...clip, made: null }, deps) : finished;
   }
   // Made before a reload cut it short: its text is saved, so it's done.
   if (clip.made && !clip.made.making) {
@@ -130,42 +148,9 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       : failed('no-folder', 'That folder is gone, or you can’t add pages to it. Choose another.');
   }
 
-  let body = '';
-  let faithful = true;
-  /** Where the last piece starts: a screenshot's link, which its image goes above. */
-  let last = 0;
-  try {
-    for (const part of clipParts(clip)) {
-      const written = await deps.convert(part.html, part.text);
-      if (!written.markdown.trim()) continue;
-      body += body ? '\n' : '';
-      last = body.length;
-      body += written.markdown;
-      faithful &&= written.faithful;
-    }
-  } catch {
-    return failed('failed', 'WikiStow couldn’t read this clip.');
-  }
-  let markdown: string;
-  try {
-    markdown = clipFrontmatter(clip, deps.today) + body;
-  } catch {
-    return failed('failed', 'This clip’s address or tags can’t be written as its properties.');
-  }
-  if (!mayFit(markdown)) return failed('too-large', TOO_LONG);
-  let plan: ReturnType<typeof planImages>;
-  try {
-    plan = planImages(markdown, await (deps.spans ?? (async (text) => linkSpans(text)))(markdown));
-  } catch {
-    return failed('too-large', TOO_LONG);
-  }
-  const first = plan.written(new Map());
-  if (!fitsPage(first)) return failed('too-large', TOO_LONG);
-  // A screenshot's page, its image above the link: its note and link
-  // name no images, so `first` is `markdown`.
-  const at = markdown.length - body.length + last;
-  const shown = (id: string) => first.slice(0, at) + screenshotMarkdown(id) + first.slice(at);
-  if (shot && !fitsPage(shown('x'.repeat(22)))) return failed('too-large', TOO_LONG);
+  const text = await pageText(clip, shot, deps);
+  if ('outcome' in text) return text;
+  const { plan, first, shown, faithful } = text;
 
   const { spaceId, folderId } = place;
   // Its IDs, kept with main before the page is made, so a reload makes it
@@ -194,9 +179,10 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
     // Made before the reload, its text in: done, or, without its
     // screenshot, made only partly.
     if (making && error instanceof ApiError && error.code === 'duplicate') {
-      const { spaceId: was, pageId, path } = making;
+      const { spaceId: was, pageId, revisionId, path } = making;
       const found = { spaceId: was, pageId, path };
-      return saveClip({ ...clip, made: shot ? { ...found, partial: true } : found }, deps);
+      const partly = { ...found, revisionId, partial: true };
+      return saveClip({ ...clip, made: shot ? partly : found }, deps);
     }
     if (error instanceof PageTooLarge) return failed('too-large', TOO_LONG);
     if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
@@ -206,7 +192,9 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
   }
   const page = { spaceId, pageId: made.pageId };
   const madeAs = { spaceId, pageId: made.pageId, path: savedTo(place.path) };
-  await deps.made?.(shot ? { ...madeAs, partial: true } : madeAs).catch(() => {});
+  // A screenshot's names its first draft, which a reload adds the screenshot on top of.
+  const partly = { ...madeAs, revisionId: made.revisionId, partial: true };
+  await deps.made?.(shot ? partly : madeAs).catch(() => {});
 
   if (shot) {
     let ref: AttachmentRef;
@@ -218,7 +206,7 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
       });
     } catch (error) {
       // Locked meanwhile, offline: the page, made partly, waits for the
-      // unlock to put it in the trash and save the clip again (#670).
+      // unlock to add the screenshot to it (#670, #681).
       if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
       // A page that was to show a screenshot, without it, isn't the clip:
       // it goes in the trash, and the extension says why.
@@ -308,4 +296,227 @@ export async function saveClip(clip: DesktopClip, deps: SaveClipDeps): Promise<S
     },
     place,
   };
+}
+
+type Shot = NonNullable<DesktopClip['screenshot']>;
+
+/** The clip's page as written: its text, then, for a screenshot, with it shown. */
+type PageText = {
+  plan: ReturnType<typeof planImages>;
+  /** The text its page is made with: images as links, a screenshot not yet in. */
+  first: string;
+  /** `first`, showing the screenshot attached as `id` above its link. */
+  shown: (id: string) => string;
+  faithful: boolean;
+};
+
+async function pageText(
+  clip: DesktopClip,
+  shot: Shot | null,
+  deps: SaveClipDeps,
+): Promise<PageText | Saved> {
+  let body = '';
+  let faithful = true;
+  /** Where the last piece starts: a screenshot's link, which its image goes above. */
+  let last = 0;
+  try {
+    for (const part of clipParts(clip)) {
+      const written = await deps.convert(part.html, part.text);
+      if (!written.markdown.trim()) continue;
+      body += body ? '\n' : '';
+      last = body.length;
+      body += written.markdown;
+      faithful &&= written.faithful;
+    }
+  } catch {
+    return failed('failed', 'WikiStow couldn’t read this clip.');
+  }
+  let markdown: string;
+  try {
+    markdown = clipFrontmatter(clip, deps.today) + body;
+  } catch {
+    return failed('failed', 'This clip’s address or tags can’t be written as its properties.');
+  }
+  if (!mayFit(markdown)) return failed('too-large', TOO_LONG);
+  let plan: ReturnType<typeof planImages>;
+  try {
+    plan = planImages(markdown, await (deps.spans ?? (async (text) => linkSpans(text)))(markdown));
+  } catch {
+    return failed('too-large', TOO_LONG);
+  }
+  const first = plan.written(new Map());
+  if (!fitsPage(first)) return failed('too-large', TOO_LONG);
+  // A screenshot's page, its image above the link: its note and link
+  // name no images, so `first` is `markdown`.
+  const at = markdown.length - body.length + last;
+  const shown = (id: string) => first.slice(0, at) + screenshotMarkdown(id) + first.slice(at);
+  if (shot && !fitsPage(shown('x'.repeat(22)))) return failed('too-large', TOO_LONG);
+  return { plan, first, shown, faithful };
+}
+
+const KEPT = 'Its page keeps your note and link.';
+const CHANGED =
+  'Its page changed since WikiStow made it, so the screenshot wasn’t added. Check whether it shows it.';
+
+const OFFLINE =
+  'WikiStow couldn’t see its page offline, so the screenshot wasn’t added. Its page keeps your note and link.';
+
+/** The server's own answer that a page is gone, or not the person's: not one a proxy wrote. */
+const isGone = (error: unknown) => error instanceof ApiError && error.code === 'not-found';
+
+const bodyOf = (markdown: string) => splitFrontmatter(markdown).body;
+
+/**
+ * Add the screenshot to its page made partly before a reload or a lock:
+ * saved, or failed with the page kept as it is, or `'gone'` if the page
+ * is in the trash, or no longer the person's to change.
+ */
+async function finishPartly(
+  clip: DesktopClip,
+  made: ClipMade,
+  shot: Shot | null,
+  deps: SaveClipDeps,
+): Promise<Saved | 'gone'> {
+  if (!shot) return failed('failed', `WikiStow couldn’t read this screenshot. ${KEPT}`);
+  const text = await pageText(clip, shot, deps);
+  if ('outcome' in text) return text;
+  const title = clipTitle(clip);
+  const { spaceId, pageId, path } = made;
+  const page = { spaceId, pageId };
+  const done: Saved = {
+    outcome: {
+      ok: true,
+      spaceId,
+      pageId,
+      title,
+      path,
+      images: { saved: 1, skipped: 0 },
+      faithful: text.faithful,
+    },
+    place: null,
+  };
+  const drafts = deps.writer.draft(page, { seen: null });
+  type Stands = { head: RevisionId; payload: PagePayload };
+  /**
+   * The page as it stands, if it's still the clip's: its change waiting on
+   * this device, read so a save into it since is a conflict (`seen`), or
+   * else its draft on the server; or how that ends it.
+   */
+  const standing = async (): Promise<{ stands: Stands | null } | Saved | 'gone'> => {
+    let stands: Stands | null = null;
+    try {
+      // In the trash here, or in a folder there, which the server hasn't
+      // heard yet: as one gone, so the clip's folder is looked for again.
+      if (await deps.trashedHere?.(page)) return 'gone';
+      const head = await drafts.waitingHead();
+      const entry = await drafts.entryNow();
+      if (entry) {
+        // A change the server refused, which the person sorts out first.
+        if (entry.failure || !head) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+        // Saved into since it was read, as by another window.
+        if (entry.version !== drafts.seen()) return failed('failed', CHANGED);
+        stands = { head, payload: entry.payload };
+      }
+    } catch {
+      return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+    }
+    if (!stands && deps.current) {
+      try {
+        stands = await deps.current(page);
+      } catch (error) {
+        if (isGone(error)) return 'gone';
+        // Offline, what the server has can't be seen, and its first draft
+        // may be the person's changes, sent from here: nothing is guessed.
+        return failed('failed', noAnswer(error) ? OFFLINE : `${SHOT_FAILED} ${KEPT}`);
+      }
+    }
+    if (stands) {
+      const { payload } = stands;
+      const body = bodyOf(payload.markdown);
+      // Saved with the screenshot already, just before a reload: done.
+      if (
+        payload.title === title &&
+        payload.attachments.some((a) => body === bodyOf(text.shown(a.id)))
+      ) {
+        await deps.made?.({ spaceId, pageId, path }).catch(() => {});
+        return done;
+      }
+      // Changed since it was made, as the person can while another clip
+      // saves first: theirs, not written over. What else they changed, such
+      // as its properties or cover, is kept below.
+      if (payload.title !== title || body !== bodyOf(text.first)) return failed('failed', CHANGED);
+    }
+    return { stands };
+  };
+  // Looked at first, so a page done or changed gets no file it won't show.
+  const before = await standing();
+  if (typeof before === 'string' || 'outcome' in before) return before;
+  let ref: AttachmentRef;
+  try {
+    ref = await deps.writer.attach(page, {
+      name: `Screenshot.${shot.mediaType === 'image/jpeg' ? 'jpg' : 'png'}`,
+      mediaType: shot.mediaType,
+      bytes: shot.bytes,
+    });
+  } catch (error) {
+    // Locked again: it waits for the next unlock, as before.
+    if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
+    if (isGone(error)) return 'gone';
+    return error instanceof ApiError && error.status === 413
+      ? failed('too-large', `This screenshot is larger than your WikiStow server takes. ${KEPT}`)
+      : failed('failed', `${SHOT_FAILED} ${KEPT}`);
+  }
+  // Looked at again once the file is in, as the queue may have sent the
+  // page meanwhile, or been refused it: the save goes on it as it is now.
+  const now = await standing();
+  if (typeof now === 'string' || 'outcome' in now) return now;
+  const { stands } = now;
+  // On the page as it stands, keeping all it has but the text, or else,
+  // with no `current`, on the first draft it was made with.
+  const basedOn = stands?.head ?? made.revisionId;
+  if (!basedOn) return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+  const shown = text.shown(ref.id);
+  const payload = stands
+    ? {
+        ...stands.payload,
+        markdown: (splitFrontmatter(stands.payload.markdown).frontmatter ?? '') + bodyOf(shown),
+        attachments: [...stands.payload.attachments, ref],
+      }
+    : { ...newPayload({ title, markdown: shown }), attachments: [ref] };
+  try {
+    await drafts.save({ basedOn, payload });
+  } catch (error) {
+    if (error instanceof QueueClosed) return failed('failed', SHOT_FAILED);
+    if (error instanceof ApiError && error.code === 'stale-head') return failed('failed', CHANGED);
+    return failed('failed', `${SHOT_FAILED} ${KEPT}`);
+  }
+  await deps.made?.({ spaceId, pageId, path }).catch(() => {});
+  return done;
+}
+
+type QueueTree = Parameters<typeof queueOperations.withQueued>[0];
+type QueueEntries = Parameters<typeof queueOperations.withQueued>[2];
+
+/**
+ * Whether page `pageId` is out of its space's `tree` only for a trash among
+ * the queue's `entries`, its own or a folder's above it. One the server
+ * refused doesn't count: the page stays. Without the tree, only its own
+ * trash is known.
+ */
+export function hiddenByTrash(
+  tree: QueueTree | null,
+  spaceId: SpaceId,
+  entries: QueueEntries,
+  pageId: PageId,
+): boolean {
+  const trash = (entry: QueueEntries[number]) => entry.kind === 'delete' && entry.failure === null;
+  if (entries.some((entry) => trash(entry) && entry.id === pageId)) return true;
+  if (!tree || !entries.some(trash)) return false;
+  const shows = (shown: QueueTree) => shown.pages.some((one) => one.id === pageId);
+  // The queue's tree hides what any trash names, refused or not.
+  const others = entries.filter((entry) => entry.kind !== 'delete');
+  return (
+    shows(queueOperations.withQueued(tree, spaceId, others)) &&
+    !shows(queueOperations.withQueued(tree, spaceId, [...others, ...entries.filter(trash)]))
+  );
 }
