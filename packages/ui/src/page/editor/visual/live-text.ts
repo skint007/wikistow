@@ -18,14 +18,17 @@ export type TextChange = {
   readonly run?: true;
 };
 
+// An HTML tag, opening or closing, anywhere, or where a text starts.
+const TAG = /<\/?[A-Za-z][^<>]*>/g;
+const TAG_HERE = new RegExp(`^${TAG.source}`);
+
 /**
  * The words `markdown` shows, without its formatting: HTML tags and the
  * characters emphasis, highlights, strikethrough, code and escapes are
  * written with taken out. Rough, but the same for the same words however
  * they're formatted, which is all it's for.
  */
-export const wordsOf = (markdown: string) =>
-  markdown.replace(/<\/?[A-Za-z][^<>]*>/g, '').replace(/[\\*_=~`]/g, '');
+export const wordsOf = (markdown: string) => markdown.replace(TAG, '').replace(/[\\*_=~`]/g, '');
 
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
@@ -68,68 +71,97 @@ function smallest(before: string, after: string, at: number): TextChange | null 
 }
 
 /**
- * The run of `line` that becomes `next`'s, formatting alone changed: from
- * the first difference to the last, widened to whole words with their
- * marks, as spaces outside HTML tags part them. So two people formatting
- * the same word, whatever marks each adds or takes off, replace the same
- * characters, and two formatting part of a word, or one inside the
- * other's tags, never splice into each other's.
+ * Where `text` parts into words: 1 at each space, tab or line break outside
+ * an HTML tag, so a tag's attributes stay with the word it marks.
  */
-function runOf(line: string, next: string, at: number): TextChange {
-  const { start, endA, endB } = edges(line, next);
-  const parts = new Uint8Array(line.length);
+function partsOf(text: string): Uint8Array {
+  const parts = new Uint8Array(text.length);
   let inTag = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '<' && /^<\/?[A-Za-z][^<>]*>/.test(line.slice(i, i + 512))) inTag = true;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '<' && TAG_HERE.test(text.slice(i, i + 512))) inTag = true;
     else if (char === '>') inTag = false;
     if (!inTag && /\s/.test(char ?? '')) parts[i] = 1;
   }
-  let from = start;
-  while (from > 0 && !parts[from - 1]) from--;
-  let to = endA;
-  while (to < line.length && !parts[to]) to++;
-  return {
-    from: at + from,
-    remove: to - from,
-    insert: next.slice(from, endB + to - endA),
-    run: true,
-  };
+  return parts;
 }
 
 /**
+ * Changes of whole words: from `from` to `to` in the text they change, and
+ * from `nowFrom` to `nowTo` in what it becomes.
+ */
+type Stretch = { from: number; to: number; nowFrom: number; nowTo: number; changes: TextChange[] };
+
+/**
  * `changes`, of the lines from `at` in a longer text that read `was` and
- * now `now`, with each line whose formatting alone changed, its words the
- * same (`wordsOf`), changed as one run (`runOf`, #720). Two people
- * formatting the same words at once then each put in a whole run of their
- * own, which the binding settles to one, where by character the changes
- * interleave into tags neither wrote. As they were if the lines don't
- * pair up, as the diff lined them up.
+ * now `now`, with formatting put in as runs (#720). A stretch of whole
+ * words, parted by spaces outside HTML tags, whose words stay the same
+ * (`wordsOf`) while two marks or more change, as a mark has two ends, or a
+ * tag does, goes in as one run; formatted stretches together on a line as
+ * one. So two people formatting the same words at once, whatever marks
+ * each adds or takes off, each put in a whole run in place of the same
+ * characters, which the binding settles to one, where by character the
+ * changes interleave into tags neither wrote. Typing, and one mark typed,
+ * as `_` in code, go in by character as before.
  */
 function inRuns(changes: TextChange[], was: string, now: string, at: number): TextChange[] {
-  const before = was.split('\n');
-  const after = now.split('\n');
-  if (before.length !== after.length) return changes;
-  // Each line's place, from `at`, and its change as a run, if it is one.
-  const lines: { from: number; to: number; run: TextChange | null }[] = [];
-  let from = at;
-  for (const [i, line] of before.entries()) {
-    const next = after[i] ?? '';
-    const to = from + line.length + (i < before.length - 1 ? 1 : 0);
-    const formatted = line !== next && wordsOf(line) === wordsOf(next) && wordsOf(line) !== '';
-    lines.push({ from, to, run: formatted ? runOf(line, next, from) : null });
-    from = to;
+  const parts = partsOf(was);
+  const stretches: Stretch[] = [];
+  let shift = 0;
+  for (const change of changes) {
+    let from = change.from - at;
+    let to = from + change.remove;
+    while (from > 0 && !parts[from - 1]) from--;
+    while (to < was.length && !parts[to]) to++;
+    let stretch = stretches.at(-1);
+    if (stretch && from < stretch.to) {
+      stretch.to = Math.max(stretch.to, to);
+      stretch.changes.push(change);
+    } else {
+      stretch = { from, to, nowFrom: from + shift, nowTo: 0, changes: [change] };
+      stretches.push(stretch);
+    }
+    shift += change.insert.length - change.remove;
+    stretch.nowTo = stretch.to + shift;
   }
-  if (!lines.some((line) => line.run)) return changes;
-  // The changes on other lines, each by the line it starts on, and the runs.
-  const on = (at: number) =>
-    lines.find((line) => at >= line.from && (at < line.to || (at === line.to && at === from)));
-  const out = changes.filter((change) => !on(change.from)?.run);
-  for (const line of lines) if (line.run) out.push(line.run);
-  const runs = out.toSorted((x, y) => x.from - y.from);
-  // Only if the diff lined the lines up as they pair, as moving text from line to line doesn't.
-  const local = runs.map((change) => ({ ...change, from: change.from - at }));
-  return applyTo(was, local) === now ? runs : changes;
+  const formatted = (stretch: Stretch) => {
+    const words = wordsOf(was.slice(stretch.from, stretch.to));
+    return words !== '' && words === wordsOf(now.slice(stretch.nowFrom, stretch.nowTo));
+  };
+  const out: TextChange[] = [];
+  let group: Stretch[] = [];
+  const tags = (text: string) => text.match(TAG)?.join('') ?? '';
+  const flush = () => {
+    const stretches = group;
+    group = [];
+    const [first, last] = [stretches[0], stretches.at(-1)];
+    if (!first || !last) return;
+    const all = stretches.flatMap((stretch) => stretch.changes);
+    const tagged = stretches.some(
+      (s) => tags(was.slice(s.from, s.to)) !== tags(now.slice(s.nowFrom, s.nowTo)),
+    );
+    if (all.length < 2 && !tagged) return void out.push(...all);
+    out.push({
+      from: first.from + at,
+      remove: last.to - first.from,
+      insert: now.slice(first.nowFrom, last.nowTo),
+      run: true,
+    });
+  };
+  for (const stretch of stretches) {
+    const last = group.at(-1);
+    if (last && was.slice(last.to, stretch.from).includes('\n')) flush();
+    if (formatted(stretch)) group.push(stretch);
+    else {
+      flush();
+      out.push(...stretch.changes);
+    }
+  }
+  flush();
+  if (!out.some((change) => change.run)) return changes;
+  // Only as the changes were: each run makes what they made.
+  const local = out.map((change) => ({ ...change, from: change.from - at }));
+  return applyTo(was, local) === now ? out : changes;
 }
 
 /**

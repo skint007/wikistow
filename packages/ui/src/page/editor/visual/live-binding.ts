@@ -75,6 +75,39 @@ const RUN_MS = 10_000;
 /** A run the editor formatted, put in whole: where it is in `body`, its first and last character, and when. */
 type OwnRun = { start: Y.RelativePosition; end: Y.RelativePosition; at: number };
 
+// Whether `id`, a character's, is one of `run`'s, which Yjs numbers in turn.
+const inRun = (run: OwnRun, id: Y.ID | null) => {
+  const [first, last] = [run.start.item, run.end.item];
+  return (
+    !!id &&
+    !!first &&
+    !!last &&
+    id.client === first.client &&
+    id.clock >= first.clock &&
+    id.clock <= last.clock
+  );
+};
+
+/**
+ * Whether the character at `at` in `text`, someone else's, went in beside
+ * `run` after they had it, by what Yjs put it in next to: after the run's
+ * last character, if it's the first of what they put in after it, or
+ * before its first, if it's the last of what they put in before it.
+ */
+function hadIt(text: Y.Text, run: OwnRun, at: number, after: boolean): boolean {
+  const id = Y.createRelativePositionFromTypeIndex(text, at).item;
+  const store = text.doc?.store;
+  if (!id || !store) return false;
+  const item = Y.getItem(store, id);
+  if (!(item instanceof Y.Item)) return false;
+  // A part of what they put in, after another part: its own origin says nothing.
+  if (after) return item.id.clock === id.clock && inRun(run, item.origin);
+  return inRun(run, item.rightOrigin);
+}
+
+/** `text`'s words as one string with spaces either side, for a match of whole words. */
+const spaced = (text: string) => ` ${text.trim().split(/\s+/).join(' ')} `;
+
 const MINE = Symbol('visual-binding');
 
 /** Text read from `body` for a take-in or a whole read, and how it became `body` since, while that's followed. */
@@ -272,15 +305,24 @@ export class VisualBinding {
         this.#runs.splice(this.#runs.indexOf(run), 1);
         continue;
       }
-      const words = wordsOf(body.slice(from, to));
+      const own = body.slice(from, to);
+      const words = spaced(wordsOf(own));
+      if (words === '  ') continue;
       let gone: { from: number; to: number } | null = null;
       for (const theirs of added) {
         if (theirs.to !== from && theirs.from !== to) continue;
-        const their = wordsOf(body.slice(theirs.from, theirs.to));
-        // The same words: the second goes. Some of theirs: this one goes,
-        // and only ever this one, so typing of theirs never does.
-        if (their === words) gone = theirs.from === to ? theirs : { from, to };
-        else if (words !== '' && their.includes(words)) gone = { from, to };
+        if (hadIt(text, run, theirs.from === to ? theirs.from : theirs.to - 1, theirs.from === to))
+          continue;
+        // Formatting, as theirs must be: words with marks or tags, or, as
+        // when both take a mark off, none, as this run has none.
+        const put = body.slice(theirs.from, theirs.to);
+        const their = spaced(wordsOf(put));
+        const marked = wordsOf(put) !== put;
+        // The same words: the second goes. Some of theirs, whole: this one
+        // goes, and only ever this one, so text of theirs never does.
+        if (their === words && (marked || wordsOf(own) === own))
+          gone = theirs.from === to ? theirs : { from, to };
+        else if (marked && their.includes(words)) gone = { from, to };
         if (gone) break;
       }
       if (!gone) continue;

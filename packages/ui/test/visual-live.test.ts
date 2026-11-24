@@ -767,6 +767,8 @@ describe('two people formatting the same text at once (#720)', () => {
     ],
     // A word, and the words around it.
     ['big world', 'big **world**', '==big world=='],
+    // Both take the same mark off.
+    ['**world** and', 'world and', 'world and'],
   ])('from %s, settles each way of formatting it to one', async (was, mine, theirs) => {
     const page = (run: string) => `Hello ${run} there.\n`;
     for (const aFirst of orders) {
@@ -779,6 +781,55 @@ describe('two people formatting the same text at once (#720)', () => {
       expect(bodyOf(a)).toBe(bodyOf(b));
       expect([page(mine), page(theirs)]).toContain(bodyOf(a));
     }
+  });
+
+  it('settles formatting typed with words elsewhere on the line', async () => {
+    const page = (run: string, end: string) => `Start ${run} end${end}\n`;
+    for (const aFirst of orders) {
+      const [a, b] = start(page('**==world==**', '.'), aFirst);
+      a.editor.shown = page(red('mark', '**world**'), '.');
+      b.editor.shown = page(red('span', '==**world**=='), '!');
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect([
+        page(red('mark', '**world**'), '!'),
+        page(red('span', '==**world**=='), '!'),
+      ]).toContain(bodyOf(a));
+    }
+  });
+
+  it('never takes out a run someone typed beside once they had it', async () => {
+    for (const [was, formatted, at, typed, merged] of [
+      ['Try a later.\n', 'Try **a** later.\n', 9, 'gain', 'Try **a**gain later.\n'],
+      // Pasted after it: theirs, put in beside it, had it.
+      ['Try a later.\n', 'Try **a** later.\n', 9, ' ==a==', 'Try **a** ==a== later.\n'],
+      ['I think so.\n', '**I** think so.\n', 0, 'I', 'I**I** think so.\n'],
+      [
+        'Read the docs.\n',
+        'Read **the** docs.\n',
+        5,
+        '**other** ',
+        'Read **other** **the** docs.\n',
+      ],
+    ] as const) {
+      const [a, b] = start(was, true);
+      a.editor.shown = formatted;
+      a.binding.write();
+      await exchange();
+      b.doc.transact(() => b.doc.getText('body').insert(at, typed));
+      await exchange();
+      expect(bodyOf(a)).toBe(merged);
+      expect(bodyOf(b)).toBe(merged);
+    }
+  });
+
+  it('types a mark alone by character, as in code', () => {
+    expect(ownChanges('x foo_bar y\n', 'x foo__bar y\n')).toEqual([
+      { from: 6, remove: 0, insert: '_' },
+    ]);
+    expect(ownChanges('x1 y\n', 'x=1 y\n')).toEqual([{ from: 1, remove: 0, insert: '=' }]);
   });
 
   it('still types by character in a line someone else formats', () => {
