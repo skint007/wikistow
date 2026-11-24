@@ -230,10 +230,13 @@ export function mountContentRoutes(
   // names the route, space and sizes, never content, names or key material.
   const bulk = async <T>(
     route: { method: string; path: string },
-    { spaceId, bodyBytes }: { spaceId: string; bodyBytes: number },
+    {
+      spaceId,
+      bodyBytes,
+      started = performance.now(),
+    }: { spaceId: string; bodyBytes: number; started?: number },
     change: () => Promise<T>,
   ): Promise<T> => {
-    const started = performance.now();
     try {
       return await change();
     } finally {
@@ -462,9 +465,10 @@ export function mountContentRoutes(
   routes.account(
     sharingRoutes.endShare,
     async ({ params, body }, { principal, bodyBytes }) => {
-      // The share's row goes with it, so its space is read first.
+      // The share's row goes with it, so its space is read first, on the clock.
+      const started = performance.now();
       const { spaceId } = await requireShare(db, params.shareId).catch(toApiError);
-      await bulk(sharingRoutes.endShare, { spaceId, bodyBytes }, () =>
+      await bulk(sharingRoutes.endShare, { spaceId, bodyBytes, started }, () =>
         endShare(
           db,
           { accountId: principal.accountId, shareId: params.shareId, ...body },
