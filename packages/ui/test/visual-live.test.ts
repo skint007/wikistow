@@ -1189,11 +1189,13 @@ describe('two people formatting the same text at once (#720)', () => {
       ).toBe(`${above}${line(aLower ? red('span', 'world') : hi('world'))}`);
   });
 
-  it('settles a colour changed as the other takes the highlight off, to the colour', async () => {
+  it('leaves a colour changed as the other takes the highlight off as main does: text, not HTML', async () => {
     for (const color of ['blue', 'green', 'purple'])
       for (const aLower of orders) {
         const mine = line(red('mark', 'world', color));
-        expect(await merged(line(hi('world')), mine, line('world'), aLower)).toBe(mine);
+        expect(await merged(line(hi('world')), mine, line('world'), aLower)).toBe(
+          byCharacter(line(hi('world')), mine, line('world'), aLower),
+        );
       }
   });
 
@@ -1319,18 +1321,41 @@ describe('two people formatting the same text at once (#720)', () => {
   });
 
   it('puts back only the tag text taken out, not a word someone deleted', async () => {
+    // B takes the highlight off as A colours the word, and C deletes the first word.
     const page = `Hello ${hi('world')} there.\n`;
-    const blue = red('mark', 'world', 'blue');
+    const colour = red('span', hi('world'));
     for (const aLower of orders) {
       const [a, b] = start(page, aLower);
-      const c = { doc: docOf('', 3_000, a.doc) };
-      a.editor.shown = page.replace(hi('world'), blue);
+      const c = { doc: docOf('', 500, a.doc) };
+      a.editor.shown = page.replace(hi('world'), colour);
       b.editor.shown = page.replace(hi('world'), 'world');
       a.binding.write();
       b.binding.write();
       c.doc.getText('body').delete(0, 'Hello '.length);
       await exchange([a, b, c]);
-      for (const s of [a, b, c]) expect(bodyOf(s)).toBe(`${blue} there.\n`);
+      for (const s of [a, b, c]) expect(bodyOf(s)).toBe(`${colour} there.\n`);
+    }
+  });
+
+  it('leaves alone a source edit to another tag on the line', async () => {
+    const page = `${hi('Hi')} world there.\n`;
+    for (const aLower of orders) {
+      const [a] = start(page, !aLower);
+      sides.splice(1).forEach((s) => s.binding.destroy());
+      const c = { doc: docOf('', aLower ? 500 : 5_000, a.doc) };
+      a.editor.shown = page.replace(' world', ` ${hi('world')}`);
+      a.binding.write();
+      await exchange([a, c]);
+      // C, by hand, recolours Hi a key at a time.
+      const body = c.doc.getText('body');
+      const at = body.toJSON().indexOf('red');
+      body.delete(at, 3);
+      await exchange([a, c]);
+      for (const [i, char] of Array.from('blue').entries()) {
+        body.insert(at + i, char);
+        await exchange([a, c]);
+      }
+      expect(bodyOf(a)).toBe(a.editor.shown.replace('"red">Hi', '"blue">Hi'));
     }
   });
 
@@ -1364,6 +1389,36 @@ describe('two people formatting the same text at once (#720)', () => {
       await exchange();
       expect(bodyOf(a)).toBe(aLower ? line(red('span', 'world')) : line(hi('world')));
       expect(bodyOf(b)).toBe(bodyOf(a));
+    }
+  });
+
+  it('keeps a source edit main keeps: a link’s address in angle brackets', async () => {
+    const was = 'Hello [click](old) and world.\n';
+    for (const aLower of orders)
+      for (const [mine, theirs] of [
+        [was.replace('world', hi('world')), was.replace('(old)', '(<mark>)')],
+        [was.replace('(old)', '(<mark>)'), was.replace('world', hi('world'))],
+      ] as const)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('keeps a third person’s typing beside another, sound highlight on the line', async () => {
+    const page = `Hello world and ${red('mark', 'there')}.\n`;
+    for (const aLower of orders) {
+      const [a, b] = start(page, aLower);
+      const c = { doc: docOf('', 500, a.doc) };
+      a.editor.shown = page.replace('world', hi('world'));
+      b.editor.shown = page.replace('world', red('span', 'world'));
+      a.binding.write();
+      b.binding.write();
+      const body = c.doc.getText('body');
+      body.insert(body.toJSON().indexOf('<mark'), 'score=');
+      await exchange([a, b, c]);
+      const higher = aLower ? red('span', 'world') : hi('world');
+      const expected = page.replace(' <mark', ' score=<mark').replace('world', higher);
+      for (const s of [a, b, c]) expect(bodyOf(s)).toBe(expected);
     }
   });
 
