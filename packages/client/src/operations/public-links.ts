@@ -467,9 +467,9 @@ const readsSaved = ({ where, show, sort }: PageQuery) =>
  * When the server took the copied version, asked of it again (`fresh`)
  * (#458): the time this device holds for it may be its own clock, for one
  * it just published (`cacheWritten`), or none, for one kept before times
- * were. (Other rows still take the time held for them where there is one, #646.) That one stands in when the server can't
- * be asked, or its answer doesn't open, so a table that may not even list
- * the page never stops its copy going up.
+ * were. That one stands in when the server can't be asked, or its answer
+ * doesn't open, so a table that may not even list the page never stops
+ * its copy going up.
  */
 async function copiedTime(ctx: ClientContext, page: PageRef, revisionId: RevisionId) {
   const wanted = { ...page, revisionId, audience: 'published' as const };
@@ -513,12 +513,13 @@ async function queryTables(
     (summary) => summary.id !== page.pageId && published(summary.id),
   );
   // Strict: a table missing pages that couldn't be fetched would be wrong,
-  // not empty. Timed: each row says when its publication was saved (#427).
+  // not empty. Timed: each row says when its publication was saved (#427),
+  // as the server took it, not this device's clock (#646).
   const opened = await openPublications(
     ctx,
     page.spaceId,
     others.flatMap(({ id, publishedHead }) => (publishedHead ? [{ id, publishedHead }] : [])),
-    { strict: true, timed: true },
+    { strict: true, timed: 'server' },
   );
   // Each folder a reader of the copy sees: under the share's root, for a share.
   const parents = new Map<string, string | null>(
