@@ -1971,6 +1971,39 @@ Round 63 reviewed that revision with the three briefs, each a fresh reviewer giv
 
 **Outcome.** Round 63 found a High, so it doesn't meet the stopping rule. Every finding is fixed but S63-5, rejected, and the chain part of M63-2, accepted. Round 64 repeats the three briefs against this revision.
 
+## Round 64: identity key rotation, narrowed, eighteenth review
+
+Round 64 reviewed round 63's revision (0198c6ae) with the three briefs, each a fresh reviewer given a short brief naming only the last two revisions' changes and a "Settled" list: the member and encoding briefs as Claude subagents, and the server brief as a Codex (gpt-6.2-sol) agent, which ran, given the whole brief inline. The round found no Critical and no High finding: 5 Medium, 17 Low and no Info (22 in all). Every reviewer found closed spaces still fully gone and round 63's fixes in place. The Mediums were a rule round 63 added that the release before rotation didn't carry (E64-F1), a member's pause where a declined key sealed a share's current version, which the text called writing as before (E64-F2, S64-1), and two older gaps the narrowing reaches: a demotion of a member whose key changed (S64-2), and a removal's lost answer after another owner's rotation (S64-3).
+
+**On E64-F1's severity.** Its reviewer rated it Medium and said it could be argued High: an app on the release before rotation, merging a stale first-sight pin over another device's decline and unpin, takes the declined key out of `removed`, so later versions are sealed to it. It is rated Medium, as rounds 61 and 63 rated the same mechanism (S61-4, S63-2): it needs a device on the release before rotation, a stale record and a decline then an unpin, and the fix is to name the rule in that release's list, which closes it. The project owner may weigh this in accepting the round.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| E64-F1 | 64 | Medium | 4.6 **Live sessions in the owner region**; 8.3; 8.6 pin row | The release before rotation didn't carry round 63's rules, so its pin merge could take a declined key out of `removed` after an unpin. | Fixed: that release carries first sight never pinning a key in `removed`, the pin row's no-op on one, and a confirm with no pin being the confirm change. |
+| E64-F2 | 64 | Medium | 8.4; A15; 6.5 **Writing** | Where a declined key sealed a share's current version, the member's app can't write there, against "writes as before". | Fixed in wording: a member's app writes as before under every version that still counts for writing, and where a declined key sealed the current version it says so and waits for an owner it accepts to rotate; A15 and the ADR name the pause as part of the cost. Same as S64-1. |
+| S64-1 | 64 | Medium | 8.4; 4.6; 6.8 | Same as E64-F2. | Fixed with E64-F2. |
+| S64-2 | 64 | Medium | 7.4; 4.6 rotation checks | An owner who declined an editor's new key can't demote them to reader with delivery deferred. | Accepted: availability; the owner confirms the key first, or removes the editor and gives access again later. |
+| S64-3 | 64 | Medium | 7.6; 5.10 | After a removal's lost answer and another owner's rotation, the retry rule didn't say when the removal is done. | Fixed: after a lost answer the app fetches the space's owners first; once the server no longer lists `R`, the removal is done. |
+| M64-1 | 64 | Low | 4.6 **Owners** | "but at a key in `removed`" read as the opposite of round 63's fix. | Fixed: "except at". Same as E64-L1. |
+| M64-2 | 64 | Low | 8.4; A15 | The warning said the exposure ends at the person's removal, though people and owners the key brought in may stay, and A15 said members could leave. | Fixed in wording. |
+| M64-3 | 64 | Low | 4.6; 8.6 | Whether a remover can open what a declined key sealed depends on which keys their record holds. | Accepted: availability for the remover only. |
+| M64-4 | 64 | Low | 8.6 pin row | The conflict check came before the `removed` no-op. | Fixed: the no-op comes first. Same as E64-L6 and S64-4. |
+| M64-5 | 64 | Low | 8.6 confirm row; ADR | A confirm merged over the same confirmed key was undefined; the ADR said "once for each space and key". | Fixed: the row says what an already-installed key does; the ADR says once per statement. Same as E64-L4, S64-5 and part of E64-L3. |
+| E64-L1 | 64 | Low | 4.6 | Same as M64-1. | Fixed with M64-1. |
+| E64-L2 | 64 | Low | 4.6 | Other re-add offers weren't guarded against a key in `removed`. | Fixed: §8.4 says no offer of §4.6 adds the person again at a key in `removed`. |
+| E64-L3 | 64 | Low | ADR; 8.4 | The ADR's account of the warning lagged §8.4. | Fixed; the "once" state is kept on each device, which may warn again, as advice. |
+| E64-L4 | 64 | Low | 8.6 confirm row | Same as M64-5. | Fixed with M64-5. |
+| E64-L5 | 64 | Low | 8.6 | Changed rows weren't marked proposed, and the confirmed-writes paragraph still offered first sight of a key in `removed`. | Fixed. |
+| E64-L6 | 64 | Low | 8.6 pin row | Same as M64-4. | Fixed with M64-4. |
+| E64-L7 | 64 | Low | 4.6 **Removing a rotated owner instead**; 7.6 | The removal exception wasn't scoped to the owner removed, and §8.4 pointed at the rotated-owner removal where someone had added them again. | Fixed: scoped to that owner's keys, and §8.4 points at §7.6, with the rotated-owner removal only where nobody added them again. A declined key moved to `openOnly` opens for reading and sealing on, as any removed owner's key there does. |
+| E64-L8 | 64 | Low | A15; `wikistow.md`; 8.4 | Wording still offered members a way to leave. | Fixed. |
+| S64-4 | 64 | Low | 8.6 pin row | Same as M64-4. | Fixed with M64-4. |
+| S64-5 | 64 | Low | 8.6 confirm row | Same as M64-5. | Fixed with M64-5. |
+| S64-6 | 64 | Low | 8.6 decline and unpin rows | A queued decline could restore a pin another device had unpinned. | Fixed: where the key it would restore is in the newer record's `removed`, the decline adds keys to `removed` only. |
+| S64-7 | 64 | Low | 8.4 | The warning named only one owner where two had re-added the person. | Fixed: it names each owner whose statement named a declined key. |
+
+**Outcome.** **Round 64 meets the stopping rule**: no Critical or High finding, with all three briefs run, the server brief on Codex. Following the rule, its findings are fixed in wording, with no new mechanism, or accepted (S64-2, M64-3). The identity-key-rotation design may be accepted once the project owner agrees; the two choices made without him in writing question 12's answer are in the ADR.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
