@@ -356,7 +356,6 @@ export class VisualBinding {
       const last = lastId && Y.getItem(doc.store, lastId);
       if (!(first instanceof Y.Item) || !(last instanceof Y.Item) || !firstId || !lastId) continue;
       const mine = { from, to, first, last, firstId, lastId };
-      const unmarked = words === own;
       const theirsOf = (item: Y.Item, theirs: Theirs) =>
         item.id.client !== doc.clientID && wordsOf(body.slice(theirs.from, theirs.to)) === words;
       // Put in where Yjs put this run, after and before the same
@@ -369,7 +368,7 @@ export class VisualBinding {
               if (!same(item.origin, first.origin) || !same(item.rightOrigin, first.rightOrigin))
                 return false;
               const put = body.slice(theirs.from, theirs.to);
-              return theirsOf(item, theirs) && (unmarked || wordsOf(put) !== put);
+              return theirsOf(item, theirs) && wordsOf(put) !== put;
             })
           : null;
       // Or right beside it, this run written there before the editor showed

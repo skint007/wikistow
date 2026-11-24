@@ -718,11 +718,12 @@ describe('two people formatting the same text at once (#720)', () => {
 
   const red = (tag: string, inner: string) => `<${tag} data-color="red">${inner}</${tag}>`;
   it.each([
-    ['**==world==**', red('mark', '**world**'), red('span', '==**world**==')],
-    ['**world**', red('mark', '**world**'), red('span', '**world**')],
-    ['**world**', '==**world**==', red('span', '**world**')],
-    ['==**world**==', red('mark', '**world**'), red('span', '==**world**==')],
-  ])('from %s, merges as one side’s writing', async (was, mine, theirs) => {
+    ['**==world==**', red('mark', '**world**'), red('span', '==**world**=='), null],
+    ['**world**', red('mark', '**world**'), red('span', '**world**'), null],
+    // Marks by character go around the other's run: both.
+    ['**world**', '==**world**==', red('span', '**world**'), `==${red('span', '**world**')}==`],
+    ['==**world**==', red('mark', '**world**'), red('span', '==**world**=='), null],
+  ])('from %s, merges as one side’s writing, or both', async (was, mine, theirs, both) => {
     const page = (run: string) => `Hello ${run} there.\n\nNext.\n`;
     for (const aFirst of orders) {
       const [a, b] = start(page(was), aFirst);
@@ -732,21 +733,23 @@ describe('two people formatting the same text at once (#720)', () => {
       b.binding.write();
       await exchange();
       expect(bodyOf(a)).toBe(bodyOf(b));
-      expect([page(mine), page(theirs)]).toContain(bodyOf(a));
+      expect([page(mine), page(theirs), ...(both ? [page(both)] : [])]).toContain(bodyOf(a));
       expect(a.editor.shown).toBe(bodyOf(a));
       expect(b.editor.shown).toBe(bodyOf(b));
     }
   });
 
   it('keeps typing just before and after a word someone formats meanwhile on its side', async () => {
+    const hi = red('mark', 'world');
     for (const [typed, merged] of [
-      ['Hello big world there.\n', 'Hello big **world** there.\n'],
-      ['Hello world! there.\n', 'Hello **world**! there.\n'],
-      ['Hello worlds there.\n', 'Hello **world**s there.\n'],
+      ['Hello big world there.\n', `Hello big ${hi} there.\n`],
+      ['Hello world! there.\n', `Hello ${hi}! there.\n`],
+      ['Hello worlds there.\n', `Hello ${hi}s there.\n`],
+      ['Hello world. there.\n', `Hello ${hi}. there.\n`],
     ] as const)
       for (const aFirst of orders) {
         const [a, b] = start('Hello world there.\n', aFirst);
-        a.editor.shown = 'Hello **world** there.\n';
+        a.editor.shown = `Hello ${hi} there.\n`;
         b.editor.shown = typed;
         a.binding.write();
         b.binding.write();
@@ -756,9 +759,20 @@ describe('two people formatting the same text at once (#720)', () => {
       }
   });
 
+  it('keeps typing before a full stop after the word on its side', async () => {
+    const hi = red('mark', 'world');
+    for (const aFirst of orders) {
+      const [a, b] = start('I like the world.\n', aFirst);
+      a.editor.shown = `I like the ${hi}.\n`;
+      b.editor.shown = 'I like the world over.\n';
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(`I like the ${hi} over.\n`);
+    }
+  });
+
   it.each([
-    // One inside the other's marks.
-    ['**world**', '**==world==**', red('span', '**world**')],
     // One inside the other's tag.
     [
       '<mark>world</mark>',
@@ -767,12 +781,10 @@ describe('two people formatting the same text at once (#720)', () => {
     ],
     // A word like a tag's name, and the page's first word.
     ['mark', red('mark', 'mark'), red('span', 'mark')],
-    // Both take the same mark off.
-    ['**world** and', 'world and', 'world and'],
     // A word with the punctuation after it, as selected.
     ['world!', red('mark', 'world!'), red('span', 'world!')],
     // A word, and a tag over it and the word before.
-    ['big world', 'big **world**', red('mark', 'big world')],
+    ['big world', `big ${red('span', 'world')}`, red('mark', 'big world')],
   ])('from %s, settles each way of formatting it to one', async (was, mine, theirs) => {
     const page = (run: string) => `Hello ${run} there.\n`;
     for (const aFirst of orders) {
@@ -805,25 +817,14 @@ describe('two people formatting the same text at once (#720)', () => {
   });
 
   it('never takes out a run someone typed beside once they had it', async () => {
-    for (const [was, formatted, at, typed, merged] of [
-      ['Try a later.\n', 'Try **a** later.\n', 9, 'gain', 'Try **a**gain later.\n'],
-      [
-        'Try world later.\n',
-        'Try **world** later.\n',
-        13,
-        '==world==',
-        'Try **world**==world== later.\n',
-      ],
+    const [a1, w1, the] = [red('mark', 'a'), red('mark', 'world'), red('mark', 'the')];
+    for (const [was, formatted, at, typed] of [
+      ['Try a later.\n', `Try ${a1} later.\n`, 4 + a1.length, 'gain'],
+      ['Try world later.\n', `Try ${w1} later.\n`, 4 + w1.length, red('span', 'world')],
       // Pasted after it: theirs, put in beside it, had it.
-      ['Try a later.\n', 'Try **a** later.\n', 9, ' ==a==', 'Try **a** ==a== later.\n'],
-      ['I think so.\n', '**I** think so.\n', 0, 'I', 'I**I** think so.\n'],
-      [
-        'Read the docs.\n',
-        'Read **the** docs.\n',
-        5,
-        '**other** ',
-        'Read **other** **the** docs.\n',
-      ],
+      ['Try a later.\n', `Try ${a1} later.\n`, 4 + a1.length, ` ${red('span', 'a')}`],
+      ['I think so.\n', `${red('mark', 'I')} think so.\n`, 0, 'I'],
+      ['Read the docs.\n', `Read ${the} docs.\n`, 5, `${red('span', 'other')} `],
     ] as const) {
       const [a, b] = start(was, true);
       a.editor.shown = formatted;
@@ -831,12 +832,14 @@ describe('two people formatting the same text at once (#720)', () => {
       await exchange();
       b.doc.transact(() => b.doc.getText('body').insert(at, typed));
       await exchange();
+      const merged = formatted.slice(0, at) + typed + formatted.slice(at);
       expect(bodyOf(a)).toBe(merged);
       expect(bodyOf(b)).toBe(merged);
     }
   });
 
   it('keeps what a third person put in beside the run that goes', async () => {
+    const [hi, co] = [red('mark', 'world'), red('span', 'world')];
     for (const [carol, merged] of [
       // A paragraph started after "world", some words, or marks around it.
       [(t: Y.Text) => t.insert(11, '\n\n'), ['\n\n ', '']],
@@ -848,62 +851,65 @@ describe('two people formatting the same text at once (#720)', () => {
         const c = new Y.Doc();
         Y.applyUpdate(c, Y.encodeStateAsUpdate(a.doc));
         carol(c.getText('body'));
-        a.editor.shown = 'Hello ~~world~~ there.\n';
-        b.editor.shown = 'Hello ==world== there.\n';
+        a.editor.shown = `Hello ${hi} there.\n`;
+        b.editor.shown = `Hello ${co} there.\n`;
         a.binding.write();
         b.binding.write();
         for (const s of [a, b]) Y.applyUpdate(s.doc, Y.encodeStateAsUpdate(c), 'remote');
         await exchange();
         expect(bodyOf(a)).toBe(bodyOf(b));
         const [after, before] = merged;
-        expect(
-          ['~~world~~', '==world=='].map((run) => `Hello ${before}${run}${before}${after}there.\n`),
-        ).toContain(bodyOf(a));
+        expect([hi, co].map((run) => `Hello ${before}${run}${before}${after}there.\n`)).toContain(
+          bodyOf(a),
+        );
       }
   });
 
   it('writes an edit in its run before the run goes', async () => {
     for (const aFirst of orders) {
       const [a, b] = start('Hello world there.\n', aFirst);
-      a.editor.shown = 'Hello **world** there.\n';
-      b.editor.shown = 'Hello ==world== there.\n';
+      a.editor.shown = `Hello ${red('mark', 'world')} there.\n`;
+      b.editor.shown = `Hello ${red('span', 'world')} there.\n`;
       a.binding.write();
       b.binding.write();
       send(a, b);
       // Before Bea's editor takes Al's in, she takes the "l" out.
-      b.editor.shown = 'Hello ==word== there.\n';
+      b.editor.shown = `Hello ${red('span', 'word')} there.\n`;
       await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
       await exchange();
       expect(bodyOf(a)).toBe(bodyOf(b));
-      expect(bodyOf(a)).toContain('==word==');
+      expect(bodyOf(a)).toContain(red('span', 'word'));
     }
   });
 
   it('settles a run written before the editor showed theirs', async () => {
+    const was = `Hello ${red('mark', 'world')} there.\n`;
+    const bea = `Hello ${red('span', red('mark', 'world'))} there.\n`;
     for (const aFirst of orders) {
-      const [a, b] = start('Hello **world** there.\n', aFirst);
+      const [a, b] = start(was, aFirst);
       a.editor.shown = 'Hello world there.\n';
       a.binding.write();
       send(a, b);
-      // Bea highlights it as her editor still shows it, bold.
-      b.editor.shown = 'Hello ==**world**== there.\n';
+      // Bea colours it as her editor still shows it, highlighted.
+      b.editor.shown = bea;
       b.binding.write();
       await exchange();
       expect(bodyOf(a)).toBe(bodyOf(b));
-      expect(['Hello world there.\n', 'Hello ==**world**== there.\n']).toContain(bodyOf(a));
+      expect(['Hello world there.\n', bea]).toContain(bodyOf(a));
     }
   });
 
   it('formats words apart as runs apart, leaving the words between', async () => {
+    const [one, three] = [red('mark', 'one'), red('mark', 'three')];
     for (const aFirst of orders) {
       const [a, b] = start('one middle three\n', aFirst);
-      a.editor.shown = '**one** middle **three**\n';
+      a.editor.shown = `${one} middle ${three}\n`;
       b.editor.shown = 'one three\n';
       a.binding.write();
       b.binding.write();
       await exchange();
-      expect(bodyOf(a)).toBe('**one** **three**\n');
-      expect(bodyOf(b)).toBe('**one** **three**\n');
+      expect(bodyOf(a)).toBe(`${one} ${three}\n`);
+      expect(bodyOf(b)).toBe(`${one} ${three}\n`);
     }
   });
 
@@ -937,32 +943,48 @@ describe('two people formatting the same text at once (#720)', () => {
       // Literal HTML typed in code, while someone takes a letter out.
       [
         'A `say world now` b.\n',
-        'A `say <em>world now` b.\n',
+        'A `say <mark>world now` b.\n',
         'A `say word now` b.\n',
-        'A `say <em>word now` b.\n',
+        'A `say <mark>word now` b.\n',
       ],
       [
         '```\nsay world now\n```\n',
-        '```\nsay <em>world</em> now\n```\n',
+        '```\nsay <mark>world</mark> now\n```\n',
         '```\nsay word now\n```\n',
-        '```\nsay <em>word</em> now\n```\n',
+        '```\nsay <mark>word</mark> now\n```\n',
+      ],
+      [
+        '```\r\nsay world now\r\n```\r\n',
+        '```\r\nsay <mark>world</mark> now\r\n```\r\n',
+        '```\r\nsay word now\r\n```\r\n',
+        '```\r\nsay <mark>word</mark> now\r\n```\r\n',
       ],
       [
         '> ```\n> say world now\n> ```\n',
-        '> ```\n> say <em>world</em> now\n> ```\n',
+        '> ```\n> say <mark>world</mark> now\n> ```\n',
         '> ```\n> say word now\n> ```\n',
-        '> ```\n> say <em>word</em> now\n> ```\n',
+        '> ```\n> say <mark>word</mark> now\n> ```\n',
       ],
       [
         'A `` a ` world `` b.\n',
-        'A `` a ` <em>world</em> `` b.\n',
+        'A `` a ` <mark>world</mark> `` b.\n',
         'A `` a ` word `` b.\n',
-        'A `` a ` <em>word</em> `` b.\n',
+        'A `` a ` <mark>word</mark> `` b.\n',
       ],
       // Each half of a word with a hyphen formatted by one of them.
-      ['A foo-bar b.\n', 'A **foo**-bar b.\n', 'A foo-~~bar~~ b.\n', 'A **foo**-~~bar~~ b.\n'],
+      [
+        'A foo-bar b.\n',
+        `A ${red('mark', 'foo')}-bar b.\n`,
+        `A foo-${red('span', 'bar')} b.\n`,
+        `A ${red('mark', 'foo')}-${red('span', 'bar')} b.\n`,
+      ],
       // Typing after a word of one letter as it's formatted.
-      ['Choose a item.\n', 'Choose **a** item.\n', 'Choose an item.\n', 'Choose **a**n item.\n'],
+      [
+        'Choose a item.\n',
+        `Choose ${red('mark', 'a')} item.\n`,
+        'Choose an item.\n',
+        `Choose ${red('mark', 'a')}n item.\n`,
+      ],
     ] as const)
       for (const aFirst of orders) {
         const [a, b] = start(was, aFirst);
@@ -976,23 +998,12 @@ describe('two people formatting the same text at once (#720)', () => {
       }
   });
 
-  it('keeps a mark typed in a run, and a pasted phrase with the word', async () => {
-    for (const aFirst of orders) {
-      const [a, b] = start('Hello world there.\n', aFirst);
-      a.editor.shown = 'Hello **world** there.\n';
-      b.editor.shown = 'Hello ==wor\\=ld== there.\n';
-      a.binding.write();
-      b.binding.write();
-      await exchange();
-      expect(bodyOf(a)).toBe(bodyOf(b));
-      // Beside the run, as typing in a word formatted meanwhile is, but there.
-      expect(bodyOf(a)).toContain('\\=');
-    }
+  it('keeps a pasted phrase with the word', async () => {
     for (const aFirst of orders) {
       const [a, b] = start('Try world later.\n', aFirst);
-      a.editor.shown = 'Try **world** later.\n';
+      a.editor.shown = `Try ${red('mark', 'world')} later.\n`;
       a.binding.write();
-      b.doc.transact(() => b.doc.getText('body').insert(9, ' **world** again'));
+      b.doc.transact(() => b.doc.getText('body').insert(9, ` ${red('span', 'world')} again`));
       await exchange();
       expect(bodyOf(a)).toBe(bodyOf(b));
       expect(bodyOf(a).match(/world/g)).toHaveLength(2);
@@ -1018,8 +1029,8 @@ describe('two people formatting the same text at once (#720)', () => {
     for (const aFirst of orders) {
       // Two words alike, each formatted by one, the hyphen between taken out.
       const [a, b] = start('Hi world-world.\n', aFirst);
-      a.editor.shown = 'Hi **world**world.\n';
-      b.editor.shown = 'Hi world-==world==.\n';
+      a.editor.shown = `Hi ${red('mark', 'world')}world.\n`;
+      b.editor.shown = `Hi world-${red('span', 'world')}.\n`;
       a.binding.write();
       b.binding.write();
       await exchange();
@@ -1028,14 +1039,15 @@ describe('two people formatting the same text at once (#720)', () => {
     }
     for (const aFirst of orders) {
       // Typing beside the word as each formats it, sent together.
+      const [hi, co] = [red('mark', 'world'), red('span', 'world')];
       const [a, b] = start('Hello world there.\n', aFirst);
-      a.editor.shown = `Hello ${red('span', 'world')} there.\n`;
+      a.editor.shown = `Hello ${co} there.\n`;
       a.binding.write();
-      a.editor.shown = `Hello !${red('span', 'world')} there.\n`;
+      a.editor.shown = `Hello !${co} there.\n`;
       a.binding.write();
-      b.editor.shown = 'Hello ==world== there.\n';
+      b.editor.shown = `Hello ${hi} there.\n`;
       b.binding.write();
-      b.editor.shown = 'Hello ==world==? there.\n';
+      b.editor.shown = `Hello ${hi}? there.\n`;
       b.binding.write();
       await exchange();
       expect(bodyOf(a)).toBe(bodyOf(b));
@@ -1045,22 +1057,23 @@ describe('two people formatting the same text at once (#720)', () => {
   });
 
   it('formats the first word of a page as any other', async () => {
+    const [hi, co] = [red('mark', 'I'), red('span', 'I')];
     for (const aFirst of orders) {
       const [a, b] = start('I think so.\n', aFirst);
-      a.editor.shown = '**I** think so.\n';
-      b.editor.shown = '==I== think so.\n';
+      a.editor.shown = `${hi} think so.\n`;
+      b.editor.shown = `${co} think so.\n`;
       a.binding.write();
       b.binding.write();
       await exchange();
       expect(bodyOf(a)).toBe(bodyOf(b));
-      expect(['**I** think so.\n', '==I== think so.\n']).toContain(bodyOf(a));
+      expect([`${hi} think so.\n`, `${co} think so.\n`]).toContain(bodyOf(a));
     }
   });
 
   it('keeps the same word pasted where a run went in', async () => {
     for (const aFirst of orders) {
       const [a, b] = start('Try word later.\n', aFirst);
-      a.editor.shown = 'Try **word** later.\n';
+      a.editor.shown = `Try ${red('mark', 'word')} later.\n`;
       a.binding.write();
       b.doc.transact(() => b.doc.getText('body').insert(6, 'word'));
       await exchange();
@@ -1112,9 +1125,17 @@ describe('two people formatting the same text at once (#720)', () => {
     expect(ownChanges('Hello world.\n', 'Hello big world.\n')).toEqual([
       { from: 6, remove: 0, insert: 'big ' },
     ]);
-    expect(ownChanges('A world.\n\nB.\n', 'A **world**.\n\nB!\n')).toEqual([
-      { from: 2, remove: 6, insert: '**world**.', run: true },
+    expect(ownChanges('A world.\n\nB.\n', `A ${red('mark', 'world')}.\n\nB!\n`)).toEqual([
+      { from: 2, remove: 5, insert: red('mark', 'world'), run: true },
       { from: 11, remove: 1, insert: '!' },
+    ]);
+    // Marks written with characters, by character, as typed.
+    expect(ownChanges('A world.\n', 'A **world**.\n')).toEqual([
+      { from: 2, remove: 0, insert: '**' },
+      { from: 7, remove: 0, insert: '**' },
+    ]);
+    expect(ownChanges('Value count=1.\n', 'Value count===1.\n')).toEqual([
+      { from: 12, remove: 0, insert: '==' },
     ]);
   });
 });

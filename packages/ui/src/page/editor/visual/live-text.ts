@@ -103,7 +103,12 @@ function partsOf(text: string): Uint8Array {
 // with no blank one between; a fence's line, in a quote or a list item too.
 const CODE_SPAN = /(?<!(?<!\\)(?:\\\\)*\\)(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
 const FENCE = /^((?:[ \t]*>)*)([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(`{3,}|~{3,})(.*)$/;
-const fenced = (text: string) => text.split('\n').some((line) => FENCE.test(line));
+const fenceOf = (line: string) => {
+  const [, , lead = '', fence = '', info = ''] = FENCE.exec(line.replace(/\r$/, '')) ?? [];
+  // A backtick fence's info string has no backtick: ```code``` is a code span.
+  return fence && !(fence[0] === '`' && info.includes('`')) ? { lead, fence, info } : null;
+};
+const fenced = (text: string) => text.split('\n').some((line) => fenceOf(line));
 
 /**
  * Whether `text` ends in a fenced code block: one opened and not yet
@@ -112,14 +117,16 @@ const fenced = (text: string) => text.split('\n').some((line) => FENCE.test(line
  */
 function inFence(text: string): boolean {
   let open: { fence: string; depth: number; indent: number } | null = null;
-  for (const line of text.split('\n')) {
+  // Whole lines only: what follows the last break is the line being read.
+  for (const line of text.split('\n').slice(0, -1)) {
     const quote = /^(?:[ \t]*>)*/.exec(line)?.[0] ?? '';
     const depth = quote.split('>').length - 1;
     const rest = line.slice(quote.length);
     const indent = rest.length - rest.trimStart().length;
     if (open && (depth < open.depth || (rest.trim() !== '' && indent < open.indent))) open = null;
-    const [, , lead = '', fence = '', info = ''] = FENCE.exec(line) ?? [];
-    if (!fence) continue;
+    const found = fenceOf(line);
+    if (!found) continue;
+    const { lead, fence, info } = found;
     if (!open) open = { fence, depth, indent: /[-*+.)]/.test(lead) ? lead.length : 0 };
     else if (fence[0] === open.fence[0] && fence.length >= open.fence.length && !info.trim())
       open = null;
@@ -201,39 +208,43 @@ function inRuns(
     const words = wordsOf(was.slice(stretch.from, stretch.to));
     return words !== '' && words === wordsOf(now.slice(stretch.nowFrom, stretch.nowTo));
   };
-  // A tag, or two characters of marks or more, changed in it, as a mark
-  // has two ends: the whole formatting of its words, not one mark typed.
+  // A tag of a mark changed in it, as a highlight or colour put on or
+  // taken off. Marks written with characters, as `**` or `==`, go in by
+  // character, as typed ones do: each end outside the word, they go
+  // around another's run, not into it.
   const tags = (text: string) => text.match(TAG)?.join('') ?? '';
-  const marks = (text: string) => {
-    const count = new Map<string, number>();
-    for (const char of text.replace(TAG, '').replace(/\\[\s\S]/g, ''))
-      if ('*_=~`'.includes(char)) count.set(char, (count.get(char) ?? 0) + 1);
-    return count;
-  };
-  const whole = (s: Stretch) => {
-    const [a, b] = [was.slice(s.from, s.to), now.slice(s.nowFrom, s.nowTo)];
-    if (tags(a) !== tags(b)) return true;
-    const [x, y] = [marks(a), marks(b)];
-    let changed = 0;
-    for (const char of '*_=~`') changed += Math.abs((x.get(char) ?? 0) - (y.get(char) ?? 0));
-    return changed >= 2;
-  };
-  const run = (stretch: Stretch): TextChange => ({
-    from: stretch.from + at,
-    remove: stretch.to - stretch.from,
-    insert: now.slice(stretch.nowFrom, stretch.nowTo),
-    run: true,
-  });
-  // Text in code is text, whatever it looks like: no run there.
-  let code: { was: [number, number][]; now: [number, number][] } | null = null;
-  const inCode = (s: Stretch) => {
-    code ??= {
-      was: [...was.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]),
-      now: [...now.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]),
+  const whole = (s: Stretch) =>
+    tags(was.slice(s.from, s.to)) !== tags(now.slice(s.nowFrom, s.nowTo));
+  // The stretch, but for punctuation at its ends both have outside its
+  // marks, so typing just before a word's full stop stays before it.
+  const run = (stretch: Stretch): TextChange => {
+    const [a, b] = [was.slice(stretch.from, stretch.to), now.slice(stretch.nowFrom, stretch.nowTo)];
+    const plain = (char: string | undefined) => !!char && /[^\p{L}\p{N}\s<>*_=~`\\]/u.test(char);
+    let start = 0;
+    while (start < a.length && a[start] === b[start] && plain(a[start])) start++;
+    let end = 0;
+    while (
+      end < a.length - start &&
+      a[a.length - 1 - end] === b[b.length - 1 - end] &&
+      plain(a[a.length - 1 - end])
+    )
+      end++;
+    return {
+      from: stretch.from + at + start,
+      remove: a.length - start - end,
+      insert: b.slice(start, b.length - end),
+      run: true,
     };
-    const meets = (spans: [number, number][], from: number, to: number) =>
-      spans.some(([start, end]) => start < to && from < end);
-    return meets(code.was, s.from, s.to) || meets(code.now, s.nowFrom, s.nowTo);
+  };
+  // Text in code is text, whatever it looks like: no run that changes
+  // anything inside a code span's backticks. Tags around one are marks.
+  let spans: [number, number][] | null = null;
+  const inCode = (s: Stretch) => {
+    spans ??= [...was.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]);
+    return s.changes.some((change) => {
+      const [from, to] = [change.from - at, change.from - at + change.remove];
+      return (spans ?? []).some(([start, end]) => from > start && to < end);
+    });
   };
   const runs = stretches.filter((s) => formatted(s) && whole(s));
   if (runs.length === 0) return changes;
