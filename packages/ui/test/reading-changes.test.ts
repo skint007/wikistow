@@ -418,6 +418,25 @@ describe('a flush of a tick on a line two tasks have (#703)', () => {
     ]);
   });
 
+  it('ticks the one clicked after a batch left a box written `[X]` as it was (#700)', async () => {
+    const written = CALLS.replace('- [ ] Tidy', '- [X] Tidy');
+    const page = server(written);
+    const tidy = (checked: boolean) => ({ ...tickIn(written, 'Tidy', 0), checked });
+    // Unticked and ticked again: nothing saved, though the page showed `[x]` meanwhile.
+    const first = [tidy(false), tidy(true)];
+    expect(await flushChanges(page.operations, first)).toEqual({
+      outcome: 'unchanged',
+      dropped: [],
+    });
+    const shown = applyChanges(written, first).markdown;
+    expect(shown).toBe(CALLS.replace('- [ ] Tidy', '- [x] Tidy'));
+    expect(await flushChanges(page.operations, [tickIn(shown, 'Call', 0)])).toEqual({
+      outcome: 'published',
+      dropped: [],
+    });
+    expect(page.state.published).toEqual([written.replace('- [ ] Call', '- [x] Call')]);
+  });
+
   it('ticks each clicked in a batch, a value set before them included', async () => {
     const page = server(CALLS);
     const size = { kind: 'property', key: 'size', value: 'big' } as const;

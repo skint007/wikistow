@@ -128,14 +128,14 @@ export function forgetTaskItems() {
  * here, is refused: someone may have swapped two sections meanwhile,
  * putting another task with that line where it was, or leaving only the
  * other one (#703). Any change counts, a tick included, as two sections
- * may differ only in what is ticked. A task already as asked is left as it
- * is, `[X]` included, so a change made twice changes nothing more. A task
- * that is gone, or whose line more than one task has where the offset
- * can't tell them apart, is refused with why. `items` gives the task
- * items, by default `taskIndex(markdown)`: those of a text this one
- * differs from only in what is ticked hold for it too, their boxes as this
- * text has them, as ticking moves no block, so changes made one after
- * another parse the page once.
+ * may differ only in what is ticked, though not a box's `[X]` for `[x]`.
+ * A task already as asked is left as it is, `[X]` included, so a change
+ * made twice changes nothing more. A task that is gone, or whose line more
+ * than one task has where the offset can't tell them apart, is refused
+ * with why. `items` gives the task items, by default `taskIndex(markdown)`:
+ * those of a text this one differs from only in what is ticked hold for
+ * it too, their boxes as this text has them, as ticking moves no block, so
+ * changes made one after another parse the page once.
  */
 export function setTask(
   markdown: string,
@@ -149,7 +149,9 @@ export function setTask(
   const { madeIn } = change;
   // Changed since, with its line on more than one task where it was ticked, or here.
   const unclear = (here: () => number) =>
-    madeIn !== undefined && madeIn.markdown !== markdown && (madeIn.repeated || here() > 1);
+    madeIn !== undefined &&
+    !sameText(madeIn.markdown, markdown, items()) &&
+    (madeIn.repeated || here() > 1);
   const changedSince = {
     ok: false,
     reason: `${named} is on the page more than once, and the page changed since it was ticked.`,
@@ -179,6 +181,27 @@ export function setTask(
     ok: true,
     markdown: markdown.slice(0, task.mark) + mark + markdown.slice(task.mark + 1),
   };
+}
+
+/**
+ * Whether `before` is `markdown`, but for boxes written `[X]` in one and
+ * `[x]` in the other: one written `[X]`, unticked and ticked again in a
+ * batch, is saved as it was, while the page showed `[x]` (#700). Its
+ * boxes are where `items`, `markdown`'s task items, have them.
+ */
+function sameText(before: string, markdown: string, items: ReadonlyMap<number, TaskItem>): boolean {
+  if (before === markdown) return true;
+  if (before.length !== markdown.length) return false;
+  let marks: Set<number> | null = null;
+  for (let i = 0; i < before.length; i++) {
+    const was = before[i];
+    const is = markdown[i];
+    if (was === is) continue;
+    if (!((was === 'X' && is === 'x') || (was === 'x' && is === 'X'))) return false;
+    marks ??= new Set([...items.values()].map(({ mark }) => mark));
+    if (!marks.has(i)) return false;
+  }
+  return true;
 }
 
 /** How many task items in `markdown` have `line`, as `taskIndex` finds them. */
