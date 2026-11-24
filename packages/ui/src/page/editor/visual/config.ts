@@ -427,11 +427,14 @@ function markedSpaceAt(nodes: readonly Tree[], first: boolean): boolean | null {
 // hold it, as it can a no-break space or another of Unicode's, which
 // Milkdown leaves in. `writable` takes a mark off a line break at its
 // run's end, but `nest` may end a mark sooner, before a link it would
-// cut. A line break stays in a link or a colour's HTML where moving it
-// out would end it with a space it holds (`markedSpaceAt`): a mark around
-// it would then end beside the space, and `writable` would take that mark
-// off the space when next written, writing it another way. A mark that
-// can't hold the space gives it up as well (#730).
+// cut. A line break stays in where moving it out would start the mark
+// beside a space that keeps it (`markedSpaceAt`), as a no-break space
+// does once the break is before it. At its end, only in a link or a
+// colour's HTML, which hold the space: a mark around it would then end
+// beside the space, and `writable` would take that mark off the space
+// when next written, writing it another way. Another mark gives up the
+// space with the break, as remark writes the last space a `**` or `~~`
+// closes on as a reference, which parts a break into `\&#xA;` (#730).
 function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[] {
   const inside = [...children];
   const holds = SPACED.has(wrap.type);
@@ -445,7 +448,7 @@ function around(wrap: Omit<Tree, 'children'>, children: readonly Tree[]): Tree[]
     for (;;) {
       const node = first ? inside[0] : inside.at(-1);
       if (node?.type === 'break') {
-        if (holds && (shields ??= markedSpaceAt(inside, first))) break;
+        if ((first || holds) && (shields ??= markedSpaceAt(inside, first))) break;
         inside.splice(first ? 0 : -1, 1);
         if (first) taken.push(node);
         else taken.unshift(node);
@@ -545,6 +548,20 @@ const holdsSpaces = (mark: Mark) =>
   mark.type.name === TEXT_COLOR || (mark.type.name === HIGHLIGHT && mark.attrs['color'] !== null);
 
 /**
+ * How many of `spaces`, at the start (`first`) or end of a colour's run,
+ * it gives up: none, as its HTML holds them, but a line break and what
+ * lies past it, with the ASCII spaces beside the break, which Milkdown
+ * would move out of a mark around the colour. Another space, as a
+ * no-break space, it keeps on its side of the break (#730).
+ */
+function kept(spaces: string, first: boolean): number {
+  const at = first ? spaces.lastIndexOf('\n') : spaces.indexOf('\n');
+  if (at < 0) return 0;
+  if (first) return at + 1 + (/^[ \t]*/.exec(spaces.slice(at + 1))?.[0].length ?? 0);
+  return spaces.length - at + (/[ \t]*$/.exec(spaces.slice(0, at))?.[0].length ?? 0);
+}
+
+/**
  * `doc` without the marks Markdown can't hold. None on the spaces and line
  * breaks a mark's run starts or ends with: delimiters can't sit beside
  * them, and Milkdown, which moves spaces out of a mark, wrote some around
@@ -585,11 +602,11 @@ function writable(doc: Node): Node {
     });
     for (const { mark, from, to } of runs) {
       const inside = text.slice(from, to);
-      // A colour's HTML keeps spaces at its ends, but not a line break.
-      const edge = (spaces: string) =>
-        holdsSpaces(mark) && !spaces.includes('\n') ? 0 : spaces.length;
-      const lead = edge(inside.slice(0, inside.length - inside.trimStart().length));
-      const trail = edge(inside.slice(inside.trimEnd().length));
+      const leading = inside.slice(0, inside.length - inside.trimStart().length);
+      const trailing = inside.slice(inside.trimEnd().length);
+      const [lead, trail] = holdsSpaces(mark)
+        ? [kept(leading, true), kept(trailing, false)]
+        : [leading.length, trailing.length];
       if (lead > 0) tr.removeMark(start + from, start + from + lead, mark);
       if (trail > 0 && lead < inside.length) tr.removeMark(start + to - trail, start + to, mark);
     }

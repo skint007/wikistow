@@ -214,16 +214,17 @@ describe('marks that overlap partly', () => {
       ],
       '[a **b**](u)\\\n**c d** e\n',
     );
-    // And past a no-break space, which goes out of the bold too, as no
-    // delimiter can sit beside one (#730). But not out of a colour's HTML
-    // around one, which a mark around the colour would then end beside.
+    // But not where the mark would then start beside a no-break space,
+    // which keeps it once the break is before it, as no delimiter can sit
+    // beside one; nor out of a colour's HTML around one, which a mark
+    // around the colour would then end beside.
     await writes(
       'a b\\\n\u00a0c d e\n',
       [
         ['link', 1, 4, { href: 'u' }],
         ['strong', 3, 7],
       ],
-      '[a **b**](u)\\\n\u00a0**c** d e\n',
+      '[a **b**](u)**\\\n\u00a0c** d e\n',
     );
     await writes(
       'a <span data-color="red">b\u00a0\\\nc d</span> e\n',
@@ -261,6 +262,27 @@ describe('marks that overlap partly', () => {
     await writes('a b\u00a0c d\n', [['strike_through', 4, 7]], 'a b\u00a0~~c~~ d\n');
     // Before a line break.
     await writes('a b\u00a0\\\nc d\n', [['strong', 3, 6]], 'a **b**\u00a0\\\nc d\n');
+    // Strikethrough from a line break on keeps the no-break space after it.
+    await writes(
+      'a b\\\n\u00a0c d e\n',
+      [
+        ['link', 1, 4, { href: 'u' }],
+        ['strike_through', 3, 7],
+      ],
+      '[a ~~b~~](u)~~\\\n\u00a0c~~ d e\n',
+    );
+    // A colour keeps a no-break space before a line break at its end, as
+    // it does at its end; an ASCII space goes out with the break.
+    await writes(
+      'a <mark data-color="red">b\u00a0\\\n</mark>c\n',
+      [['strong', 1, 2]],
+      '**a** <mark data-color="red">b\u00a0</mark>\\\nc\n',
+    );
+    await writes(
+      'a <mark data-color="red">b \\\n</mark>c\n',
+      [['strong', 1, 2]],
+      '**a** <mark data-color="red">b</mark> \\\nc\n',
+    );
     // Inside the bold, it stays.
     await writes('a b\u00a0\\\nc d\n', [['strong', 3, 7]], 'a **b\u00a0\\\nc** d\n');
   });
