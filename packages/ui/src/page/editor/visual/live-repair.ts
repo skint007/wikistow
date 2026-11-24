@@ -49,12 +49,26 @@ export const REPAIR_MS = 3_000;
 // The reader is used on a block no longer than this, as it reads it quickly.
 const READ_AT_MOST = 1_024;
 
-/** The writing to put text in as: `last`, while nobody else changed `body` since, else one anew. */
-export function writingOf(doc: Y.Doc, last: Writing | undefined, heard: boolean): Writing {
+/** The state of `doc`, by Yjs client, as a writing keeps what it was written on. */
+export const stateOf = (doc: Y.Doc): ReadonlyMap<number, number> =>
+  Y.decodeStateVector(Y.encodeStateVector(doc));
+
+/**
+ * The writing to put text in as: `last`, while nobody else changed `body`
+ * since, else one anew, written on `seen`, the state of `body` its editor
+ * last took in: what `body` had then is what the person had seen.
+ */
+export function writingOf(
+  doc: Y.Doc,
+  last: Writing | undefined,
+  heard: boolean,
+  seen: ReadonlyMap<number, number>,
+): Writing {
   if (last && !heard && last.client === doc.clientID) return last;
   return {
     client: doc.clientID,
-    seen: Y.decodeStateVector(Y.encodeStateVector(doc)),
+    // Its own text is all seen, whenever it went in.
+    seen: new Map([...seen, [doc.clientID, Y.getState(doc.store, doc.clientID)]]),
     put: [],
     deleted: [],
     full: 0,
@@ -113,7 +127,7 @@ const LONGEST_TAG = 32;
 // A colour's opening tag, exactly as the visual editor writes it and the reader reads it.
 const COLOR_TAG = /^<(span|mark) data-color="([a-z]+)">$/;
 // A line that may start code or HTML of its own: four spaces or a tab, or `<`.
-const CODE_OR_HTML = /^(?: {4}|\t| {0,3}<)/;
+const CODE_OR_HTML = /^(?: {4}| {0,3}\t| {0,3}<)/;
 
 const isNameChar = (code: number) =>
   (code >= 97 && code <= 122) ||
@@ -158,7 +172,7 @@ export type Reading = 'clean' | 'broken' | 'unsure';
  * and closed in turn, none inside one of its own kind.
  */
 function scanned(block: string): Reading | null {
-  const open: ('span' | 'mark')[] = [];
+  const open: string[] = [];
   let clean = true;
   // Something only the reader can tell: a mark inside a colour, or a tag written otherwise.
   let unsure = false;
@@ -175,19 +189,21 @@ function scanned(block: string): Reading | null {
     }
     if (tag.closing) {
       if (block.slice(at, at + 7) !== `</${tag.name}>`) unsure = true;
-      else if (open.pop() !== tag.name) clean = false;
+      else if (open.pop()?.split(':')[0] !== tag.name) clean = false;
       else at += 6;
       continue;
     }
-    // Right after `(`, it may be a link's address, as `[a](<mark>)`.
-    if (block[at - 1] === '(') unsure = true;
+    // Right after `(`, it may be a link's address, as `[a](<Mark Twain.md>)`.
+    if (block[at - 1] === '(') code = true;
     const end = block.slice(at, at + LONGEST_TAG).indexOf('>');
     const named = end < 0 ? null : COLOR_TAG.exec(block.slice(at, at + end + 1));
-    if (!named || !isColor(named[2]) || open.includes(tag.name)) {
+    const key = `${tag.name}:${named?.[2] ?? ''}`;
+    // One inside one the same, of the same colour, the editor shows as one.
+    if (!named || !isColor(named[2]) || open.includes(key)) {
       clean = false;
       continue;
     }
-    open.push(tag.name);
+    open.push(key);
     at += end;
   }
   if (open.length > 0) clean = false;
@@ -196,8 +212,6 @@ function scanned(block: string): Reading | null {
   if (!clean) return 'broken';
   return unsure ? null : 'clean';
 }
-
-const COLORED = new Set(['colorHighlight', 'highlight']);
 
 /**
  * How the reader reads `block`: broken where a tag named `span` or `mark`
@@ -211,9 +225,7 @@ function read(block: string): Reading {
   } catch {
     return 'broken';
   }
-  const stack: { node: Nodes; marked: boolean; colored: boolean }[] = [
-    { node: tree, marked: false, colored: false },
-  ];
+  const stack: { node: Nodes; around: readonly string[] }[] = [{ node: tree, around: [] }];
   for (let at = stack.pop(); at; at = stack.pop()) {
     const { node } = at;
     if (node.type === 'html' || node.type === 'text') {
@@ -224,14 +236,21 @@ function read(block: string): Reading {
         start === undefined || end === undefined ? node.value : block.slice(start, end);
       if (suspect(written)) return 'broken';
     }
-    const marks = COLORED.has(node.type);
-    const colors = node.type === 'textColor';
-    if ((marks && at.marked) || (colors && at.colored)) return 'broken';
+    const kind = kindOf(node);
+    if (kind && at.around.includes(kind)) return 'broken';
     if (!('children' in node)) continue;
-    for (const child of node.children)
-      stack.push({ node: child, marked: at.marked || marks, colored: at.colored || colors });
+    const around = kind ? [...at.around, kind] : at.around;
+    for (const child of node.children) stack.push({ node: child, around });
   }
   return 'clean';
+}
+
+/** A highlight or colour as the editor tells them apart: its kind and colour; else null. */
+function kindOf(node: Nodes): string | null {
+  if (node.type === 'highlight') return 'mark:';
+  if (node.type === 'colorHighlight') return `mark:${node.color}`;
+  if (node.type === 'textColor') return `span:${node.color}`;
+  return null;
 }
 
 /**
@@ -303,7 +322,7 @@ const BESIDE = new Set('*_~=[]`$');
  * crossed by another, left open, or inside one of its own kind.
  */
 function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
-  const open: { name: string; tag: Span }[] = [];
+  const open: { name: string; key: string; tag: Span }[] = [];
   const pairs: [Span, Span][] = [];
   const bad: Span[] = [];
   for (const tag of tagsIn(line, 0, line.length)) {
@@ -320,8 +339,9 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
       continue;
     }
     const named = COLOR_TAG.exec(written);
-    if (!named || !isColor(named[2]) || open.some((o) => o.name === name)) bad.push(tag);
-    else open.push({ name, tag });
+    const key = `${name}:${named?.[2] ?? ''}`;
+    if (!named || !isColor(named[2]) || open.some((o) => o.key === key)) bad.push(tag);
+    else open.push({ name, key, tag });
   }
   for (const left of open) bad.push(left.tag);
   return { pairs, bad: bad.sort((a, b) => a.from - b.from) };
@@ -339,41 +359,34 @@ function readerBad(line: string): Span[] | null {
     return null;
   }
   const bad: Span[] = [];
-  const stack: { node: Nodes; marked: boolean; colored: boolean }[] = [
-    { node: tree, marked: false, colored: false },
-  ];
+  const stack: { node: Nodes; around: readonly string[] }[] = [{ node: tree, around: [] }];
   for (let at = stack.pop(); at; at = stack.pop()) {
     const { node } = at;
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if ((node.type === 'html' || node.type === 'text') && start !== undefined && end !== undefined)
       bad.push(...tagsIn(line, start, end));
-    const marks = COLORED.has(node.type);
-    const colors = node.type === 'textColor';
-    if (
-      ((marks && at.marked) || (colors && at.colored)) &&
-      start !== undefined &&
-      end !== undefined
-    )
+    const kind = kindOf(node);
+    if (kind && at.around.includes(kind) && start !== undefined && end !== undefined)
       bad.push({ from: start, to: line.indexOf('>', start) + 1 }, { from: end - 7, to: end });
     if (!('children' in node)) continue;
-    for (const child of node.children)
-      stack.push({ node: child, marked: at.marked || marks, colored: at.colored || colors });
+    const around = kind ? [...at.around, kind] : at.around;
+    for (const child of node.children) stack.push({ node: child, around });
   }
   return bad.sort((a, b) => a.from - b.from);
 }
 
 /**
- * What doesn't read cleanly on a line of `text` from `from` to `to`, as
+ * What doesn't read cleanly in a block of `text` from `from` to `to`, as
  * the reader would have it: each tag that doesn't pair (`pairsOf`), or
  * that the reader leaves as HTML, and each pair with one of those inside
  * it, each with the marks right beside it (`BESIDE`), as the `**` of bold
  * put on around a highlight. Other tags on the line, which read as a
  * colour, aren't. In order, none overlapping; null where it can't tell.
  */
-function conflictOn(text: string, from: number, to: number): Span[] | null {
+function conflictOn(text: string, from: number, to: number): Conflict | null {
   const line = text.slice(from, to);
-  if (!suspect(line)) return [];
+  if (!suspect(line)) return { tags: [], spans: [] };
   const { pairs, bad: unpaired } = pairsOf(line);
   let bad = unpaired;
   if (scanned(line) === null) {
@@ -382,16 +395,17 @@ function conflictOn(text: string, from: number, to: number): Span[] | null {
     if (!read) return null;
     bad = read;
   }
-  if (bad.length === 0) return [];
+  if (bad.length === 0) return { tags: [], spans: [] };
   const tags = [...bad];
   for (const [open, close] of pairs)
     if (overlapsAny(bad, open.from, close.to)) tags.push(open, close);
-  tags.sort((a, b) => a.from - b.from);
-  return besideOf(line, merged(tags, []), 0, line.length).map((span) => ({
-    from: span.from + from,
-    to: span.to + from,
-  }));
+  const shift = (span: Span) => ({ from: span.from + from, to: span.to + from });
+  const all = merged(tags, []);
+  return { tags: all.map(shift), spans: besideOf(line, all, 0, line.length).map(shift) };
 }
+
+/** What doesn't read cleanly: its tags, and those with the marks beside them. */
+type Conflict = { tags: Span[]; spans: Span[] };
 
 /** `tags`, tags of `text` from `from` to `to`, each with the marks right beside it, those that meet made one. */
 function besideOf(text: string, tags: readonly Span[], from: number, to: number): Span[] {
@@ -584,7 +598,12 @@ class Fences {
       if (fence && !open) {
         // `$$` with more on its line is math within the line.
         if (fence.run[0] !== '$' || fence.bare) open = fence;
-      } else if (fence?.bare && open && fence.container === open.container) {
+      } else if (
+        fence?.bare &&
+        open &&
+        (fence.container === open.container ||
+          (open.container === 'list' && fence.container === 'page'))
+      ) {
         if (fence.run[0] === open.run[0] && fence.run.length >= open.run.length) open = null;
       }
       this.#open = open;
@@ -701,15 +720,20 @@ function deletedBy(writings: readonly Writing[], item: Found): number {
  */
 function repairs1(
   items: readonly Found[],
-  suspects: readonly Span[],
+  conflict: Conflict,
   recent: readonly Writing[],
   clients: ReadonlySet<number>,
-): { kept: Span[]; unseen: Found[]; own: Span[] } | null {
+): { kept: Span[]; own: Span[]; formatters: number } | null {
   if (recent.some((w) => w.deleted === null)) return null;
-  const inOne = (item: Found) =>
-    item.deleted
-      ? touchesAny(suspects, item.at, item.at)
-      : overlapsAny(suspects, item.at, item.at + item.length);
+  const { tags, spans } = conflict;
+  // In a tag, or all of it in a tag and the marks beside it: not text that only meets one.
+  const inOne = (item: Found) => {
+    if (item.deleted) return touchesAny(spans, item.at, item.at);
+    const end = item.at + item.length;
+    if (overlapsAny(tags, item.at, end)) return true;
+    const span = spans[firstEnding(spans, item.at)];
+    return span !== undefined && span.from <= item.at && span.to >= end;
+  };
   let latest = -1;
   for (const item of items)
     if (inOne(item))
@@ -722,7 +746,7 @@ function repairs1(
       !item.deleted &&
       item.client === writing.client &&
       holds(writing.put, item.client, item.clock, item.clock + item.length) &&
-      overlapsAny(suspects, item.at, item.at + item.length),
+      inOne(item),
   );
   if (!putThere) return null;
   const fresh = (id: Y.ID | null) =>
@@ -756,7 +780,7 @@ function repairs1(
         !item.deleted && holds(writing.put, item.client, item.clock, item.clock + item.length),
     )
     .map((item) => ({ from: item.at, to: item.at + item.length }));
-  return { kept, unseen, own };
+  return { kept, own, formatters: formatters.size };
 }
 
 /** The first of `spans`, in order and none overlapping, that ends after `from`. */
@@ -781,7 +805,7 @@ function overlapsAny(spans: readonly Span[], from: number, to: number): boolean 
  * `theirs`, others' changes in a block of `body` from `at`, undone within
  * `lines`, in order and none overlapping: what they put in there out, but
  * for what lies in `kept`, and what they took out of a tag in `mine`, the
- * block as this app wrote it, or of the marks beside one, within a line's
+ * block as this app wrote it, or of the marks beside one, beside one of
  * `conflicts`, back in. What
  * they put in or took out across a line break stays, and so does other
  * text they took out, as a word deleted elsewhere on the line.
@@ -796,17 +820,6 @@ function undoneOn(
   held: string,
 ): TextChange[] {
   const tags = besideOf(mine, colourTagsOf(mine), 0, mine.length);
-  // Each line's conflict, with what this app put in there, from first to last.
-  const regions = lines.flatMap((line) => {
-    const on = conflicts.filter((c) => c.to > line.from && c.from < line.to);
-    if (on.length === 0) return [];
-    return [
-      {
-        from: Math.max(line.from, Math.min(...on.map((c) => c.from))),
-        to: Math.min(line.to, Math.max(...on.map((c) => c.to))),
-      },
-    ];
-  });
   // How far `mine` is behind `body`, before the change in turn.
   let shift = 0;
   const out: TextChange[] = [];
@@ -837,7 +850,7 @@ function undoneOn(
         continue;
       }
       const was = held.slice(change.held, change.heldEnd);
-      if (was.includes('\n') || !touchesAny(regions, change.body, change.body)) break;
+      if (was.includes('\n') || !touchesAny(conflicts, change.body, change.body)) break;
       // Only what was in a tag: what else was taken out with it may be someone else's.
       let back = '';
       for (let t = firstEnding(tags, inMine); t < tags.length; t++) {
@@ -934,23 +947,23 @@ export function repairs(
   const out: TextChange[] = [];
   for (const [i, { block, shown, mine, theirs: inside }] of candidates.entries()) {
     const found = items[i] ?? [];
-    // What doesn't read cleanly, line by line.
-    const failing: Span[] = [];
-    const suspects: Span[] = [];
-    let unsure = false;
-    for (const line of linesOf(body, block.from, block.to)) {
-      const conflict = conflictOn(body, line.from, line.to);
-      if (!conflict) unsure = true;
-      else if (conflict.length > 0) {
-        failing.push(line);
-        suspects.push(...conflict);
-      }
-    }
-    if (unsure || suspects.length === 0) continue;
-    const repairer = repairs1(found, suspects, recent, clients);
+    // What doesn't read cleanly, over the block, as a highlight may go on past a line.
+    const conflict = conflictOn(body, block.from, block.to);
+    if (!conflict || conflict.tags.length === 0) continue;
+    const failing = linesOf(body, block.from, block.to).filter((line) =>
+      overlapsAny(conflict.spans, line.from, line.to + 1),
+    );
+    const repairer = repairs1(found, conflict, recent, clients);
     if (!repairer) continue;
+    // Others only took text out: only if beside what it put in, made at once, not knowing it.
+    const own = merged(repairer.own, []);
+    if (
+      repairer.formatters === 0 &&
+      !inside.some((c) => c.bodyEnd === c.body && touchesAny(own, c.body, c.body))
+    )
+      continue;
     // Its own text in the conflict, as its letters of a tag the other took out, for what to put back.
-    const conflicts = merged(suspects, repairer.own);
+    const conflicts = merged(conflict.spans, own);
     const changes = undoneOn(inside, block.from, failing, conflicts, mine, repairer.kept, held);
     const result = applied(shown, block.from, changes);
     if (changes.length > 0 && readingOf(result) === 'clean') out.push(...changes);

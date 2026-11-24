@@ -1142,20 +1142,20 @@ describe('two people formatting the same text at once (#720)', () => {
   it('repairs many lines of one block in time that grows with their number, not faster', async () => {
     const lines = (n: number, run: (i: number) => string) =>
       Array.from({ length: n }, (_, i) => `Line ${i} ${run(i)} end.`).join('\n') + '\n';
+    // Past about 40 lines the editor's change goes in as the whole block, which merges cleanly.
     const time = async (n: number) => {
-      const started = performance.now();
       const real = Date.now();
-      void started;
-      await merged(
+      const result = await merged(
         lines(n, () => 'world'),
         lines(n, () => hi('world')),
         lines(n, () => red('span', 'world')),
         false,
       );
+      expect(result).toBe(lines(n, () => hi('world')));
       return Date.now() - real;
     };
-    const short = await time(50);
-    const result = await time(400);
+    const short = await time(5);
+    const result = await time(40);
     expect(result).toBeLessThan(24 * Math.max(short, 5));
   });
 
@@ -1419,6 +1419,118 @@ describe('two people formatting the same text at once (#720)', () => {
       const higher = aLower ? red('span', 'world') : hi('world');
       const expected = page.replace(' <mark', ' score=<mark').replace('world', higher);
       for (const s of [a, b, c]) expect(bodyOf(s)).toBe(expected);
+    }
+  });
+
+  it('keeps what main keeps: typing beside the tags, link addresses, nested colours, code', async () => {
+    const twain = 'See my [notes](old.md) here.\n';
+    for (const [was, mine, theirs] of [
+      // A link's address in angle brackets, typed into from both sides.
+      ['[click](<mk notes.md>)\n', '[click](<mrk notes.md>)\n', '[click](<mak notes.md>)\n'],
+      [
+        twain,
+        twain.replace('my [notes](old.md)', hi('my [notes](old.md)')),
+        twain.replace('(old.md)', '(<Mark Twain.md>)'),
+      ],
+      // A colour inside a highlight of another colour.
+      [
+        line('big world today'),
+        line(hi('big world today')),
+        line(`big ${red('mark', 'world', 'blue')} today`),
+      ],
+      // Code under a space and a tab.
+      [' \tworld\n', ` \t${hi('world')}\n`, ` \t${red('span', 'world')}\n`],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+  });
+
+  it('keeps a third person’s typing that only meets the tags', async () => {
+    for (const aLower of orders) {
+      const [a, b] = start(line('world'), aLower);
+      const c = { doc: docOf('', 500, a.doc) };
+      a.editor.shown = line(hi('world'));
+      b.editor.shown = line(red('span', 'world'));
+      a.binding.write();
+      b.binding.write();
+      c.doc.getText('body').insert('Hello '.length, 'score=');
+      await exchange([a, b, c]);
+      const higher = aLower ? red('span', 'world') : hi('world');
+      for (const s of [a, b, c]) expect(bodyOf(s)).toBe(line(`score=${higher}`));
+    }
+  });
+
+  it('leaves a source recolour of a highlight across lines, and settles the word', async () => {
+    const page = `Hello ${hi('some\ntext')} and world there.\n`;
+    for (const aLower of orders) {
+      const [a, b] = start(page, aLower);
+      const c = { doc: docOf('', 500, a.doc) };
+      a.editor.shown = page.replace('world', hi('world'));
+      b.editor.shown = page.replace('world', red('span', 'world'));
+      a.binding.write();
+      b.binding.write();
+      const body = c.doc.getText('body');
+      const at = body.toJSON().indexOf('red');
+      body.delete(at, 3);
+      body.insert(at, 'blue');
+      await exchange([a, b, c]);
+      const higher = aLower ? red('span', 'world') : hi('world');
+      const expected = page.replace('"red"', '"blue"').replace('world', higher);
+      for (const s of [a, b, c]) expect(bodyOf(s)).toBe(expected);
+    }
+  });
+
+  it('settles crossed tags in a list item after its fence', async () => {
+    const above = '- ```\n  literal\n  ```\n\n  ';
+    for (const aLower of orders)
+      expect(
+        await merged(
+          `${above}${line('world')}`,
+          `${above}${line(hi('world'))}`,
+          `${above}${line(red('span', 'world'))}`,
+          aLower,
+        ),
+      ).toBe(`${above}${line(aLower ? red('span', 'world') : hi('world'))}`);
+  });
+
+  it('repairs once when the other formatted before its editor took this one in', async () => {
+    const [a, b] = start('abcdefgh\n', false);
+    a.editor.shown = `${hi('abcdef')}gh\n`;
+    a.binding.write();
+    // B has A's highlight in Yjs, but its editor colours what it showed before.
+    send(a, b);
+    b.editor.shown = `abc${red('span', 'defgh')}\n`;
+    b.binding.write();
+    send(b, a);
+    await vi.advanceTimersByTimeAsync(TAKE_MS * 2);
+    await exchange();
+    expect(bodyOf(b)).toBe(bodyOf(a));
+    expect([`${hi('abcdef')}gh\n`, `abc${red('span', 'defgh')}\n`]).toContain(bodyOf(a));
+  });
+
+  it('never puts back tags someone takes out by hand away from what it wrote', async () => {
+    const page = `${hi('Hi')} world there and more.\n`;
+    for (const aLower of orders) {
+      const [a] = start(page, !aLower);
+      sides.splice(1).forEach((s) => s.binding.destroy());
+      const c = { doc: docOf('', aLower ? 500 : 5_000, a.doc) };
+      a.editor.shown = page.replace('more', hi('more'));
+      a.binding.write();
+      await exchange([a, c]);
+      // C backspaces Hi's end tag, then its start tag, a key at a time.
+      const body = c.doc.getText('body');
+      const open = '<mark data-color="red">'.length;
+      for (const [from, length] of [
+        [open + 'Hi'.length, '</mark>'.length],
+        [0, open],
+      ] as const)
+        for (let i = length - 1; i >= 0; i--) {
+          body.delete(from + i, 1);
+          await exchange([a, c]);
+        }
+      expect(bodyOf(a)).toBe(`Hi world there and ${hi('more')}.\n`);
     }
   });
 

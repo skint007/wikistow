@@ -15,7 +15,7 @@
 //   cleanly, it puts back as it wrote it, if it's the one to
 //   (`live-repair.ts`), before it takes the change in.
 import * as Y from 'yjs';
-import { repairs, WRITINGS, wrote, writingOf, type Writing } from './live-repair';
+import { repairs, stateOf, WRITINGS, wrote, writingOf, type Writing } from './live-repair';
 import { applyTo, Mapping, ownChanges, putInto, type Delta } from './live-text';
 
 /** How a take-in went: in, not by block (read whole), or waiting on a composition. */
@@ -113,6 +113,8 @@ export class VisualBinding {
    */
   #local = 0;
   #localTaken = 0;
+  /** The state of `body`, by Yjs client, that the editor last took in. */
+  #seen: ReadonlyMap<number, number> = new Map();
   #destroyed = false;
 
   constructor(body: BoundText, editor: BoundEditor) {
@@ -191,8 +193,9 @@ export class VisualBinding {
   }
 
   // `held` is `body`, or what's followed from now on starts from the text the editor took in.
-  #synced(from?: Pending, local = this.#local) {
+  #synced(from?: Pending, local = this.#local, seen = this.#stateNow()) {
     this.#localTaken = local;
+    this.#seen = seen;
     const body = this.#body.text.toJSON();
     if (this.#held === body) this.#map = Mapping.identity(body.length);
     else if (from && from.text === this.#held) this.#map = from.map;
@@ -232,7 +235,7 @@ export class VisualBinding {
 
   // `put` its own change into `body`, kept as part of its writing.
   #wrote(doc: Y.Doc, transaction: Y.Transaction, put: () => void) {
-    const writing = writingOf(doc, this.#writings.at(-1), this.#heard);
+    const writing = writingOf(doc, this.#writings.at(-1), this.#heard, this.#seen);
     if (writing !== this.#writings.at(-1)) this.#writings.push(writing);
     if (this.#writings.length > WRITINGS) this.#writings.shift();
     this.#heard = false;
@@ -264,6 +267,11 @@ export class VisualBinding {
       }),
     );
     return null;
+  }
+
+  #stateNow(): ReadonlyMap<number, number> {
+    const doc = this.#body.text.doc;
+    return doc ? stateOf(doc) : new Map();
   }
 
   /** Text was given from elsewhere, which `body` holds: catch up with it soon. */
@@ -312,12 +320,13 @@ export class VisualBinding {
     if (text === this.#held) {
       // As changes that changed nothing it shows leave it: the same again.
       this.#map = Mapping.identity(text.length);
-      this.#localTaken = this.#local;
+      this.#synced(undefined, this.#local);
       return this.#caughtUp();
     }
     const pending: Pending = { text, map: Mapping.identity(text.length) };
     this.#pending = pending;
     const local = this.#local;
+    const seen = this.#stateNow();
     const taking = this.#editor.take(text);
     if (taking instanceof Promise) {
       this.#reading = true;
@@ -325,20 +334,20 @@ export class VisualBinding {
         .catch(() => false as const)
         .then((took) => {
           this.#reading = false;
-          this.#took(pending, took, local);
+          this.#took(pending, took, local, seen);
         });
       return;
     }
-    this.#took(pending, taking, local);
+    this.#took(pending, taking, local, seen);
   }
 
-  #took(pending: Pending, took: Taking, local: number) {
+  #took(pending: Pending, took: Taking, local: number, seen: ReadonlyMap<number, number>) {
     this.#pending = null;
     if (this.#destroyed || !this.#body.active()) return;
     if (took === 'composing') return this.#schedule(COMPOSING_MS);
     if (!took) return this.#whole();
     this.#held = this.#editor.written();
-    this.#synced(pending, local);
+    this.#synced(pending, local, seen);
     if (this.#again || this.behind) return this.#schedule();
     this.#caughtUp();
   }
@@ -386,6 +395,7 @@ export class VisualBinding {
     const pending: Pending = { text, map: Mapping.identity(text.length) };
     this.#pending = pending;
     const local = this.#local;
+    const seen = this.#stateNow();
     void this.#editor
       .check(text)
       .catch(() => ({ visual: false, reason: null }))
@@ -412,7 +422,7 @@ export class VisualBinding {
         else shown = this.#withOwn(text, pending, heldThen, mapThen);
         if (this.#editor.show(shown.text) === 'composing') return this.#schedule(COMPOSING_MS);
         this.#held = this.#editor.written();
-        this.#synced(shown, local);
+        this.#synced(shown, local, seen);
         if (this.#again || this.behind) return this.#schedule();
         this.#caughtUp();
       });
