@@ -10,6 +10,7 @@ import {
   newId,
   newPayload,
   PageId,
+  queueOperations,
   RevisionId,
   SpaceId,
   splitFrontmatter,
@@ -32,7 +33,7 @@ import {
   textHtml,
 } from '../src/clip/clip-page';
 import { rememberedPlaces, searchPlaces, type ClipPlace } from '../src/clip/clip-places';
-import { saveClip, type SaveClipDeps } from '../src/clip/save-clip';
+import { hiddenByTrash, saveClip, type SaveClipDeps } from '../src/clip/save-clip';
 
 const spaceId = newId(SpaceId);
 const folderId = newId(FolderId);
@@ -300,6 +301,69 @@ function fakeWriter({
   } as unknown as PageWriter;
   return { writer, calls, revisionId };
 }
+
+// A space's tree as the queue shows it (`withQueued`): folders by ID, each at the top, and pages in them.
+type QueueTree = Parameters<typeof queueOperations.withQueued>[0];
+const spaceTree = (folders: FolderId[], pages: [PageId, FolderId][]) =>
+  ({
+    space: null,
+    shares: [],
+    folders: folders.map((id) => ({
+      id,
+      parentId: null,
+      permissionVersion: 1,
+      position: null,
+      metadata: null,
+    })),
+    pages: pages.map(([id, parentId]) => ({
+      id,
+      parentId,
+      permissionVersion: 1,
+      draftHead: null,
+      publishedHead: null,
+      draftChanges: false,
+      position: null,
+      title: 'Clip',
+      emoji: null,
+      icon: null,
+      symbol: null,
+      region: null,
+    })),
+    agentActivity: null,
+  }) as unknown as QueueTree;
+const trashOf = (id: PageId | FolderId, failure: unknown = null) =>
+  ({
+    kind: 'delete',
+    id,
+    node: 'folder',
+    spaceId,
+    name: 'Gone',
+    failure,
+    at: 1,
+  }) as unknown as queueOperations.QueueEntry;
+
+describe('a page in the trash on this device', () => {
+  const pageId = newId(PageId);
+  const chosen = newId(FolderId);
+  const tree = spaceTree([folderId, chosen], [[pageId, chosen]]);
+
+  it('is hidden by a trash waiting for it, or for its folder', () => {
+    expect(hiddenByTrash(tree, spaceId, [trashOf(pageId)], pageId)).toBe(true);
+    expect(hiddenByTrash(tree, spaceId, [trashOf(chosen)], pageId)).toBe(true);
+  });
+
+  it('isn’t by one for another folder, as the one a clip was first sent to', () => {
+    expect(hiddenByTrash(tree, spaceId, [trashOf(folderId)], pageId)).toBe(false);
+  });
+
+  it('isn’t by one the server refused, nor when nothing waits, nor if it isn’t there at all', () => {
+    expect(hiddenByTrash(tree, spaceId, [trashOf(chosen, { kind: 'forbidden' })], pageId)).toBe(
+      false,
+    );
+    expect(hiddenByTrash(tree, spaceId, [], pageId)).toBe(false);
+    expect(hiddenByTrash(tree, spaceId, [trashOf(chosen)], newId(PageId))).toBe(false);
+  });
+});
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 const here: ClipPlace = { spaceId, folderId, path: ['Home', 'News'] };
@@ -917,13 +981,29 @@ describe('saving a screenshot', () => {
       expect(attaching.calls).toEqual([]);
     });
 
+    it('adds it in the folder the person chose, though the one it was sent to waits for the trash', async () => {
+      const chosen = newId(FolderId);
+      const tree = spaceTree([folderId, chosen], [[pageId, chosen]]);
+      const { writer, calls } = fakeWriter();
+      const saved = await saveClip(
+        partly({ waited: true }),
+        deps({
+          writer,
+          trashedHere: async (page) =>
+            hiddenByTrash(tree, spaceId, [trashOf(folderId)], page.pageId),
+        }),
+      );
+      expect(saved.outcome).toMatchObject({ ok: true, pageId });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'save']);
+    });
+
     it('looks for its folder again if the person put that in the trash here meanwhile', async () => {
       const { writer, calls } = fakeWriter();
       const saved = await saveClip(
         partly(),
         deps({
           writer,
-          trashWaiting: async (id) => id === folderId,
+          trashedHere: async () => true,
           // As the tree shows it once the folder is in the trash.
           places: async () => ({ places: [], unread: new Set() }),
         }),
@@ -1195,14 +1275,15 @@ describe('a lock while an offline clip saves', () => {
     const revisionId = newId(RevisionId);
     const { kept, writer } = await unlock(memoryKeptStore());
     await writer.deleteNode({ spaceId, nodeId: pageId, node: 'page', name: 'Clip' });
-    const trashWaiting = async (id: PageId | FolderId) =>
-      (await kept.queue.waiting(id)).some((one) => one.kind === 'delete');
+    const tree = spaceTree([folderId], [[pageId, folderId]]);
+    const trashedHere = async (page: { pageId: PageId }) =>
+      hiddenByTrash(tree, spaceId, await kept.queue.entries(), page.pageId);
     const saved = await saveClip(
       {
         ...screenshotClip(),
         made: { spaceId, pageId, revisionId, path: 'Home / News', partial: true },
       },
-      deps({ writer, convert: plainText, trashWaiting }),
+      deps({ writer, convert: plainText, trashedHere }),
     );
     expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
     expect(saved.outcome).not.toMatchObject({ pageId });

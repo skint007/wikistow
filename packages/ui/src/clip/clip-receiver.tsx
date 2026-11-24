@@ -8,7 +8,10 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ApiError,
+  keptOperations,
+  noAnswer,
   pageOperations,
+  spaceOperations,
   revisePayload,
   type ClientContext,
   type PageId,
@@ -42,7 +45,7 @@ import {
   searchPlaces,
   type ClipPlace,
 } from './clip-places';
-import { saveClip, type Places, type Saved } from './save-clip';
+import { hiddenByTrash, saveClip, type Places, type Saved } from './save-clip';
 import { MarkdownWorker, READ_BUDGET_MS } from '../page/markdown-worker';
 
 /** How long a space's tree loaded for clipping is taken as current. */
@@ -154,6 +157,27 @@ const convert = async (html: string, text: string) => {
 
 /** The question for a clip whose folder can't take it: where it goes instead. */
 type Asking = { title: string; places: ClipPlace[]; answer: (place: ClipPlace | null) => void };
+
+/**
+ * Whether a page is out of its space's tree for a trash waiting on this
+ * device (`SaveClipDeps.trashedHere`). Not known, as when its space isn't
+ * kept offline, it isn't.
+ */
+async function trashedHere(ctx: ClientContext, page: { spaceId: SpaceId; pageId: PageId }) {
+  const queue = ctx.keptContent?.queue;
+  if (!queue) return false;
+  try {
+    const entries = await queue.entries();
+    if (!entries.some((one) => one.kind === 'delete' && one.spaceId === page.spaceId)) return false;
+    const tree = await spaceOperations.loadTree(ctx, page.spaceId).catch((error: unknown) => {
+      if (!noAnswer(error)) throw error;
+      return keptOperations.keptTree(ctx, page.spaceId);
+    });
+    return hiddenByTrash(tree, page.spaceId, entries, page.pageId);
+  } catch {
+    return false;
+  }
+}
 
 /** A page's draft on the server now, fetched afresh (`SaveClipDeps.current`). */
 async function currentDraft(ctx: ClientContext, page: { spaceId: SpaceId; pageId: PageId }) {
@@ -275,11 +299,7 @@ function Receiver({ bridge }: { bridge: DesktopBridge }) {
         spans,
         made: (page) => bridge.clipMade(next.id, page),
         current: (page) => currentDraft(ctx, page),
-        // One the server refused stays, and the page with it.
-        trashWaiting: async (id) =>
-          (await ctx.keptContent?.queue.waiting(id))?.some(
-            (one) => one.kind === 'delete' && !one.failure,
-          ) ?? false,
+        trashedHere: (page) => trashedHere(ctx, page),
         image: (url) => bridge.clipImage(next.id, url),
         today: localDay(),
         choose: (_clip, title) =>

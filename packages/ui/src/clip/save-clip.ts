@@ -18,8 +18,8 @@ import {
   linkSpans,
   noAnswer,
   splitFrontmatter,
+  queueOperations,
   type AttachmentRef,
-  type FolderId,
   type LinkSpans,
   type PagePayload,
   type PageWriter,
@@ -68,8 +68,11 @@ export type SaveClipDeps = {
     head: RevisionId;
     payload: PagePayload;
   }>;
-  /** Whether the person put a page or folder in the trash on this device, waiting to be sent. */
-  trashWaiting?: (id: PageId | FolderId) => Promise<boolean>;
+  /**
+   * Whether a page is out of its space's tree for a trash waiting on this
+   * device, its own or a folder's above it (`hiddenByTrash`).
+   */
+  trashedHere?: (page: { spaceId: SpaceId; pageId: PageId }) => Promise<boolean>;
   /** Main's fetch of one of the clip's images (`DesktopBridge.clipImage`). */
   image: (url: string) => Promise<ClipImage>;
   /** Today, as `clipped` says it. */
@@ -404,9 +407,7 @@ async function finishPartly(
     try {
       // In the trash here, or in a folder there, which the server hasn't
       // heard yet: as one gone, so the clip's folder is looked for again.
-      const { folderId } = clip.folder;
-      if (await deps.trashWaiting?.(pageId)) return 'gone';
-      if (folderId && (await deps.trashWaiting?.(folderId))) return 'gone';
+      if (await deps.trashedHere?.(page)) return 'gone';
       const head = await drafts.waitingHead();
       const entry = await drafts.entryNow();
       if (entry) {
@@ -491,4 +492,28 @@ async function finishPartly(
   }
   await deps.made?.({ spaceId, pageId, path }).catch(() => {});
   return done;
+}
+
+type QueueTree = Parameters<typeof queueOperations.withQueued>[0];
+type QueueEntries = Parameters<typeof queueOperations.withQueued>[2];
+
+/**
+ * Whether page `pageId` is out of its space's `tree` only for a trash among
+ * the queue's `entries`, its own or a folder's above it. One the server
+ * refused doesn't count: the page stays.
+ */
+export function hiddenByTrash(
+  tree: QueueTree,
+  spaceId: SpaceId,
+  entries: QueueEntries,
+  pageId: PageId,
+): boolean {
+  const trash = (entry: QueueEntries[number]) => entry.kind === 'delete' && entry.failure === null;
+  if (!entries.some(trash)) return false;
+  const shows = (shown: QueueTree) => shown.pages.some((one) => one.id === pageId);
+  const kept = entries.filter((entry) => !trash(entry));
+  return (
+    shows(queueOperations.withQueued(tree, spaceId, kept)) &&
+    !shows(queueOperations.withQueued(tree, spaceId, entries))
+  );
 }
