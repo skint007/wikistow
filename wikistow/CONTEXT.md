@@ -78,7 +78,7 @@ The first public key your app saw for a person, kept in your contacts. If the se
 _Avoid_: Verified key, safety code.
 
 **Identity key rotation**
-A person replacing their own identity keys with new ones, as when the old ones may have leaked, with a statement both keys sign. The people they share with follow it to the new key without the key-change warning, what the person signed before stays theirs, and the shares they're in get new folder keys. Proposed in ADR 0018. Not recovery, which opens the same keys with the recovery key.
+A person replacing their own identity keys with new ones, as when the old ones may have leaked, with a statement both keys sign. The people they share with follow it to the new key without the key-change warning, what the person signed before stays theirs, and the shares they're in get new folder keys. An owner who replaces their keys is added again as an owner by a co-owner. Proposed in ADR 0018. Not recovery, which opens the same keys with the recovery key.
 _Avoid_: Key reset, re-keying, key change (a key the app can't follow).
 
 **Shared with me**
