@@ -185,6 +185,14 @@ function carried(a: Node, b: Node, kept: (mark: Mark) => boolean): StepMap {
     endA--;
     endB--;
   }
+  // Out to whole blocks, as the editor's own writes are diffed by whole
+  // lines, so characters alike within them line up as they did there.
+  const edge = (token: string | undefined) => token === 'e' || token?.startsWith('s');
+  while (start > 0 && !edge(was[start - 1])) start--;
+  while (endA < was.length && endB < now.length && !edge(was[endA])) {
+    endA++;
+    endB++;
+  }
   if (start === endA && start === endB) return StepMap.empty;
   const [middleA, middleB] = [was.slice(start, endA), now.slice(start, endB)];
   const parts = diffArrays(middleA, middleB, { timeout: DIFF_MS }) ?? [

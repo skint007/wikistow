@@ -246,7 +246,11 @@ export class VisualBinding {
     const body = this.#body.text.toJSON();
     if (this.#destroyed) return body;
     const next = this.#editor.written();
-    if (next === this.#held) return body;
+    // Formatting that writes as nothing, as a colour chosen again, is nothing to make again.
+    if (next === this.#held) {
+      this.#editor.intent?.();
+      return body;
+    }
     const mapping = this.#mapNow(body);
     const changes = ownChanges(this.#held, next);
     const carried = body === this.#held ? changes : mapping.carry(changes);

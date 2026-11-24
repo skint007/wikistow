@@ -545,4 +545,51 @@ describe('formatting made alongside someone else’s', () => {
     expect(b.text.toJSON()).toBe(end);
     expect(raw(end)).toBe(false);
   });
+
+  it('comes out as main does: a phrase typed just after it', async () => {
+    const page = 'Hello world there.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    colour('world', 'highlight', 'red')(a);
+    typing('world', 5, 0, ', my friend')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('makes nothing again of a colour chosen again, which wrote nothing', async () => {
+    const page = 'Say <mark data-color="red">world</mark>! now.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    colour('world', 'highlight', 'red')(a);
+    await new Promise((resolve) => setTimeout(resolve, 875));
+    colour('!', 'highlight', 'blue')(a);
+    colour('world', 'highlight', 'plain')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('leaves typing after it as main does, beyond text taken out after it came', async () => {
+    const page = 'Say world now.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    colour('world', 'highlight', 'red')(a);
+    await expect.poll(() => a.log.length).toBe(1);
+    send(a, b);
+    await shows(b, a.text.toJSON());
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    typing(' now.', 0, 4, '')(b);
+    await expect.poll(() => b.log.length).toBe(1);
+    send(b, a);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    typing('.', 0, 1, ', then.')(b);
+    await expect.poll(() => b.log.length).toBe(2);
+    const main = merged(page, [a, b], [1, 2]);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
 });

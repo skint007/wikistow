@@ -99,7 +99,7 @@ const change = (): Change => ({ inserts: new Map(), deletes: new Map() });
 /**
  * Whether `a` and `b` changed the same text in `text`: something each put
  * in or took out stands beside the other's, with no character between
- * them that neither touched. Changes to the same word apart, as one to its
+ * them that neither touched, standing or taken out before. Changes to the same word apart, as one to its
  * first letter and one to its last, don't meet.
  */
 export function meet(text: Y.Text, a: Change, b: Change): boolean {
@@ -110,8 +110,11 @@ export function meet(text: Y.Text, a: Change, b: Change): boolean {
       touches(c.inserts, client, clock, item.length) ||
       touches(c.deletes, client, clock, item.length);
     const [hitA, hitB] = [hit(a), hit(b)];
+    // A character neither touched stands between them, taken out before or not:
+    // Yjs places typing after what was taken out at its place, so typing there
+    // later is apart from a write's tags just before it.
     if (!hitA && !hitB) {
-      if (!item.deleted && item.countable) [inA, inB] = [false, false];
+      if (item.countable) [inA, inB] = [false, false];
       continue;
     }
     inA ||= hitA;
