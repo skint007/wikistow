@@ -858,4 +858,17 @@ describe('the bodies a page showed as this person’s changes were made (#728)',
     expect(shown.has('- [ ] Call\n- [ ] Call\n')).toBe(false);
     expect(shown.has('- [ ] Call\n- [x] Call\n')).toBe(true);
   });
+
+  it('keep the first however many are ticked one after another', () => {
+    const page = Array.from({ length: 40 }, () => '- [ ] Call\n').join('');
+    const shown = new ShownBodies();
+    const ticks: ReadingChange[] = [];
+    for (let at = 0; at < 40; at++) {
+      ticks.push({ kind: 'task', offset: at * 11, line: 'Call', checked: true });
+      shown.see(page, [...ticks]);
+    }
+    expect(shown.has(page)).toBe(true);
+    expect(shown.has(page.replaceAll('[ ]', '[x]'))).toBe(true);
+    expect(shown.has(page.replace('[ ]', '[X]'))).toBe(false);
+  });
 });

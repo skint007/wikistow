@@ -157,8 +157,7 @@ export function applyChange(
     : { ok: false, reason: `${change.key} couldn’t be changed: ${edit.reason}` };
 }
 
-// How many bodies a page keeps as shown: a run of ticks, with a flush or two among them.
-const BODIES_KEPT = 32;
+const BOX_MARKS = new Set([' ', 'x', 'X']);
 
 /**
  * The bodies a page showed on this device as this person's changes were
@@ -167,40 +166,71 @@ const BODIES_KEPT = 32;
  * ticks and properties move no task in the body; another, though it
  * differs only in what is ticked, may have two same-named tasks swapped.
  * A flush of this person's changes keeps them: the text it published is
- * one of them.
+ * one of them. Each is kept as where its boxes differ from the first, so
+ * however many are kept, they hold no page text but that one.
  */
 export class ShownBodies {
-  readonly #bodies = new Set<string>();
+  #first: string | null = null;
+  #shown = new Set<string>();
+  // The text read last, and what of it was made since: only changes queued after those are made again.
+  #read: string | null = null;
+  #made: readonly ReadingChange[] = [];
+  #markdown = '';
+  #parsed = '';
 
   /** The page shows `read` with `changes` made: each body on the way is kept. */
   see(read: string, changes: readonly ReadingChange[]) {
-    let markdown = read;
-    let parsed = read;
-    const items = () => taskIndex(parsed);
-    const first = splitFrontmatter(read).body;
-    if (!this.#bodies.has(first)) this.#bodies.clear();
-    this.#keep(first);
-    for (const change of changes) {
-      const made = applyChange(markdown, change, items);
-      if (!made.ok) continue;
-      markdown = made.markdown;
-      if (change.kind === 'property') parsed = markdown;
-      else this.#keep(splitFrontmatter(markdown).body);
+    if (read !== this.#read) {
+      const body = splitFrontmatter(read).body;
+      const key = this.#key(body);
+      if (key === null || !this.#shown.has(key)) {
+        this.#first = body;
+        this.#shown = new Set(['']);
+      }
+      this.#read = read;
+      this.#made = [];
     }
+    const more =
+      changes.length >= this.#made.length &&
+      this.#made.every((change, at) => change === changes[at]);
+    if (!more || this.#made.length === 0) {
+      this.#made = [];
+      this.#markdown = read;
+      this.#parsed = read;
+    }
+    for (const change of changes.slice(this.#made.length)) {
+      const made = applyChange(this.#markdown, change, () => taskIndex(this.#parsed));
+      if (!made.ok) continue;
+      this.#markdown = made.markdown;
+      if (change.kind === 'property') this.#parsed = made.markdown;
+      else {
+        const key = this.#key(splitFrontmatter(made.markdown).body);
+        if (key !== null) this.#shown.add(key);
+      }
+    }
+    this.#made = changes;
   }
 
   /** Whether the page showed `body` as this person's changes were made. */
   has(body: string): boolean {
-    return this.#bodies.has(body);
+    const key = this.#key(body);
+    return key !== null && this.#shown.has(key);
   }
 
-  #keep(body: string) {
-    if (this.#bodies.has(body)) return;
-    this.#bodies.add(body);
-    for (const old of this.#bodies) {
-      if (this.#bodies.size <= BODIES_KEPT) break;
-      this.#bodies.delete(old);
+  /** Where `body`'s boxes differ from the first body's, or null where more than boxes do. */
+  #key(body: string): string | null {
+    const first = this.#first;
+    if (first === null || first.length !== body.length) return null;
+    if (first === body) return '';
+    let key = '';
+    for (let at = 0; at < body.length; at++) {
+      const was = first[at]!;
+      const is = body[at]!;
+      if (was === is) continue;
+      if (!BOX_MARKS.has(was) || !BOX_MARKS.has(is)) return null;
+      key += `${at}${is},`;
     }
+    return key;
   }
 }
 
