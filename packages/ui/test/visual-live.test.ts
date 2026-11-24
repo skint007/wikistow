@@ -1692,6 +1692,48 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
+  it('never repairs a highlight taken off as the other colours it into losing the word', async () => {
+    for (const word of ['data', 'color', 'mark', 'world'])
+      for (const aLower of orders) {
+        const was = line(hi(word));
+        const [mine, theirs] = [line(word), line(red('span', hi(word), 'green'))];
+        const result = await merged(was, mine, theirs, aLower);
+        // Settled with the word, or left as main merged it.
+        if (result !== byCharacter(was, mine, theirs, aLower)) {
+          expect(readsCleanly(result), `${word} ${result}`).toBe(true);
+          expect(result, word).toContain(`>${word}<`);
+        }
+      }
+  });
+
+  it('keeps what main keeps: a third person’s link address, a link title, maths', async () => {
+    const title = '[click](dest "<mk value>")\n';
+    const maths = '$$$\nx$$\n\n<mk value>\n$$$\n';
+    for (const [was, mine, theirs] of [
+      [title, title.replace('<mk', '<mrk'), title.replace('<mk', '<mak')],
+      [maths, maths.replace('<mk', '<mrk'), maths.replace('<mk', '<mak')],
+    ] as const)
+      for (const aLower of orders)
+        expect(await merged(was, mine, theirs, aLower)).toBe(
+          byCharacter(was, mine, theirs, aLower),
+        );
+    const page = 'See [score](old)world there.\n';
+    for (const aLower of orders) {
+      const [a, b] = start(page, aLower);
+      const c = { doc: docOf('', 500, a.doc) };
+      a.editor.shown = page.replace('world', hi('world'));
+      b.editor.shown = page.replace('world', red('span', 'world'));
+      a.binding.write();
+      b.binding.write();
+      const body = c.doc.getText('body');
+      const at = body.toJSON().indexOf('old');
+      body.delete(at, 3);
+      body.insert(at, 'new');
+      await exchange([a, b, c]);
+      for (const s of [a, b, c]) expect(bodyOf(s)).toContain('(new)');
+    }
+  });
+
   it('leaves a block broken when the one to repair it is gone', async () => {
     const [a, b] = start(line('world'), true);
     a.editor.shown = line(hi('world'));

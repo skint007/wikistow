@@ -285,7 +285,8 @@ function scanned(block: string): Reading | null {
       continue;
     }
     // Right after `(`, it may be a link's address, as `[a](<Mark Twain.md>)`.
-    if (block[at - 1] === '(') code = true;
+    // Or, right after a quote, its title, as `[a](x "<mark>")`.
+    if (block[at - 1] === '(' || block[at - 1] === '"' || block[at - 1] === "'") code = true;
     const end = block.slice(at, at + LONGEST_TAG).indexOf('>');
     const named = end < 0 ? null : COLOR_TAG.exec(block.slice(at, at + end + 1));
     const key = `${tag.name}:${named?.[2] ?? ''}`;
@@ -418,6 +419,19 @@ function addressAfter(text: string, at: number, to: number): number {
   return -1;
 }
 
+/**
+ * Whether the text of the link whose `](` is at `address` in `text` holds
+ * a tag's start, as one the merge put a link's address after, not a link
+ * of its own before the tag, as `[score](old)<mark>`.
+ */
+function tagInLinkText(text: string, address: number, from: number): boolean {
+  for (let i = address - 1; i >= Math.max(from, address - LINK_AT_MOST); i--) {
+    if (text[i] === '[' || text[i] === ']') return false;
+    if (text[i] === '<' && (tagAt(text, i) || splitTagAt(text, i))) return true;
+  }
+  return false;
+}
+
 /** Where the `](` of a link's address that ends with the `)` at `close` in `text` starts, not before `from`; or -1. */
 function addressBefore(text: string, close: number, from: number): number {
   for (let i = close - 1; i > Math.max(from, close - LINK_AT_MOST); i--) {
@@ -456,6 +470,8 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
   const open: { name: string; key: string; tag: Span }[] = [];
   const pairs: [Span, Span][] = [];
   const bad: Span[] = [];
+  // How many of each name are open, so one that closes nothing is told at once.
+  const opened = new Map<string, number>();
   for (const tag of tagsIn(line, 0, line.length, true)) {
     const named0 = tagAt(line, tag.from);
     if (!named0) {
@@ -465,19 +481,27 @@ function pairsOf(line: string): { pairs: [Span, Span][]; bad: Span[] } {
     const { name, closing } = named0;
     const written = line.slice(tag.from, tag.to);
     if (closing) {
-      const at = open.findLastIndex((o) => o.name === name);
+      // Those it crosses are taken off as it's found, so each is looked at once.
+      const at = (opened.get(name) ?? 0) > 0 ? open.findLastIndex((o) => o.name === name) : -1;
       if (written !== `</${name}>` || at < 0) {
         bad.push(tag);
         continue;
       }
-      for (const crossed of open.splice(at + 1)) bad.push(crossed.tag);
+      for (const crossed of open.splice(at + 1)) {
+        bad.push(crossed.tag);
+        opened.set(crossed.name, (opened.get(crossed.name) ?? 1) - 1);
+      }
       pairs.push([(open.pop() as { tag: Span }).tag, tag]);
+      opened.set(name, (opened.get(name) ?? 1) - 1);
       continue;
     }
     const named = COLOR_TAG.exec(written);
     const key = `${name}:${named?.[2] ?? ''}`;
     if (!named || !isColor(named[2])) bad.push(tag);
-    else open.push({ name, key, tag });
+    else {
+      open.push({ name, key, tag });
+      opened.set(name, (opened.get(name) ?? 0) + 1);
+    }
   }
   for (const left of open) bad.push(left.tag);
   bad.push(...doubled(line, pairs));
@@ -567,7 +591,7 @@ function besideOf(text: string, tags: readonly Span[], from: number, to: number)
     // A link's address before a tag, as `[<mark>world](x.md)</mark>`.
     if (text[start - 1] === ')') {
       const address = addressBefore(text, start - 1, from);
-      if (address >= 0) start = address;
+      if (address >= 0 && tagInLinkText(text, address, from)) start = address;
     }
     for (let run = markRun(text, start, -1, from); run > 0; run = markRun(text, start, -1, from))
       start -= run;
@@ -729,6 +753,15 @@ function fenceOn(
   return { run: text.slice(i, runEnd), container, bare: rest === end };
 }
 
+/** How many `$` the line of `text` from `at` to `end` ends with, but for spaces after. */
+function dollarsAtEnd(text: string, at: number, end: number): number {
+  let i = end;
+  while (i > at && /[ \t\r]/.test(text[i - 1] as string)) i--;
+  let run = 0;
+  while (i - run > at && text[i - run - 1] === '$') run++;
+  return run;
+}
+
 /** Whether the line of `text` from `at` goes on in `container`: quoted, or indented. */
 function goesOn(text: string, at: number, end: number, container: Container): boolean {
   let i = at;
@@ -760,12 +793,8 @@ class Fences {
       let open = this.#open;
       if (open && !goesOn(text, this.#at, end, open.container)) open = null;
       const fence = fenceOn(text, this.#at, end);
-      // Maths ends on a line ending `$$`, as `x$$` or `$$ x $$`.
-      if (
-        open?.run[0] === '$' &&
-        /\$\$[ \t\r]*$/.test(text.slice(Math.max(this.#at, end - 40), end))
-      )
-        open = null;
+      // Maths ends on a line ending in a run of `$` as long as its own, as `x$$` or `$$ x $$`.
+      if (open?.run[0] === '$' && dollarsAtEnd(text, this.#at, end) >= open.run.length) open = null;
       else if (fence && !open) {
         // `$$` with more on its line is math within the line.
         if (fence.run[0] !== '$' || fence.bare) open = fence;
@@ -1086,6 +1115,36 @@ function applied(text: string, at: number, changes: readonly TextChange[]): stri
   return out + text.slice(from);
 }
 
+/** The words of `text`, runs of letters and digits, outside its tags unless `raw`, counted. */
+function wordsOf(text: string, raw = false): Map<string, number> {
+  const words = new Map<string, number>();
+  let from = 0;
+  const count = (part: string) => {
+    for (const word of part.match(/[\p{L}\p{N}]+/gu) ?? [])
+      words.set(word, (words.get(word) ?? 0) + 1);
+  };
+  if (!raw)
+    for (const tag of tagsIn(text, 0, text.length, true)) {
+      count(text.slice(from, tag.from));
+      from = tag.to;
+    }
+  count(text.slice(from));
+  return words;
+}
+
+/**
+ * Whether `result` has each word of `mine` as often as both it and
+ * `merged` have it, in `merged` counting what's in its tags too, as a
+ * word a merge took for letters of one.
+ */
+function keepsWords(mine: string, merged: string, result: string): boolean {
+  const there = wordsOf(merged, true);
+  const after = wordsOf(result);
+  for (const [word, times] of wordsOf(mine))
+    if ((after.get(word) ?? 0) < Math.min(times, there.get(word) ?? 0)) return false;
+  return true;
+}
+
 /** A block to repair, if this app is the one to. */
 type Candidate = { block: Span; shown: string; mine: string; theirs: Theirs[] };
 
@@ -1174,9 +1233,17 @@ export function repairs(
       held,
     );
     const result = applied(shown, block.from, changes);
-    // No pieces of the other's tags left as text: no more colours named than it wrote.
+    // No pieces of the other's tags left as text: no more colours named than
+    // it wrote; and no word it wrote that's still there lost, as a merge that
+    // took a word for letters of a tag can leave a repair rebuilding the tag
+    // around nothing.
     const named = (text: string) => text.split('data-color').length;
-    if (changes.length > 0 && readingOf(result) === 'clean' && named(result) <= named(mine))
+    if (
+      changes.length > 0 &&
+      readingOf(result) === 'clean' &&
+      named(result) <= named(mine) &&
+      keepsWords(mine, shown, result)
+    )
       out.push(...changes);
   }
   return out;
