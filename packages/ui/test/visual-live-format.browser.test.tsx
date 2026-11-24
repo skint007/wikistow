@@ -18,6 +18,7 @@ import {
   type Edit,
 } from './live-format-people.tsx';
 import { viewOf } from './editor-view.ts';
+import { BESIDE_MS } from '../src/page/editor/visual/live-rebase.ts';
 
 // Two people formatting the same text at once in a live session, each in a
 // visual editor mounted for real over a Yjs `body` of its own (#720): the
@@ -293,5 +294,57 @@ describe('formatting made alongside someone else’s', () => {
     await settle([a, b, c]);
     for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
     expect(main).toContain('blue');
+  });
+
+  // Typed where the write took markup out: Yjs places it after what was
+  // taken out, so it was typed with the write in.
+  const beside: [string, string, Edit][] = [
+    ['typed before letters un-bolded', 'Say **world** now.\n', typing('wor', 0, 0, 'X')],
+    ['a word typed before them', '**world** now.\n', typing('wor', 0, 0, 'The ')],
+  ];
+  for (const [name, page, b] of beside) {
+    it(`leaves a change made after it as main does: ${name}`, async () => {
+      const [pa, pb] = [await person(page, 2), await person(page, 1)];
+      toggle('wor', 'bold')(pa);
+      await expect.poll(() => pa.text.toJSON()).not.toBe(page);
+      send(pa, pb);
+      await shows(pb, pa.text.toJSON());
+      // As a person typing after they see it: past `BESIDE_MS`.
+      await new Promise((resolve) => setTimeout(resolve, BESIDE_MS));
+      b(pb);
+      await expect.poll(() => pb.log.length).toBeGreaterThan(0);
+      const main = merged(page, [pa, pb], [pa.log.length, pb.log.length]);
+      await settle([pa, pb]);
+      expect(pa.text.toJSON()).toBe(main);
+      expect(pb.text.toJSON()).toBe(main);
+    });
+  }
+
+  it('comes out as main does when the same word is typed beside it', async () => {
+    const page = 'Say **world** now.\n';
+    const [a, b] = [await person(page, 2), await person(page, 1)];
+    colour('world', 'highlight', 'red')(a);
+    typing('world', 0, 0, 'world ')(b);
+    await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 1]);
+    const main = merged(page, [a, b], [1, 1]);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
+  });
+
+  it('brings back nothing a third person took out that it took out too', async () => {
+    const page = 'Say **==world==** now.\n';
+    const a = await person(page, 3);
+    const [b, c] = [sourcePerson(page, 2), sourcePerson(page, 1)];
+    colour('world', 'highlight', 'red')(a);
+    typeSource(b, page.replace('**==', 'world **=='));
+    typeSource(c, page.replaceAll('==', ''));
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b, c], [1, 1, 1]);
+    send(c, a);
+    send(b, a);
+    await settle([a, b, c]);
+    for (const p of [a, b, c]) expect(p.text.toJSON()).toBe(main);
   });
 });

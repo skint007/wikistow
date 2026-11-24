@@ -4,12 +4,12 @@
 // `live-rebase.ts` does, and it has taken in someone else's text in its
 // place, it adds and removes the same marks again, each over its range
 // carried onto what it shows now, as prosemirror-collab maps its steps.
-import type { Node } from '@milkdown/kit/prose/model';
+import type { Mark, Node } from '@milkdown/kit/prose/model';
 import { Plugin, type Transaction } from '@milkdown/kit/prose/state';
 import { AddMarkStep, RemoveMarkStep, StepMap, Transform } from '@milkdown/kit/prose/transform';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
-import { diffChars } from 'diff';
+import { diffArrays } from 'diff';
 import { EXTERNAL } from './plugins';
 
 /** Marks added and taken off, each over its range in `before`, the document they were made on. */
@@ -108,7 +108,16 @@ export function readsAs(merged: Node, theirs: Node, intents: readonly unknown[])
 function remade(tr: Transform, intents: readonly unknown[]): void {
   for (const intent of intents) {
     if (!isFormatting(intent) || intent.before.type.schema !== tr.doc.type.schema) continue;
-    const map = carried(intent.before, tr.doc);
+    // Lined up by its text and the marks it doesn't change, so a word typed
+    // beside its copy isn't taken for it; by its text alone where someone's
+    // other marks cut across a range.
+    const changed = new Set(intent.steps.map((step) => step.mark.type));
+    const kept = (mark: Mark) => !changed.has(mark.type);
+    const marked = carried(intent.before, tr.doc, kept);
+    const cut = intent.steps.some((step) =>
+      [step.from, step.to].some((at) => marked.mapResult(at, 1).deleted),
+    );
+    const map = cut ? carried(intent.before, tr.doc, () => false) : marked;
     for (const step of intent.steps) {
       const from = map.map(step.from, 1);
       const to = map.map(step.to, 1);
@@ -119,50 +128,57 @@ function remade(tr: Transform, intents: readonly unknown[]): void {
   }
 }
 
-// A document as one character for each place in it, as ProseMirror counts
-// them, its marks left out: each node's start by its type and its end, each
-// leaf, and its text as it is.
-const LEAF = '￼';
-const END = '';
-function places(doc: Node): string {
-  const types = Object.keys(doc.type.schema.nodes);
-  const startOf = (name: string) => String.fromCharCode(0xe000 + types.indexOf(name));
-  const parts: string[] = [];
+// A document as one token for each place in it, as ProseMirror counts
+// them: each node's start by its type and its end, each leaf, and each
+// character of its text, with the marks `kept` keeps.
+function places(doc: Node, kept: (mark: Mark) => boolean): string[] {
+  const out: string[] = [];
+  const marks = (node: Node) =>
+    node.marks
+      .filter(kept)
+      .map((mark) => `${mark.type.name}${JSON.stringify(mark.attrs)}`)
+      .join(' ');
   const walk = (node: Node) =>
     node.forEach((child) => {
-      if (child.isText) parts.push(child.text ?? '');
-      else if (child.isLeaf) parts.push(LEAF);
+      if (child.isText) {
+        const signature = marks(child);
+        for (const unit of child.text ?? '') {
+          // A character beyond the first plane is two places, as ProseMirror counts it.
+          for (let i = 0; i < unit.length; i++) out.push(`t${unit}${i}|${signature}`);
+        }
+      } else if (child.isLeaf) out.push(`l${child.type.name}|${marks(child)}`);
       else {
-        parts.push(startOf(child.type.name));
+        out.push(`s${child.type.name}`);
         walk(child);
-        parts.push(END);
+        out.push('e');
       }
     });
   walk(doc);
-  return parts.join('');
+  return out;
 }
 
-// A character diff of a few thousand places takes a millisecond or two;
-// past this long it gives up, and what lies between the common start and
-// end counts as replaced.
+// A diff of a few thousand places takes a millisecond or two; past this
+// long it gives up, and what lies between the common start and end counts
+// as replaced.
 const DIFF_MS = 50;
 
-/** How places in `a` are carried into `b`, by a diff of their places, marks aside. */
-function carried(a: Node, b: Node): StepMap {
-  const was = places(a);
-  const now = places(b);
+/** How places in `a` are carried into `b`, by a diff of their places (`places`). */
+function carried(a: Node, b: Node, kept: (mark: Mark) => boolean): StepMap {
+  const was = places(a, kept);
+  const now = places(b, kept);
   let start = 0;
   const shortest = Math.min(was.length, now.length);
-  while (start < shortest && was.charCodeAt(start) === now.charCodeAt(start)) start++;
+  while (start < shortest && was[start] === now[start]) start++;
   let [endA, endB] = [was.length, now.length];
-  while (endA > start && endB > start && was.charCodeAt(endA - 1) === now.charCodeAt(endB - 1)) {
+  while (endA > start && endB > start && was[endA - 1] === now[endB - 1]) {
     endA--;
     endB--;
   }
   if (start === endA && start === endB) return StepMap.empty;
-  const parts = diffChars(was.slice(start, endA), now.slice(start, endB), { timeout: DIFF_MS }) ?? [
-    { value: was.slice(start, endA), removed: true, added: false, count: 1 },
-    { value: now.slice(start, endB), removed: false, added: true, count: 1 },
+  const [middleA, middleB] = [was.slice(start, endA), now.slice(start, endB)];
+  const parts = diffArrays(middleA, middleB, { timeout: DIFF_MS }) ?? [
+    { value: middleA, removed: true, added: false, count: middleA.length },
+    { value: middleB, removed: false, added: true, count: middleB.length },
   ];
   const ranges: number[] = [];
   let at = start;

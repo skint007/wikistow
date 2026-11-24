@@ -144,27 +144,32 @@ export class VisualBinding {
       const undone = transaction.meta.get(UNDONE) === this;
       if (this.#pending) this.#pending.map = this.#pending.map?.remote(delta, mine) ?? null;
       // The person's own from elsewhere in the app, as split view's source
-      // pane; or someone else's. Its own writes it tells of as it makes them.
-      if (transaction.local) {
-        if (!mine && !undone) this.#formatting.own(transaction);
-      } else this.#formatting.heard(transaction, this.#from);
+      // pane. Its own writes it tells of as it makes them, and someone
+      // else's once their transaction is done (`done`).
+      if (transaction.local && !mine && !undone) this.#formatting.own(transaction);
       if (mine) return;
       const followed = this.#map;
       this.#map = followed?.remote(delta) ?? null;
       this.#theirs++;
       // Taken out again, it's to be taken in as anyone's change is, but nobody made it.
       if (!undone) this.#by.add(this.#sending);
-      // Too much to follow: catch up at once, so a diff stands in as briefly
-      // as can be. Formatting to make again over theirs goes at once too,
-      // before anyone writes over the text it takes out.
-      this.#schedule((followed && !this.#map) || this.#formatting.due ? 0 : TAKE_MS);
+      // Too much to follow: catch up at once, so a diff stands in as briefly as can be.
+      this.#schedule(followed && !this.#map ? 0 : TAKE_MS);
     };
     body.text.observe(observer);
     this.#stops.push(() => body.text.unobserve(observer));
     // A sender counts for the one transaction its change goes in with: after
     // its observers, whether it touched `body` or not.
     const doc = body.text.doc;
-    const done = () => {
+    // Someone else's change, heard whether it touched `body` here or not:
+    // one that only takes out what this app took out already still counts.
+    // Formatting to make again over theirs goes at once, before anyone
+    // writes over the text it takes out.
+    const done = (transaction: Y.Transaction) => {
+      if (!transaction.local && !this.#destroyed) {
+        this.#formatting.heard(transaction, this.#from);
+        if (this.#formatting.due) this.#schedule(0);
+      }
       this.#sending = null;
       this.#from = null;
     };

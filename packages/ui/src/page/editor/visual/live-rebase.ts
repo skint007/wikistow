@@ -18,6 +18,13 @@ import type { RemoteUpdate } from '../source/live';
 export const REBASE_MS = 3_000;
 /** How long the side that doesn't make its write again waits for the one that does. */
 export const WAIT_MS = 1_000;
+/**
+ * Typing placed just after what a write took out may have been typed with
+ * the write in, or beside those characters while they still stood: Yjs
+ * places the two alike. A change that comes this long after the write
+ * counts as the first, as one made alongside comes back within a round trip.
+ */
+export const BESIDE_MS = 750;
 /** How many times one formatting change is made again, at most. */
 const MAX_REBASES = 3;
 
@@ -266,6 +273,7 @@ export class OwnFormatting {
     if (client === null || client === me) return;
     const update = from ? Y.decodeUpdate(from.update) : null;
     this.#learn(client, transaction, update?.ds ?? null, me);
+    this.#learnBeside(client, transaction, update?.ds ?? null, me);
     const known = this.#knows.get(client) ?? 0;
     const now = performance.now();
     const made = this.#changeOf(transaction, me);
@@ -461,6 +469,37 @@ export class OwnFormatting {
       ([client, after]) => client !== me && after > (transaction.beforeState.get(client) ?? 0),
     );
     return clients.length === 1 ? (clients[0] as [number, number])[0] : null;
+  }
+
+  /**
+   * What `client`'s change shows it had of the kept writes by what they took
+   * out: Yjs puts typing after the deleted characters at its place, so a
+   * new item placed just after one a write took out, which the change
+   * itself didn't take out, was typed with that write in, if it came long
+   * enough after it (`BESIDE_MS`).
+   */
+  #learnBeside(client: number, transaction: Y.Transaction, ds: DeleteSet | null, me: number) {
+    const own: Ranges = new Map();
+    if (ds) addAll(own, ds);
+    let known = this.#knows.get(client) ?? 0;
+    const doc = transaction.doc;
+    for (const [writer, after] of transaction.afterState) {
+      if (writer === me) continue;
+      let clock = transaction.beforeState.get(writer) ?? 0;
+      while (clock < after) {
+        const struct = Y.getItem(doc.store, Y.createID(writer, clock));
+        const origin = struct.origin;
+        if (origin && !touches(own, origin.client, origin.clock, 1)) {
+          for (const write of this.#writes) {
+            if (performance.now() - write.at < BESIDE_MS) continue;
+            if (touches(write.own.deletes, origin.client, origin.clock, 1))
+              known = Math.max(known, write.from + 1);
+          }
+        }
+        clock = struct.id.clock + struct.length;
+      }
+    }
+    this.#knows.set(client, known);
   }
 
   /**
