@@ -16,6 +16,8 @@ export type TextChange = {
   readonly insert: string;
   /** A run whose formatting alone changed, put in whole (`ownChanges`). */
   readonly run?: true;
+  /** A run's place in what it replaces, from `from`, which `putInto` puts it in at: by default, its middle. */
+  readonly middle?: number;
 };
 
 // A tag the visual editor writes a mark with, a highlight's or a colour's,
@@ -105,9 +107,31 @@ const CODE_SPAN = /(?<!(?<!\\)(?:\\\\)*\\)(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S]
 const FENCE = /^((?:[ \t]*>)*)([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(`{3,}|~{3,})(.*)$/;
 const fenceOf = (line: string) => {
   const [, , lead = '', fence = '', info = ''] = FENCE.exec(line.replace(/\r$/, '')) ?? [];
-  // A backtick fence's info string has no backtick: ```code``` is a code span.
-  return fence && !(fence[0] === '`' && info.includes('`')) ? { lead, fence, info } : null;
+  // A backtick fence's info string has no backtick: ```code``` is a code
+  // span. Four spaces in or more, it's a line of an indented code block.
+  if (!fence || (fence[0] === '`' && info.includes('`'))) return null;
+  return /^ {4}|^\t/.test(lead.replace(/^([ \t]*)[-*+\d.)][\s\S]*$/, '$1'))
+    ? null
+    : { lead, fence, info };
 };
+
+/** Whether `run`'s tags of marks don't all close in it, as one end of a tag over several words. */
+export const endOfTag = (run: string) => {
+  const tags = run.match(TAG) ?? [];
+  return tags.filter((tag) => tag.startsWith('</')).length * 2 !== tags.length;
+};
+
+// A tag of a mark where a text ends.
+const TAG_END = new RegExp(`(?:${TAG.source})$`);
+
+/**
+ * Whether `text` is shaped as the run of a highlight or colour is: a tag
+ * of a mark at each end, or, one end of a tag over several words, at one.
+ */
+export const runShaped = (text: string) =>
+  endOfTag(text)
+    ? TAG_HERE.test(text) || TAG_END.test(text)
+    : TAG_HERE.test(text) && TAG_END.test(text);
 const fenced = (text: string) => text.split('\n').some((line) => fenceOf(line));
 
 /**
@@ -229,11 +253,15 @@ function inRuns(
       plain(a[a.length - 1 - end])
     )
       end++;
+    // In at the middle of the whole word, as another's run of it, with
+    // its punctuation or without, goes in too.
+    const remove = a.length - start - end;
     return {
       from: stretch.from + at + start,
-      remove: a.length - start - end,
+      remove,
       insert: b.slice(start, b.length - end),
       run: true,
+      middle: Math.max(0, Math.min(remove, (a.length >> 1) - start)),
     };
   };
   // Text in code is text, whatever it looks like: no run that changes
@@ -670,7 +698,7 @@ export function putInto(text: Y.Text, changes: readonly TextChange[]): void {
       if (insert !== '') text.insert(change.from, insert);
       continue;
     }
-    let middle = change.remove >> 1;
+    let middle = change.middle ?? change.remove >> 1;
     while (middle > 0 && splits(now, change.from + middle)) middle--;
     // Put in while the characters each side are there: beside a deleted
     // one, Yjs may put it on either side of what's deleted.

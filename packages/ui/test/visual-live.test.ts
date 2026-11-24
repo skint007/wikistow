@@ -8,7 +8,13 @@ import {
   type BoundEditor,
   type Taking,
 } from '../src/page/editor/visual/live-binding.ts';
-import { applyTo, Mapping, ownChanges, putInto } from '../src/page/editor/visual/live-text.ts';
+import {
+  applyTo,
+  Mapping,
+  ownChanges,
+  putInto,
+  wordsOf,
+} from '../src/page/editor/visual/live-text.ts';
 
 // The visual editor in a live session (ADR 0015 decision 3): its own edits
 // go into `body` as the blocks it changed, carried through others' changes
@@ -884,10 +890,11 @@ describe('two people formatting the same text at once (#720)', () => {
 
   it('settles a run written before the editor showed theirs', async () => {
     const was = `Hello ${red('mark', 'world')} there.\n`;
+    const al = `Hello ${red('span', 'world')} there.\n`;
     const bea = `Hello ${red('span', red('mark', 'world'))} there.\n`;
     for (const aFirst of orders) {
       const [a, b] = start(was, aFirst);
-      a.editor.shown = 'Hello world there.\n';
+      a.editor.shown = al;
       a.binding.write();
       send(a, b);
       // Bea colours it as her editor still shows it, highlighted.
@@ -895,7 +902,7 @@ describe('two people formatting the same text at once (#720)', () => {
       b.binding.write();
       await exchange();
       expect(bodyOf(a)).toBe(bodyOf(b));
-      expect(['Hello world there.\n', bea]).toContain(bodyOf(a));
+      expect([al, bea]).toContain(bodyOf(a));
     }
   });
 
@@ -1056,6 +1063,56 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
+  it('settles a run with the punctuation after the word and one without', async () => {
+    const [mine, theirs] = [red('mark', 'world!'), `${red('span', 'world')}!`];
+    for (const aFirst of orders) {
+      const [a, b] = start('Hello world! there.\n', aFirst);
+      a.editor.shown = `Hello ${mine} there.\n`;
+      b.editor.shown = `Hello ${theirs} there.\n`;
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(bodyOf(a)).toBe(`Hello ${mine} there.\n`);
+    }
+  });
+
+  it('never pairs a run with typing or literal tags beside it', async () => {
+    for (const aFirst of orders) {
+      // Typed after a run of one's own, in source mode, as the other's goes in.
+      const [a, b] = start('Hello world there.\n', aFirst);
+      a.editor.shown = `Hello ${red('mark', 'world')} there.\n`;
+      b.editor.shown = `Hello ${red('span', 'world')} there.\n`;
+      a.binding.write();
+      b.binding.write();
+      const at = 6 + red('span', 'world').length;
+      b.doc.transact(() => b.doc.getText('body').insert(at, '*'));
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(bodyOf(a)).toContain('*');
+    }
+    for (const aFirst of orders) {
+      // Typed beside the word, then formatted from a view without it.
+      const [a, b] = start('Try a now.\n', aFirst);
+      b.doc.transact(() => b.doc.getText('body').insert(4, 'a'));
+      send(b, a);
+      a.editor.shown = `Try ${red('mark', 'a')} now.\n`;
+      a.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(wordsOf(bodyOf(a))).toBe('Try aa now.\n');
+    }
+  });
+
+  it('reads an indented code block as code, not a fence', () => {
+    const page = '    ```js\n    x\n\n';
+    expect(
+      ownChanges(page + 'Hello world.\n', page + `Hello ${red('mark', 'world')}.\n`).some(
+        (change) => change.run,
+      ),
+    ).toBe(true);
+  });
+
   it('formats the first word of a page as any other', async () => {
     const [hi, co] = [red('mark', 'I'), red('span', 'I')];
     for (const aFirst of orders) {
@@ -1126,7 +1183,8 @@ describe('two people formatting the same text at once (#720)', () => {
       { from: 6, remove: 0, insert: 'big ' },
     ]);
     expect(ownChanges('A world.\n\nB.\n', `A ${red('mark', 'world')}.\n\nB!\n`)).toEqual([
-      { from: 2, remove: 5, insert: red('mark', 'world'), run: true },
+      // In at the middle of `world.`, as another's run with the stop goes in.
+      { from: 2, remove: 5, insert: red('mark', 'world'), run: true, middle: 3 },
       { from: 11, remove: 1, insert: '!' },
     ]);
     // Marks written with characters, by character, as typed.
