@@ -942,6 +942,7 @@ async function finishHeld(tx: Database, caller: Caller, copy: CopyRow): Promise<
         ? await topsOf(tx, copy.sourceSpaceId, going)
         : [copy.sourceNodeId],
       going,
+      copy.openedBy,
     );
   }
   await placeTops(tx, copy, tops);
@@ -1145,7 +1146,7 @@ async function dropHeld(tx: Database, copy: CopyRow): Promise<string[]> {
     const ids = held.map((node) => node.id);
     const there = new Set(ids);
     if (!tops.every((id) => there.has(id))) throw new ContentError('not-found');
-    removed = await removeSubtree(tx, copy.destinationSpaceId, tops, ids);
+    removed = await removeSubtree(tx, copy.destinationSpaceId, tops, ids, null);
   }
   await tx.delete(copies).where(eq(copies.id, copy.id));
   return removed;

@@ -746,7 +746,7 @@ export async function deleteSpace(
       .where(inOrder);
     // Its pages' public links, copies and the target rows naming them, in
     // their lock order, rather than by the cascade.
-    await endLinks(tx, ids);
+    await endLinks(tx, ids, input.accountId);
     // Copies of its nodes into other spaces, unfinished, with their hidden nodes there.
     const copied = await dropCopiesFrom(tx, spaceId);
     // Old addresses of what moved into it.
