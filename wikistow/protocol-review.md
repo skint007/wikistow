@@ -1176,6 +1176,35 @@ Round 38 ran the three briefs again, with fresh reviewers given the same materia
 
 **Outcome.** Round 38 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but M38-3, accepted in A15. Round 39 repeats the three briefs against this revision.
 
+## Round 39: identity key rotation, ninth review
+
+Round 39 ran the three briefs again, with fresh reviewers given the same material and the log of rounds 31 to 38, against the round 38 revision (d77d597): the member and encoding briefs as Claude subagents, the server brief as a Codex (gpt-6.2-sol) agent. The first Codex run was refused by its provider's content filter, as in round 33, though its brief was worded as a consistency review; a second, worded as a review of whether the specification's rules agree, ran. It found no Critical finding, 4 High, 3 Medium, 9 Low and 2 Info (18 in all). The encoding brief found no High or Medium for the second round running. Round 38's fixes held where they reached. The Highs were a session the app kept sending in after verifying a successor whose follow wasn't stored yet, two things only the release before rotation can teach older apps (the decline block, and the vouching check for members left unconfirmed), and an owner the server no longer lists, whose removal in finishing left every share they sealed unrotatable. Section numbers are protocol.md's after the fixes, which are not yet reviewed.
+
+| ID | Round | Severity | Section | Finding | Outcome |
+|---|---|---|---|---|---|
+| S39-1 | 39 | High | 4.6 **Live sessions in the owner region**; 8.4 | An app that verified an owner's successor kept sending in a session sealed to the old key while the server stalled its follow, since its record hadn't changed; a tab could also send before another tab's broadcast arrived. | Fixed: §4.6. The app stops sending once it verifies the chain, a follow still pending included, and a browser tab reads the shared mark under the lock before it sends. |
+| S39-2 | 39 | High | 4.6 **Using an earlier key**; 7.9; ADR decision 10 | An older owner's app gives access to a member left unconfirmed with no vouching check. | Fixed: the release before rotation carries the check, and the server refuses envelopes for such a member from a request without `confirmedNew`. Accepted: A15 names older apps against a server that doesn't refuse. Same as M39-2. |
+| S39-3 | 39 | High | 8.4; 4.6; A15 | An older app carries `wikistow.declined` forward but doesn't enforce it, and seals to the restored pin when the server lists it. | Fixed and accepted: the release before rotation enforces it; A15 names apps older than that. |
+| S39-4 | 39 | Medium | 4.6; 8.5 | The rotate-again check needed versions the restore took away, and §8.5 had two readings of the restored head. | Fixed: only the exact version named, as the rotation's input, not as the current record; otherwise read-only. Same as E39-L1. |
+| S39-5 | 39 | Medium | 4.6 **When someone else rotated** | Another tab, still unlocked, could sign at the old key after one tab recorded the successor. | Fixed: recording it sends `lock` to the other tabs, and every tab checks the record before signing or sealing. |
+| S39-6 | 39 | Low | 4.6 **Members**; 6.4 | An envelope names its recipient by ID and key version, so with two statements for one version the owner can't tell which key received it. | Fixed in wording: in that case no envelope of the member's counts as vouching. |
+| M39-1 | 39 | High | 4.6 finishing; 7.5 step 1; 7.6 | Removing an owner the server no longer lists was only a `removedOwners` entry, after which every share whose current version they sealed couldn't be rotated, so finishing never ended and members kept saving under keys the old key holds. | Fixed: §4.6. In finishing's rotations of that space such an owner's envelopes count for step 1 only and add nobody to `E`, as in a removal. |
+| M39-2 | 39 | Medium | 4.6; 7.9 | Same as S39-2, and the waiting reason as a new property breaks older apps' strict parse of the whole list. | Fixed with S39-2: the reason is served only with `?reasons=1`. |
+| M39-3 | 39 | Low | 4.6 finishing | Entries the old key wrote for the person's own ID could make them remove themself. | Fixed: the review ignores them, and the first new-key version drops them. |
+| M39-4 | 39 | Low | 4.6 **Members**; 6.5 | "Only reads" forbade rotating from the version every share the person owns sits at. | Fixed: it only reads, and rotates from. |
+| M39-5 | 39 | Low | ADR decisions 2 and 6 | The log said ADR decision 6 carried S38-2, and it didn't; M38-4 wasn't in decision 2. | Fixed in the ADR. |
+| E39-L1 | 39 | Low | 4.6; 8.5 | Same as S39-4. | Fixed with S39-4. |
+| E39-L2 | 39 | Low | 8.6; 8.5 | The pin a decline restores came from a copy no section keeps. | Fixed: the browser and desktop app keep, per ID, the pin before a synced move along a chain; the CLI restores one step down. |
+| E39-L3 | 39 | Low | 8.5; 9.3 | Whether the CLI's followed key survives a reported restore was unstated. | Fixed: it does, as the anchor does. |
+| E39-L4 | 39 | Low | 8.6 | An unpin merged over a pin a follow moved had three readings. | Fixed: it removes the pin whatever key it holds, and the keys on the chain go into `removed`. |
+| E39-L5 | 39 | Low | 4.6 route | "No other row holds" could be read as the pair of keys. | Fixed: key by key. |
+| E39-I1 | 39 | Info | 8.4; 4.6 | A rotation landing between the directory read and the chain read made an honest server look like an attack. | Fixed: the rotations route serves the current row from the same read. |
+| E39-I2 | 39 | Info | 4.6 | A successor recorded before a restore that took it away had no stated way out. | Fixed: forgetting what the device kept is the only one. |
+
+**Outcome.** Round 39 found Highs, so it doesn't meet the stopping rule. Every finding is fixed but parts of S39-2 and S39-3, accepted in A15 for apps older than the release before rotation. Its fixes are unreviewed.
+
+**After rounds 34 to 39.** Six rounds ran after the project owner decided ADR 0018 (2026-11-23), with 7, 5, 4, 4, 4 and 4 High findings, and none Critical. The statement's bytes, the chain, the keyring and the contacts cutoff held from round 31 on, and the encoding brief found no High in rounds 35, 38 and 39. The Highs kept coming in the same few places, each one step past the last round's fix: finishing's owner review (which owners it covers, when they count, how they're removed), the person's own devices across a lost answer, a restore or an unexpected successor, owner-region live sessions while a key changes, and what apps older than the release before rotation still do. Eight Highs were accepted into A15 rather than met with a new mechanism. The rounds stop here unmet, as agreed for this run, for the project owner to decide how to go on.
+
 ## Known items for reviewers
 
 These were raised while drafting. They aren't findings yet; reviewers should confirm, challenge or extend them.
