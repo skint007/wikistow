@@ -26,6 +26,7 @@ import {
   flushesUnderway,
   holding,
   inTurn,
+  leftOut,
   leftOutcome,
   notePublished,
   readingNotices,
@@ -243,7 +244,7 @@ export function useReadingQueue(
       if (others.length > 0 || (publish && !change) || stalePublish || change?.failure) {
         return {
           outcome: 'unchanged',
-          dropped: changes.map((made) => ({ change: made, reason: WAITS_ON_DEVICE })),
+          dropped: changes.map((made) => leftOut(made, WAITS_ON_DEVICE)),
         };
       }
       // Over the publication the first of them was ticked on, not one their own publish made.
@@ -274,13 +275,10 @@ export function useReadingQueue(
         (here ? kept : moved).push(made);
         if (!here && made.kind === 'property') cut = true;
       });
-      const left = moved.map((made) => ({ change: made, reason: CHANGED_ELSEWHERE }));
+      const left = moved.map((made) => leftOut(made, CHANGED_ELSEWHERE));
       // Refused by the queue, as another tab changed the page since it was read
       // here: left out, never kept to go online later over that change (#700).
-      const everyChangeLeftOut = changes.map((made) => ({
-        change: made,
-        reason: CHANGED_ELSEWHERE,
-      }));
+      const everyChangeLeftOut = changes.map((made) => leftOut(made, CHANGED_ELSEWHERE));
       if (kept.length === 0) return { outcome: 'unchanged', dropped: left };
       const draft = await pageOperations.openRevisionOf(ctx, page, 'draft', head);
       const based = revisePayload(draft.opened, {});

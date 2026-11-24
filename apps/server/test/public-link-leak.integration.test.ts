@@ -740,6 +740,53 @@ describe('a public page holding a query table (ADR 0006, decision 9)', () => {
     }
   });
 
+  it('writes the other rows’ times as the server took them, not by this device’s clock (#646)', async () => {
+    const owner = await personWithVault(t);
+    const spaceId = await spaceOperations.createSpace(owner.ctx, { name: 'Diary' });
+    const create = async (title: string, markdown = '') => {
+      const ref = {
+        spaceId,
+        pageId: await pages.createPage(owner.ctx, { spaceId, parentId: null, title, markdown }),
+      };
+      return { ref, ...(await pages.publishPage(owner.ctx, ref)) };
+    };
+    const first = await create('First');
+    const notes = await create('Notes', '```wikistow-query\nshow: saved\nsort: saved desc\n```\n');
+    const id = await links.turnOn(owner.ctx, notes.ref.pageId);
+    const savedAt = async (revisionId: string) => {
+      const [row] = await t.db
+        .select({ at: schema.revisions.createdAt })
+        .from(schema.revisions)
+        .where(eq(schema.revisions.id, revisionId));
+      const at = row?.at.toISOString() ?? '';
+      return `${at.slice(0, 10)} ${at.slice(11, 16)} +00:00`;
+    };
+    const wanted = { ...first.ref, revisionId: first.revisionId, audience: 'published' } as const;
+    // This device published First, so it holds it by its own clock, here ten
+    // minutes fast, which would sort it above Notes; then the same time with
+    // no word on whose it is, as for a version kept before they were told apart.
+    const fast = new Date(Date.now() + 10 * 60_000).toISOString();
+    expect(owner.ctx.revisions.get(wanted)?.timeFrom).toBe('device');
+    for (const timeFrom of ['device', undefined] as const) {
+      const held = owner.ctx.revisions.get(wanted);
+      if (!held) throw new Error('The version isn’t held');
+      const { timeFrom: _, ...rest } = held;
+      owner.ctx.revisions.put({ ...rest, createdAt: fast, ...(timeFrom && { timeFrom }) });
+      await links.shareCopy(owner.ctx, notes.ref);
+      const html = await (await visit(`/p/${id}`)).text();
+      const rows = [...html.matchAll(/<tr>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>/g)].map(
+        ([, title, at]) => [title, at],
+      );
+      expect(rows, String(timeFrom)).toEqual([
+        ['Notes', await savedAt(notes.revisionId)],
+        ['First', await savedAt(first.revisionId)],
+      ]);
+      // And the device holds the server's time for it from then on.
+      expect(owner.ctx.revisions.get(wanted)).toMatchObject({ timeFrom: 'server' });
+      expect(owner.ctx.revisions.get(wanted)?.createdAt).not.toBe(fast);
+    }
+  });
+
   it('lists in a page in a share no page its readers can’t open', async () => {
     const n = randomBytes(4).toString('hex');
     const outside = `PLAINTEXT-OWNERS-ONLY-TITLE-${n}`;

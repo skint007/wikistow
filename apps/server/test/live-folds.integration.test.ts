@@ -394,6 +394,10 @@ describe('a live session’s saves', () => {
     if (!published) throw new Error('not published');
     setBody(mine, 'Version two.\n');
     await expect.poll(() => mine.status().saved, { timeout: 30_000 }).toBe(true);
+    // The editor's app restores on the head it last heard, so it waits to hear
+    // this one: on a stale head the restore is refused, and nothing goes in.
+    const saved = mine.status().checked;
+    await expect.poll(() => theirs.status().checked, { timeout: 30_000 }).toBe(saved);
 
     const restored = await theirs.restoreThrough((input) =>
       pages.restorePublished(editor.ctx, page, published, input),

@@ -1,5 +1,6 @@
 import type { QuoteText } from '@wikistow/client';
 import { TextSelection } from '@milkdown/kit/prose/state';
+import { CellSelection } from '@milkdown/kit/prose/tables';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { userEvent } from 'vite-plus/test/browser/context';
@@ -195,4 +196,43 @@ it('counts no selection while a control in the editor has the focus', async () =
   expect(checkbox).not.toBeNull();
   act(() => checkbox!.focus());
   await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('true');
+});
+
+it('quotes cells selected in a table from the first to the last, as the page reads (#672)', async () => {
+  const quotes: QuoteText[] = [];
+  const { dom } = await mount(
+    '| Step | Do |\n| --- | --- |\n| 1 | Brown the mince |\n| 2 | Bake the pastry |\n\nServe hot.\n',
+    async (quote) => {
+      quotes.push(quote);
+    },
+  );
+  const view = viewOf(dom);
+  // The position of the cell holding `text`.
+  const cell = (text: string) => {
+    let found = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (found < 0 && node.type.spec.tableRole?.includes('cell') && node.textContent === text)
+        found = pos;
+    });
+    if (found < 0) throw new Error(`No cell ${text}`);
+    return found;
+  };
+  dom.focus();
+  // As by a drag from one cell down to the next, which selects both.
+  act(() =>
+    view.dispatch(
+      view.state.tr.setSelection(
+        CellSelection.create(view.state.doc, cell('Brown the mince'), cell('Bake the pastry')),
+      ),
+    ),
+  );
+  expect(view.state.selection).toBeInstanceOf(CellSelection);
+  await expect.poll(() => comment()?.getAttribute('aria-disabled')).toBe('false');
+  await userEvent.click(comment()!);
+  await expect.poll(() => quotes.length).toBe(1);
+  expect(quotes[0]).toEqual({
+    exact: 'Brown the mince\n2\nBake the pastry',
+    prefix: 'Step\nDo\n1\n',
+    suffix: '\nServe hot.',
+  });
 });
