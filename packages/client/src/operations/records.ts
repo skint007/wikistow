@@ -64,6 +64,12 @@ export type OpenedRevision = {
    * version kept on the device before times were.
    */
   createdAt: string | null;
+  /**
+   * Whose clock `createdAt` is: the server's, as it answered, or this
+   * device's, for a version it wrote. Absent when that isn't known, as for
+   * a version kept on the device before the two were told apart (#646).
+   */
+  timeFrom?: 'server' | 'device';
 };
 
 /**
@@ -132,7 +138,7 @@ export function openServedRevision(
     recordProtocol(served.revision, 'Revision') === 1 ? openRevision(args) : openRevisionV2(args);
   // It opened through this wrap, so the wrap parses.
   const keyVersion = material.keyring ? KeyWrap.parse(material.wrap).keyVersion : null;
-  return { ...opened, keyVersion, createdAt: served.meta.createdAt };
+  return { ...opened, keyVersion, createdAt: served.meta.createdAt, timeFrom: 'server' };
 }
 
 /**
