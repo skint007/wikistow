@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- A public link's copy lists the other pages in its query tables by when the server saved them, not by this device's clock, for pages published from this device too. A device whose clock ran fast or slow could list them out of order. (#725)
+
 ## 0.30.2 - 2026-11-23
 
 ### Highlights
