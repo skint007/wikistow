@@ -140,9 +140,6 @@ const holds = (theirs: Theirs, id: Y.ID | null) =>
   id.clock >= theirs.first.clock &&
   id.clock < theirs.first.clock + theirs.to - theirs.from;
 
-/** `words` without the punctuation at its ends. */
-const core = (words: string) => words.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
-
 const MINE = Symbol('visual-binding');
 
 /** Text read from `body` for a take-in or a whole read, and how it became `body` since, while that's followed. */
@@ -355,13 +352,10 @@ export class VisualBinding {
       if (!(first instanceof Y.Item) || !(last instanceof Y.Item) || !firstId || !lastId) continue;
       const mine = { from, to, first, last, firstId, lastId };
       // Another's run of the same word: shaped as one, tags at its ends,
-      // with the same words, or with punctuation at their ends the one has
-      // and the other left out of its run.
+      // with exactly the same words.
       const theirsOf = (item: Y.Item, theirs: Theirs) => {
         const put = body.slice(theirs.from, theirs.to);
-        const their = wordsOf(put);
-        if (item.id.client === doc.clientID || !runShaped(put)) return false;
-        return their === words || (core(their) !== '' && core(their) === core(words));
+        return item.id.client !== doc.clientID && runShaped(put) && wordsOf(put) === words;
       };
       // Put in where Yjs put this run, after and before the same
       // characters of the word both took the place of, neither having the
@@ -388,19 +382,11 @@ export class VisualBinding {
         );
       let gone: { from: number; to: number } | null = null;
       if (theirs) {
-        // The one without the punctuation the other took in goes, as it
-        // went from the old word. Else, one end of a tag over several words
-        // beside a whole run: the whole one goes, so the tag keeps both
-        // ends. Else the second.
+        // One end of a tag over several words beside a whole run: the
+        // whole one goes, so the tag keeps both ends. Else the second.
         const put = body.slice(theirs.from, theirs.to);
-        const their = wordsOf(put);
         const [mineEnd, theirEnd] = [endOfTag(own), endOfTag(put)];
-        const theirsGoes =
-          their !== words
-            ? their.length < words.length
-            : mineEnd !== theirEnd
-              ? mineEnd
-              : theirs.from >= to;
+        const theirsGoes = mineEnd !== theirEnd ? mineEnd : theirs.from >= to;
         gone = theirsGoes ? theirs : { from, to };
       }
       if (!gone) continue;

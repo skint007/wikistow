@@ -16,8 +16,6 @@ export type TextChange = {
   readonly insert: string;
   /** A run whose formatting alone changed, put in whole (`ownChanges`). */
   readonly run?: true;
-  /** A run's place in what it replaces, from `from`, which `putInto` puts it in at: by default, its middle. */
-  readonly middle?: number;
 };
 
 // A tag the visual editor writes a mark with, a highlight's or a colour's,
@@ -107,12 +105,8 @@ const CODE_SPAN = /(?<!(?<!\\)(?:\\\\)*\\)(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S]
 const FENCE = /^((?:[ \t]*>)*)([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?)(`{3,}|~{3,})(.*)$/;
 const fenceOf = (line: string) => {
   const [, , lead = '', fence = '', info = ''] = FENCE.exec(line.replace(/\r$/, '')) ?? [];
-  // A backtick fence's info string has no backtick: ```code``` is a code
-  // span. Four spaces in or more, it's a line of an indented code block.
-  if (!fence || (fence[0] === '`' && info.includes('`'))) return null;
-  return /^ {4}|^\t/.test(lead.replace(/^([ \t]*)[-*+\d.)][\s\S]*$/, '$1'))
-    ? null
-    : { lead, fence, info };
+  // A backtick fence's info string has no backtick: ```code``` is a code span.
+  return fence && !(fence[0] === '`' && info.includes('`')) ? { lead, fence, info } : null;
 };
 
 /** Whether `run`'s tags of marks don't all close in it, as one end of a tag over several words. */
@@ -128,10 +122,13 @@ const TAG_END = new RegExp(`(?:${TAG.source})$`);
  * Whether `text` is shaped as the run of a highlight or colour is: a tag
  * of a mark at each end, or, one end of a tag over several words, at one.
  */
-export const runShaped = (text: string) =>
-  endOfTag(text)
-    ? TAG_HERE.test(text) || TAG_END.test(text)
-    : TAG_HERE.test(text) && TAG_END.test(text);
+export const runShaped = (text: string) => {
+  // Less punctuation outside its tags, as a selection of `world` leaves the `!`.
+  const inner = text.replace(/^[^\p{L}\p{N}\s<>*_=~`\\]+|[^\p{L}\p{N}\s<>*_=~`\\]+$/gu, '');
+  return endOfTag(inner)
+    ? TAG_HERE.test(inner) || TAG_END.test(inner)
+    : TAG_HERE.test(inner) && TAG_END.test(inner);
+};
 const fenced = (text: string) => text.split('\n').some((line) => fenceOf(line));
 
 /**
@@ -139,7 +136,7 @@ const fenced = (text: string) => text.split('\n').some((line) => fenceOf(line));
  * closed, by a fence as long or longer of its character, or by the end of
  * the quote or list item it's in.
  */
-function inFence(text: string): boolean {
+function inFence(text: string, next = ''): boolean {
   let open: { fence: string; depth: number; indent: number } | null = null;
   // Whole lines only: what follows the last break is the line being read.
   for (const line of text.split('\n').slice(0, -1)) {
@@ -155,7 +152,16 @@ function inFence(text: string): boolean {
     else if (fence[0] === open.fence[0] && fence.length >= open.fence.length && !info.trim())
       open = null;
   }
-  return open !== null;
+  if (!open) return false;
+  // Ended by the next line, as a quote's or a list item's end ends it.
+  const line = next.split('\n', 1)[0]?.replace(/\r$/, '') ?? '';
+  const quote = /^(?:[ \t]*>)*/.exec(line)?.[0] ?? '';
+  const rest = line.slice(quote.length);
+  const indent = rest.length - rest.trimStart().length;
+  return !(
+    quote.split('>').length - 1 < open.depth ||
+    (rest.trim() !== '' && indent < open.indent)
+  );
 }
 
 /**
@@ -239,31 +245,14 @@ function inRuns(
   const tags = (text: string) => text.match(TAG)?.join('') ?? '';
   const whole = (s: Stretch) =>
     tags(was.slice(s.from, s.to)) !== tags(now.slice(s.nowFrom, s.nowTo));
-  // The stretch, but for punctuation at its ends both have outside its
-  // marks, so typing just before a word's full stop stays before it.
-  const run = (stretch: Stretch): TextChange => {
-    const [a, b] = [was.slice(stretch.from, stretch.to), now.slice(stretch.nowFrom, stretch.nowTo)];
-    const plain = (char: string | undefined) => !!char && /[^\p{L}\p{N}\s<>*_=~`\\]/u.test(char);
-    let start = 0;
-    while (start < a.length && a[start] === b[start] && plain(a[start])) start++;
-    let end = 0;
-    while (
-      end < a.length - start &&
-      a[a.length - 1 - end] === b[b.length - 1 - end] &&
-      plain(a[a.length - 1 - end])
-    )
-      end++;
-    // In at the middle of the whole word, as another's run of it, with
-    // its punctuation or without, goes in too.
-    const remove = a.length - start - end;
-    return {
-      from: stretch.from + at + start,
-      remove,
-      insert: b.slice(start, b.length - end),
-      run: true,
-      middle: Math.max(0, Math.min(remove, (a.length >> 1) - start)),
-    };
-  };
+  // The whole stretch, punctuation and all, so another's run of the
+  // word, whatever their selection took in, replaces the same characters.
+  const run = (stretch: Stretch): TextChange => ({
+    from: stretch.from + at,
+    remove: stretch.to - stretch.from,
+    insert: now.slice(stretch.nowFrom, stretch.nowTo),
+    run: true,
+  });
   // Text in code is text, whatever it looks like: no run that changes
   // anything inside a code span's backticks. Tags around one are marks.
   let spans: [number, number][] | null = null;
@@ -277,7 +266,7 @@ function inRuns(
   const runs = stretches.filter((s) => formatted(s) && whole(s));
   if (runs.length === 0) return changes;
   // In a fenced block, or one starting or ending here: none at all.
-  if (fenced(was) || fenced(now) || inFence(before.slice(0, at))) return changes;
+  if (fenced(was) || fenced(now) || inFence(before.slice(0, at), was)) return changes;
   const kept = runs.filter((stretch) => !inCode(stretch));
   if (kept.length === 0) return changes;
   // The rest by character, as before, each stretch apart, as the diff of
@@ -698,7 +687,7 @@ export function putInto(text: Y.Text, changes: readonly TextChange[]): void {
       if (insert !== '') text.insert(change.from, insert);
       continue;
     }
-    let middle = change.middle ?? change.remove >> 1;
+    let middle = change.remove >> 1;
     while (middle > 0 && splits(now, change.from + middle)) middle--;
     // Put in while the characters each side are there: beside a deleted
     // one, Yjs may put it on either side of what's deleted.

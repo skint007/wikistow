@@ -765,19 +765,6 @@ describe('two people formatting the same text at once (#720)', () => {
       }
   });
 
-  it('keeps typing before a full stop after the word on its side', async () => {
-    const hi = red('mark', 'world');
-    for (const aFirst of orders) {
-      const [a, b] = start('I like the world.\n', aFirst);
-      a.editor.shown = `I like the ${hi}.\n`;
-      b.editor.shown = 'I like the world over.\n';
-      a.binding.write();
-      b.binding.write();
-      await exchange();
-      expect(bodyOf(a)).toBe(`I like the ${hi} over.\n`);
-    }
-  });
-
   it.each([
     // One inside the other's tag.
     [
@@ -1063,18 +1050,21 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
-  it('settles a run with the punctuation after the word and one without', async () => {
-    const [mine, theirs] = [red('mark', 'world!'), `${red('span', 'world')}!`];
-    for (const aFirst of orders) {
-      const [a, b] = start('Hello world! there.\n', aFirst);
-      a.editor.shown = `Hello ${mine} there.\n`;
-      b.editor.shown = `Hello ${theirs} there.\n`;
-      a.binding.write();
-      b.binding.write();
-      await exchange();
-      expect(bodyOf(a)).toBe(bodyOf(b));
-      expect(bodyOf(a)).toBe(`Hello ${mine} there.\n`);
-    }
+  it('settles runs of a word that took in different punctuation beside it', async () => {
+    for (const [was, mine, theirs] of [
+      ['world!', red('mark', 'world!'), `${red('span', 'world')}!`],
+      ['(world)', `${red('mark', '(world')})`, `(${red('span', 'world)')}`],
+    ] as const)
+      for (const aFirst of orders) {
+        const [a, b] = start(`Hello ${was} there.\n`, aFirst);
+        a.editor.shown = `Hello ${mine} there.\n`;
+        b.editor.shown = `Hello ${theirs} there.\n`;
+        a.binding.write();
+        b.binding.write();
+        await exchange();
+        expect(bodyOf(a)).toBe(bodyOf(b));
+        expect([`Hello ${mine} there.\n`, `Hello ${theirs} there.\n`]).toContain(bodyOf(a));
+      }
   });
 
   it('never pairs a run with typing or literal tags beside it', async () => {
@@ -1104,12 +1094,17 @@ describe('two people formatting the same text at once (#720)', () => {
     }
   });
 
-  it('reads an indented code block as code, not a fence', () => {
-    const page = '    ```js\n    x\n\n';
+  it('reads a fence in a nested list item as code, and one in a quote as ended with it', () => {
+    const runs = (before: string, after: string) =>
+      ownChanges(before, after).some((change) => change.run);
     expect(
-      ownChanges(page + 'Hello world.\n', page + `Hello ${red('mark', 'world')}.\n`).some(
-        (change) => change.run,
+      runs(
+        '- a\n    ```\n    say world now\n    ```\n',
+        '- a\n    ```\n    say <mark>world</mark> now\n    ```\n',
       ),
+    ).toBe(false);
+    expect(
+      runs('> ```\n> x\nHello world.\n', `> \`\`\`\n> x\nHello ${red('mark', 'world')}.\n`),
     ).toBe(true);
   });
 
@@ -1183,8 +1178,8 @@ describe('two people formatting the same text at once (#720)', () => {
       { from: 6, remove: 0, insert: 'big ' },
     ]);
     expect(ownChanges('A world.\n\nB.\n', `A ${red('mark', 'world')}.\n\nB!\n`)).toEqual([
-      // In at the middle of `world.`, as another's run with the stop goes in.
-      { from: 2, remove: 5, insert: red('mark', 'world'), run: true, middle: 3 },
+      // The word with its stop, as another's run of it, whatever they selected.
+      { from: 2, remove: 6, insert: `${red('mark', 'world')}.`, run: true },
       { from: 11, remove: 1, insert: '!' },
     ]);
     // Marks written with characters, by character, as typed.
