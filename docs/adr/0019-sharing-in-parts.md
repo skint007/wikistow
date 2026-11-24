@@ -210,9 +210,9 @@ Parts change when material reaches the server and how long it waits there, not w
 
 Step 3 needs step 2. Step 2 needs this ADR accepted and a review round that meets the stopping rule. Rounds 31 to 33 (`wikistow/protocol-review.md`) found 1 High in their last round, fixed, so one more round is due first (Decide 8).
 
-## Decide
+## Decided (2026-11-23)
 
-Questions only Scott can answer, each with a recommendation.
+Scott accepted recommendations 1 to 7 below on 2026-11-23.
 
 1. **Build it now, or when a library gets near the limit?** Recommended: accept the design now and build it when a library passes half the limit (decision 1). Add the server's `bulk-request-large` log line first, so the operator sees it coming. A family's space is 3 to 10 % of the limit today.
 2. **Keep what was sent when access changes meanwhile, and finish after a new preview?** Recommended: yes (decision 6). Nothing staged depends on who can read, so a member added during a long share costs a new preview, not every part again. The app asks the owner again when what its dialog said would change, and for a co-owner always. A new share's keys are never reused for a smaller audience than one they were sent to.
@@ -221,4 +221,9 @@ Questions only Scott can answer, each with a recommendation.
 5. **How long an abandoned change waits before it is deleted?** Recommended: a day after its last request, as an unfinished copy (decision 7). Enough for a laptop closed overnight; short enough that little is kept.
 6. **Limits per account: two open changes, and no storage charge for what is staged?** Recommended: yes (decision 8). Key material is never charged today, and the server bounds a change by its subtree.
 7. **Seal parts under a key sent only with the finish, so a cancelled move or co-owner leaves nothing a server could use?** Recommended: no (Threat model). A10 already accepts that a move's wraps reach the server once the owner presses Move; widening it to a cancel after some parts went up is the same risk, towards people the owner chose. Sealing parts would move every check to the finish.
+
+## Decide
+
+Still open, with a recommendation.
+
 8. **Another review round before building?** Recommended: yes, a fourth round with the same three briefs once these decisions are made, since round 33 still found a High (the reuse of a new share's keys during a catch-up), now fixed. It costs little now and nothing is built yet. Each round's findings were narrower than the last.
