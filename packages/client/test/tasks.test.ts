@@ -187,9 +187,14 @@ describe('ticking a task', () => {
       // Swapped, and Mum's renamed: Bob's, the only `Call`, starts where hers did.
       const renamed = SWAPPED.replace('## Mum\n- [ ] Call', '## Mum\n- [ ] Text');
       expect(renamed.indexOf('- [ ] Call')).toBe(mums.offset);
-      expect(setTask(renamed, mums)).toEqual(refused);
+      const once = {
+        ok: false,
+        reason:
+          'The task “Call” was on the page more than once when it was ticked, and the page has changed since.',
+      };
+      expect(setTask(renamed, mums)).toEqual(once);
       // Mum's gone: Bob's is the only one, elsewhere.
-      expect(setTask('## Bob\n\n- [ ] Call\n', mums)).toEqual(refused);
+      expect(setTask('## Bob\n\n- [ ] Call\n', mums)).toEqual(once);
     });
 
     it('is ticked by its offset in the text it was ticked in', () => {

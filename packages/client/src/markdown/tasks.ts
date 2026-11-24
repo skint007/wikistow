@@ -152,14 +152,19 @@ export function setTask(
     madeIn !== undefined &&
     !sameText(madeIn.markdown, markdown, items()) &&
     (madeIn.repeated || here() > 1);
-  const changedSince = {
-    ok: false,
-    reason: `${named} is on the page more than once, and the page changed since it was ticked.`,
-  } as const;
+  // Said as it is now: on the page more than once, or only when it was ticked.
+  const changedSince = (here: number) =>
+    ({
+      ok: false,
+      reason:
+        here > 1
+          ? `${named} is on the page more than once, and the page changed since it was ticked.`
+          : `${named} was on the page more than once when it was ticked, and the page has changed since.`,
+    }) as const;
   const there = items().get(change.offset);
   let task: TaskItem | null = null;
   if (there?.line === change.line) {
-    if (unclear(() => same().length)) return changedSince;
+    if (unclear(() => same().length)) return changedSince(same().length);
     task = now(there);
   } else {
     const found = same();
@@ -172,7 +177,7 @@ export function setTask(
             : `${named} is on the page more than once now.`,
       };
     }
-    if (unclear(() => 1)) return changedSince;
+    if (unclear(() => 1)) return changedSince(1);
     task = found[0] ? now(found[0]) : null;
   }
   if (!task || task.checked === change.checked) return { ok: true, markdown };
