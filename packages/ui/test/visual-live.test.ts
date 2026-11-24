@@ -826,21 +826,29 @@ describe('two people formatting the same text at once (#720)', () => {
   });
 
   it('keeps what a third person put in beside the run that goes', async () => {
-    for (const aFirst of orders) {
-      const [a, b] = start('Hello world there.\n', aFirst);
-      // Carol, from the same text, starts a paragraph after "world".
-      const carol = new Y.Doc();
-      Y.applyUpdate(carol, Y.encodeStateAsUpdate(a.doc));
-      carol.getText('body').insert(11, '\n\n');
-      a.editor.shown = 'Hello **world** there.\n';
-      b.editor.shown = 'Hello ==world== there.\n';
-      a.binding.write();
-      b.binding.write();
-      for (const s of [a, b]) Y.applyUpdate(s.doc, Y.encodeStateAsUpdate(carol), 'remote');
-      await exchange();
-      expect(bodyOf(a)).toBe(bodyOf(b));
-      expect(['Hello **world**\n\n there.\n', 'Hello ==world==\n\n there.\n']).toContain(bodyOf(a));
-    }
+    for (const [carol, merged] of [
+      // A paragraph started after "world", some words, or marks around it.
+      [(t: Y.Text) => t.insert(11, '\n\n'), ['\n\n ', '']],
+      [(t: Y.Text) => t.insert(11, ' more'), [' more ', '']],
+      [(t: Y.Text) => (t.insert(11, '**'), t.insert(6, '**')), [' ', '**']],
+    ] as const)
+      for (const aFirst of orders) {
+        const [a, b] = start('Hello world there.\n', aFirst);
+        const c = new Y.Doc();
+        Y.applyUpdate(c, Y.encodeStateAsUpdate(a.doc));
+        carol(c.getText('body'));
+        a.editor.shown = 'Hello ~~world~~ there.\n';
+        b.editor.shown = 'Hello ==world== there.\n';
+        a.binding.write();
+        b.binding.write();
+        for (const s of [a, b]) Y.applyUpdate(s.doc, Y.encodeStateAsUpdate(c), 'remote');
+        await exchange();
+        expect(bodyOf(a)).toBe(bodyOf(b));
+        const [after, before] = merged;
+        expect(
+          ['~~world~~', '==world=='].map((run) => `Hello ${before}${run}${before}${after}there.\n`),
+        ).toContain(bodyOf(a));
+      }
   });
 
   it('writes an edit in its run before the run goes', async () => {
@@ -913,6 +921,76 @@ describe('two people formatting the same text at once (#720)', () => {
       }
   });
 
+  it('leaves code as text, and words parted by punctuation apart', async () => {
+    for (const [was, mine, theirs, merged] of [
+      // Literal HTML typed in code, while someone takes a letter out.
+      [
+        'A `say world now` b.\n',
+        'A `say <em>world now` b.\n',
+        'A `say word now` b.\n',
+        'A `say <em>word now` b.\n',
+      ],
+      [
+        '```\nsay world now\n```\n',
+        '```\nsay <em>world</em> now\n```\n',
+        '```\nsay word now\n```\n',
+        '```\nsay <em>word</em> now\n```\n',
+      ],
+      // Each half of a word with a hyphen formatted by one of them.
+      ['A foo-bar b.\n', 'A **foo**-bar b.\n', 'A foo-~~bar~~ b.\n', 'A **foo**-~~bar~~ b.\n'],
+      // Typing after a word of one letter as it's formatted.
+      ['Choose a item.\n', 'Choose **a** item.\n', 'Choose an item.\n', 'Choose **a**n item.\n'],
+    ] as const)
+      for (const aFirst of orders) {
+        const [a, b] = start(was, aFirst);
+        a.editor.shown = mine;
+        b.editor.shown = theirs;
+        a.binding.write();
+        b.binding.write();
+        await exchange();
+        expect(bodyOf(a)).toBe(merged);
+        expect(bodyOf(b)).toBe(merged);
+      }
+  });
+
+  it('keeps a mark typed in a run, and a pasted phrase with the word', async () => {
+    for (const aFirst of orders) {
+      const [a, b] = start('Hello world there.\n', aFirst);
+      a.editor.shown = 'Hello **world** there.\n';
+      b.editor.shown = 'Hello ==wor\\=ld== there.\n';
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      // Beside the run, as typing in a word formatted meanwhile is, but there.
+      expect(bodyOf(a)).toContain('\\=');
+    }
+    for (const aFirst of orders) {
+      const [a, b] = start('Try world later.\n', aFirst);
+      a.editor.shown = 'Try **world** later.\n';
+      a.binding.write();
+      b.doc.transact(() => b.doc.getText('body').insert(9, ' **world** again'));
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect(bodyOf(a).match(/world/g)).toHaveLength(2);
+    }
+  });
+
+  it('formats a word that is only a mark', async () => {
+    for (const aFirst of orders) {
+      const [a, b] = start('Type = here.\n', aFirst);
+      a.editor.shown = `Type ${red('mark', '=')} here.\n`;
+      b.editor.shown = `Type ${red('span', '=')} here.\n`;
+      a.binding.write();
+      b.binding.write();
+      await exchange();
+      expect(bodyOf(a)).toBe(bodyOf(b));
+      expect([`Type ${red('mark', '=')} here.\n`, `Type ${red('span', '=')} here.\n`]).toContain(
+        bodyOf(a),
+      );
+    }
+  });
+
   it('types a mark alone by character, as in code', () => {
     expect(ownChanges('a `world` b\n', 'a `<em>world` b\n')).toEqual([
       { from: 3, remove: 0, insert: '<em>' },
@@ -928,7 +1006,7 @@ describe('two people formatting the same text at once (#720)', () => {
       { from: 6, remove: 0, insert: 'big ' },
     ]);
     expect(ownChanges('A world.\n\nB.\n', 'A **world**.\n\nB!\n')).toEqual([
-      { from: 2, remove: 6, insert: '**world**.', run: true },
+      { from: 2, remove: 5, insert: '**world**', run: true },
       { from: 11, remove: 1, insert: '!' },
     ]);
   });

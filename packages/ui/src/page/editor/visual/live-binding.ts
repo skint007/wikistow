@@ -138,9 +138,6 @@ const endOfTag = (run: string) => {
   return closing * 2 !== tags.length;
 };
 
-/** `text`'s words as one string with spaces either side, for a match of whole words. */
-const spaced = (text: string) => ` ${text.trim().split(/\s+/).join(' ')} `;
-
 const MINE = Symbol('visual-binding');
 
 /** Text read from `body` for a take-in or a whole read, and how it became `body` since, while that's followed. */
@@ -181,6 +178,8 @@ export class VisualBinding {
   #theirs = 0;
   /** Runs it formatted, within `RUN_MS`. */
   #runs: OwnRun[] = [];
+  /** It's taking a run out, settling it with someone else's. */
+  #settling = false;
   #destroyed = false;
 
   constructor(body: BoundText, editor: BoundEditor) {
@@ -195,8 +194,11 @@ export class VisualBinding {
       if (mine) return;
       const followed = this.#map;
       this.#map = followed?.remote(delta) ?? null;
-      this.#theirs++;
-      this.#by.add(this.#sending);
+      // A run it took out, settling, is nobody else's change.
+      if (!this.#settling) {
+        this.#theirs++;
+        this.#by.add(this.#sending);
+      }
       // Too much to follow: catch up at once, so a diff stands in as briefly as can be.
       this.#schedule(followed && !this.#map ? 0 : TAKE_MS);
     };
@@ -354,28 +356,26 @@ export class VisualBinding {
         const their = wordsOf(put);
         const marked = their !== put;
         // The same words, exactly, so nothing else put in beside them goes
-        // with them: the second goes. More words than these, whole, theirs
-        // with these among them: this one goes, and only ever this one, so
-        // text of theirs never does.
+        // with them.
         if (their === words && (marked || words === own || ownHadIt(text, run, theirs))) {
           // One end of a tag over several words beside a whole run: the
           // whole one goes, so the tag keeps both ends. Else the second.
           const [mineEnd, theirEnd] = [endOfTag(own), endOfTag(put)];
           const theirsGoes = mineEnd !== theirEnd ? mineEnd : after;
           gone = theirsGoes ? theirs : { from, to };
-        } else if (
-          marked &&
-          spaced(their) !== spaced(words) &&
-          spaced(their).includes(spaced(words))
-        )
-          gone = { from, to };
+        }
         if (gone) break;
       }
       if (!gone) continue;
       this.#runs.splice(this.#runs.indexOf(run), 1);
       const { from: at, to: end } = gone;
       // As someone else's change: the editor takes in what's left.
-      this.#body.edit(() => text.delete(at, end - at));
+      this.#settling = true;
+      try {
+        this.#body.edit(() => text.delete(at, end - at));
+      } finally {
+        this.#settling = false;
+      }
       return this.#settleRuns();
     }
   }

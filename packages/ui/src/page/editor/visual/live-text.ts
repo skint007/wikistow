@@ -23,12 +23,18 @@ const TAG = /<\/?[A-Za-z][^<>]*>/g;
 const TAG_HERE = new RegExp(`^${TAG.source}`);
 
 /**
- * The words `markdown` shows, without its formatting: HTML tags and the
- * characters emphasis, highlights, strikethrough, code and escapes are
- * written with taken out. Rough, but the same for the same words however
- * they're formatted, which is all it's for.
+ * The words `markdown` shows, without its formatting: HTML tags, and the
+ * marks emphasis, highlights, strikethrough and code are written with,
+ * taken out, an escaped character kept as itself. Rough, but the same for
+ * the same words however they're formatted, which is all it's for.
  */
-export const wordsOf = (markdown: string) => markdown.replace(TAG, '').replace(/[\\*_=~`]/g, '');
+export const wordsOf = (markdown: string) =>
+  markdown
+    .replace(TAG, '')
+    .replace(/\\([^\n])|==|~~|[*_`]/g, (_, escaped: string | undefined) => escaped ?? '');
+
+// Characters marks are written with, which part no words.
+const MARKS = new Set(['*', '_', '=', '~', '`', '\\', '<', '>']);
 
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
@@ -71,20 +77,26 @@ function smallest(before: string, after: string, at: number): TextChange | null 
 }
 
 /**
- * Where `text` parts into words: 1 at each space, tab or line break outside
- * an HTML tag, so a tag's attributes stay with the word it marks.
+ * Where `text` parts into words: 1 at each space, line break, punctuation
+ * mark or symbol, other than those marks are written with, outside an HTML
+ * tag, so a tag's attributes stay with the word it marks, and the two
+ * halves of `foo-bar` are two words.
  */
 function partsOf(text: string): Uint8Array {
   const parts = new Uint8Array(text.length);
   let inTag = false;
   for (let i = 0; i < text.length; i++) {
-    const char = text[i];
+    const char = text[i] ?? '';
     if (char === '<' && TAG_HERE.test(text.slice(i, i + 512))) inTag = true;
     else if (char === '>') inTag = false;
-    if (!inTag && /\s/.test(char ?? '')) parts[i] = 1;
+    if (!inTag && !MARKS.has(char) && /[\s\p{P}\p{S}]/u.test(char)) parts[i] = 1;
   }
   return parts;
 }
+
+// Where code is: a code span, or a fence's line, which starts or ends a block.
+const CODE_SPAN = /(`+)[^`\n]*?\1/g;
+const FENCE = /^ {0,3}(`{3,}|~{3,})/gm;
 
 /**
  * Changes of whole words: from `from` to `to` in the text they change, and
@@ -106,7 +118,13 @@ type Stretch = { from: number; to: number; nowFrom: number; nowTo: number; chang
  * whose ends are a mark each, go in by character as before, so what
  * someone else does among the words a mark covers stays as they did it.
  */
-function inRuns(changes: TextChange[], was: string, now: string, at: number): TextChange[] {
+function inRuns(
+  changes: TextChange[],
+  was: string,
+  now: string,
+  at: number,
+  before: string,
+): TextChange[] {
   const parts = partsOf(was);
   const stretches: Stretch[] = [];
   let shift = 0;
@@ -131,11 +149,7 @@ function inRuns(changes: TextChange[], was: string, now: string, at: number): Te
     return words !== '' && words === wordsOf(now.slice(stretch.nowFrom, stretch.nowTo));
   };
   // A tag, or two marks or more, changed in it: the whole formatting of its words.
-  const tags = (text: string) =>
-    text
-      .replace(/`[^`\n]*`/g, '')
-      .match(TAG)
-      ?.join('') ?? '';
+  const tags = (text: string) => text.match(TAG)?.join('') ?? '';
   const whole = (s: Stretch) =>
     s.changes.length >= 2 || tags(was.slice(s.from, s.to)) !== tags(now.slice(s.nowFrom, s.nowTo));
   const run = (stretch: Stretch): TextChange => ({
@@ -144,9 +158,25 @@ function inRuns(changes: TextChange[], was: string, now: string, at: number): Te
     insert: now.slice(stretch.nowFrom, stretch.nowTo),
     run: true,
   });
+  // Text in code is text, whatever it looks like: no run there.
+  let code: { was: [number, number][]; now: [number, number][] } | null = null;
+  const inCode = (s: Stretch) => {
+    code ??= {
+      was: [...was.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]),
+      now: [...now.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length]),
+    };
+    const meets = (spans: [number, number][], from: number, to: number) =>
+      spans.some(([start, end]) => start < to && from < end);
+    return meets(code.was, s.from, s.to) || meets(code.now, s.nowFrom, s.nowTo);
+  };
+  const runs = stretches.filter((s) => formatted(s) && whole(s));
+  if (runs.length === 0) return changes;
+  // In a fenced block, or one starting or ending here: none at all.
+  const fences = (text: string) => text.match(FENCE)?.length ?? 0;
+  if (fences(was) > 0 || fences(now) > 0 || fences(before.slice(0, at)) % 2 === 1) return changes;
   const out: TextChange[] = [];
   for (const stretch of stretches)
-    out.push(...(formatted(stretch) && whole(stretch) ? [run(stretch)] : stretch.changes));
+    out.push(...(runs.includes(stretch) && !inCode(stretch) ? [run(stretch)] : stretch.changes));
   if (!out.some((change) => change.run)) return changes;
   // Only as the changes were: each run makes what they made.
   const local = out.map((change) => ({ ...change, from: change.from - at }));
@@ -205,7 +235,7 @@ export function ownChanges(before: string, after: string): TextChange[] {
     }
   }
   flush(!byChars);
-  return byChars ? inRuns(changes, was, now, start) : changes;
+  return byChars ? inRuns(changes, was, now, start, before) : changes;
 }
 
 /**
@@ -218,7 +248,12 @@ type Piece = {
   readonly length: number;
   /** In `body` only, or in `held` only, by the editor's own writing rather than someone else's. */
   readonly mine?: true;
+  /** In `body` only: which change of someone else's put it in, as `added` tells them apart. */
+  readonly batch?: number;
 };
+
+// Each of others' changes followed, numbered in turn.
+let batches = 0;
 
 /** A stretch of `held`, and what it is in `body` now. */
 type Segment = {
@@ -241,7 +276,7 @@ function joined(pieces: readonly Piece[]): Piece[] {
   for (const piece of pieces) {
     if (piece.length === 0) continue;
     const last = out.at(-1);
-    if (last?.kind === piece.kind && last.mine === piece.mine)
+    if (last?.kind === piece.kind && last.mine === piece.mine && last.batch === piece.batch)
       out[out.length - 1] = { ...last, length: last.length + piece.length };
     else out.push(piece);
   }
@@ -343,6 +378,7 @@ export class Mapping {
    */
   remote(delta: Delta, mine = false): Mapping | null {
     const own = mine ? ({ mine: true } as const) : {};
+    const batch = mine ? {} : { batch: ++batches };
     const out: Piece[] = [];
     const rest = new Cursor(this.#pieces);
     // Take `length` of `body` from `rest`, as `take` says, with what of
@@ -370,7 +406,7 @@ export class Mapping {
       else if (op.insert !== undefined) {
         // After what of `held` only lies here.
         while (rest.peek()?.kind === 'held') out.push(rest.take(Infinity));
-        out.push({ kind: 'body', length: lengthOf(op.insert), ...own });
+        out.push({ kind: 'body', length: lengthOf(op.insert), ...own, ...batch });
       }
       if (out.length > MAX_PIECES) return null;
     }
@@ -445,7 +481,10 @@ export class Mapping {
     return { text: shown, map: new Mapping(pieces) };
   }
 
-  /** Where in `body` what others put in, and the editor hasn't taken in, is: each run of it, in order. */
+  /**
+   * Where in `body` what others put in, and the editor hasn't taken in, is:
+   * each run of it one change put in, in order.
+   */
   added(): { from: number; to: number }[] {
     const out: { from: number; to: number }[] = [];
     let body = 0;
@@ -560,17 +599,17 @@ export function putInto(text: Y.Text, changes: readonly TextChange[]): void {
   const now = runs ? text.toJSON() : '';
   for (const change of changes.toReversed()) {
     const insert = change.insert.toWellFormed();
-    let middle = change.run && insert !== '' ? change.remove >> 1 : 0;
-    while (middle > 0 && splits(now, change.from + middle)) middle--;
-    if (middle === 0) {
+    if (!change.run || insert === '') {
       if (change.remove > 0) text.delete(change.from, change.remove);
       if (insert !== '') text.insert(change.from, insert);
       continue;
     }
+    let middle = change.remove >> 1;
+    while (middle > 0 && splits(now, change.from + middle)) middle--;
     // Put in while the characters each side are there: beside a deleted
     // one, Yjs may put it on either side of what's deleted.
     text.insert(change.from + middle, insert);
     text.delete(change.from + middle + insert.length, change.remove - middle);
-    text.delete(change.from, middle);
+    if (middle > 0) text.delete(change.from, middle);
   }
 }
