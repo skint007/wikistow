@@ -933,6 +933,7 @@ test('a screenshot of an area is the part dragged over, scrolled, in its device 
   ).toBeVisible();
   await page.bringToFront();
   expect(await got('stable', 'clip')).toEqual([]);
+  await expect.poll(() => page.evaluate(() => document.documentElement.children.length)).toBe(3);
   // The screenshot is taken as the drag starts: the page changing as the
   // overlay goes isn't in it.
   await redOnceOverlayGoes(page);
@@ -949,7 +950,12 @@ test('a screenshot of an area is the part dragged over, scrolled, in its device 
   await page.mouse.move(400, 350, { steps: 5 });
   if (SCREENSHOTS) await page.screenshot({ path: join(SCREENSHOTS, 'area-choosing.png') });
   await page.mouse.up();
-  await expect(again.getByText('Saved to Personal / Recipes')).toBeVisible();
+  // The popup goes as the person drags, and shows how the clip went once
+  // opened again. The one left open here hears it only if a call of its
+  // own was still on its way as the worker stopped, which reconnects it.
+  await expect.poll(async () => (await got('stable', 'clip')).length).toBe(1);
+  const after = await reopen(tabId);
+  await expect(after.getByText('Saved to Personal / Recipes')).toBeVisible();
   // The overlay was gone before the screenshot, and is gone from the page.
   expect(await page.evaluate(() => document.documentElement.children.length)).toBe(2);
   expect(await page.evaluate(() => scrollY)).toBe(1000);

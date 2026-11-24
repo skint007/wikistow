@@ -204,21 +204,73 @@ try {
   if (app.exitCode === null) spawnSync('taskkill', ['/F', '/T', '/PID', String(app.pid)]);
 }
 
+/** What runs from the app's folder, by process ID and command line, Electron's own processes all being WikiStow.exe. */
+function runningFrom(dir: string): string[] {
+  const listed = spawnSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ' +
+        "$_.ExecutablePath.StartsWith($env:CHECK_FOLDER, 'OrdinalIgnoreCase') } | " +
+        'ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }',
+    ],
+    { encoding: 'utf8', env: { ...process.env, CHECK_FOLDER: `${dir}\\` } },
+  );
+  if (listed.status !== 0) throw new Error(`Couldn’t list processes: ${listed.stderr}`);
+  return listed.stdout.split(/\r?\n/).filter(Boolean);
+}
+/** What runs from the app's folder, as a failure says it. */
+function stillRunning() {
+  try {
+    return runningFrom(folder).join('; ') || 'nothing';
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
 // A silent uninstall gives up at once, removing nothing, while WikiStow.exe
 // or the helper still runs. Each can take a moment to go once it's done:
 // the app's own processes after it quits, the helper after its last
-// answer. Likely why the Arm runner's uninstall sometimes left everything.
-await until('the app and its helper to exit', async () => notRunning(exe) && notRunning(helper));
+// answer. Both files must open for writing, the uninstaller's own test,
+// which a program running from either fails.
+await until(
+  'the app and its helper to exit',
+  async () => notRunning(exe) && notRunning(helper),
+).catch((error) => {
+  const held = `WikiStow.exe free: ${notRunning(exe)}, helper free: ${notRunning(helper)}`;
+  throw new Error(`${(error as Error).message} (${held}; running: ${stillRunning()})`);
+});
+// Said, not checked: what else runs from the folder as the uninstall starts.
+process.stdout.write(`running from the app's folder: ${stillRunning()}\n`);
 // The uninstaller copies itself away to remove its folder, so it returns at
-// once. A slow runner gets a while longer, and says what was left.
+// once. A slow runner gets a while longer, and says what was left. The
+// uninstaller runs once: a file it couldn't delete stays, however long
+// this waits. What still runs, and whether WikiStow.exe opens for writing,
+// tell a program running from it from another that only had it open.
 execFileSync(join(folder, 'Uninstall WikiStow.exe'), ['/S'], { stdio: 'inherit' });
 await until('the uninstall', async () => !existsSync(folder) || null, 120_000).catch((error) => {
   const left = existsSync(folder) ? readdirSync(folder).join(', ') : '';
-  throw new Error(`${(error as Error).message} (left: ${left})`);
+  const writable = existsSync(exe) ? `; WikiStow.exe opens for writing: ${notRunning(exe)}` : '';
+  throw new Error(
+    `${(error as Error).message} (left: ${left}; running: ${stillRunning()}${writable})`,
+  );
 });
-check(!existsSync(shortcut), 'the Start menu entry is gone');
+/**
+ * Whether `file` is gone within 30 s. Windows still lists a file deleted
+ * while another program has it open until that program lets go, as the
+ * shell may a Start menu shortcut: the uninstaller deletes the shortcut
+ * first, yet the Arm runner once found it after the folder had gone.
+ */
+const gone = (file: string) =>
+  until(`${file} to go`, async () => !existsSync(file) || null).then(
+    () => true,
+    () => false,
+  );
+check(await gone(shortcut), 'the Start menu entry is gone');
 check(registry(LINKS) === null && registry(UNINSTALL) === null, 'the registry keys are gone');
 check(
-  registry(FIREFOX_HOST) === null && !existsSync(manifests),
+  registry(FIREFOX_HOST) === null && (await gone(manifests)),
   'the host manifests and their keys are gone',
 );

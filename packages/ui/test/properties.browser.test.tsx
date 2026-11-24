@@ -525,7 +525,7 @@ describe('completing a reference', () => {
       const { container, ref } = await pageEditor(page, mode);
       await focusEditor(ref);
       await userEvent.keyboard(
-        mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=cook t' : '{End} `=cook t',
+        mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=cook t' : '{End}`=cook t',
       );
       const shown = () =>
         mode === 'source'
@@ -549,7 +549,7 @@ describe('completing a reference', () => {
       await focusEditor(ref);
       // Up to its virama, a combining mark.
       await userEvent.keyboard(
-        mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=मूल्' : '{End} `=मूल्',
+        mode === 'source' ? '{Control>}{End}{/Control}{ArrowUp}{End}`=मूल्' : '{End}`=मूल्',
       );
       const shown = () =>
         mode === 'source'
@@ -569,7 +569,7 @@ describe('completing a reference', () => {
   it('offers them in the visual editor too, writing the reference as code', async () => {
     const { container, ref } = await pageEditor(page, 'visual');
     await userEvent.click(container.querySelector('#page-visual p')!);
-    await userEvent.keyboard('{End} `= this.co');
+    await userEvent.keyboard('{End}`= this.co');
     const options = () =>
       [...document.querySelectorAll('[role=listbox][aria-label=Property] [role=option]')].map(
         (option) => option.textContent,
