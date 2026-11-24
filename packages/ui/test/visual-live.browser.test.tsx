@@ -223,7 +223,9 @@ describe('its own edits', () => {
     await expect.poll(() => shownText(m)).toContain('Two Big');
     type(m, 'daily.', '!', 7);
     m.handle.read();
-    expect(s.text.toJSON()).toBe('Two Big Beans in May. Water daily. !\n\nCompost in March. Peas\n');
+    expect(s.text.toJSON()).toBe(
+      'Two Big Beans in May. Water daily. !\n\nCompost in March. Peas\n',
+    );
   });
 
   it('keep an emoji whole on a CRLF page', async () => {
