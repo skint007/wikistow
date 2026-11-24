@@ -54,7 +54,7 @@ Everything Milestones 0 and 1 shipped is **version 1 and frozen**. Stored data u
 - agent enrollment with an enrollment fingerprint (`agent-enrollment-check/v1`), and bearer credentials;
 - the `wikistow.publication` payload extension, which names a published copy's source inside its encrypted payload (section 13).
 
-Identity key rotation, and its statement format, are left to a later milestone (section 4.6, #327).
+Identity key rotation, and its statement format (`identity-key-rotation/v1`), are proposed in [ADR 0018](../docs/adr/0018-identity-key-rotation.md) (section 4.6, #327), and are neither reviewed to the stopping rule nor built.
 
 ### What Milestone 5 adds
 
@@ -134,6 +134,7 @@ These further risks are accepted too:
 - **A12. Public links** (accepted 2026-10-21). A page someone gives a public link has its published version stored readable on the server while the link is on ([ADR 0005](../docs/adr/0005-public-links.md)). The server can read that copy, keep it after the link is turned off, and keep serving it. It can also claim a page has a link when it doesn't. Then a public page's upload tells it which of that page's wikilinks name the page, and so a typed title for it. The app sends a target only for a link that names a page by its published title alone, and the server deletes the targets naming a page when that page's link ends. So an honest server learns from targets only which links of a public page lead to another page whose link is on, by the text the public page shows. The app uploads a copy only after saying so on screen, in the public link dialog or a Publish that asks first, so a person sees it before a copy of a private page goes up. Nothing in this protocol protects a copy once it is uploaded, or checks that it matches the published version: the server takes the text the app sends. The app uploads the version the server names as published, except right after a publish, when it uploads the one it just published. So a server that serves an old published head (A2) can get that older version uploaded, which may hold something a later publish took out. The page's readers could already read it. The copy also holds the page's cover, with the images it shows, and, as text, the property values its body shows and its query tables, from other pages' published versions too ([ADR 0006](../docs/adr/0006-page-properties.md)), so a public page can make another page's values readable to anyone with the link; the app says so before it uploads such a copy, and never puts a draft's values in it. Removing someone from a share doesn't change a link someone else turned on that they could see. Only a new link does, and not if a public page updated since links to it, since that page leads to the new link. A copy never holds the page's comments (section 5.9, accepted).
 - **A13. Kept for offline** (accepted in [ADR 0009](../docs/adr/0009-offline.md), and built). A device keeps the pages it may open offline, sealed under a key from the person's identity key, so they open only with their unlocked vault. They stay readable there after the person's access is removed, until the app is online again and drops them, or for good on a device that never is (A3). The device also keeps the vault wrapper unsealed, which lets someone holding the device guess the passphrase offline, as someone holding the server's database can, and after a passphrase change made elsewhere the old passphrase, or an unlock remembered before it, still opens that device's vault offline; once the device is online again the app locks it and asks for the new one. Likewise, ending a device's session elsewhere, or a password reset, doesn't stop its remembered unlock opening what it keeps while it stays offline. Offline the app shows what the server last served, so a removal, rotation or unpublish it hasn't heard of shows only once it is back online. Changes made offline are sealed only when sent, with the share's keys of that moment, so they change nothing in sections 6.8 and 7.5. Files added offline are sealed for their page's draft at once, as their AD names no share (section 5.3). A change sent again after a lost answer goes under the IDs recorded for it, and the server's `duplicate` says it landed.
 - **A14. Programs running as the person, through the web clipper** (accepted in [ADR 0017](../docs/adr/0017-web-clipper.md); the socket, its challenge and saving clips are built). The desktop app listens on a Unix socket in a folder only the person can open, or on Windows a named pipe, and answers only a client that proves it holds the token in `clip-host.json`, a file only the person can read, with an HMAC challenge that names each side's role and both nonces. Other accounts on the computer, and on Windows other computers, can't read the token, and the app sends nothing before the challenge, so they learn nothing. No web page can reach a socket or a pipe. A program running as the person can: it can start the helper with any arguments, or read the token and connect itself, as it can already ask the keyring for the app's key ([desktop](../docs/desktop.md#the-keyring)). Through the socket, and without the vault key, it can make drafts as the person in folders they can edit, and, by searching again and again while the app is unlocked, learn every folder's path; searches are limited to 60 a minute, clips to 30 and one at a time, and the images the app fetches for them to 200, at most 50 and 100 MiB a clip. It can open in the window only a draft a clip made since the app opened. It can't read a page, publish, delete or move anything, or reach the session or a key. The caller the helper names is checked against the published extension IDs only to catch mistakes. A page the person clips from chooses what is clipped: its HTML goes through the app's paste cleaning, and its images come in only as attachments the app fetches itself, without the person's cookies or credentials, from addresses outside the local network unless the page is on that kind of address by its own address or a local name whose addresses are all local (a site's own name could claim any address), checked as each name is looked up and connected to as checked, so a name can't answer otherwise in between; and only raster images, never SVG. A page that looks like frontmatter sets no property: the clip's properties are the app's. The server sees a clip as any new draft the person makes.
+- **A15. A rotation by whoever holds the old key** (proposed in [ADR 0018](../docs/adr/0018-identity-key-rotation.md), section 4.6). A rotation statement proves only that whoever signed it held the old key and holds the new one. Someone holding a person's old secret keys and their session, or the server's help, can rotate to keys of their own before the person does, and every app that follows the chain (section 8.4) then seals to them as the person, and accepts them as an owner where the person was one (section 4.6, **Owners**). The person's own app notices at its next unlock and stops (section 4.6, **When someone else rotated**), but only the people they warn can decline the key. After the person rotates, a server that holds the old keys, or colludes with someone who does, can show an app that hasn't followed yet a chain of its own instead, which that app follows, undetected unless two people compare fingerprints, as at first sight (A4); and old-key signatures stay valid, so it can show apps that followed records signed with the old key as the person's earlier writing, though never a key to write under, an owner or an agent (section 4.6, **Using an earlier key**). Whoever held the old key keeps everything sealed to it (A3), including every folder key version sealed to it, and so what members save in a share until an owner rotates it, and the private part of the person's contacts record as it was, with the secret keys and tokens of the agents their app ran.
 
 ### 2.5 What the server can and cannot do
 
@@ -151,6 +152,7 @@ These further risks are accepted too:
 | Make a member accept a key version from an owner it doesn't accept | **No** | 6.5 |
 | Substitute a key an app has pinned, without a key-change warning | **No**, except in a browser served an older contacts record (A4) | 8.4 |
 | Substitute a person's key before any app has seen the real one | Yes | A4 |
+| Move a pin by a rotation statement, without the person's keys | **No** (proposed) | 4.6, 8.4 |
 | Hide a key rotation from a writer, who then keeps saving under the old version | Yes | A2 |
 | Open a key wrap, an envelope, a payload or an attachment | **No** | 6.3, 6.4 |
 | Keep serving a removed person old ciphertext | Yes | A3 |
@@ -289,7 +291,7 @@ Worked example: `canonical('x/v1', ['a', 1, null, Uint8Array[0x00]])`:
 
 ### 3.5 Domain registry
 
-Every domain string in the protocol. **Status** is *frozen* (v1, shipped), *kept* (added by PR #29 and unchanged), *changed* (added by PR #29 and changed here, section 15), *new*, or *accepted* (decided in an ADR, not built yet).
+Every domain string in the protocol. **Status** is *frozen* (v1, shipped), *kept* (added by PR #29 and unchanged), *changed* (added by PR #29 and changed here, section 15), *new*, *accepted* (decided in an ADR, not built yet), or *proposed* (in an ADR the project owner hasn't decided, and not reviewed to the stopping rule).
 
 | Domain | Status | Use | Fields, in order | Defined in |
 |---|---|---|---|---|
@@ -326,6 +328,7 @@ Every domain string in the protocol. **Status** is *frozen* (v1, shipped), *kept
 | `live-message/v1` | accepted | signed by sender | installationId, spaceId, pageId, sessionId, recordHash, kind, senderId, senderKeyVersion, joinId, seq, payloadHash | §5.10 |
 | `live-message-payload/v1` | accepted | AEAD AD | installationId, spaceId, pageId, sessionId, recordHash, kind, senderId, senderKeyVersion, joinId, seq | §5.10 |
 | `live-client/v1` | accepted | hash input for a Yjs client ID | installationId, sessionId, senderId, senderKeyVersion, joinId | §5.10 |
+| `identity-key-rotation/v1` | proposed | signed by the old key and by the new key | installationId, id, from.keyVersion, from.keyHash, to.keyVersion, to.boxPublicKey (bytes), to.signPublicKey (bytes) | §4.6 |
 
 Comments (section 5.9) add no domain: a comment is a `metadata-record/v2` with `subjectKind: "comment"`, opened through a `content-key-wrap/v1` with `subjectKind: "comment"` and its audience as `audienceClass`, or through `metadata-envelope/v2`, and its payload uses `metadata-payload/v1` as its AD.
 
@@ -421,7 +424,52 @@ To accept an enrollment (`verifyEnrollment`):
 
 ### 4.6 Identity key rotation
 
-Identity key rotation, and the statement that would announce it, are left to a later milestone (Q4, #327). In Milestone 2 a person's key version still increases when they replace lost keys during recovery. Every other app treats that as a key change (section 8.4): owners share with the person again after confirming it (section 7.3), and an owner is re-added as a co-owner (section 7.6).
+**Status: proposed** ([ADR 0018](../docs/adr/0018-identity-key-rotation.md), #327). Nothing here is built or frozen, and the review rounds continue once the project owner decides the ADR's questions. Until it is built, nothing raises a person's key version: recovery keeps the keys (section 5.6), and the server registers a person only at key version 1. A higher key version the directory shows is therefore always a key change (section 8.4).
+
+A person who still has their vault can replace their identity keys, as when they may have leaked. Their app makes keys at the next key version under the same identity ID, and a **rotation statement** that both the old key and the new one sign:
+
+```
+IdentityRotation = { installationId, id: HumanId,
+                     from: { keyVersion, keyHash: Hash32 },
+                     to:   { keyVersion, boxPublicKey: PublicKey, signPublicKey: PublicKey },
+                     fromSignature, toSignature }
+
+bytes         = canonical('identity-key-rotation/v1', [installationId, id, from.keyVersion, from.keyHash,
+                to.keyVersion, to.boxPublicKey (bytes), to.signPublicKey (bytes)])
+fromSignature = Ed25519(the key at from, bytes)
+toSignature   = Ed25519(the key at to, bytes)
+```
+
+- It parses strictly (section 3.3, rule 8). `id` is a `HumanId`: agents never rotate (section 4.2). `to.keyVersion` is `from.keyVersion + 1`. `to`'s keys pass section 4.1, and each differs from the `from` key of its kind; a statement whose `to.boxPublicKey` or `to.signPublicKey` equals the old one is `malformed`.
+- `from` is resolved as an identity reference (section 4.4): the keys of the row at `from.keyVersion` MUST recompute to `from.keyHash`. `fromSignature` verifies under that row's `signPublicKey`, and `toSignature` under `to.signPublicKey`, over the same bytes.
+- The **new key** is `{id, kind: "human", keyVersion: to.keyVersion, boxPublicKey, signPublicKey}`, as `to` gives them, never as the directory does. The directory's row at that version MUST have exactly those keys, or it is a key change.
+
+**A chain** from key version `a` to `b` is the statements from `a` to `b`, one per version, each statement's `from` being the key the one before it ended at, and the first one's `from.keyHash` the hash of the key at `a`. It is valid when each statement is. Every key on a valid chain before its end is an **earlier key** of the person, to whoever holds a pin or reference at a key on it.
+
+**The server** stores one statement per `(id, from.keyVersion)`, and refuses a second. `POST /api/me/identity/rotate {rotation, identity, wrapper, expectedVaultVersion, enrollments, revokedAgents}`, behind a recent sign-in, needs `from` to be the caller's current row and the statement to verify as above; `identity` is the new key, which no other row holds; `wrapper` is a vault wrapper of format 2 (below) whose KDF settings pass, replacing the one at `expectedVaultVersion`. In one transaction under a lock on the account, the server adds the new row, keeps the old one as no longer current (`revokedAt` set, never deleted), stores the statement and the wrapper, stores `enrollments` (section 9) and revokes the agents in `revokedAgents`, which must be the caller's, ends the account's other sessions, and ends the live sessions in every space where the caller is an owner or a member (section 5.10). `GET /api/identities/:id/rotations?after=n` serves the statements of an identity from key version `n` up, in order, and `GET /api/identities/:id/versions/:keyVersion` an earlier row's public keys, to anyone who may look the identity up.
+
+**The rotating app** asks for a recent sign-in. It makes a new vault key, passphrase and recovery key, and a keyring that keeps the earlier secret keys:
+
+```
+Keyring v2 = { format: 2, public: PublicIdentity, boxSecretKey, signSecretKey,
+               retired: [ { public: PublicIdentity, boxSecretKey, signSecretKey } ] }
+```
+
+in a wrapper of `format: 2`, whose layout and ADs are otherwise format 1's (section 5.6). `retired` holds every earlier key of this identity, each with matching secret keys; the keyring is `malformed` if any doesn't match, or two share a key version, or one is at or above `public.keyVersion`. A client that meets wrapper format 2 and doesn't know it refuses it and asks to update (section 1). The app never signs or seals with a retired key, except `fromSignature`. Once the server accepts the rotation, the app writes its contacts record under the new key (section 8.1), rotates every share of every space it owns, as section 7.5 does with nobody left out, and seals the new versions to the agents it kept (section 9.4). It does these again at each unlock until they are done.
+
+**Opening with earlier keys.** The person's own app opens a folder key envelope, a v1 or v2 envelope, and its contacts record's private key, addressed to any key version its keyring holds, current or retired (sections 5.8 and 6.4, step 1: "this identity at a key version it holds"). The server serves a caller their envelopes at every key version of theirs. What a device sealed for itself under an earlier key (`sealOnDevice`, section 3.5) it opens with that key and seals again under the current one.
+
+**Using an earlier key.** Another app that holds a key on the chain checks records, envelopes, statements and contacts versions signed with an earlier key of the person against that key, with no mark. An earlier key counts for **opening** only (section 6.5, **Using the result**): a key version whose envelope it sealed doesn't count for writing, but in a rotation or an owner's removal, where its envelopes count when verifying the current version (section 7.5, step 1) without moving the **No going back** mark; an owner statement it signed accepts nobody (section 6.5, step 3); nothing is sealed to it; no agent enrollment signed with it counts; and a contacts version signed with it is accepted only below the first version of that record signed with a later key.
+
+**Owners.** An app that has accepted an owner at a key accepts them at each later key on a chain it follows, as the "accept an owner" change of section 8.6 records. The co-owner re-add of section 7.6 isn't needed. An app accepts itself in section 6.5, step 1, when the space's first name record verifies under any key its keyring holds.
+
+**Members, in spaces others own.** A member who rotated waits at their new key (section 7.9), and reads what they held through their earlier keys. Owners' apps list them as having replaced their keys, without the key-change warning, and offer a rotation of each share they wait in that also gives them every earlier version at the new key: `POST /api/shares/:shareId/rotate` gains `rekeyed: [identityId]`, members whose current key the server lists above their member row's, for whom the envelopes cover every version `1` to `v + 1` at their current key, and whose rows then take that key, as **Give access** does (section 7.9).
+
+**Agents.** The person's app signs the enrollments of the agents the person keeps again under the new key (section 4.5, with `ownerKeyVersion` the new key version), with no fingerprint to compare, and revokes the others, and the agents it runs itself (section 9.8), whose secret keys were sealed to the old key. An agent follows its person's chain from the key it pinned at enrollment (section 9.3), keeps the new key in its local file, and accepts its enrollment only at its person's current key version.
+
+**Recovery** is unchanged (section 5.6). After a rotation, the new recovery key opens the new vault, and an old one opens only an old wrapper, which holds only earlier keys.
+
+**When someone else rotated.** The person's own app, at unlock, compares the directory's current key for its identity with its keyring. A current key its keyring doesn't hold, at a higher key version than its own, which a valid chain from a key it holds leads to, is a rotation made by someone else holding an earlier key: the app says so, tells the person to warn the people they share with, and signs and seals nothing more. Without a valid chain it is a substitution, reported as a possible attack. Either way nothing in the protocol takes the identity back (A15).
 
 ---
 
@@ -725,7 +773,7 @@ MetadataEnvelopeV2 = the same, with metadataRevisionId in place of revisionId, s
 `spaceId` and `payloadHash` come from the record the envelope unlocks; they aren't JSON properties of the envelope. `sealedKey` is 80 bytes.
 
 **Opening** (`openEnvelope`, v2):
-1. It names this record version, and this reader at its current key version (`wrong-recipient`).
+1. It names this record version, and this reader at its current key version (`wrong-recipient`), or, as proposed, at a retired key version its keyring holds (section 4.6).
 2. The granter is an accepted owner of the space (section 6.5), at a key that passes section 8.4, and the signature verifies. Otherwise `untrusted-sealer` or `bad-signature`.
 3. The sealed key opens (`decrypt-failed`), and matches the record's `keyCommitment` (`key-commitment`).
 
@@ -963,7 +1011,7 @@ signature    = Ed25519(sealer, canonical('folder-key-envelope/v1', [installation
 - **Sealer.** For a human recipient, the sealer is an owner of the space. For an agent recipient, it is the agent's own person (section 9.4).
 
 **Opening** (the recipient's client):
-1. The envelope parses strictly, names the space and share asked for (`binding-mismatch`), and names this identity at its current key version (`wrong-recipient`).
+1. The envelope parses strictly, names the space and share asked for (`binding-mismatch`), and names this identity at its current key version (`wrong-recipient`), or, as proposed, at a retired key version its keyring holds (section 4.6).
 2. **The sealer is trusted.** For a human, the sealer is an accepted owner of the space (section 6.5). For an agent, it is the person pinned at enrollment (section 9.3). The sealer's key passes section 8.4. Otherwise the client refuses (`untrusted-sealer`) and reports a possible attack.
 3. The signature verifies (`bad-signature`).
 4. Both sealed keys open (`decrypt-failed`).
@@ -1331,7 +1379,11 @@ Before it uses a key, a person's app compares it with its pins:
 - **by identity ID:** a pin for that ID has the same `keyVersion` and keys;
 - **by email,** when it found the person by email, or picked them from the list of people by the email it shows (section 7.3): the label with that email names the same identity ID and key hash.
 
-Any difference is a **key change**. The directory never changes a row's keys (section 4.1), so a different key at the pinned key version is always a substitution, and a higher key version is a rotation or a substitution. Until the person confirms the change:
+Any difference is a **key change**. The directory never changes a row's keys (section 4.1), so a different key at the pinned key version is always a substitution, and a higher key version is a rotation or a substitution.
+
+**Following a rotation** (proposed, section 4.6, [ADR 0018](../docs/adr/0018-identity-key-rotation.md)). When the higher key version comes with a valid chain (section 4.6) from the pinned key to exactly the key the app is about to use, it isn't a key change. The app replaces the pin with the chain's last key, keeping its `method`, and the label's key hash, in its next contacts write (the "follow a rotation" change, section 8.6), and shows once, where the person appears, that they replaced their keys, signed with their earlier key; contact details show the fingerprints of both. An app that finds a label by email naming an earlier key of the same ID follows the same way. A chain that is missing a statement or fails a check, a key at a version the app already followed other than the one it followed, or a key at a higher version than the chain reaches, is a key change, and the app reports a possible attack. A server can't make a valid chain without the person's keys, so it can't move a pin by itself.
+
+Until the person confirms a key change:
 - **Sharing stops.** No dialog seals to that person (`identity-key-changed`); it shows them with the warning instead.
 - Folder key envelopes, v2 envelopes and owner statements signed with the changed key aren't accepted.
 - A record signed at a key version above the pinned one is shown with a "key changed" mark. A record signed at the pinned version with other keys is refused (`identity-key-changed`).
@@ -1363,6 +1415,7 @@ On conflict, the client fetches the newer record, verifies it, and **re-applies 
 |---|---|
 | pin `identity` with `label` | No-op if the same ID is pinned to the same keys. **Stop and ask the person** (`contacts-conflict`) if it is pinned to other keys, or another label has the same `email`. Otherwise add both, and drop any `removed` entry with the same `keyHash`. |
 | confirm a changed key | Replace that pin and its label's key hash. Stop and ask if the newer record holds a third key for the ID. |
+| follow a rotation (proposed, section 4.6) | Replace that pin, keeping its `method`, and its label's key hash, if the newer record's pin for the ID is a key on the chain at or below the one followed; no-op if it is the same key. Stop and ask (`contacts-conflict`) if it is any other key. |
 | rename a label, or unpin | Change or remove that pin's label; for an unpin, remove the pin and add a `removed` entry. |
 | enroll agent `{enrollment, label, shares}` | Add it unless the same agent ID is there. Stop and ask if another agent has the same label name. |
 | rename agent, or change its `shares` or `groups` | Set the field. For `shares` and `groups`, apply the added and removed `{spaceId, shareId}` or `{spaceId, groupId}` items, and the changed `drafts` values, never the whole list. |
@@ -1378,7 +1431,7 @@ On conflict, the client fetches the newer record, verifies it, and **re-applies 
 
 **Confirmed writes.** Adding an agent to `revokedAgents`, adding a share to an agent's `shares` or a group to its `groups`, or changing their `drafts`, and adding an owner to `removedOwners` are confirmed: the client writes the version, re-reads the record, and goes on only if the served version holds the change (section 9).
 
-**When to write.** Clients write the record when they pin, confirm, decline, rename or unpin a key; enroll, rename, grant, change the role of, or revoke an agent; accept, add or remove an owner; and approve, update, change the access of, turn on or off, or remove a library plugin. The CLI never writes it.
+**When to write.** Clients write the record when they pin, confirm, decline, rename or unpin a key, or follow a rotation; enroll, rename, grant, change the role of, or revoke an agent; accept, add or remove an owner; and approve, update, change the access of, turn on or off, or remove a library plugin. The CLI never writes it.
 
 ---
 
@@ -1755,7 +1808,7 @@ PR #29 merged the client and contracts formats of the earlier design. None of th
 - `safety-code.ts` and `bip39-english.ts`: `safety-code/v1` and `safety-code-salt/v1`;
 - the errors `authority-invalid`, `placement-invalid`, `legacy-invalid` and `safety-code-mismatch`.
 
-**New:** `content-key-wrap/v1` (section 6.3), `folder-key-envelope/v1` (section 6.4), `space-owner/v1` (section 6.5), `agent-enrollment-check/v1` (section 9.2), and the errors `missing-key`, `untrusted-sealer`, `unaccepted-owner`, `region-mismatch` (client), `key-version` (client and server), and `share-nesting`, `last-owner` (server). Identity key rotation (`identity-rotation/v1` in earlier drafts) is left to a later milestone (section 4.6).
+**New:** `content-key-wrap/v1` (section 6.3), `folder-key-envelope/v1` (section 6.4), `space-owner/v1` (section 6.5), `agent-enrollment-check/v1` (section 9.2), and the errors `missing-key`, `untrusted-sealer`, `unaccepted-owner`, `region-mismatch` (client), `key-version` (client and server), and `share-nesting`, `last-owner` (server). Identity key rotation (`identity-rotation/v1` in earlier drafts) was left to a later milestone; its proposal (section 4.6) takes a new domain, `identity-key-rotation/v1`, rather than the cut one.
 
 ---
 
@@ -1802,7 +1855,7 @@ These notes say what the next two PRs change. They add no rules; where they diff
 | Q1 | **Agents in groups.** | Built in Milestone 5 (sections 7.8, 7.9 and 9.4). A group is a set of people and their agents added to shares together; it needs no new key format. |
 | Q2 | **Contacts rollback in the browser, and contacts forks between devices** (section 8.5). | Accepted. The CLI, the desktop app with a trusted secret store, and the browser (ADR 0009) detect a rollback across sessions; the person can compare the version and hash each device shows. |
 | Q3 | **KDF floor.** Vault wrappers accept libsodium's minimum Argon2id cost (section 5.6). | Recommend refusing to *write* below INTERACTIVE. Needs a code change. |
-| Q4 | **Identity key rotation** isn't in Milestone 2 (section 4.6). | Later milestone (#327), which also defines its statement format. Until then a person with a new key version is re-shared by owners after a key-change warning. |
+| Q4 | **Identity key rotation** isn't in Milestone 2 (section 4.6). | Proposed in [ADR 0018](../docs/adr/0018-identity-key-rotation.md) (#327): a statement signed by the old and new keys (`identity-key-rotation/v1`), which contacts' apps follow without a key-change warning (section 8.4), with A15 accepted. Reviewed once (`protocol-review.md`, **Identity key rotation, first review**); the rounds continue once the project owner decides the ADR's questions. Until it is built, nothing raises a key version, and a higher one is a key change. |
 | Q5 | **Published history order** is the server's, and unsigned. | Accepted, as in Milestone 1 (A2). |
 | Q6 | **New key version after unpublish.** | Dropped. New members get every key version and current readers get the new one, so the rotation protected nothing. Unpublish only hides the page from readers (section 11). |
 | Q7 | **Agents wait for their person after a rotation** (section 9.4). An unattended agent can't save in a rotated share until its person unlocks an app. | Accepted for Milestone 2. Owners sealing to agents directly would need owners to trust the server's list of agents. |
@@ -1819,4 +1872,4 @@ These notes say what the next two PRs change. They add no rules; where they diff
 
 `wikistow.md` L333 and L357 make a focused security review of this protocol a release gate. The earlier design was reviewed in 16 rounds, logged in [`protocol-review.md`](protocol-review.md). Their outcomes for the parts this design keeps still stand: primitives, encodings, records, key commitment, the contacts record format, enrollment and the CLI's output rules. Their outcomes for the access log, vouching, safety codes, read-only spaces, re-homing, closing and owner requests no longer apply, because those parts are gone.
 
-This design gets its own review round, with the same three briefs: a malicious server, a malicious or removed member or a compromised agent host, and encoding pitfalls. It focuses on what is new: shares and regions, key wraps, folder key envelopes, accepted owners, the key version check, rotations, moves and agent sealing. It also checks that the accepted risks in section 2.4 are the only ways the guarantees in section 2.3 fail. The round's findings, and the freeze once a round meets the stopping rule, are logged in `protocol-review.md`. Rounds 17 to 19 reviewed it on 2026-10-05. Round 19 met the stopping rule, and its findings are fixed, so the design is frozen for Milestone 2. Comments (section 5.9) were reviewed in rounds 20 and 21 on 2026-11-09, with the same three briefs; round 21 met the stopping rule, so they may be built. Live sessions (section 5.10) were reviewed in rounds 22 to 30 on 2026-11-12 and 2026-11-13, with the same three briefs; round 30 met the stopping rule, so they may be built.
+This design gets its own review round, with the same three briefs: a malicious server, a malicious or removed member or a compromised agent host, and encoding pitfalls. It focuses on what is new: shares and regions, key wraps, folder key envelopes, accepted owners, the key version check, rotations, moves and agent sealing. It also checks that the accepted risks in section 2.4 are the only ways the guarantees in section 2.3 fail. The round's findings, and the freeze once a round meets the stopping rule, are logged in `protocol-review.md`. Rounds 17 to 19 reviewed it on 2026-10-05. Round 19 met the stopping rule, and its findings are fixed, so the design is frozen for Milestone 2. Comments (section 5.9) were reviewed in rounds 20 and 21 on 2026-11-09, with the same three briefs; round 21 met the stopping rule, so they may be built. Live sessions (section 5.10) were reviewed in rounds 22 to 30 on 2026-11-12 and 2026-11-13, with the same three briefs; round 30 met the stopping rule, so they may be built. Identity key rotation (section 4.6, proposed) had a first round on 2026-11-23, with the same three briefs; its rounds continue once the project owner decides ADR 0018.

@@ -1,0 +1,221 @@
+---
+status: proposed
+---
+
+# Replacing a person's identity keys
+
+A person whose identity key may have leaked should be able to replace it with a new one, and have the people and spaces they share with move to the new key in an orderly way (#327). Today nothing replaces a person's keys. A key the server shows at a higher key version is a key change, with a warning that stops sharing until someone confirms it by phone or in person, and an owner whose key changed must be added again as a co-owner. The spec already says that a "suspected private-key compromise requires identity-key rotation and replacing grants for future content" (`wikistow.md` line 171), and the protocol left rotation, and its statement format, to a later milestone (`wikistow/protocol.md` section 4.6, Q4). This ADR decides the statement and what signs it, who can rotate, how contacts' apps take a rotation and tell it from a server swapping keys, what happens when someone else holds the old key too, agents, what old content stays readable under, whether shares rotate their keys, how the CLI and offline devices learn of it, and how it fits recovery, which keeps working.
+
+In short:
+- **Replace my keys**, in Settings → Security, for a person who still has their vault. Their app makes new keys at the next key version under the same identity ID, a new vault key, a new recovery key and a new passphrase, and signs out their other devices.
+- **One statement, signed by both keys.** A **rotation statement** (`identity-key-rotation/v1`) names the old key by its key hash and holds the new public keys. The old key signs it, so apps that pinned the old key can follow; the new key signs it, so it proves the new key's holder made it and vouches for the old key as its predecessor.
+- **Contacts' apps follow it without a warning.** An app that pinned the old key checks the chain of statements from its pin to the new key and moves the pin, with a notice, not the key-change warning. A server alone can't make a statement, so a substitution still shows as a key change. A thief who holds the old key and the person's session, or the server's help, can rotate too; that is a new accepted risk, A15.
+- **The old key only opens.** The person's keyring keeps its earlier secret keys, to open what was sealed to them. Everyone verifies what the old key signed before. Nothing is sealed to it again, and a key version sealed with it doesn't count for writing.
+- **Shares rotate their keys.** Whoever held the old key holds every folder key sealed to it. The person's app rotates every share of every space they own at once. Owners elsewhere are offered **Rotate keys and give access**, in one step. A rotating owner stays an owner, with no co-owner dialog.
+- **Agents carry over.** The app signs their enrollments again under the new key, for the agents the person keeps. The agents a person's app runs are made again, as their keys were sealed to the old key.
+- **The CLI and offline devices** follow when they next reach the server: the CLI from its person's contacts record, a device by locking and asking for the new passphrase, as after a passphrase change.
+- **Recovery doesn't change.** The new recovery key opens the new vault. It is how someone back from a lost passphrase gets in, and then they can replace their keys.
+
+## What the code supports today
+
+- **One key version per person, for good.** The server registers a person's identity only at key version 1 (`createVault`, `packages/server/src/content/vault.ts` line 44), and nothing else adds a human row; the only other insert is an agent's (`packages/server/src/content/agents.ts` line 443). The table could hold more: one row per `(id, keyVersion)` (`packages/server/src/db/schema/identities.ts` line 35), with at most one live human row per account (lines 39 to 41).
+- **Recovery keeps the keys.** The recovery page opens the vault with the recovery key, then asks for a new passphrase (`packages/ui/src/routes/_app/vault/recover.tsx` lines 24 to 28 and 77 to 107). `PUT /api/vault` replaces the passphrase wrapper and nothing else: the keyring and the recovery wrapper must come back byte for byte (`packages/contracts/src/routes/vault.ts` lines 24 to 33, `packages/server/src/content/vault.ts` lines 117 to 148). So protocol section 4.6's "a person's key version still increases when they replace lost keys during recovery" describes a path that was never built. A person who loses both their passphrase and their recovery key can't make a new vault either (`vault-exists`, line 69). Today a higher key version is only ever a server's substitution.
+- **The keyring holds one identity.** `{public, boxSecretKey, signSecretKey}` (`packages/client/src/vault.ts` line 57), under the vault key with the AD `vault-keyring/v1` (line 82).
+- **The directory serves current keys only.** `lookupIdentities` returns each ID's newest live row (`packages/server/src/content/identities.ts` lines 39 to 52), and a request's caller is the account's newest live identity (lines 19 to 36 and 74 to 78). No route serves an earlier row.
+- **One pin per person.** `TrustStore` keeps one key per identity ID (`packages/client/src/trust.ts` line 172). `require`, which every signature check uses, throws `unknown-identity` for any other key version (lines 265 to 271), so once a pin moves, what the person signed with the earlier key stops verifying. That is stricter than protocol section 8.4's "key changed" mark for a record above the pin. `confirmKey` replaces the pin after the key-change warning (lines 345 to 382). A pin's `method` is a strict enum of `first-seen` and `confirmed` (`packages/client/src/contacts.ts` line 73), and the interface shows a confirmed pin as checked (`packages/ui/src/sharing/people.ts` line 116).
+- **Envelopes are served at the current key only.** Owner-region envelopes (`packages/server/src/content/serving.ts` line 76), folder key envelopes (`packages/server/src/content/sharing.ts` lines 1190 and 1226) and comment envelopes (`packages/server/src/content/comments.ts` line 548) are filtered by the caller's current key version.
+- **Agents are bound to their person's key version.** `verifyEnrollment` requires the enrollment's `ownerKeyVersion` to be the person's (`trust.ts` line 97). A contacts record must be at its owner's key version (`contacts.ts` line 469), and only agents whose enrollment verifies under the owner's key get its content key (protocol section 8.1). The CLI's key file keeps the person at the key it pinned at enrollment (`apps/cli/src/keyfile.ts` lines 72 and 73).
+- **Owner statements bind a key version** (protocol section 6.5: "An owner whose key version changes is accepted again only when an owner re-adds them"; the server's check, `packages/server/src/content/owners.ts` lines 329 to 336). Owner rows are by identity ID (`space_owners`), so the server's owner list doesn't change with a key.
+- **The first owner of a space accepts itself** only if its first name record "verifies under `I`'s current key" (protocol section 6.5, step 1).
+- **What's sealed to a person's box key.** Every folder key envelope and owner-region envelope addressed to them, their contacts record's private part, which holds the secret keys and tokens of the agents their app runs (protocol section 9.8), and everything a device keeps sealed for them, whose key comes from the box secret key (`packages/client/src/device-seal.ts` lines 11 and 12): kept pages, the search index and queued changes (ADR 0009).
+- **A key change today** stops sharing with the person (`identity-key-changed`), makes them wait in shares that groups bring them into, and needs an owner's **Give access** at the new key (protocol sections 7.3, 7.9 and 8.4).
+
+## Decisions
+
+### 1. The rotation statement, and what signs it
+
+A rotation statement says "the key at version `k` of this identity is replaced by these keys at `k + 1`".
+
+```
+IdentityRotation = { installationId, id: HumanId,
+                     from: { keyVersion, keyHash },
+                     to:   { keyVersion, boxPublicKey, signPublicKey },
+                     fromSignature, toSignature }
+
+bytes = canonical('identity-key-rotation/v1', [installationId, id, from.keyVersion, from.keyHash,
+        to.keyVersion, to.boxPublicKey (bytes), to.signPublicKey (bytes)])
+```
+
+`from` is an identity reference without its ID (protocol section 4.4), so it binds the exact old keys. `to` holds the new public keys themselves, so a contact checks them against the statement, not against the directory. `to.keyVersion` is `from.keyVersion + 1`, and each new key differs from the old one of its kind. A chain of statements leads from any earlier key to the current one, one version at a time. The domain is new: `identity-rotation/v1`, from the drafts before the folder-key design, was cut (protocol section 15), and isn't used again.
+
+**What signs it.**
+- **A. The old key only.** That is what lets a contact's app follow. But nothing shows the new key's holder agreed: whoever has the old key could name any keys, someone else's included.
+- **B. The new key only.** It proves the new keys are held, but says nothing to someone who pinned the old key, which is the point.
+- **C. Both, over the same bytes** (recommended). The old key's signature is the continuity for apps that pinned it. The new key's proves its holder made the statement, and vouches for the old key as its predecessor, so someone who first met the person at the new key can still verify what they signed before. Each signature is checked under a different key, and the keys must differ, so neither stands in for the other. Decide 1.
+
+**No reason, and no time.** The statement doesn't say why. A "routine" rotation would let an honest person skip rotating shares, but every rotation here is for a key that may have leaked (decision 6), and a thief's statement could claim anything. It has no signed time either: an app shows when it followed. Decide 3.
+
+### 2. Who can rotate, and what changes
+
+**Only the person, from an unlocked vault.** Rotating needs the old secret keys to sign, and an app with a session. Settings → Security → **Replace my keys** asks for a recent sign-in, with the second factor where it's on, as a passphrase change does. A person who has lost their vault can't rotate: they recover first, with the recovery key.
+
+**What the app makes.**
+- New X25519 and Ed25519 keys at `k + 1`.
+- **A new vault key, recovery key and passphrase.** A leak of the keys may be a leak of the vault key too, from an unlocked device or served JavaScript (A8, A9), and then the old wrapper's copies open anything sealed under that vault key. So the new keyring goes under a new vault key, wrapped by a new passphrase and a new recovery key, shown once to save, as at setup. `wikistow.md` line 171 asks for exactly this: "Distinguish wrapper replacement from rotation after compromise." Decide 4.
+- **The keyring keeps the earlier keys**, as `retired` (decision 5). The wrapper is format 2, so an older app refuses it and asks to update (decision 10).
+- The statement, signed by both keys.
+- The agents' enrollments, signed again (decision 7).
+
+**One request.** `POST /api/me/identity/rotate` carries the statement, the new public identity, the new wrapper, the vault version it replaces, the kept agents' enrollments and the agents to revoke. Under a lock on the account, the server checks that `from` is the caller's current row, that no statement from that key version exists, that both signatures verify, that the new keys pass protocol section 4.1 and belong to no other row, and that the wrapper's settings pass. In one transaction it adds the new row, keeps the old one as no longer current, stores the statement and the wrapper, stores the enrollments and revokes the other agents, ends the account's other sessions, and ends the live sessions in the spaces the person owns or is a member of (ADR 0015, decision 12). It records `identity.rotated`.
+
+**Ending other sessions.** A stolen device is often why someone rotates. Signing out every other device stops that one reaching the server, and the person's own devices sign in again. It doesn't end agents' credentials: the agents the person keeps carry on. Decide 4.
+
+**Then the app finishes**, in order, and again at each unlock until it's done, as a transfer's rotations are (protocol section 7.6): its contacts record under the new key; the rotation of every share in the spaces it owns (decision 6); and the new versions sealed to its kept agents. It shows the rotation as unfinished until then.
+
+**The first statement wins.** The server keeps one statement per key version. If someone else rotated first, the request fails, and the app explains below (decision 4).
+
+### 3. How a contact's app takes it
+
+When an app holding a pin sees a higher key version for the same ID (in the directory, on a record or an envelope, or on its own person's contacts record), it fetches the statements from the pinned version up and checks the chain: the first names the pin by key hash, each next one starts where the last ended, both signatures of each verify, and the last ends at the key it saw.
+
+- **A. Follow it, with a notice** (recommended). The pin moves to the new key, keeping its label and its `method`, in the next contacts write. The app says once, where the person appears, that they replaced their keys, signed with their earlier key, and the contact's details list both fingerprints. Nothing stops: records the person signs at the new key verify, owners keep accepting them as an owner (decision 6), and their agents keep working. The one step left is an owner's, which only an owner's app can take anyway: giving them access at the new key, which is one action with no key-change warning (decision 6).
+- **B. Ask each contact first.** A calmer notice than the key-change warning, with one button to accept. But a click without checking with the person adds no safety: the only thing a contact could check is the fingerprint, by phone or in person, which is today's warning. And until each contact clicks, owner-region saves stop (`unaccepted-owner`) and the person's records show unverified.
+- **C. Treat it as a key change**, as today. Then a rotation brings no less friction than a substitution, which is what #327 asks for.
+
+Following trusts the new key exactly as far as the app trusted the old one: whoever held the old key could already sign and seal as the person. What A adds for a thief is decision 4. Decide 2.
+
+**A chain that doesn't check out** (a statement missing, a signature failing, a key that doesn't match) is a key change, with today's warning, and the app reports a possible attack. **A fork**, a second key at a version the app already followed, or another device's contacts record pinning a key off the chain, is a substitution (`identity-key-changed`) or a contacts conflict, never followed.
+
+**Telling a rotation from a server swapping keys.** The server can't sign with keys it doesn't hold, so it can't make a statement, and its substitution stays a key change with the warning. That is the distinction the issue asks for. The thing a statement can't tell apart is a rotation by the person from one by someone holding their old key (decision 4).
+
+### 4. When someone else holds the old key too
+
+What a thief can do with the old secret keys, by what else they have:
+- **The keys alone.** Nothing new: they can't post a rotation without the person's session and a recent sign-in. They can already open everything sealed to the old key that they can get from the server, which needs the server's help (A3).
+- **The keys and the person's session, or the server's help, before the person rotates.** They can rotate first, to keys of their own. Contacts follow, and their key wins. The person's own app, at its next unlock, finds a current key its keyring doesn't hold, which a chain from a key it holds leads to. It says **Someone else replaced your keys**, tells the person to warn the people they share with in person, and signs and seals nothing more. Those people can compare fingerprints, decline the key (which puts it in `removed`, protocol section 8.4), and remove the identity from their shares. Nothing in the protocol takes the identity back. A way to start again with a new identity, which a person who lost both their passphrase and recovery key needs too, is for another issue. Decide 7.
+- **The keys and the server's help, after the person rotated.** The server can show an app that hasn't followed yet a chain of the thief's instead, so that app follows the thief. Each app sees one chain and can't know of the other. This goes unnoticed unless two people compare fingerprints, as at first sight (A4). The thief can also still sign records, envelopes, owner statements and contacts versions with the old key. Apps that followed read such records as the person's earlier writing, but never take a key to write under, an owner or an agent from the old key (decision 5), so nothing new is sealed where the thief can read it.
+- **Everything the old key opened stays open to them** (A3): every folder key version sealed to it, the owner-region content keys, the private part of the contacts record as it was (labels, plugin approvals, and the keys and tokens of the agents the app runs). So what members save in a share whose keys haven't rotated reaches them, until an owner rotates it (decision 6).
+
+The ADR records these as accepted risk **A15** (protocol section 2.4). A stronger answer is an offline key that alone may rotate, such as one derived from the recovery key, which contacts would pin at first sight. That needs every existing identity to commit to it first, signed by a key that may already have leaked, and is listed under **Considered options**.
+
+### 5. What stays readable, and under what
+
+**Content keys never change**, so every record, published version, comment, history entry and public link reads as before. The question is only whose keys open and verify them.
+
+**The person's own app** keeps every earlier secret key in its keyring (`retired`), and opens envelopes addressed to any key version it holds, current or earlier. The server serves a person their envelopes at every key version of theirs, not only the current one. It never seals or signs with an earlier key. What a device sealed for itself under an earlier key it opens once, to seal again under the new key: kept pages, the search index and queued changes.
+- **A. Keep the earlier secret keys** (recommended). Nothing is re-sealed. The keys are the leaked ones, so keeping them exposes nothing more.
+- **B. Re-seal everything to the new key**, then drop the old. Every envelope and wrap the person holds, in one request or many, the size of adding a co-owner to every space at once (Q8), for history whoever stole the key holds anyway. Decide 6.
+
+**Everyone else** verifies what the person signed with an earlier key through the chain: the directory serves earlier rows by key version, checked against the chain's key hashes. A key reached through the chain before the pin is an **earlier key** of that person. Its signatures verify for opening, with no mark. It counts for nothing else:
+- a key version whose envelope it sealed doesn't count for writing (protocol section 6.5, **Writing**), with the one exception that a rotation may verify the current version through it (decision 6);
+- an owner statement it signed accepts nobody (section 6.5, step 3);
+- nothing is sealed to it, and no agent's enrollment counts under it;
+- a contacts version it signed is accepted only below the first version signed with a later key: key versions along a contacts chain never go down.
+
+So once an app follows, a thief signing with the old key can show it old-looking records, but can't make it write under keys the thief knows. History stays readable after the person rotates, and the published versions, which readers open with the share's published keys, don't depend on the person's keys at all.
+
+### 6. Shares and ownership
+
+**Shares rotate their keys.** Whoever holds the old key holds every folder key ever sealed to it, so content saved later in those shares is theirs too, with the server's help, until a new key version leaves them out. Leaving rotation to owners' discretion, as after an agent's revocation (protocol section 9.7), would leave every share the person was in open by default.
+- **In the spaces the person owns**, their app rotates every share at once, after the rotation lands (decision 2), with nobody left out, as protocol section 7.5 does, and raises its **No going back** marks. Its own envelope of each new version goes to its new key. Until then, members' apps that followed see the current version sealed by an earlier key, which doesn't count for writing, and wait for the new version: a pause, not a leak.
+- **In spaces others own**, the person waits at their new key, as a member whose key changed does (protocol section 7.9), and still reads what they had through their earlier keys. The owners' apps list them under **Waiting** as having replaced their keys, not with the key-change warning, and offer **Rotate keys and give access** for each share they're in: one rotation whose new version goes to everyone remaining, with every earlier version sealed to the person's new key in the same request. The person's agents get the new versions from the person once they have them.
+
+**A rotating owner stays an owner.** An app that accepted an owner at a key accepts them at every later key on a chain it follows, and records it as it records accepting an owner (protocol section 8.6). The co-owner dialog and the re-add of section 7.6 aren't needed. A removed owner stays removed, as `removedOwners` holds IDs. An app accepts itself as a space's first owner when its first name record verifies under any key its keyring holds, not only the current one. New owner-region saves seal to the owners at the keys the server lists, the rotated owner's new key among them. Older owner-region records stay sealed to their earlier key, which their keyring opens.
+
+**A rotation from a version an earlier key sealed.** When a share's current version was sealed with the earlier key of an accepted owner, which will be every share the rotating owner rotated last, that version doesn't count for writing, so a rotation from it would be refused. In a rotation, and in an owner's removal, envelopes sealed with an earlier key of an accepted owner who isn't removed count when verifying that version, as protocol section 7.6, step 2, does for an owner being removed. They don't move the **No going back** mark.
+
+Decide 3.
+
+### 7. Agents enrolled under the old key
+
+An agent's own keys don't change, and its ID derives from its person's ID and its keys (protocol section 4.2), not their key version. But its enrollment is signed at the old key version, and nothing it can verify says the new key is its person's.
+
+- **The agents the person keeps carry over.** The rotation dialog lists the person's agents by their labels, each kept unless the person unticks it. For each kept agent the app signs the enrollment again with the new key: the same agent, at `ownerKeyVersion` `k + 1`, with no fingerprint to compare, since the agent is already the person's. Unticked ones are revoked, which ends their credentials and grants. A thief who enrolled an agent of their own with the old key shows up here, under a label the person doesn't know.
+- **The agents the person's app runs** (protocol section 9.8) are revoked, and made again the next time the page chat needs one. Their secret keys and tokens were in the private part of the contacts record, sealed to the old key.
+- **An agent follows its person.** It finds its person's contacts record at the new key, follows the chain from the key it pinned at enrollment, and keeps the new key in its local file. It accepts its enrollment only signed again at its person's current key, so an agent the person dropped can't read the record. What its person sealed to it with the earlier key it opens, but writes only under versions its person seals with the new key, which the person's app does as it finishes the rotation, for the shares it then holds.
+
+Re-enrolling every agent from scratch would be the alternative: no new rule, but every CLI's user would go through the lookup code and fingerprint again. Decide 5.
+
+### 8. How the CLI and offline devices learn of it
+
+- **The CLI** reads its person's contacts record at each command, as now. A record at a higher key version makes it fetch the chain from the key in its key file, check it, write the new key there, and say once on standard error that its person replaced their keys, signed with their earlier key. A chain that doesn't check out stops it with `identity-key-changed`, and it tells the user to enroll again. An agent whose person dropped it can't open the record, and its credential is ended anyway.
+- **A device that was offline** keeps unlocking offline with the wrapper it kept, as before (A13): offline it can't know. Back online, the server's wrapper version has moved, so the app locks and asks for the new passphrase, as it does after a passphrase change made elsewhere (ADR 0009, decision 5). The new keyring opens what the device kept under the old key, which it seals again under the new one, and its queued changes are signed and sealed with the new key when sent, as offline changes always are. A device the rotation signed out signs in first.
+- **Other people's devices** follow the chain the first time they meet the new key, online.
+
+### 9. The recovery path
+
+It keeps working as built (protocol section 5.6): the recovery key opens the vault, and the person chooses a new passphrase. After a rotation, the new recovery key is the one that works. An old recovery key opens only a copy of the old wrapper, if anyone kept one, and that holds only the old keys, which are the leaked ones. Recovery and rotation are separate on purpose: recovery is for a lost passphrase, rotation for a leaked key, and someone who lost a device may need both, recovery first.
+
+The protocol's claim that recovery raises the key version (section 4.6) is corrected to what's built: it never does.
+
+### 10. Older apps and servers
+
+- **The person's own older apps** refuse a format 2 wrapper and ask to update, by the versioning rules (protocol section 1), rather than run with a keyring whose earlier keys they can't see.
+- **Other people's older apps** see a key change, with today's warning. Confirming it is what they do today, and an owner among them adds the person again as a co-owner. They keep working once updated.
+- **An older server** has no rotate route, so **Replace my keys** says the server needs an update.
+
+### 11. Routes
+
+| Request | What the server does |
+|---|---|
+| `POST /api/me/identity/rotate {rotation, identity, wrapper, expectedVaultVersion, enrollments, revokedAgents}` | Decision 2. Behind a recent sign-in. |
+| `GET /api/identities/:id/rotations?after=n` | The statements of that identity from key version `n` up, in order, to anyone signed in who may look the identity up. |
+| `GET /api/identities/:id/versions/:keyVersion` | An earlier row's public keys. |
+| `POST /api/shares/:shareId/rotate` | Gains `rekeyed`: members at a new key whom this rotation also gives every earlier version, as **Give access** does (decision 6). |
+
+Serving envelopes at every key version of the caller changes the existing routes, not their shapes.
+
+### Out of scope
+
+- **Starting again with a new identity**, for a person who lost both their passphrase and their recovery key, or whose identity someone else rotated (decision 4, Decide 7).
+- **Rotating an agent's keys.** That is enrolling a new agent, as today (protocol section 4.2).
+- **Rotating on a schedule.** Every rotation costs owners a step; it's for a key that may have leaked.
+
+## Considered options
+
+- **Re-adding the person everywhere, as today.** No new format, but every owner sees the key-change warning and adds them again as a co-owner, for a change the person made on purpose (decision 3, C).
+- **Only the old key signs** (decision 1, A), **or only the new** (decision 1, B).
+- **A rotation key held offline**, derived from the recovery key or saved separately, which alone could sign a rotation, as Matrix's cross-signing master key or Keybase's paper keys work. It is the one design that tells the person from a thief holding the identity key. But contacts would have to pin it at first sight, every existing identity would commit to it with a key that may already have leaked, and the recovery key would gain a second job that makes it worth more to steal. It can come later, as a statement format of its own, if A15 proves too wide.
+- **A waiting period** before contacts follow, so the person could object. The server decides what each app sees and when, so a wait proves nothing against it.
+- **Asking each contact to accept** (decision 3, B).
+- **Re-sealing history to the new key** (decision 5, B).
+- **A "routine" rotation** that rotates no shares (decision 1).
+- **Re-enrolling every agent** (decision 7).
+- **Keeping the vault key**, and replacing only the keyring under it. One fewer secret to save, but whoever had the vault key opens the new keyring from the server's copy.
+
+## Consequences
+
+- **Now, with this ADR:** protocol sections 4.6, 8.4 and Q4 hold the proposed rules, marked proposed, with the new domain `identity-key-rotation/v1`, accepted risk A15 and the "follow a rotation" contacts change. `wikistow.md` line 171 says it's proposed. `CONTEXT.md` gains **Identity key rotation**. Section 4.6's claim that recovery raises the key version is corrected.
+- **Before it's built:** protocol review rounds until one finds nothing high or critical, as for every format (`protocol-review.md`). The first ran with this ADR (**Identity key rotation, first review**).
+- **Once accepted:**
+  - `wikistow.md` gains **Replace my keys** in **Human and agent keys**, and the spec's ADR list says it's accepted.
+  - `wikistow/ui-design.md` gains the dialog, the notice a contact sees, **Waiting**'s new reason, the unfinished state and **Someone else replaced your keys**.
+- **Code:**
+  - `packages/contracts`: the statement, the format 2 wrapper and keyring, and the routes.
+  - `packages/client`: the statement's bytes and checks, chains; `TrustStore` gains earlier keys and following, `require` accepts an earlier key for opening; the accepted-owner and writing predicates learn earlier keys; opening at a held key version; the rotation operation and its finishing steps; agents' new enrollments.
+  - `packages/server`: the rotate route and its checks, the old row kept but not current, statements stored, envelopes served at every key version of the caller, `rekeyed` in rotations, ending sessions and live sessions.
+  - `packages/ui`: Settings → Security, the notices, **Waiting**, the owners' offer, the device's re-sealing.
+  - `apps/cli`: following its person, and the notice.
+
+## Implementation, in pull requests
+
+1. **This ADR**, with the protocol change and its first review round (#327).
+2. **Review rounds** to the stopping rule, and the project owner's decisions recorded here (#327).
+3. **Formats and checks** (#327). The statement, chains, the format 2 wrapper and keyring, earlier keys in `TrustStore`, test vectors.
+4. **Rotating** (#327). The route, Settings → Security, the new vault and recovery key, agents' enrollments, ending sessions, the unfinished state, and **Someone else replaced your keys**.
+5. **Following** (#327). Contacts' apps and the CLI follow chains; owners accept the rotated owner; opening at earlier keys, on the server and in the apps; the devices' re-sealing.
+6. **Shares** (#327). The person's own shares rotated at once, and owners' **Rotate keys and give access**.
+7. **The spec,** marked built (#327).
+
+Steps 3 and 4 come first. Step 5 needs 3, and step 6 needs 4 and 5.
+
+## Decide
+
+1. **One statement, `identity-key-rotation/v1`, signed by both the old key and the new?** Recommended: yes (decision 1). The old key's signature lets contacts follow; the new key's proves the new keys are held and vouches for the old key, so history signed before stays verifiable by anyone who meets the person later.
+2. **Contacts' apps follow a valid chain without asking, with a notice?** Recommended: yes (decision 3, A). The only real check a contact can make is the fingerprint, which is today's key-change warning; a click that checks nothing adds no safety, and until it came, owner-region saves would stop. A server alone still can't move a pin. The cost is A15: a thief with the old key and the person's session, or the server's help, is followed too.
+3. **Every rotation counts as a leak: the person's own shares rotate at once, and owners elsewhere get "Rotate keys and give access" as one step?** Recommended: yes (decisions 1 and 6). The old key holds every folder key sealed to it. A "routine" rotation that skipped this would be the one option a thief would always pick.
+4. **A rotation makes a new vault key, recovery key and passphrase, and signs out the person's other devices?** Recommended: yes (decision 2). A leaked identity key may come with the vault key or the passphrase, and the device it leaked from may be one of the person's. The cost: a new recovery key to save, and signing in again elsewhere.
+5. **Agents carry over, with their enrollments signed again, unless the person unticks them; the page chat's agents are made again?** Recommended: yes (decision 7). Re-enrolling every CLI by hand is the alternative.
+6. **The keyring keeps the earlier secret keys, to open history, rather than re-sealing history to the new key?** Recommended: keep them (decision 5). They are the leaked keys, so keeping them costs nothing, where re-sealing is the size of adding a co-owner to every space.
+7. **A rotation someone else made first is not undone by the protocol: the person's app says so and stops, and a way to start again with a new identity is a separate issue?** Recommended: yes (decision 4, and A15). Undoing it needs a key the thief doesn't hold, such as an offline rotation key (**Considered options**), which every identity would have to commit to in advance.
+8. **Older apps of the rotated person refuse the new wrapper and ask to update?** Recommended: yes (decision 10). The alternative, ignoring the earlier keys, leaves them unable to open history and to accept themselves as owners, with errors that don't say why.

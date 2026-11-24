@@ -74,8 +74,12 @@ An owner making a new key version and sealing it only to the people who keep acc
 _Avoid_: Rekey. Replacing a person's own identity keys is identity key rotation, a different thing.
 
 **Pinned key**
-The first public key your app saw for a person, kept in your contacts. If the server later shows a different key for them, your app warns you and stops sharing with them until you confirm the new key.
+The first public key your app saw for a person, kept in your contacts. If the server later shows a different key for them, your app warns you and stops sharing with them until you confirm the new key. A key the person replaced themself, which their earlier key vouches for, moves the pin with a notice instead.
 _Avoid_: Verified key, safety code.
+
+**Identity key rotation**
+A person replacing their own identity keys with new ones, as when the old ones may have leaked, with a statement both keys sign. The people they share with follow it to the new key without the key-change warning, what the person signed before stays theirs, and the shares they're in get new folder keys. Proposed in ADR 0018. Not recovery, which opens the same keys with the recovery key.
+_Avoid_: Key reset, re-keying, key change (a key the app can't follow).
 
 **Shared with me**
 The list of shares you are a member of. Each shows the shared folder's name and who shared it, never the names of the folders above it.
