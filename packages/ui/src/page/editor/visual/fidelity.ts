@@ -102,7 +102,7 @@ const isBreak = (item: Shown | undefined) =>
  * another of Unicode's, shows as itself, as Markdown keeps it, but with no
  * marks, as an ASCII space does, in code too: no delimiter can sit beside
  * one either, so one at a mark's end is written outside it (`writable`,
- * `around`), save in a link or a colour's HTML, which hold it (#730).
+ * `around`), save in a colour's HTML, which holds it (#730).
  */
 function inline(block: Node): Shown[] {
   const shown: Shown[] = [];
