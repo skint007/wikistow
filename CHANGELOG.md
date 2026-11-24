@@ -12,6 +12,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - In the visual editor, Comment over cells selected in a table quotes them from the first to the last, as the page reads, rather than only the last cell. (#721)
 - A public link's copy lists the other pages in its query tables by when the server saved them, not by this device's clock, for pages published from this device too. A device whose clock ran fast or slow could list them out of order. (#725)
 
+#### Desktop
+
+- On Linux, logging out with the app open, or stopping it with `systemctl`, no longer crashes it with a core dump, after which Ubuntu offered to report a problem. The launcher starts it with `--no-unsandboxed-zygote`, so the app can start its GPU process again when the session ends that process and the zygote first. (#727)
+
 #### Server
 
 - Suspending someone no longer fails while that person unpublishes a page, turns its public link off, changes who can publish, deletes a space or moves a page to another space, where it ended a public link they shared or a copy they uploaded. (#724)

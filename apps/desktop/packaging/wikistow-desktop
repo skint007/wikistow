@@ -17,5 +17,11 @@ if [ -r "$flags" ]; then
   set -- $(grep -v '^[[:space:]]*#' "$flags") "$@"
 fi
 app=/usr/lib/$name
-if [ -x "$app/$name" ]; then exec "$app/$name" "$@"; fi
-exec electron44 "$app/app.asar" "$@"
+# Chromium starts the GPU process through a helper process, the unsandboxed
+# zygote. Logging out, or `systemctl stop`, can end both before the app has
+# quit; the app then can't start the GPU process again, and Chromium crashes
+# it on purpose, with a core dump (#627). With this switch the app starts
+# the GPU process itself, so it can. It must be on the command line: the
+# zygote starts before the app's code runs.
+if [ -x "$app/$name" ]; then exec "$app/$name" --no-unsandboxed-zygote "$@"; fi
+exec electron44 "$app/app.asar" --no-unsandboxed-zygote "$@"
