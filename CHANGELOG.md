@@ -12,10 +12,15 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 - In the visual editor, Comment over cells selected in a table quotes them from the first to the last, as the page reads, rather than only the last cell. (#721)
 - Live editing: a space typed at the end of a paragraph or heading in the visual editor is no longer lost when someone else changes that block or the one beside it at the same moment, which ran the next word typed into the one before. The visual editor now keeps the spaces a paragraph or heading ends with in the page, as it writes them. (#723)
 - A public link's copy lists the other pages in its query tables by when the server saved them, not by this device's clock, for pages published from this device too. A device whose clock ran fast or slow could list them out of order. (#725)
+- In the visual editor, bold or another mark that ends at a line break, where a link starts inside it and goes on past the break, no longer sends the page to source mode. (#731)
 
 #### Desktop
 
 - On Linux, logging out with the app open, or stopping it with `systemctl`, no longer crashes it with a core dump, after which Ubuntu offered to report a problem. The launcher starts it with `--no-unsandboxed-zygote`, so the app can start its GPU process again when the session ends that process and the zygote first. (#727)
+
+#### Desktop
+
+- Web clipper: a screenshot clip that a reload or a lock cut short adds its screenshot to the page it made, rather than putting that page in the trash and making another. Where you can add pages to a shared folder but not trash them, it no longer leaves two pages, and if adding it fails, the page with your note and link stays. (#734)
 
 #### Server
 

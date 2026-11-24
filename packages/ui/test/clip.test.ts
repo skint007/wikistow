@@ -8,13 +8,16 @@ import {
   keptOperations,
   memoryKeptStore,
   newId,
+  newPayload,
   PageId,
+  queueOperations,
   RevisionId,
   SpaceId,
   splitFrontmatter,
   type AttachmentRef,
   type DraftSave,
   type KeptStore,
+  type PagePayload,
   type PageWriter,
   type QueuedPage,
   type ServerWrites,
@@ -30,7 +33,7 @@ import {
   textHtml,
 } from '../src/clip/clip-page';
 import { rememberedPlaces, searchPlaces, type ClipPlace } from '../src/clip/clip-places';
-import { saveClip, type SaveClipDeps } from '../src/clip/save-clip';
+import { hiddenByTrash, saveClip, type SaveClipDeps } from '../src/clip/save-clip';
 
 const spaceId = newId(SpaceId);
 const folderId = newId(FolderId);
@@ -230,10 +233,22 @@ describe('the folder search', () => {
 function fakeWriter({
   refuse,
   made = [],
+  gone = [],
+  waiting = null,
+  savedSince = false,
+  whileAttaching,
 }: {
-  refuse?: 'page' | 'attach' | 'attach-failed' | 'save' | 'delete';
+  refuse?: 'page' | 'attach' | 'attach-failed' | 'save' | 'delete' | 'delete-forbidden';
   /** Pages made already, which making again is refused as. */
   made?: PageId[];
+  /** Pages in the trash, which attaching to is refused as not found. */
+  gone?: PageId[];
+  /** The page's change waiting on this device, and the head it's on: none for one the server refused. */
+  waiting?: { head: RevisionId | null; payload: PagePayload } | null;
+  /** Another window saved into the waiting change after its head was read. */
+  savedSince?: boolean;
+  /** The waiting change once a file is attached, as the queue sent it or was refused it meanwhile. */
+  whileAttaching?: { waiting: { head: RevisionId | null; payload: PagePayload } | null };
 } = {}) {
   const calls: { call: string; input: unknown }[] = [];
   const revisionId = newId(RevisionId);
@@ -247,8 +262,13 @@ function fakeWriter({
       }
       return { pageId: input.ids?.pageId ?? newId(PageId), revisionId };
     },
-    async attach(_page: unknown, file: { name: string; mediaType: string; bytes: Uint8Array }) {
+    async attach(
+      page: { pageId: PageId },
+      file: { name: string; mediaType: string; bytes: Uint8Array },
+    ) {
       calls.push({ call: 'attach', input: file.name });
+      if (whileAttaching) waiting = whileAttaching.waiting;
+      if (gone.includes(page.pageId)) throw new ApiError(404, 'not-found', 'Not found');
       if (refuse === 'attach') throw new ApiError(413, 'payload-too-large', 'Too large');
       if (refuse === 'attach-failed') throw new Error('Gone');
       n += 1;
@@ -257,11 +277,20 @@ function fakeWriter({
     async deleteNode(input: unknown) {
       calls.push({ call: 'deleteNode', input });
       if (refuse === 'delete') throw new ApiError(404, 'not-found', 'Gone');
+      if (refuse === 'delete-forbidden') throw new ApiError(403, 'forbidden', 'No');
       return 'trashed';
     },
     draft() {
       return {
-        waitingHead: async () => null,
+        waitingHead: async () => waiting?.head ?? null,
+        // Version 1, refused by the server without a head, or saved into after the head was read.
+        entryNow: async () =>
+          waiting && {
+            version: savedSince ? 2 : 1,
+            payload: waiting.payload,
+            failure: waiting.head ? null : { kind: 'gone' },
+          },
+        seen: () => (waiting?.head ? 1 : null),
         save: async (input: DraftSave) => {
           calls.push({ call: 'save', input });
           if (refuse === 'save') throw new ApiError(409, 'stale-head', 'Stale');
@@ -272,6 +301,82 @@ function fakeWriter({
   } as unknown as PageWriter;
   return { writer, calls, revisionId };
 }
+
+// A space's tree as the queue shows it (`withQueued`): folders by ID, each at the top, and pages in them.
+type QueueTree = Parameters<typeof queueOperations.withQueued>[0];
+const spaceTree = (folders: FolderId[], pages: [PageId, FolderId][]) =>
+  ({
+    space: null,
+    shares: [],
+    folders: folders.map((id) => ({
+      id,
+      parentId: null,
+      permissionVersion: 1,
+      position: null,
+      metadata: null,
+    })),
+    pages: pages.map(([id, parentId]) => ({
+      id,
+      parentId,
+      permissionVersion: 1,
+      draftHead: null,
+      publishedHead: null,
+      draftChanges: false,
+      position: null,
+      title: 'Clip',
+      emoji: null,
+      icon: null,
+      symbol: null,
+      region: null,
+    })),
+    agentActivity: null,
+  }) as unknown as QueueTree;
+const trashOf = (id: PageId | FolderId, failure: unknown = null) =>
+  ({
+    kind: 'delete',
+    id,
+    node: 'folder',
+    spaceId,
+    name: 'Gone',
+    failure,
+    at: 1,
+  }) as unknown as queueOperations.QueueEntry;
+
+describe('a page in the trash on this device', () => {
+  const pageId = newId(PageId);
+  const chosen = newId(FolderId);
+  const tree = spaceTree([folderId, chosen], [[pageId, chosen]]);
+
+  it('is hidden by a trash waiting for it, or for its folder', () => {
+    expect(hiddenByTrash(tree, spaceId, [trashOf(pageId)], pageId)).toBe(true);
+    expect(hiddenByTrash(tree, spaceId, [trashOf(chosen)], pageId)).toBe(true);
+  });
+
+  it('isn’t by one for another folder, as the one a clip was first sent to', () => {
+    expect(hiddenByTrash(tree, spaceId, [trashOf(folderId)], pageId)).toBe(false);
+  });
+
+  it('isn’t by one the server refused, nor when nothing waits, nor if it isn’t there at all', () => {
+    expect(hiddenByTrash(tree, spaceId, [trashOf(chosen, { kind: 'forbidden' })], pageId)).toBe(
+      false,
+    );
+    expect(hiddenByTrash(tree, spaceId, [], pageId)).toBe(false);
+    expect(hiddenByTrash(tree, spaceId, [trashOf(chosen)], newId(PageId))).toBe(false);
+  });
+
+  it('is by its own, even where its space’s tree can’t be read', () => {
+    expect(hiddenByTrash(null, spaceId, [trashOf(pageId)], pageId)).toBe(true);
+    expect(hiddenByTrash(null, spaceId, [trashOf(chosen)], pageId)).toBe(false);
+    expect(hiddenByTrash(null, spaceId, [trashOf(pageId, { kind: 'forbidden' })], pageId)).toBe(
+      false,
+    );
+  });
+
+  it('is by one waiting beside another the server refused', () => {
+    const refused = trashOf(pageId, { kind: 'forbidden' });
+    expect(hiddenByTrash(tree, spaceId, [refused, trashOf(chosen)], pageId)).toBe(true);
+  });
+});
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 const here: ClipPlace = { spaceId, folderId, path: ['Home', 'News'] };
@@ -624,76 +729,341 @@ describe('saving a screenshot', () => {
     expect(calls[0]?.input).toMatchObject({ ids: { pageId, revisionId, sent: true } });
   });
 
-  it('puts a page a reload cut short just after it was made in the trash, and saves the screenshot again', async () => {
+  it('adds the screenshot to a page a reload cut short just after it was made, making no other', async () => {
     const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
     const { writer, calls } = fakeWriter({ made: [pageId] });
     const told: ClipMade[] = [];
     const saved = await saveClip(
-      shot({ made: { spaceId, pageId, path: 'Home / News', making: true } }),
+      shot({ made: { spaceId, pageId, revisionId, path: 'Home / News', making: true } }),
       deps({ writer, made: async (page) => void told.push(page) }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, pageId, images: { saved: 1, skipped: 0 } });
+    expect(calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'save']);
+    const save = calls[2]!.input as DraftSave;
+    expect(save.basedOn).toBe(revisionId);
+    expect(save.payload.markdown).toContain('![Screenshot](attachment:att1)');
+    expect(told).toEqual([{ spaceId, pageId, path: 'Home / News' }]);
+  });
+
+  it('saves the screenshot again if the page a reload cut short is in the trash already', async () => {
+    const pageId = newId(PageId);
+    const { writer, calls } = fakeWriter({ made: [pageId], gone: [pageId] });
+    const saved = await saveClip(
+      shot({
+        made: { spaceId, pageId, revisionId: newId(RevisionId), path: 'Home / News', making: true },
+      }),
+      deps({ writer }),
     );
     expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
     expect(saved.outcome).not.toMatchObject({ pageId });
     expect(calls.map((c) => c.call)).toEqual([
       'newPageDraft',
-      'deleteNode',
+      'attach',
       'newPageDraft',
       'attach',
       'save',
     ]);
-    expect(calls[1]?.input).toMatchObject({ spaceId, nodeId: pageId, dropChanges: true });
     // The new page's ID is kept before it's made, as any.
     const { ids: again } = calls[2]!.input as {
       ids: { pageId: PageId; revisionId: RevisionId; sent: boolean };
     };
     expect(again.pageId).not.toBe(pageId);
     expect(again.sent).toBe(false);
-    expect(told[0]).toEqual({
-      spaceId,
-      pageId: again.pageId,
-      revisionId: again.revisionId,
-      path: 'Home / News',
-      making: true,
+  });
+
+  it('says a partly made page’s first draft, so a reload can add the screenshot to it', async () => {
+    const { writer, revisionId } = fakeWriter();
+    const told: ClipMade[] = [];
+    await saveClip(shot(), deps({ writer, made: async (page) => void told.push(page) }));
+    expect(told[1]).toMatchObject({ revisionId, partial: true });
+  });
+
+  // A page made partly is never put in the trash (#681): a person who can
+  // add pages to a shared folder may not trash them, and a save that failed
+  // after the trash would leave nothing of the note.
+  describe('made partly before a reload', () => {
+    const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
+    const partly = (fields: Partial<DesktopClip> = {}) =>
+      shot({
+        made: { spaceId, pageId, revisionId, path: 'Home / News', partial: true },
+        ...fields,
+      });
+
+    it('adds the screenshot to it, making no other', async () => {
+      const { writer, calls } = fakeWriter();
+      const told: ClipMade[] = [];
+      const saved = await saveClip(
+        partly(),
+        deps({ writer, made: async (page) => void told.push(page) }),
+      );
+      expect(saved.outcome).toEqual({
+        ok: true,
+        spaceId,
+        pageId,
+        title: 'A [story]',
+        path: 'Home / News',
+        images: { saved: 1, skipped: 0 },
+        faithful: true,
+      });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'save']);
+      const save = calls[1]?.input as DraftSave;
+      expect(save.basedOn).toBe(revisionId);
+      expect(save.payload.markdown).toContain('![Screenshot](attachment:att1)');
+      expect(save.payload.attachments).toEqual([expect.objectContaining({ id: 'att1' })]);
+      expect(told).toEqual([{ spaceId, pageId, path: 'Home / News' }]);
     });
-  });
 
-  it('saves the screenshot again if the page a reload cut short is in the trash already', async () => {
-    const pageId = newId(PageId);
-    const { writer, calls } = fakeWriter({ made: [pageId], refuse: 'delete' });
-    const saved = await saveClip(
-      shot({ made: { spaceId, pageId, path: 'Home / News', making: true } }),
-      deps({ writer }),
-    );
-    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
-    expect(calls.map((c) => c.call)).toEqual([
-      'newPageDraft',
-      'deleteNode',
-      'newPageDraft',
-      'attach',
-      'save',
-    ]);
-  });
+    it('adds it even where the person can’t put pages in the trash', async () => {
+      const { writer, calls } = fakeWriter({ refuse: 'delete-forbidden' });
+      const saved = await saveClip(partly(), deps({ writer }));
+      expect(saved.outcome).toMatchObject({ ok: true, pageId });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'save']);
+    });
 
-  it('puts a page made partly before a reload in the trash, and saves the screenshot again', async () => {
-    const { writer, calls } = fakeWriter();
-    const pageId = newId(PageId);
-    const saved = await saveClip(
-      shot({ made: { spaceId, pageId, path: 'Home / News', partial: true } }),
-      deps({ writer }),
-    );
-    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
-    expect(calls.map((c) => c.call)).toEqual(['deleteNode', 'newPageDraft', 'attach', 'save']);
-    expect(calls[0]?.input).toMatchObject({ spaceId, nodeId: pageId, dropChanges: true });
-  });
+    it('adds it even if the folders can’t be loaded', async () => {
+      const { writer, calls } = fakeWriter();
+      const saved = await saveClip(
+        partly(),
+        deps({ writer, places: () => Promise.reject(new ApiError(500, 'internal', 'No')) }),
+      );
+      expect(saved.outcome).toMatchObject({ ok: true, pageId });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'save']);
+    });
 
-  it('saves the screenshot again even if the partial page is gone already', async () => {
-    const { writer, calls } = fakeWriter({ refuse: 'delete' });
-    const saved = await saveClip(
-      shot({ made: { spaceId, pageId: newId(PageId), path: 'Home / News', partial: true } }),
-      deps({ writer }),
-    );
-    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
-    expect(calls.map((c) => c.call)).toEqual(['deleteNode', 'newPageDraft', 'attach', 'save']);
+    it('keeps it, with the note and link, if the screenshot can’t be added', async () => {
+      for (const refuse of ['attach', 'attach-failed'] as const) {
+        const { writer, calls } = fakeWriter({ refuse });
+        const saved = await saveClip(partly(), deps({ writer }));
+        expect(saved.outcome).toMatchObject({
+          ok: false,
+          code: refuse === 'attach' ? 'too-large' : 'failed',
+          message: expect.stringContaining('Its page keeps your note and link.'),
+        });
+        expect(calls.map((c) => c.call)).not.toContain('deleteNode');
+        expect(calls.map((c) => c.call)).not.toContain('newPageDraft');
+      }
+    });
+
+    // The page as the clip wrote it, first without the screenshot, then with it as `att1`.
+    async function written() {
+      const { writer, calls } = fakeWriter();
+      await saveClip(shot(), deps({ writer }));
+      const first = calls[0]!.input as { title: string; markdown: string };
+      const whole = (calls[2]!.input as DraftSave).payload;
+      return { first: { ...newPayload(first), attachments: [] }, whole };
+    }
+
+    it('adds it on the draft the server has now, keeping all else the person changed', async () => {
+      const { first } = await written();
+      const head = newId(RevisionId);
+      const cover = { 'wikistow.cover': { emoji: '🌲' } };
+      const markdown = first.markdown.replace(
+        'clipped: 2026-11-13',
+        'clipped: 2026-11-13\nmine: yes',
+      );
+      const { writer, calls } = fakeWriter();
+      const saved = await saveClip(
+        partly(),
+        deps({
+          writer,
+          current: async () => ({ head, payload: { ...first, markdown, extensions: cover } }),
+        }),
+      );
+      expect(saved.outcome).toMatchObject({ ok: true, pageId });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'save']);
+      const save = calls[1]!.input as DraftSave;
+      expect(save.basedOn).toBe(head);
+      expect(save.payload.extensions).toEqual(cover);
+      expect(save.payload.markdown).toContain('mine: yes');
+      expect(save.payload.markdown).toContain('![Screenshot](attachment:att1)');
+    });
+
+    it('leaves it as the person changed it on the server, adding nothing', async () => {
+      const { first } = await written();
+      const { writer, calls } = fakeWriter();
+      const saved = await saveClip(
+        partly(),
+        deps({
+          writer,
+          current: async () => ({
+            head: newId(RevisionId),
+            payload: { ...first, markdown: `${first.markdown}My words\n` },
+          }),
+        }),
+      );
+      expect(saved.outcome).toMatchObject({
+        ok: false,
+        message: expect.stringContaining('Its page changed since WikiStow made it'),
+      });
+      expect(calls).toEqual([]);
+    });
+
+    it('finds the screenshot in it already, on the server or here, adding no other', async () => {
+      const { whole } = await written();
+      const head = newId(RevisionId);
+      const online = fakeWriter();
+      const onServer = await saveClip(
+        partly(),
+        deps({ writer: online.writer, current: async () => ({ head, payload: whole }) }),
+      );
+      expect(onServer.outcome).toMatchObject({ ok: true, pageId });
+      expect(online.calls).toEqual([]);
+      const offline = fakeWriter({ waiting: { head, payload: whole } });
+      const here = await saveClip(partly(), deps({ writer: offline.writer }));
+      expect(here.outcome).toMatchObject({ ok: true, pageId });
+      expect(offline.calls).toEqual([]);
+    });
+
+    it('fails, keeping it, if its change waiting here was refused, screenshot and all', async () => {
+      const { whole } = await written();
+      const { writer, calls } = fakeWriter({ waiting: { head: null, payload: whole } });
+      const saved = await saveClip(partly(), deps({ writer }));
+      expect(saved.outcome).toMatchObject({ ok: false, code: 'failed' });
+      expect(calls).toEqual([]);
+    });
+
+    it('makes it again if the server says it’s gone, and adds nothing offline, unseen', async () => {
+      const gone = fakeWriter();
+      const remade = await saveClip(
+        partly(),
+        deps({
+          writer: gone.writer,
+          current: () => Promise.reject(new ApiError(404, 'not-found', 'Not found')),
+        }),
+      );
+      expect(remade.outcome).toMatchObject({ ok: true });
+      expect(remade.outcome).not.toMatchObject({ pageId });
+      expect(gone.calls.map((c) => c.call)).toEqual(['newPageDraft', 'attach', 'save']);
+      const offline = fakeWriter();
+      const added = await saveClip(
+        partly(),
+        deps({
+          writer: offline.writer,
+          current: () => Promise.reject(new ApiError(0, 'network', 'No answer')),
+        }),
+      );
+      expect(added.outcome).toMatchObject({
+        ok: false,
+        message: expect.stringContaining('couldn’t see its page offline'),
+      });
+      expect(offline.calls).toEqual([]);
+    });
+
+    it('looks at the page again once the screenshot is in, as the queue may send it meanwhile', async () => {
+      const { first } = await written();
+      // Sent while the screenshot went in, with the person's words in it, under its first draft.
+      const edited = { ...first, markdown: `${first.markdown}My words\n` };
+      const sent = fakeWriter({
+        waiting: { head: revisionId, payload: first },
+        whileAttaching: { waiting: null },
+      });
+      const saved = await saveClip(
+        partly(),
+        deps({ writer: sent.writer, current: async () => ({ head: revisionId, payload: edited }) }),
+      );
+      expect(saved.outcome).toMatchObject({
+        ok: false,
+        message: expect.stringContaining('Its page changed since WikiStow made it'),
+      });
+      expect(sent.calls.map((c) => c.call)).toEqual(['attach']);
+      // Refused by the server meanwhile: the person sorts that out first.
+      const refused = fakeWriter({
+        waiting: { head: revisionId, payload: first },
+        whileAttaching: { waiting: { head: null, payload: first } },
+      });
+      const stopped = await saveClip(partly(), deps({ writer: refused.writer }));
+      expect(stopped.outcome).toMatchObject({ ok: false, code: 'failed' });
+      expect(refused.calls.map((c) => c.call)).toEqual(['attach']);
+    });
+
+    it('keeps it if a 404 isn’t the server’s own, making no other', async () => {
+      const proxy = new ApiError(404, 'unreadable-response', 'Not JSON');
+      const read = fakeWriter();
+      const unread = await saveClip(
+        partly(),
+        deps({ writer: read.writer, current: () => Promise.reject(proxy) }),
+      );
+      expect(unread.outcome).toMatchObject({ ok: false, code: 'failed' });
+      expect(read.calls).toEqual([]);
+      const attaching = fakeWriter();
+      const writer = { ...attaching.writer, attach: () => Promise.reject(proxy) } as PageWriter;
+      const unattached = await saveClip(partly(), deps({ writer }));
+      expect(unattached.outcome).toMatchObject({ ok: false, code: 'failed' });
+      expect(attaching.calls).toEqual([]);
+    });
+
+    it('adds it in the folder the person chose, though the one it was sent to waits for the trash', async () => {
+      const chosen = newId(FolderId);
+      const tree = spaceTree([folderId, chosen], [[pageId, chosen]]);
+      const { writer, calls } = fakeWriter();
+      const saved = await saveClip(
+        partly({ waited: true }),
+        deps({
+          writer,
+          trashedHere: async (page) =>
+            hiddenByTrash(tree, spaceId, [trashOf(folderId)], page.pageId),
+        }),
+      );
+      expect(saved.outcome).toMatchObject({ ok: true, pageId });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'save']);
+    });
+
+    it('looks for its folder again if the person put that in the trash here meanwhile', async () => {
+      const { writer, calls } = fakeWriter();
+      const saved = await saveClip(
+        partly(),
+        deps({
+          writer,
+          trashedHere: async () => true,
+          // As the tree shows it once the folder is in the trash.
+          places: async () => ({ places: [], unread: new Set() }),
+        }),
+      );
+      expect(saved.outcome).toMatchObject({ ok: false, code: 'no-folder' });
+      expect(calls).toEqual([]);
+    });
+
+    it('leaves its change waiting here alone if another window saved into it meanwhile', async () => {
+      const { first } = await written();
+      const { writer, calls } = fakeWriter({
+        waiting: { head: revisionId, payload: first },
+        savedSince: true,
+      });
+      const saved = await saveClip(partly(), deps({ writer }));
+      expect(saved.outcome).toMatchObject({
+        ok: false,
+        message: expect.stringContaining('Its page changed since WikiStow made it'),
+      });
+      expect(calls).toEqual([]);
+    });
+
+    it('says its page changed if the server has a newer draft of it', async () => {
+      const { writer, calls } = fakeWriter({ refuse: 'save' });
+      const saved = await saveClip(partly(), deps({ writer }));
+      expect(saved.outcome).toMatchObject({
+        ok: false,
+        code: 'failed',
+        message: expect.stringContaining('Its page changed since WikiStow made it'),
+      });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'save']);
+    });
+
+    it('keeps it if the screenshot is gone, making nothing', async () => {
+      const { writer, calls } = fakeWriter();
+      const saved = await saveClip(partly({ screenshot: null }), deps({ writer }));
+      expect(saved.outcome).toMatchObject({ ok: false, code: 'failed' });
+      expect(calls).toEqual([]);
+    });
+
+    it('saves the screenshot again if the page is in the trash already', async () => {
+      const { writer, calls } = fakeWriter({ gone: [pageId] });
+      const saved = await saveClip(partly(), deps({ writer }));
+      expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+      expect(saved.outcome).not.toMatchObject({ pageId });
+      expect(calls.map((c) => c.call)).toEqual(['attach', 'newPageDraft', 'attach', 'save']);
+    });
   });
 
   it('finishes a screenshot whose page was made whole before a reload, making no other', async () => {
@@ -755,7 +1125,11 @@ describe('a lock while an offline clip saves', () => {
   const pages = async (kept: keptOperations.KeptContent) =>
     (await kept.queue.entries()).filter((entry) => entry.kind === 'page');
 
-  async function saveAcrossLock(first: DesktopClip, convert?: SaveClipDeps['convert']) {
+  async function saveAcrossLock(
+    first: DesktopClip,
+    convert?: SaveClipDeps['convert'],
+    unlocked: Partial<SaveClipDeps> = {},
+  ) {
     const store = memoryKeptStore();
     const main = mainCopy();
     const locked = await unlock(store, { lockAfterAttach: true });
@@ -767,21 +1141,25 @@ describe('a lock while an offline clip saves', () => {
     const again = await unlock(store);
     const after = await saveClip(
       { ...first, made: main.copy() },
-      deps({ writer: again.writer, made: main.made, ...(convert && { convert }) }),
+      deps({ writer: again.writer, made: main.made, ...(convert && { convert }), ...unlocked }),
     );
     return { before, after, kept: again.kept };
   }
 
+  const screenshotClip = () =>
+    clip({
+      mode: 'screenshot',
+      html: '',
+      note: 'Look at this',
+      screenshot: { bytes: PNG, mediaType: 'image/png' },
+    });
+  const plainText: SaveClipDeps['convert'] = async (html) => ({
+    markdown: `${html.replace(/<[^>]+>/g, '')}\n`,
+    faithful: true,
+  });
+
   it('keeps a screenshot clip for the unlock, and saves it with its screenshot then', async () => {
-    const { before, after, kept } = await saveAcrossLock(
-      clip({
-        mode: 'screenshot',
-        html: '',
-        note: 'Look at this',
-        screenshot: { bytes: PNG, mediaType: 'image/png' },
-      }),
-      async (html) => ({ markdown: `${html.replace(/<[^>]+>/g, '')}\n`, faithful: true }),
-    );
+    const { before, after, kept } = await saveAcrossLock(screenshotClip(), plainText);
     expect(before.outcome).toMatchObject({ ok: false, code: 'failed' });
     expect(after.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
     // One page, the one said saved, showing its screenshot, whose file waits with it.
@@ -794,6 +1172,138 @@ describe('a lock while an offline clip saves', () => {
     expect(await kept.queue.blob(payload.attachments[0]!.blobHash)).not.toBeNull();
     // Nothing waits to go to the trash: the page left behind was never sent.
     expect((await kept.queue.entries()).filter((entry) => entry.kind === 'delete')).toEqual([]);
+  });
+
+  it('adds the screenshot at the unlock to the page it left, even if the folders can’t be loaded', async () => {
+    const { before, after, kept } = await saveAcrossLock(screenshotClip(), plainText, {
+      places: () => Promise.reject(new ApiError(500, 'internal', 'No')),
+    });
+    expect(before.outcome).toMatchObject({ ok: false, code: 'failed' });
+    expect(after.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    const [page, ...others] = await pages(kept);
+    expect(others).toEqual([]);
+    expect(page).toMatchObject({ id: (after.outcome as { pageId: PageId }).pageId });
+    expect((page as QueuedPage).payload.markdown).toContain('![Screenshot](attachment:');
+  });
+
+  it('keeps a page made partly that was sent, putting nothing in the trash and making no other', async () => {
+    // Sent before going offline: a trash waiting here would be refused once
+    // sent, to a person who can add pages but not trash them (#681). Its
+    // draft on the server can't be seen offline, so nothing is written on it.
+    const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
+    const { kept, writer } = await unlock(memoryKeptStore());
+    const saved = await saveClip(
+      {
+        ...screenshotClip(),
+        made: { spaceId, pageId, revisionId, path: 'Home / News', partial: true },
+      },
+      deps({
+        writer,
+        convert: plainText,
+        current: () => Promise.reject(new ApiError(0, 'network', 'No answer')),
+      }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: false, code: 'failed' });
+    expect(await kept.queue.entries()).toEqual([]);
+  });
+
+  it('leaves the page a lock cut short as the person changed it, rather than write over it', async () => {
+    const store = memoryKeptStore();
+    const main = mainCopy();
+    const first = screenshotClip();
+    const locked = await unlock(store, { lockAfterAttach: true });
+    await saveClip(first, deps({ writer: locked.writer, made: main.made, convert: plainText }));
+    // Unlocked, the person writes in the page before the clip is saved again.
+    const again = await unlock(store);
+    const { pageId, spaceId: at } = main.copy()!;
+    const drafts = again.writer.draft({ spaceId: at, pageId }, { seen: null });
+    const basedOn = (await drafts.waitingHead())!;
+    await drafts.save({ basedOn, payload: newPayload({ title: 'Mine', markdown: 'My words\n' }) });
+    const after = await saveClip(
+      { ...first, made: main.copy() },
+      deps({ writer: again.writer, made: main.made, convert: plainText }),
+    );
+    expect(after.outcome).toMatchObject({ ok: false, code: 'failed' });
+    const [page, ...others] = await pages(again.kept);
+    expect(others).toEqual([]);
+    expect((page as QueuedPage).payload).toMatchObject({ title: 'Mine', markdown: 'My words\n' });
+  });
+
+  it('keeps what else the person changed in the page a lock cut short, such as its cover', async () => {
+    const store = memoryKeptStore();
+    const main = mainCopy();
+    const first = screenshotClip();
+    const locked = await unlock(store, { lockAfterAttach: true });
+    await saveClip(first, deps({ writer: locked.writer, made: main.made, convert: plainText }));
+    const again = await unlock(store);
+    const { pageId, spaceId: at } = main.copy()!;
+    const drafts = again.writer.draft({ spaceId: at, pageId }, { seen: null });
+    const basedOn = (await drafts.waitingHead())!;
+    const waiting = (await drafts.waitingChange())!;
+    const extensions = { 'wikistow.cover': { emoji: '🌲' } };
+    await drafts.save({ basedOn, payload: { ...waiting.payload, extensions } });
+    const after = await saveClip(
+      { ...first, made: main.copy() },
+      deps({ writer: again.writer, made: main.made, convert: plainText }),
+    );
+    expect(after.outcome).toMatchObject({ ok: true, pageId });
+    const [page] = (await pages(again.kept)) as QueuedPage[];
+    expect(page!.payload.extensions).toEqual(extensions);
+    expect(page!.payload.markdown).toContain('![Screenshot](attachment:');
+  });
+
+  it('finds the screenshot saved already when a reload came just after, adding no other', async () => {
+    const store = memoryKeptStore();
+    const told: ClipMade[] = [];
+    const { kept, writer } = await unlock(store);
+    const first = screenshotClip();
+    const before = await saveClip(
+      first,
+      deps({ writer, made: async (page) => void told.push(page), convert: plainText }),
+    );
+    expect(before.outcome).toMatchObject({ ok: true });
+    const [saved] = (await pages(kept)) as QueuedPage[];
+    // Main heard it was made partly, but not yet that it is whole.
+    const partly = told.find((page) => page.partial)!;
+    const after = await saveClip({ ...first, made: partly }, deps({ writer, convert: plainText }));
+    expect(after.outcome).toMatchObject({ ok: true, pageId: partly.pageId });
+    const [page, ...others] = await pages(kept);
+    expect(others).toEqual([]);
+    expect((page as QueuedPage).payload.attachments).toEqual(saved!.payload.attachments);
+  });
+
+  it('keeps the properties of the page a lock cut short when it adds the screenshot', async () => {
+    const { kept, after } = await saveAcrossLock(screenshotClip(), plainText, {
+      today: '2026-11-14',
+    });
+    expect(after.outcome).toMatchObject({ ok: true });
+    const [page] = await pages(kept);
+    expect((page as QueuedPage).payload.markdown).toContain('clipped: 2026-11-13');
+  });
+
+  it('makes the clip again if the person put its page made partly in the trash here meanwhile', async () => {
+    // Sent, then put in the trash offline: the trash waits to be sent.
+    const pageId = newId(PageId);
+    const revisionId = newId(RevisionId);
+    const { kept, writer } = await unlock(memoryKeptStore());
+    await writer.deleteNode({ spaceId, nodeId: pageId, node: 'page', name: 'Clip' });
+    const tree = spaceTree([folderId], [[pageId, folderId]]);
+    const trashedHere = async (page: { pageId: PageId }) =>
+      hiddenByTrash(tree, spaceId, await kept.queue.entries(), page.pageId);
+    const saved = await saveClip(
+      {
+        ...screenshotClip(),
+        made: { spaceId, pageId, revisionId, path: 'Home / News', partial: true },
+      },
+      deps({ writer, convert: plainText, trashedHere }),
+    );
+    expect(saved.outcome).toMatchObject({ ok: true, images: { saved: 1, skipped: 0 } });
+    expect(saved.outcome).not.toMatchObject({ pageId });
+    const [page, ...others] = await pages(kept);
+    expect(others).toEqual([]);
+    expect(page).toMatchObject({ id: (saved.outcome as { pageId: PageId }).pageId });
+    expect((page as QueuedPage).payload.markdown).toContain('![Screenshot](attachment:');
   });
 
   it('says a text clip’s images a lock stopped weren’t saved, keeping them as links', async () => {
