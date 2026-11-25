@@ -4,6 +4,20 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.30.4-beta.1 - 2026-11-25
+
+### Highlights
+
+#### Fixes
+
+- Ticking a task while reading no longer ticks another task when the page changed just before the newer text showed.
+- In the visual editor, bold, italic or strikethrough beside a no-break space (Option+Space on a Mac) no longer sends the page to source mode.
+
+#### Maintenance
+
+- The server warns in its log when a share, a move, ending a share or adding an owner nears the size or time one request allows.
+- The desktop app runs on Electron 44.11.6.
+
 ### Changes
 
 #### App
@@ -14,6 +28,14 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Server
 
 - The server logs a `bulk-request-large` warning when making a share, a move, ending a share or adding an owner sends more than 32 MiB, half the 64 MiB a request may carry, or takes more than 30 seconds. The line names the route, the body's size, the time taken and the space, so you see a library outgrowing one request before sharing it fails. (#735)
+
+#### Releases and packaging
+
+- Electron 44.11.6, from 44.11.5.
+
+#### Development
+
+- ADR 0018 accepts a design for replacing a person's identity keys when they may have leaked, with the protocol change and its review rounds. It isn't built yet. (#733)
 
 ## 0.30.3 - 2026-11-24
 

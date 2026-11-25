@@ -1,6 +1,6 @@
 {
   "name": "@wikistow/desktop",
-  "version": "0.30.3",
+  "version": "0.30.4-beta.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -17,7 +17,7 @@
     "@types/node": "^26.0.0",
     "@wikistow/contracts": "workspace:*",
     "@wikistow/plugin-sdk": "workspace:*",
-    "electron": "44.11.5",
+    "electron": "44.11.6",
     "resedit": "^3.1.0",
     "zod": "^4.6.5"
   },
