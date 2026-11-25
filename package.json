@@ -1,6 +1,6 @@
 {
   "name": "wikistow",
-  "version": "0.30.3",
+  "version": "0.30.4-beta.1",
   "private": true,
   "license": "MIT",
   "type": "module",
