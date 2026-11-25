@@ -2,14 +2,15 @@
 // text (ADR 0015, **Decided while building it**): when its write of the
 // formatting is taken out of a live session's `body` again, as
 // `live-rebase.ts` does, and it has taken in someone else's text in its
-// place, it adds and removes the same marks again, each over its range
-// carried onto what it shows now, as prosemirror-collab maps its steps.
-import type { Mark, Node } from '@milkdown/kit/prose/model';
+// place, it adds and removes the same marks again, each over its range in
+// what it shows now, as prosemirror-collab maps its steps. Only over a
+// block whose text nobody changed since: the other person's change to it
+// is formatting alone too, so each range is where it was.
+import type { Node } from '@milkdown/kit/prose/model';
 import { Plugin, type Transaction } from '@milkdown/kit/prose/state';
-import { AddMarkStep, RemoveMarkStep, StepMap, Transform } from '@milkdown/kit/prose/transform';
+import { AddMarkStep, RemoveMarkStep, Transform } from '@milkdown/kit/prose/transform';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
-import { diffArrays } from 'diff';
 import { EXTERNAL } from './plugins';
 
 /** Marks added and taken off, each over its range in `before`, the document they were made on. */
@@ -88,6 +89,108 @@ export const literal = (intent: unknown): boolean =>
   isFormatting(intent) &&
   intent.steps.some((step) => !!step.mark.type.spec.code || step.mark.type.name === 'link');
 
+// Each top-level block as one string, without its marks: two blocks share
+// it only if they have the same text and nodes, formatted alike or not.
+// Kept by node, as documents share the blocks an edit didn't change.
+const bareOf = new WeakMap<Node, string>();
+// And with its marks, as it shows, whatever ids each reading gave its links.
+const shownOf = new WeakMap<Node, string>();
+
+function key(node: Node, marked: boolean): string {
+  const cache = marked ? shownOf : bareOf;
+  const known = cache.get(node);
+  if (known !== undefined) return known;
+  const out: string[] = [];
+  const marks = (child: Node) =>
+    marked
+      ? JSON.stringify(
+          child.marks.map((mark) => [
+            mark.type.name,
+            mark.type.name === 'link' ? { ...mark.attrs, id: null } : mark.attrs,
+          ]),
+        )
+      : '';
+  const walk = (parent: Node) => {
+    // Text as one run while its marks are the same: without them, all of it
+    // between two nodes, however its marks split it.
+    let run: string | null = null;
+    let text = '';
+    const flush = () => {
+      if (run !== null) out.push(`t${run}${JSON.stringify(text)}`);
+      [run, text] = [null, ''];
+    };
+    parent.forEach((child) => {
+      if (child.isText) {
+        const signature = marks(child);
+        if (signature !== run) flush();
+        run = signature;
+        text += child.text ?? '';
+        return;
+      }
+      flush();
+      out.push(`n${child.type.name}${JSON.stringify(child.attrs)}${marks(child)}(`);
+      walk(child);
+      out.push(')');
+    });
+    flush();
+  };
+  out.push(`n${node.type.name}${JSON.stringify(node.attrs)}(`);
+  walk(node);
+  out.push(')');
+  const made = out.join('');
+  cache.set(node, made);
+  return made;
+}
+
+/**
+ * How a place in `before` is found in `now`, where only blocks whose text
+ * and nodes are the same in both are lined up: those from the start up to
+ * the first that differs, and those from the end back to the last. A place
+ * in a block between, whose text someone changed, isn't found: null.
+ */
+type LinedUp = (from: number, to: number) => [number, number] | null;
+
+function lineUp(before: Node, now: Node): LinedUp {
+  const [a, b] = [before.childCount, now.childCount];
+  const alike = (x: Node, y: Node) => x === y || key(x, false) === key(y, false);
+  let head = 0;
+  let headEnd = 0;
+  while (head < a && head < b && alike(before.child(head), now.child(head))) {
+    headEnd += before.child(head).nodeSize;
+    head++;
+  }
+  let tail = 0;
+  let tailStart = before.content.size;
+  while (
+    tail < a - head &&
+    tail < b - head &&
+    alike(before.child(a - 1 - tail), now.child(b - 1 - tail))
+  ) {
+    tailStart -= before.child(a - 1 - tail).nodeSize;
+    tail++;
+  }
+  const shift = now.content.size - before.content.size;
+  return (from, to) => {
+    if (to <= headEnd) return [from, to];
+    if (from >= tailStart) return [from + shift, to + shift];
+    return null;
+  };
+}
+
+/**
+ * Whether each of `intents`' marks can be made again over `doc`: every
+ * range lies in a block whose text and nodes are as they were when it was
+ * made. Otherwise someone changed its text since, as by typing in it, and
+ * Yjs's merge of the two stays as it is.
+ */
+export function remakes(doc: Node, intents: readonly unknown[]): boolean {
+  return intents.every((intent) => {
+    if (!isFormatting(intent) || intent.before.type.schema !== doc.type.schema) return false;
+    const lined = lineUp(intent.before, doc);
+    return intent.steps.every((step) => lined(step.from, step.to) !== null);
+  });
+}
+
 /**
  * `intents`' marks made again over the document `view` shows now, as one
  * edit of the person's own (`remade`).
@@ -99,195 +202,66 @@ export function reformat(view: EditorView, intents: readonly unknown[]): void {
 }
 
 /**
- * Whether Yjs's merge, `merged`, is to stay as it is: it already reads as
- * `theirs` with `intents`' marks made again over it; or `theirs`, the text
- * without this app's formatting, reads worse: it shows raw HTML the merge
- * doesn't, as someone's tags that split this app's mark, which taking it
- * out leaves unpaired, or text the merge doesn't show, as marks that
- * someone's typing beside them left unpaired and the merge still pairs.
+ * Whether Yjs's merge, `merged`, already reads as `theirs`, the text
+ * without this app's formatting, with `intents`' marks made again over it:
+ * then it stays as it is. With their marks of the same kind left or painted
+ * over, as Yjs nests two colours with the higher client's inside.
  */
-export function keeps(merged: Node, theirs: Node, intents: readonly unknown[]): boolean {
-  if (rawIn(theirs) > rawIn(merged)) return true;
-  if (!within(textOf(theirs), textOf(merged))) return true;
-  const target = shown(merged);
-  // Text typed at either end of a range may have gone inside it or outside,
-  // as Yjs placed it: either reading counts.
-  const ends: Ends[] = [
-    [1, 1],
-    [1, -1],
-    [-1, 1],
-    [-1, -1],
-  ];
-  // And with their marks of the same kind left or painted over, as Yjs
-  // nests two colours with the higher client's inside.
-  return [true, false].some((spare) =>
-    ends.some((assoc) => {
-      const tr = new Transform(theirs);
-      remade(tr, intents, assoc, spare);
-      return shown(tr.doc) === target;
-    }),
-  );
-}
-
-/**
- * The text `doc` shows, raw HTML's as written: a letter someone typed that
- * Yjs put inside a tag of the merge, as `data-Color`, is still in it.
- */
-function textOf(doc: Node): string {
-  let text = '';
-  doc.descendants((node) => {
-    if (node.isText) text += node.text ?? '';
-    else if (node.type.name === 'html') text += String(node.attrs['value'] ?? '');
+export function readsAs(merged: Node, theirs: Node, intents: readonly unknown[]): boolean {
+  return [true, false].some((spare) => {
+    const tr = new Transform(theirs);
+    remade(tr, intents, spare);
+    return same(tr.doc, merged);
   });
-  return text;
 }
 
-/** Whether `part`'s characters are all in `whole`, in order. */
-function within(part: string, whole: string): boolean {
-  let at = 0;
-  for (let i = 0; i < part.length; i++) {
-    at = whole.indexOf(part[i] as string, at);
-    if (at < 0) return false;
-    at++;
+// Whether two documents show the same, block by block.
+function same(a: Node, b: Node): boolean {
+  if (a.childCount !== b.childCount) return false;
+  for (let i = 0; i < a.childCount; i++) {
+    if (a.child(i) !== b.child(i) && key(a.child(i), true) !== key(b.child(i), true)) return false;
   }
   return true;
 }
 
 /**
- * `doc` as one string that two documents share only if they show the
- * same, whatever ids each reading gave its links: their text, with its
- * marks run by run, and their nodes' types and attributes. Built in one
- * walk, as a page of many links is compared several times.
+ * `intents`' marks made again over `tr`'s document, each over its range in
+ * the document it was made on, which is where it is now (`remakes`).
  */
-function shown(doc: Node): string {
-  const out: string[] = [];
-  const marks = (node: Node) =>
-    JSON.stringify(
-      node.marks.map((mark) => [
-        mark.type.name,
-        mark.type.name === 'link' ? { ...mark.attrs, id: null } : mark.attrs,
-      ]),
-    );
-  const walk = (node: Node) => {
-    let run: string | null = null;
-    let text = '';
-    const flush = () => {
-      if (run !== null) out.push(`t${run}${JSON.stringify(text)}`);
-      [run, text] = [null, ''];
-    };
-    node.forEach((child) => {
-      if (child.isText) {
-        const key = marks(child);
-        if (key !== run) {
-          flush();
-          run = key;
-        }
-        text += child.text ?? '';
-        return;
-      }
-      flush();
-      out.push(`n${child.type.name}${JSON.stringify(child.attrs)}${marks(child)}(`);
-      walk(child);
-      out.push(')');
-    });
-    flush();
-  };
-  walk(doc);
-  return out.join('');
-}
-
-/** Which way each end of a range carried goes when text was typed right there. */
-type Ends = readonly [from: number, to: number];
-
-/** How many pieces of raw HTML `doc` shows. */
-function rawIn(doc: Node): number {
-  let count = 0;
-  doc.descendants((node) => {
-    if (node.type.name === 'html') count++;
-  });
-  return count;
-}
-
-/**
- * `intents`' marks made again over `tr`'s document, each over its range
- * carried from the document it was made on. Text put in at either end of a
- * range goes inside it, as Yjs placed the text of the other person, the
- * lower client, before this one's tags in the merge it replaces.
- */
-// How each intent's ranges were lined up with a document, as `keeps` reads
-// one document several ways.
-const lined = new WeakMap<Node, Map<unknown, StepMap>>();
-
-function remade(
-  tr: Transform,
-  intents: readonly unknown[],
-  ends: Ends = [1, 1],
-  spare = true,
-): void {
+function remade(tr: Transform, intents: readonly unknown[], spare = true): void {
   for (const intent of intents) {
     if (!isFormatting(intent) || intent.before.type.schema !== tr.doc.type.schema) continue;
-    // Lined up by its text and marks, so a word typed beside its copy isn't
-    // taken for it; or, where someone's marks changed since, as a word they
-    // un-bolded, by the marks it doesn't change, or by its text alone: by
-    // whichever of these changes the fewest places and cuts across none of
-    // its ranges, the first of them if several do. Someone's marks changed
-    // make the text and marks look changed there, and a diff of them can
-    // then line up a letter with one of another word.
-    const changed = new Set(intent.steps.map((step) => step.mark.type));
-    const ways: ((mark: Mark) => boolean)[] = [
-      () => true,
-      (mark) => !changed.has(mark.type),
-      () => false,
-    ];
-    let map = lined.get(tr.doc)?.get(intent);
-    if (!map) {
-      let best: { map: StepMap; cost: number } | null = null;
-      let last = StepMap.empty;
-      for (const kept of ways) {
-        const way = carried(intent.before, tr.doc, kept);
-        last = way.map;
-        const cut = intent.steps.some((step) =>
-          [step.from, step.to].some((at) => way.map.mapResult(at, 1).deleted),
-        );
-        if (!cut && (!best || way.cost < best.cost)) best = way;
-      }
-      map = best?.map ?? last;
-      lined.set(tr.doc, (lined.get(tr.doc) ?? new Map()).set(intent, map));
-    }
+    const lined = lineUp(intent.before, tr.doc);
     for (const step of intent.steps) {
+      const at = lined(step.from, step.to);
+      if (!at) continue;
       const Made = step instanceof AddMarkStep ? AddMarkStep : RemoveMarkStep;
       // Not over a mark of the same kind someone else put on since, as their
       // highlight inside this app's: theirs stays, as the merge kept it.
-      for (const [from, to] of unclaimed(intent.before, tr.doc, map, step, ends, spare)) {
+      for (const [from, to] of unclaimed(intent.before, tr.doc, step, at, spare)) {
         tr.maybeStep(new Made(from, to, step.mark));
       }
     }
   }
 }
 
-// The ranges of `doc` that `step`'s range in `before` is carried onto by
-// `map`, but for characters with a mark of `step`'s kind they didn't have
-// in `before`.
+// The ranges of `doc` that `step`'s range in `before` is at now, `at`, but
+// for characters with a mark of `step`'s kind they didn't have in `before`.
 function unclaimed(
   before: Node,
   doc: Node,
-  map: StepMap,
   step: AddMarkStep | RemoveMarkStep,
-  ends: Ends,
+  [start, end]: [number, number],
   spare: boolean,
 ): [number, number][] {
-  const [start, end] = [map.map(step.from, ends[0]), map.map(step.to, ends[1])];
-  if (start >= end) return [];
   const type = step.mark.type;
   const markOf = (node: Node | null | undefined) => type.isInSet(node?.marks ?? []);
   const out: [number, number][] = [];
-  const back = map.invert();
+  const shift = start - step.from;
   let open: number | null = null;
   for (let at = start; at < end; at++) {
     const now = markOf(doc.nodeAt(at));
-    // Where this character was, if it was there.
-    const there = back.mapResult(at, 1);
-    const was = there.deleted ? null : markOf(before.nodeAt(there.pos));
+    const was = markOf(before.nodeAt(at - shift));
     const claimed = spare && !!now && !(was && was.eq(now));
     if (!claimed) open ??= at;
     else if (open !== null) {
@@ -297,90 +271,4 @@ function unclaimed(
   }
   if (open !== null) out.push([open, end]);
   return out;
-}
-
-// A document as one token for each place in it, as ProseMirror counts
-// them: each node's start by its type and its end, each leaf, and each
-// character of its text, with the marks `kept` keeps.
-function places(doc: Node, kept: (mark: Mark) => boolean): string[] {
-  const out: string[] = [];
-  const marks = (node: Node) =>
-    node.marks
-      .filter(kept)
-      // A link's id is new each time a text is read: it tells nothing.
-      .map((mark) => `${mark.type.name}${JSON.stringify({ ...mark.attrs, id: null })}`)
-      .join(' ');
-  const walk = (node: Node) =>
-    node.forEach((child) => {
-      if (child.isText) {
-        const signature = marks(child);
-        for (const unit of child.text ?? '') {
-          // A character beyond the first plane is two places, as ProseMirror counts it.
-          for (let i = 0; i < unit.length; i++) out.push(`t${unit}${i}|${signature}`);
-        }
-      } else if (child.isLeaf) out.push(`l${child.type.name}|${marks(child)}`);
-      else {
-        out.push(`s${child.type.name}`);
-        walk(child);
-        out.push('e');
-      }
-    });
-  walk(doc);
-  return out;
-}
-
-// A diff of a few thousand places takes a millisecond or two; past this
-// long it gives up, and what lies between the common start and end counts
-// as replaced.
-const DIFF_MS = 50;
-
-/**
- * How places in `a` are carried into `b`, by a diff of their places
- * (`places`), and how many places it puts in or takes out.
- */
-function carried(a: Node, b: Node, kept: (mark: Mark) => boolean): { map: StepMap; cost: number } {
-  const was = places(a, kept);
-  const now = places(b, kept);
-  let start = 0;
-  const shortest = Math.min(was.length, now.length);
-  while (start < shortest && was[start] === now[start]) start++;
-  let [endA, endB] = [was.length, now.length];
-  while (endA > start && endB > start && was[endA - 1] === now[endB - 1]) {
-    endA--;
-    endB--;
-  }
-  // Out to whole blocks, as the editor's own writes are diffed by whole
-  // lines, so characters alike within them line up as they did there.
-  const edge = (token: string | undefined) => token === 'e' || token?.startsWith('s');
-  while (start > 0 && !edge(was[start - 1])) start--;
-  while (endA < was.length && endB < now.length && !edge(was[endA])) {
-    endA++;
-    endB++;
-  }
-  if (start === endA && start === endB) return { map: StepMap.empty, cost: 0 };
-  const [middleA, middleB] = [was.slice(start, endA), now.slice(start, endB)];
-  const parts = diffArrays(middleA, middleB, { timeout: DIFF_MS }) ?? [
-    { value: middleA, removed: true, added: false, count: middleA.length },
-    { value: middleB, removed: false, added: true, count: middleB.length },
-  ];
-  const ranges: number[] = [];
-  let at = start;
-  let [removed, added] = [0, 0];
-  let cost = 0;
-  const flush = () => {
-    if (removed > 0 || added > 0) ranges.push(at, removed, added);
-    at += removed;
-    cost += removed + added;
-    [removed, added] = [0, 0];
-  };
-  for (const part of parts) {
-    if (part.removed) removed += part.value.length;
-    else if (part.added) added += part.value.length;
-    else {
-      flush();
-      at += part.value.length;
-    }
-  }
-  flush();
-  return { map: new StepMap(ranges), cost };
 }

@@ -6,7 +6,7 @@ import {
   serializerCtx,
   type Editor,
 } from '@milkdown/kit/core';
-import type { Node, ResolvedPos } from '@milkdown/kit/prose/model';
+import { Fragment, type Node, type ResolvedPos } from '@milkdown/kit/prose/model';
 import { Plugin, Selection, TextSelection, type Transaction } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
@@ -28,7 +28,7 @@ import { CompletionListbox } from './completion-list';
 import { alerts } from './alerts';
 import { selectedMarkdown } from './at-cursor';
 import { loadSyntaxNodes, visualEditor, visualPlugins } from './config';
-import { planBlocks, replaceIn, replacement, same, type Taken } from './blocks';
+import { planBlocks, replaceIn, replacement, same, type Plan, type Taken } from './blocks';
 import { BLOCK_TIMED, checkFidelity, endsInLine, fidelityOf, withLf } from './fidelity';
 import { lineBreakFor } from '../surface';
 import { inText, spansOf, type Span } from './sources';
@@ -57,7 +57,7 @@ import * as Y from 'yjs';
 import type { LiveSource } from '../source/live';
 import { resolveIn } from '../live-cursor';
 import { VisualBinding, type Taking } from './live-binding';
-import { FormatRecord, keeps, literal, reformat } from './live-reformat';
+import { FormatRecord, literal, readsAs, reformat, remakes } from './live-reformat';
 import { barDecorations, barsOf, blockAt, liveBars, setBars, type BarsHost } from './live-bars';
 
 export { checkFidelity, type Fidelity } from './fidelity';
@@ -70,9 +70,11 @@ export { wikilinkEditorNode } from './wikilink-node';
 // it all is; one that must go out sooner, as the page is hidden or the
 // editor left, writes and reads the whole page then.
 const REPORT_MS = 150;
-// A page longer than this isn't checked at once before formatting is made
-// again over someone's change in a live session: its merge stays (#720).
-// Checking 16 KB holds the page's thread for about a tenth of a second.
+// A page longer than this isn't checked before formatting is made again
+// over someone's change in a live session, nor more than this checked in
+// one task: the merge stays (#720). Checking one paragraph of 16 KB of
+// links holds the page's thread for about 0.35 s, on top of the 0.75 s
+// taking it in holds it for, as without the check.
 const KEEPS_MAX = 16_000;
 const SLICE_MS = 10;
 
@@ -367,6 +369,23 @@ function Surface({
   );
   // Others' bars, and the person's caret going out, while it's bound.
   const [bars] = useState<BarsHost>(() => ({}));
+  // Their text checked to be taken in next, with this editor's formatting
+  // made again over it (`keeps`), and how much more may be checked so in
+  // this task.
+  const rebasing = useRef<{
+    markdown: string;
+    plan: Plan & { doc: Node; transform: Parameters<typeof fidelityOf>[1] };
+  } | null>(null);
+  const budget = useRef<{ left: number } | null>(null);
+  const keepsBudget = () => {
+    if (budget.current) return budget.current;
+    const fresh = { left: KEEPS_MAX };
+    budget.current = fresh;
+    queueMicrotask(() => {
+      if (budget.current === fresh) budget.current = null;
+    });
+    return fresh;
+  };
 
   const docOf = (live: Editor) => live.action((ctx) => ctx.get(editorViewCtx).state.doc);
   // `doc` as the page holds it, ending as the text it was given does, and
@@ -507,7 +526,12 @@ function Surface({
       const write = writer.current;
       if (!live || !write) return false;
       const mine = ++changes.current;
-      const plan = surface.plan(markdown);
+      // Checked already, as their text is before formatting is made again
+      // over it, at once, whatever its length (`keeps`).
+      const ready = rebasing.current;
+      rebasing.current = null;
+      const checked = ready?.markdown === markdown && ready.plan.doc === docOf(live);
+      const plan = checked ? ready.plan : surface.plan(markdown);
       if (!plan) return false;
       const go = (kept: boolean): Taking => {
         const now = editor.current;
@@ -532,6 +556,7 @@ function Surface({
         surface.later();
         return true;
       };
+      if (checked) return go(true);
       if (plan.check.length < BLOCK_TIMED) return go(fidelityOf(plan.check, plan.transform).visual);
       if (atOnce) return false;
       // Anything that fails on the way, as a plugin putting it in, is as
@@ -541,31 +566,70 @@ function Surface({
         .catch((): Taking => false);
     },
     /** How `markdown` would be taken in a block at a time (`planBlocks`), if it can be. */
-    plan: (markdown: string) => {
+    plan: (markdown: string) => surface.plans([markdown])[0] ?? null,
+    /** `plan` for each of `texts`, the page's own text written once for them all. */
+    plans: (texts: readonly string[]) => {
       const live = editor.current;
       const write = writer.current;
       const given = origin.current;
-      if (!live || !write || !given) return null;
+      if (!live || !write || !given) return [];
       const holds = surface.read();
       return live.action((ctx) => {
         const { doc } = ctx.get(editorViewCtx).state;
         const { page, runs, spans } = write.layout(doc, endsInLine(given.markdown));
         // Only text it holds as the page does can be compared with it.
-        if (page !== holds) return null;
+        if (page !== holds) return [];
         const parse = ctx.get(parserCtx);
-        const made = planBlocks({ doc, page, runs, spans, text: markdown, parse });
         const transform = { parse, serialize: ctx.get(serializerCtx) };
-        return made && { ...made, doc, transform };
+        return texts.map((text) => {
+          const made = planBlocks({ doc, page, runs, spans, text, parse });
+          return made && { ...made, doc, transform };
+        });
       });
     },
     /**
-     * Whether `markdown` could be taken in a block at a time at once, as
-     * far as can be told without reading it: the blocks it changes are
-     * under 1 KB (`BLOCK_TIMED`).
+     * Whether Yjs's merge, `merged`, is to stay as it is in a live session,
+     * rather than this editor's formatting, `intents`, taken out of it and
+     * made again over `theirs`, the text without it (#720). It stays unless
+     * each range of the formatting is in a block whose text and nodes
+     * nobody changed (`remakes`), so that the other person's change there
+     * is formatting alone too; the merge doesn't already read as theirs
+     * with it made again (`readsAs`); and the editor can show theirs.
+     * Only the blocks each text changes are read, with those beside them,
+     * and in one task no more than `KEEPS_MAX` of text: past that, the
+     * merge stays. Their text, so checked, is what's taken in next.
      */
-    fits: (markdown: string) => {
-      const plan = surface.plan(markdown);
-      return !!plan && plan.check.length < BLOCK_TIMED;
+    keeps: (merged: string, theirs: string, intents: readonly unknown[]): boolean => {
+      if (theirs.length > KEEPS_MAX) return true;
+      const budget = keepsBudget();
+      const read = (plan: NonNullable<ReturnType<typeof surface.plan>>) => {
+        const taken = plan.finish();
+        if (!taken) return null;
+        const { doc } = plan;
+        const nodes = [
+          ...doc.content.content.slice(0, taken.first),
+          ...taken.nodes,
+          ...doc.content.content.slice(taken.first + taken.count),
+        ];
+        return { plan: { ...plan, finish: () => taken }, doc: doc.copy(Fragment.from(nodes)) };
+      };
+      try {
+        const [mine, ours] = surface.plans([theirs, merged]);
+        // Each check reads about as much of the merge again, and checks
+        // their text as a paste is: it's counted by their text read.
+        if (!mine || !ours || mine.check.length > budget.left) return true;
+        budget.left -= mine.check.length;
+        const them = read(mine);
+        if (!them || !remakes(them.doc, intents)) return true;
+        const merge = read(ours);
+        if (!merge || readsAs(merge.doc, them.doc, intents)) return true;
+        const { check, transform } = them.plan;
+        if (!fidelityOf(check, transform).visual) return true;
+        rebasing.current = { markdown: theirs, plan: them.plan };
+        return false;
+      } catch {
+        return true;
+      }
     },
     /**
      * Show `markdown`, checked already, at once: a block at a time if that
@@ -760,22 +824,7 @@ function Surface({
           const view = viewNow();
           if (view) reformat(view, intents);
         },
-        keeps: (merged, theirs, intents) => {
-          // Their text, the formatting taken out, is to be taken in at once
-          // before it's made again: one the editor can't take in so, as
-          // blocks of 1 KB or more, which are checked off the thread, or a
-          // page too long to compare here at once, keeps the merge. The
-          // take-in checks that the editor can show it.
-          if (theirs.length > KEEPS_MAX || !surface.fits(theirs)) return true;
-          const parse = editor.current?.action((ctx) => ctx.get(parserCtx));
-          if (!parse) return true;
-          try {
-            const [a, b] = [parse(withLf(merged)), parse(withLf(theirs))];
-            return !!a && !!b && keeps(a, b, intents);
-          } catch {
-            return true;
-          }
-        },
+        keeps: (merged, theirs, intents) => surface.keeps(merged, theirs, intents),
       },
     );
     const stops: (() => void)[] = [];

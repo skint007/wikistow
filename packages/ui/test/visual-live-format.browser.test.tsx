@@ -180,24 +180,18 @@ describe('formatting made alongside someone else’s', () => {
     }
   }
 
-  it('never takes out a third person’s change made alongside', async () => {
+  it('comes out as main does when a third person types in the word both format', async () => {
     const page = 'Say **world** now.\n';
     const people = [await person(page, 3), await person(page, 2), await person(page, 1)] as const;
     colour('world', 'highlight', 'red')(people[0]);
     colour('world', 'text', 'red')(people[1]);
     typing('world', 0, 1, 'W')(people[2]);
     typing('orld', 4, 0, 's')(people[2]);
-    await expect
-      .poll(() => people.map((p) => p.text.toJSON() === page))
-      .toEqual([false, false, false]);
+    await expect.poll(() => people.map((p) => p.log.length)).toEqual([1, 1, 1]);
+    const main = merged(page, [...people], [1, 1, 1]);
     await settle([...people]);
-    const ends = people.map((p) => p.text.toJSON());
-    expect(new Set(ends).size).toBe(1);
-    const [end] = ends as [string];
-    expect(raw(end)).toBe(false);
-    expect(end).toContain('Worlds');
-    expect(end).toContain('<span data-color="red">');
-    expect(end).toContain('<mark data-color="red">');
+    for (const p of people) expect(p.text.toJSON()).toBe(main);
+    expect(main).toContain('Worlds');
   });
 
   it('is made again over a change typed in source mode, by the higher client', async () => {
@@ -522,7 +516,7 @@ describe('formatting made alongside someone else’s', () => {
     for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
   });
 
-  it('is made again over a change that meets it after one that read right', async () => {
+  it('comes out as main does when typing of theirs made alongside came first', async () => {
     const page = 'world\n';
     const [a, b] = [await person(page, 2), await person(page, 1)];
     typing('world', 5, 0, '!')(b);
@@ -531,7 +525,8 @@ describe('formatting made alongside someone else’s', () => {
     colour('world', 'highlight', 'red')(a);
     colour('world!', 'text', 'red')(b);
     await expect.poll(() => [a, b].map((p) => p.log.length)).toEqual([1, 2]);
-    // B's two messages one after the other: the first reads right as it merges.
+    // B's two messages one after the other: the first, typing, made alongside
+    // A's write, so the block's text isn't as A formatted it.
     const [first, second] = b.log;
     for (const update of [first, second]) {
       for (const listener of a.before)
@@ -540,10 +535,9 @@ describe('formatting made alongside someone else’s', () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
     b.sent.set(a, 2);
+    const main = merged(page, [a, b], [1, 2]);
     await settle([a, b]);
-    const [end] = [a.text.toJSON()];
-    expect(b.text.toJSON()).toBe(end);
-    expect(raw(end)).toBe(false);
+    for (const p of [a, b]) expect(p.text.toJSON()).toBe(main);
   });
 
   it('comes out as main does: a phrase typed just after it', async () => {
@@ -856,8 +850,28 @@ describe('formatting made alongside someone else’s', () => {
     expect(main).toContain('<mark data-color="red">');
   });
 
-  it('keeps the merge in a paragraph of 1 KB or more, which is checked off the thread', async () => {
+  it('reads as both people’s in a paragraph of 1 KB or more, checked at once', async () => {
     const page = `**world**${' [x](pg0.md)'.repeat(980)}\n`;
+    const a = await person(page, 2);
+    const b = sourcePerson(page, 1);
+    colour('world', 'highlight', 'red')(a);
+    typeSource(b, `<span data-color="red">**world**</span>${page.slice('**world**'.length)}`);
+    await expect.poll(() => a.log.length).toBe(1);
+    const main = merged(page, [a, b], [1, 1]);
+    expect(raw(main)).toBe(true);
+    send(b, a);
+    send(a, b);
+    await settle([a, b]);
+    const end = a.text.toJSON();
+    expect(b.text.toJSON()).toBe(end);
+    expect(raw(end)).toBe(false);
+    expect(
+      end.startsWith('<span data-color="red"><mark data-color="red">**world**</mark></span>'),
+    ).toBe(true);
+  });
+
+  it('keeps the merge on a page of more than 16 KB', async () => {
+    const page = `**world**${' [x](pg0.md)'.repeat(1_400)}\n`;
     const a = await person(page, 2);
     const b = sourcePerson(page, 1);
     colour('world', 'highlight', 'red')(a);
@@ -900,4 +914,89 @@ describe('formatting made alongside someone else’s', () => {
     // About 0.15 s in Chromium here; before, 0.4 to 0.5 s.
     expect(longest).toBeLessThan(300);
   });
+  // From the last review of PR #745, after which Scott narrowed it: a write is
+  // made again only when both people's changes to the block are formatting
+  // alone. Typing on either side merges as main does.
+  it('comes out as main does: typing before a word highlighted, with a bold elsewhere', async () => {
+    const page = 'foo *world* is big now.\n';
+    const { end, main } = await together(
+      page,
+      [
+        (p) => {
+          toggle('now', 'bold')(p);
+          typing('world', 0, 0, 'new ')(p);
+        },
+        colour('world', 'highlight', 'red'),
+      ],
+      [1, 2],
+    );
+    expect(main).toBe('foo new <mark data-color="red">*world*</mark> is big **now**.\n');
+    expect(end).toBe(main);
+  });
+
+  it('comes out as main does: letters typed in source mode beside a word highlighted', async () => {
+    const page = '**world**\n';
+    const visual = await person(page, 2);
+    const source = sourcePerson(page, 1);
+    colour('world', 'highlight', 'red')(visual);
+    typeSource(source, 'X**Yworld**\n');
+    await expect.poll(() => visual.log.length).toBe(1);
+    const main = merged(page, [visual, source], [1, 1]);
+    expect(main).toBe('X<mark data-color="red">**Yworld**</mark>\n');
+    send(source, visual);
+    await settle([visual, source]);
+    expect(source.text.toJSON()).toBe(visual.text.toJSON());
+    expect(visual.text.toJSON()).toBe(main);
+  });
+
+  for (const ids of ORDERS) {
+    it(`reads as both people’s between two paragraphs of 550 characters, clients ${ids.join(' and ')}`, async () => {
+      const filler = `${Array.from({ length: 80 }, (_, i) => `word${i}`).join(' ')}.`;
+      const page = `${filler}\n\n**world** here.\n\n${filler}\n`;
+      const { end, main } = await together(
+        page,
+        [colour('world', 'highlight', 'red'), colour('world', 'text', 'red')],
+        ids,
+      );
+      expect(raw(main)).toBe(true);
+      expect(raw(end)).toBe(false);
+      expect(end).toContain('<span data-color="red">');
+      expect(end).toContain('<mark data-color="red">');
+    });
+  }
+
+  it('holds the page’s thread briefly when a word is capitalised beside each of many highlights', async () => {
+    const words = Array.from({ length: 8 }, (_, i) => `world${i}`);
+    const links = Array.from({ length: 120 }, (_, i) =>
+      Array.from({ length: 10 }, () => `[x](p${i}.md)`).join(' '),
+    );
+    const page = `${[...words.map((word) => `${word} here.`), 'spacer.', ...links].join('\n\n')}\n`;
+    const visual = await person(page, 2);
+    const source = sourcePerson(page, 1);
+    for (const [i, word] of words.entries()) {
+      colour(word, 'highlight', 'red')(visual);
+      await expect.poll(() => visual.log.length).toBe(i + 1);
+    }
+    await expect.poll(() => visual.handle.read()).toBe(visual.text.toJSON());
+    typeSource(source, page.replaceAll('world', 'World'));
+    const main = merged(page, [visual, source], [words.length, 1]);
+    // The longest the thread is held, as the longest gap between timers.
+    let longest = 0;
+    let last = performance.now();
+    let ticking = true;
+    const tick = () => {
+      const now = performance.now();
+      longest = Math.max(longest, now - last);
+      last = now;
+      if (ticking) setTimeout(tick, 0);
+    };
+    setTimeout(tick, 0);
+    send(source, visual);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    ticking = false;
+    await settle([visual, source]);
+    expect(source.text.toJSON()).toBe(main);
+    expect(visual.text.toJSON()).toBe(main);
+    expect(longest).toBeLessThan(100);
+  }, 20_000);
 });
