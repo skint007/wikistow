@@ -27,6 +27,7 @@ import {
 } from './contacts.ts';
 import { KeptContent } from './kept.ts';
 import type { SpaceKeys } from './keys.ts';
+import { keepWrapper } from './vault.ts';
 
 /**
  * Everything an operation needs once the vault is open: the API, this
@@ -256,11 +257,7 @@ export async function confirmSession(
   if (installationId !== ctx.installationId) return 'other-installation';
   const served = await ctx.api.call(vaultRoutes.getVault);
   const store = ctx.keptContent?.store;
-  if (store) {
-    await keptUnlock(store)
-      .keepVault({ ...served, keptAt: new Date().toISOString() })
-      .catch(() => {});
-  }
+  if (store) await keepWrapper(store, served);
   if (served.version !== unconfirmed.vaultVersion) return 'passphrase-changed';
   const unseen = ctx.kept && unseenRestore(restore, ctx.kept.restoredAt);
   if (unseen) ctx.kept?.startOver(unseen.restoredAt);

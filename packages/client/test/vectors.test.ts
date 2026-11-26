@@ -53,6 +53,10 @@ import {
   toBase64,
   TrustStore,
   unlockVault,
+  identityRotationBytes,
+  parseIdentityRotation,
+  verifyIdentityRotation,
+  verifyRotationChain,
   type PrivateIdentity,
 } from '../src/index.ts';
 import { z } from 'zod';
@@ -837,5 +841,63 @@ describe('kept vector test vectors (ADR 0016, decision 4)', () => {
     expect(
       openMeaningIndex(keeper, fromBase64(flip(meaning.sealed, 30)), meaning.modelHash),
     ).toBeNull();
+  });
+});
+
+describe('identity key rotation test vectors (section 4.6)', () => {
+  const { rotation } = vectors;
+  const keys = rotation.keys.map(identity);
+  const installationId = InstallationId.parse('vector-installation');
+
+  it('name each key by its key hash', () => {
+    expect(keys.map((key) => keyHash(key.public))).toEqual(rotation.keyHashes);
+  });
+
+  it('sign each statement over its bytes with the old key and the new one', () => {
+    for (const [index, { statement: raw, signedBytes }] of rotation.statements.entries()) {
+      const statement = parseIdentityRotation(raw);
+      const bytes = identityRotationBytes(statement);
+      expect(sodium.to_hex(bytes)).toBe(signedBytes);
+      const [from, to] = [keys[index], keys[index + 1]];
+      if (!from || !to) throw new Error('A statement between two vector keys');
+      expect(verifySignature(from.public, bytes, statement.fromSignature)).toBe(true);
+      expect(verifySignature(to.public, bytes, statement.toSignature)).toBe(true);
+      expect(verifyIdentityRotation({ installationId, from: from.public, statement })).toEqual(
+        to.public,
+      );
+    }
+  });
+
+  it('chain the statements from the first key to the last', () => {
+    const [first, last] = [keys[0], keys.at(-1)];
+    if (!first || !last) throw new Error('Vector keys');
+    const chain = verifyRotationChain({
+      installationId,
+      start: first.public,
+      end: last.public,
+      statements: rotation.statements.map(({ statement }) => statement),
+    });
+    expect(chain.keys).toEqual(keys.map((key) => key.public));
+  });
+
+  it('unlock the format 2 vault, with every earlier key, under vault-keyring/v2', () => {
+    const { wrapper, passphrase, recoveryKey, keyringAd } = rotation.vault;
+    expect(sodium.to_hex(canonical('vault-keyring/v2', [wrapper.accountId]))).toBe(keyringAd);
+    for (const secret of [
+      { kind: 'passphrase', passphrase },
+      { kind: 'recovery-key', recoveryKey },
+    ] as const) {
+      const vault = unlockVault({ wrapper, secret, formats: [1, 2] });
+      expect(vault.identity.public).toEqual(keys[2]?.public);
+      expect(vault.retired.map((key) => key.public)).toEqual(
+        keys.slice(0, 2).map((key) => key.public),
+      );
+      expect(vault.retired.map((key) => toBase64(key.signSecretKey))).toEqual(
+        rotation.keys.slice(0, 2).map((key) => key.signSecretKey),
+      );
+    }
+    expect(() => unlockVault({ wrapper, secret: { kind: 'passphrase', passphrase } })).toThrow(
+      code('unsupported-format'),
+    );
   });
 });

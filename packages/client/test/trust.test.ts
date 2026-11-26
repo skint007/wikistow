@@ -10,8 +10,11 @@ import {
   generateIdentity,
   InstallationId,
   enrollmentFingerprint,
+  signIdentityRotation,
   toBase64,
   TrustStore,
+  verifyRotationChain,
+  type PrivateIdentity,
 } from '../src/index.ts';
 import { buildWorld } from './fixture/world.ts';
 import { directoryEntry } from './support/testing.ts';
@@ -179,5 +182,83 @@ describe('first-seen pins and key changes (sections 8.3 and 8.4)', () => {
     const impostor = generateIdentity({ id: IdentityId.parse('impostor'), kind: 'human' });
     expect(loaded.check(impostor.public, fernEntry.email).kind).toBe('changed');
     expect(loaded.takeChanges()).toEqual([]);
+  });
+});
+
+describe('earlier keys (section 4.6)', () => {
+  const installationId = InstallationId.parse('test-installation');
+  const id = IdentityId.parse('rotated');
+  const [k1, k2, k3] = [1, 2, 3].map((keyVersion) =>
+    generateIdentity({ kind: 'human', id, keyVersion }),
+  ) as [PrivateIdentity, PrivateIdentity, PrivateIdentity];
+  const contacts = { version: 1, contactsHash: keyHash(k1.public) };
+  const s12 = signIdentityRotation({ installationId, from: k1, to: k2, contacts: null });
+  const s23 = signIdentityRotation({ installationId, from: k2, to: k3, contacts });
+  const chain = (statements: unknown[], start = k1.public, end = k3.public) =>
+    verifyRotationChain({ installationId, start, end, statements });
+  const unknown = expect.objectContaining({ code: 'unknown-identity' });
+  const pinnedAt = (key: PrivateIdentity) => {
+    const trust = new TrustStore(installationId);
+    trust.use(directoryEntry(key.public));
+    return trust;
+  };
+
+  it('verify for opening only, from a chain that ends at the pin', () => {
+    const trust = pinnedAt(k3);
+    expect(() => trust.requireForOpening(id, 1)).toThrow(unknown);
+    trust.addEarlierKeys(chain([s12, s23]));
+    expect(trust.requireForOpening(id, 1)).toEqual({ identity: k1.public, earlier: true });
+    expect(trust.requireForOpening(id, 2)).toEqual({ identity: k2.public, earlier: true });
+    expect(trust.requireForOpening(id, 3)).toEqual({ identity: k3.public, earlier: false });
+    // Everything else still takes the pin alone.
+    expect(() => trust.require(id, 2)).toThrow(unknown);
+    expect(trust.require(id, 3)).toEqual(k3.public);
+    expect(trust.check(k2.public).kind).toBe('changed');
+    expect(() => trust.requireForOpening(id, 4)).toThrow(unknown);
+  });
+
+  it('come only from a chain that ends at the pin, through no declined key', () => {
+    expect(() => pinnedAt(k2).addEarlierKeys(chain([s12, s23]))).toThrow(changed);
+    expect(() => new TrustStore(installationId).addEarlierKeys(chain([s12, s23]))).toThrow(unknown);
+    const declined = pinnedAt(k3);
+    declined.declineKey(k2.public);
+    expect(() => declined.addEarlierKeys(chain([s12, s23]))).toThrow(changed);
+    expect(() => declined.requireForOpening(id, 1)).toThrow(unknown);
+    expect(() => pinnedAt(k3).addEarlierKeys({ keys: [k1.public, k3.public] } as never)).toThrow(
+      expect.objectContaining({ code: 'malformed' }),
+    );
+  });
+
+  it('agree across chains, and stop at a key declined later', () => {
+    const trust = pinnedAt(k3);
+    trust.addEarlierKeys(chain([s23], k2.public));
+    trust.addEarlierKeys(chain([s12, s23]));
+    expect(trust.requireForOpening(id, 1).identity).toEqual(k1.public);
+    trust.declineKey(k1.public);
+    expect(() => trust.requireForOpening(id, 1)).toThrow(unknown);
+    expect(trust.requireForOpening(id, 2).identity).toEqual(k2.public);
+  });
+
+  it('refuse a second chain to the pin through other keys', () => {
+    const trust = pinnedAt(k3);
+    trust.addEarlierKeys(chain([s12, s23]));
+    // The holder of the current key vouched for another predecessor too.
+    const other = generateIdentity({ kind: 'human', id, keyVersion: 2 });
+    const other23 = signIdentityRotation({ installationId, from: other, to: k3, contacts });
+    expect(() => trust.addEarlierKeys(chain([other23], other.public))).toThrow(changed);
+    expect(trust.requireForOpening(id, 2).identity).toEqual(k2.public);
+  });
+
+  it('go with the pin they chained to', () => {
+    const confirmed = pinnedAt(k3);
+    confirmed.addEarlierKeys(chain([s12, s23]));
+    const replacement = generateIdentity({ kind: 'human', id, keyVersion: 4 });
+    confirmed.confirmKey(directoryEntry(replacement.public));
+    expect(() => confirmed.requireForOpening(id, 2)).toThrow(unknown);
+
+    const reloaded = pinnedAt(k3);
+    reloaded.addEarlierKeys(chain([s12, s23]));
+    reloaded.reload(newContactsPayloads(), [k3.public]);
+    expect(() => reloaded.requireForOpening(id, 2)).toThrow(unknown);
   });
 });

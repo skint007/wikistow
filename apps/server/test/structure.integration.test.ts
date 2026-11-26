@@ -26,6 +26,7 @@ import {
   SealedMetadataV2,
   structureRoutes,
   vaultRoutes,
+  VaultWrapperV1,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
 import { schema, setAvatar } from '@wikistow/server';
@@ -65,9 +66,25 @@ describe('the vault', () => {
     expect(await rejection(again)).toBe('vault-exists');
   });
 
+  it('takes a format 1 wrapper only, until replacing keys is built', async () => {
+    const alice = await personWithVault(t);
+    const served = await alice.api.call(vaultRoutes.getVault);
+    const wrapper = { ...VaultWrapperV1.parse(served.wrapper), format: 2 };
+    expect(
+      await rejection(
+        alice.api.call(vaultRoutes.replaceVault, {
+          body: { wrapper: wrapper as never, expectedVersion: served.version },
+        }),
+      ),
+    ).toBe('invalid-request');
+    expect((await alice.api.call(vaultRoutes.getVault)).version).toBe(served.version);
+  });
+
   it('changes only its passphrase wrapper', async () => {
     const alice = await personWithVault(t);
-    const { wrapper, version } = await alice.api.call(vaultRoutes.getVault);
+    const served = await alice.api.call(vaultRoutes.getVault);
+    const { version } = served;
+    const wrapper = VaultWrapperV1.parse(served.wrapper);
 
     const destroyKeys = {
       ...wrapper,

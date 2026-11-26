@@ -20,6 +20,12 @@ export const PublicKey = z.string().regex(BYTES_32);
 export const Hash32 = z.string().regex(BYTES_32);
 
 /**
+ * An Ed25519 signature, 64 bytes in their one canonical base64url form, so
+ * a message or record can't carry more than its sealed part says.
+ */
+export const Signature = z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/);
+
+/**
  * The output of authenticated encryption, as stored in records. The nonce
  * length is fixed, so no bytes can move between nonce and ciphertext without
  * changing the hash of `nonce ‖ ciphertext`. The ciphertext holds at least

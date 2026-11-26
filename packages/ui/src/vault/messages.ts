@@ -16,6 +16,9 @@ export function vaultMessage(error: unknown): string {
         : 'That didn’t unlock the vault. Check it and try again.';
     case 'kdf-failed':
       return 'This device doesn’t have enough memory to unlock the vault. Try another device.';
+    case 'unsupported-format':
+      // As after someone replaced their keys with a newer app (section 4.6).
+      return 'Your vault was saved by a newer version of WikiStow. Update the app to unlock it.';
     case 'malformed':
       return 'That doesn’t look like a recovery key. It has 64 characters in groups of four.';
     default:

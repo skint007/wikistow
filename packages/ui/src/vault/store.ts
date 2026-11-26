@@ -37,8 +37,10 @@ export type Ask = (question: string) => boolean;
 /** Overwrite a vault's secret keys, so they can't be read from memory later. */
 export function zeroVault(vault: UnlockedVault) {
   vault.vaultKey.fill(0);
-  vault.identity.boxSecretKey.fill(0);
-  vault.identity.signSecretKey.fill(0);
+  for (const identity of [vault.identity, ...vault.retired]) {
+    identity.boxSecretKey.fill(0);
+    identity.signSecretKey.fill(0);
+  }
 }
 
 const emit = () => {

@@ -186,11 +186,19 @@ async function restore(accountId: string) {
   } catch (caught) {
     // A key that no longer opens this vault is no use to keep. Anything
     // else, such as the server being away, leaves it for the next load.
-    if (caught instanceof CryptoError) await forgetKeptUnlock();
+    if (noLongerOpens(caught)) await forgetKeptUnlock();
   } finally {
     vaultKey.fill(0);
   }
 }
+
+/**
+ * Whether a remembered unlock failed because its key no longer opens the
+ * vault, so it is no use to keep. A vault in a format this version doesn't
+ * unlock says nothing about the key: the app asks to update, and keeps it.
+ */
+export const noLongerOpens = (error: unknown): boolean =>
+  error instanceof CryptoError && error.code !== 'unsupported-format';
 
 // The vault's version on the server, or null with no answer.
 async function servedVersion(): Promise<number | null> {

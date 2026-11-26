@@ -1,4 +1,9 @@
-import { vaultRoutes, type AccountId, type VaultWrapper } from '@wikistow/contracts';
+import {
+  vaultRoutes,
+  type AccountId,
+  type ServedVaultWrapper,
+  type VaultWrapperV1,
+} from '@wikistow/contracts';
 import { noAnswer, type ApiClient } from '../api/client.ts';
 import type { KeptStore } from '../kept-store.ts';
 import { keptUnlock } from '../kept-unlock.ts';
@@ -8,6 +13,7 @@ import {
   changePassphrase,
   createVault,
   unlockVault,
+  unlocks,
   type KdfParams,
   type UnlockedVault,
   type VaultSecret,
@@ -20,17 +26,17 @@ import {
 export type VaultCrypto = {
   create(input: { accountId: AccountId; passphrase: string; kdf?: KdfParams }): Promise<{
     identity: PrivateIdentity;
-    wrapper: VaultWrapper;
+    wrapper: VaultWrapperV1;
     recoveryKey: string;
     vault: UnlockedVault;
   }>;
-  unlock(input: { wrapper: VaultWrapper; secret: VaultSecret }): Promise<UnlockedVault>;
+  unlock(input: { wrapper: ServedVaultWrapper; secret: VaultSecret }): Promise<UnlockedVault>;
   changePassphrase(input: {
     vault: UnlockedVault;
-    wrapper: VaultWrapper;
+    wrapper: ServedVaultWrapper;
     passphrase: string;
     kdf?: KdfParams;
-  }): Promise<VaultWrapper>;
+  }): Promise<VaultWrapperV1>;
 };
 
 export const inlineVaultCrypto: VaultCrypto = {
@@ -80,7 +86,7 @@ export function prepareVault({
 export async function registerVault(
   api: ApiClient,
   prepared: PreparedVault,
-): Promise<{ wrapper: VaultWrapper; version: number }> {
+): Promise<{ wrapper: VaultWrapperV1; version: number }> {
   const { version } = await api.call(vaultRoutes.createVault, {
     body: { identity: prepared.identity.public, wrapper: prepared.wrapper },
   });
@@ -110,7 +116,7 @@ export async function openVault({
 export async function vaultWrapper(
   api: ApiClient,
   kept: KeptStore | null,
-): Promise<{ wrapper: VaultWrapper; version: number; keptAt: string | null }> {
+): Promise<{ wrapper: ServedVaultWrapper; version: number; keptAt: string | null }> {
   try {
     const served = await api.call(vaultRoutes.getVault);
     if (kept) await keepWrapper(kept, served);
@@ -122,11 +128,16 @@ export async function vaultWrapper(
   }
 }
 
-/** Keep the wrapper the server serves now, for unlocking offline. Failing only means an older one stays. */
-export function keepWrapper(
+/**
+ * Keep the wrapper the server serves now, for unlocking offline. Failing
+ * only means an older one stays, as it does for a format this version
+ * doesn't unlock, which would only ask to update offline too.
+ */
+export async function keepWrapper(
   kept: KeptStore,
-  { wrapper, version }: { wrapper: VaultWrapper; version: number },
+  { wrapper, version }: { wrapper: ServedVaultWrapper; version: number },
 ): Promise<void> {
+  if (!unlocks(wrapper)) return;
   return keptUnlock(kept)
     .keepVault({ wrapper, version, keptAt: new Date().toISOString() })
     .catch(() => {});
@@ -150,7 +161,7 @@ export async function changeVaultPassphrase({
   vault: UnlockedVault;
   passphrase: string;
   kdf?: KdfParams;
-}): Promise<{ wrapper: VaultWrapper; version: number }> {
+}): Promise<{ wrapper: VaultWrapperV1; version: number }> {
   const { wrapper, version } = await api.call(vaultRoutes.getVault);
   const next = await crypto.changePassphrase({
     vault,

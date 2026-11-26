@@ -17,6 +17,7 @@ export * from './import.ts';
 export * from './import-archive.ts';
 export * from './folder-keys.ts';
 export * from './identity.ts';
+export * from './identity-rotation.ts';
 export * from './metadata.ts';
 export * from './owners.ts';
 export * from './pace.ts';
