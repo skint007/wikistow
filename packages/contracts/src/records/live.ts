@@ -5,7 +5,7 @@
 // `subjectKind: "live"`, in a schema of its own as a comment's is, so no
 // route that takes a name takes it.
 import { z } from 'zod';
-import { Base64, PositiveInt, Sealed } from './encoding.ts';
+import { Base64, PositiveInt, Sealed, Signature } from './encoding.ts';
 import { IdentityId, PageId, RevisionId } from './ids.ts';
 import { LiveSubjectKind, MetadataRecordV2 } from './metadata.ts';
 
@@ -32,12 +32,6 @@ const Format = z.looseObject({
 
 /** 32 bytes in their one canonical base64url form. */
 const Bytes32 = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
-
-/**
- * An Ed25519 signature, 64 bytes in their one canonical base64url form, so
- * a message or record can't carry more than its sealed part says.
- */
-const Signature = z.string().regex(/^[A-Za-z0-9_-]{85}[AQgw]$/);
 
 /**
  * A session's record: a metadata record v2 (sections 5.4 and 5.7) with

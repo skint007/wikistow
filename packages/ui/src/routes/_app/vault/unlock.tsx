@@ -16,7 +16,7 @@ import { desktop } from '../../../desktop';
 import { tabSafeMode } from '../../../plugins/safe-mode';
 import { isApple } from '../../../shell/search-model';
 import { vaultMessage } from '../../../vault/messages';
-import { rememberOpenVault, unlockWith } from '../../../vault/open';
+import { noLongerOpens, rememberOpenVault, unlockWith } from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
 import { forgetInBrowser } from '../../../vault/tab-unlock';
 
@@ -69,8 +69,10 @@ function Unlock() {
         }
       } catch (caught) {
         // A key that no longer opens this vault is no use to keep. Anything
-        // else, such as the server being away, leaves it for next time.
-        if (caught instanceof CryptoError) await desktop.forgetVault().catch(() => {});
+        // else, such as the server being away, leaves it for next time; a
+        // vault this version can't unlock says so before anyone types.
+        if (noLongerOpens(caught)) await desktop.forgetVault().catch(() => {});
+        else if (caught instanceof CryptoError) setError(vaultMessage(caught));
       } finally {
         vaultKey?.fill(0);
       }

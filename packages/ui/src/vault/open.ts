@@ -7,6 +7,7 @@ import {
   openKeptSession,
   openSession,
   vaultWrapper,
+  unlocks,
   type ClientContext,
   type KeptFile,
   type UnlockedVault,
@@ -174,9 +175,11 @@ async function restore(accountId: string) {
   try {
     // The passphrase changed since it was remembered: ask for the new one.
     // With no answer, that is checked once the server answers (ADR 0009,
-    // decision 5).
-    const served = version === undefined ? null : await servedVersion();
-    if (served !== null && served !== version) {
+    // decision 5). A vault this version can't unlock stays locked, and
+    // unlocking asks to update; the key remembered says nothing about it.
+    const served = version === undefined ? null : await servedVault();
+    if (served && !unlocks(served.wrapper)) return;
+    if (served !== null && served.version !== version) {
       await forgetInBrowser();
       return;
     }
@@ -186,16 +189,24 @@ async function restore(accountId: string) {
   } catch (caught) {
     // A key that no longer opens this vault is no use to keep. Anything
     // else, such as the server being away, leaves it for the next load.
-    if (caught instanceof CryptoError) await forgetKeptUnlock();
+    if (noLongerOpens(caught)) await forgetKeptUnlock();
   } finally {
     vaultKey.fill(0);
   }
 }
 
-// The vault's version on the server, or null with no answer.
-async function servedVersion(): Promise<number | null> {
+/**
+ * Whether a remembered unlock failed because its key no longer opens the
+ * vault, so it is no use to keep. A vault in a format this version doesn't
+ * unlock says nothing about the key: the app asks to update, and keeps it.
+ */
+export const noLongerOpens = (error: unknown): boolean =>
+  error instanceof CryptoError && error.code !== 'unsupported-format';
+
+// The vault on the server, or null with no answer.
+async function servedVault() {
   try {
-    return (await api.call(vaultRoutes.getVault)).version;
+    return await api.call(vaultRoutes.getVault);
   } catch (error) {
     if (noAnswer(error)) return null;
     throw error;

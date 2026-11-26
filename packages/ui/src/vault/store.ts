@@ -37,8 +37,10 @@ export type Ask = (question: string) => boolean;
 /** Overwrite a vault's secret keys, so they can't be read from memory later. */
 export function zeroVault(vault: UnlockedVault) {
   vault.vaultKey.fill(0);
-  vault.identity.boxSecretKey.fill(0);
-  vault.identity.signSecretKey.fill(0);
+  for (const identity of [vault.identity, ...vault.retired]) {
+    identity.boxSecretKey.fill(0);
+    identity.signSecretKey.fill(0);
+  }
 }
 
 const emit = () => {
@@ -98,13 +100,16 @@ export const vaultStore = {
   /**
    * Lock the vault the way a person asks to: every guard runs first, and any
    * of them can keep it open. Guards ask with `ask`, by default a confirm
-   * dialog. Resolves whether it locked.
+   * dialog. Resolves whether it locked. `forget` as for `lock`.
    */
-  async requestLock(ask: Ask = (question) => window.confirm(question)): Promise<boolean> {
+  async requestLock(
+    ask: Ask = (question) => window.confirm(question),
+    { forget = true }: { forget?: boolean } = {},
+  ): Promise<boolean> {
     for (const guard of [...lockGuards]) {
       if (!(await guard(ask))) return false;
     }
-    vaultStore.lock();
+    vaultStore.lock({ forget });
     return true;
   },
   /** Run `guard` before each requested lock until the returned function is called. */
@@ -117,11 +122,12 @@ export const vaultStore = {
   /**
    * Lock now, without asking anyone: for a session that has already ended.
    * The kept unlock goes too, so the next launch or load asks for the
-   * passphrase again.
+   * passphrase again, unless `forget` is false: as for a vault this
+   * version can't unlock, which says nothing about the key kept.
    */
-  lock() {
+  lock({ forget = true }: { forget?: boolean } = {}) {
     epoch += 1;
-    void forgetKeptUnlock();
+    if (forget) void forgetKeptUnlock();
     if (state.status === 'unlocked') {
       closeSession(state.ctx);
       zeroVault(state.vault);

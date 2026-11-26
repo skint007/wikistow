@@ -13,7 +13,9 @@ let confirmed = 0;
  * (`confirmSession`; ADR 0009, decision 5). Another installation, or a
  * passphrase changed elsewhere, ends the session: the vault locks as Lock
  * vault does, saving what can be saved first and forgetting a remembered
- * unlock, so the new passphrase is asked for. So does a contacts record
+ * unlock, so the new passphrase is asked for. A vault in a format this
+ * version doesn't unlock locks it too, keeping a remembered unlock, and
+ * unlocking then asks to update. So does a contacts record
  * that fails against the mark, which the next online unlock then reports.
  * With no answer again, it waits for the next one; any other failure, or
  * a lock an edit that can't be saved keeps off, is tried again shortly.
@@ -30,7 +32,9 @@ export function useConfirmSession() {
     void confirmSession(ctx)
       .then(async (outcome) => {
         // As an idle lock: nobody is asked, and an edit that can't be saved keeps it open.
-        if (outcome !== 'confirmed') await vaultStore.requestLock(() => false);
+        if (outcome !== 'confirmed') {
+          await vaultStore.requestLock(() => false, { forget: outcome !== 'update-app' });
+        }
       })
       .catch((error: unknown) => {
         if (error instanceof CryptoError) vaultStore.lock();

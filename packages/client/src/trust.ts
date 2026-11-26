@@ -19,6 +19,7 @@ import {
   verifySignature,
   type PrivateIdentity,
 } from './identity.ts';
+import { RotationChain } from './identity-rotation.ts';
 import { IdentityId, InstallationId } from './ids.ts';
 
 export { AgentEnrollment };
@@ -166,10 +167,18 @@ export type TrustCheck =
  *
  * Every pin, confirmation and decline is also queued as a contacts change;
  * the app writes them with its next contacts write (`takeChanges`).
+ *
+ * A person who replaced their keys also has **earlier keys**: keys a valid
+ * chain of rotation statements reached before their pin (section 4.6). They
+ * verify what the person signed with them, for opening only, and are never
+ * pinned, sealed to or used to accept anything (`requireForOpening`).
  */
 export class TrustStore {
   readonly installationId: InstallationId;
   readonly #pins = new Map<IdentityId, Readonly<PublicIdentity>>();
+  // Each person's earlier keys, by key version. Each map came from a chain
+  // that ended at their pin, and goes when the pin does.
+  readonly #earlier = new Map<IdentityId, ReadonlyMap<number, Readonly<PublicIdentity>>>();
   readonly #removed = new Set<string>();
   // Each label's key, by its normalized email.
   readonly #labels = new Map<string, { id: string; keyHash: string }>();
@@ -211,7 +220,10 @@ export class TrustStore {
     payloads: Pick<OpenedContacts, 'shared' | 'private'>,
     dropped: readonly PublicIdentity[],
   ): void {
-    for (const { id } of dropped) this.#pins.delete(id);
+    for (const { id } of dropped) {
+      this.#pins.delete(id);
+      this.#earlier.delete(id);
+    }
     this.load(payloads);
   }
 
@@ -261,13 +273,77 @@ export class TrustStore {
     return pinned ? { kind: 'pinned', identity: pinned } : { kind: 'unknown' };
   }
 
-  /** The pinned key for checking a signature by `id`. */
+  /**
+   * The pinned key for checking a signature by `id`. Only the pin: what an
+   * earlier key signed counts for opening alone, so it never passes here
+   * (`requireForOpening`).
+   */
   require(id: IdentityId, keyVersion: number): PublicIdentity {
     const pinned = this.#pins.get(id);
     if (!pinned || pinned.keyVersion !== keyVersion) {
       throw new CryptoError('unknown-identity', `No pinned key for ${id} version ${keyVersion}`);
     }
     return pinned;
+  }
+
+  /**
+   * The key for checking what `id` signed at `keyVersion`, for **opening
+   * only** (section 4.6, **Using an earlier key**): their pin, or one of
+   * their earlier keys, with `earlier` saying which. What an earlier key
+   * signed is read as the person's earlier writing, with no mark, and counts
+   * for nothing else: not for writing, accepting an owner or an agent, or
+   * sealing. A key they declined is never returned (`unknown-identity`).
+   */
+  requireForOpening(
+    id: IdentityId,
+    keyVersion: number,
+  ): { identity: PublicIdentity; earlier: boolean } {
+    const pinned = this.#pins.get(id);
+    const found =
+      pinned?.keyVersion === keyVersion
+        ? { identity: pinned, earlier: false }
+        : { identity: this.#earlier.get(id)?.get(keyVersion), earlier: true };
+    const { identity, earlier } = found;
+    if (!identity || this.#removed.has(keyHash(identity))) {
+      throw new CryptoError('unknown-identity', `No key for ${id} version ${keyVersion}`);
+    }
+    return { identity, earlier };
+  }
+
+  /**
+   * Take the earlier keys of a pinned person from `chain`, which must end at
+   * their pin (section 4.6). Earlier keys from another chain, as from a
+   * shorter fetch, must agree with it at every key version both hold. One
+   * checked for another installation is `binding-mismatch`. A
+   * chain that ends at another key, passes through a key in `removed`, or
+   * disagrees with earlier keys taken before is `identity-key-changed`,
+   * and nothing is taken. A person not pinned is `unknown-identity`.
+   */
+  addEarlierKeys(chain: RotationChain): void {
+    if (!(chain instanceof RotationChain)) {
+      throw new CryptoError('malformed', 'Only a checked chain gives earlier keys');
+    }
+    if (chain.installationId !== this.installationId) {
+      throw new CryptoError('binding-mismatch', 'The chain was checked for another installation');
+    }
+    const end = chain.last;
+    const pinned = this.#pins.get(end.id);
+    if (!pinned) throw new CryptoError('unknown-identity', `${end.id} isn’t pinned`);
+    if (!sameKeys(pinned, end)) {
+      throw new CryptoError('identity-key-changed', `The chain of ${end.id} ends at another key`);
+    }
+    if (chain.keys.some((key) => this.#removed.has(keyHash(key)))) {
+      throw new CryptoError('identity-key-changed', `The chain of ${end.id} has a declined key`);
+    }
+    const earlier = new Map(this.#earlier.get(end.id));
+    for (const key of chain.keys.slice(0, -1)) {
+      const held = earlier.get(key.keyVersion);
+      if (held && !sameKeys(held, key)) {
+        throw new CryptoError('identity-key-changed', `Two chains of ${end.id} disagree`);
+      }
+      earlier.set(key.keyVersion, key);
+    }
+    this.#earlier.set(end.id, earlier);
   }
 
   /**
@@ -362,6 +438,8 @@ export class TrustStore {
     if (pinned && sameKeys(pinned, identity) && !this.#removed.has(hashed)) return pinned;
     const confirmed = Object.freeze(PublicIdentity.parse(identity));
     this.#pins.set(identity.id, confirmed);
+    // Earlier keys came from a chain to the pin this replaces.
+    if (pinned && !sameKeys(pinned, confirmed)) this.#earlier.delete(identity.id);
     this.#removed.delete(hashed);
     const pin = {
       identity: asHuman(confirmed),

@@ -22,6 +22,7 @@ const filled = (length: number) => new Uint8Array(length).fill(7);
 const newVault = (): UnlockedVault => ({
   accountId: AccountId.parse('account-1'),
   identity: generateIdentity({ kind: 'human', id: newId(IdentityId) }),
+  retired: [],
   vaultKey: filled(32),
 });
 

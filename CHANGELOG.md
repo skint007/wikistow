@@ -4,6 +4,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### App
+
+- A vault saved by a newer version of WikiStow, as one will be once someone replaces their keys, now asks you to update the app to unlock it, where it said "Try again in a moment". A device keeps the vault it unlocks offline with, and the desktop app keeps a remembered unlock, until you update. (#751)
+
+#### Development
+
+- The formats and checks for replacing a person's identity keys (ADR 0018, #327): the rotation statement and chains of them, the format 2 vault and its keyring, earlier keys in `TrustStore`, and their test vectors. Nothing uses them yet, and the server still registers people at key version 1 only. (#751)
+
 ## 0.30.4 - 2026-11-25
 
 ### Highlights

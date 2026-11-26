@@ -1,23 +1,29 @@
 import { z } from 'zod';
 import { PublicIdentity } from '../records/identity.ts';
 import { IdentityId } from '../records/ids.ts';
-import { VaultWrapper } from '../records/vault.ts';
+import { ServedVaultWrapper, VaultWrapperV1 } from '../records/vault.ts';
 import type { RouteDef } from '../route.ts';
 
-/** Register this account's identity and vault together, once. */
+/**
+ * Register this account's identity and vault together, once. A new vault is
+ * format 1: format 2 comes only from replacing a person's keys.
+ */
 export const createVault = {
   method: 'POST',
   path: '/api/vault',
-  body: z.object({ identity: PublicIdentity, wrapper: VaultWrapper }),
+  body: z.object({ identity: PublicIdentity, wrapper: VaultWrapperV1 }),
   response: z.strictObject({ version: z.number().int() }),
   status: 201,
 } as const satisfies RouteDef;
 
-/** The caller's own vault wrapper. Nobody else's is ever served. */
+/**
+ * The caller's own vault wrapper. Nobody else's is ever served. A format
+ * newer than this version knows is still read, so the app can say to update.
+ */
 export const getVault = {
   method: 'GET',
   path: '/api/vault',
-  response: z.strictObject({ wrapper: VaultWrapper, version: z.number().int() }),
+  response: z.strictObject({ wrapper: ServedVaultWrapper, version: z.number().int() }),
 } as const satisfies RouteDef;
 
 /**
@@ -27,7 +33,7 @@ export const getVault = {
 export const replaceVault = {
   method: 'PUT',
   path: '/api/vault',
-  body: z.object({ wrapper: VaultWrapper, expectedVersion: z.number().int().positive() }),
+  body: z.object({ wrapper: VaultWrapperV1, expectedVersion: z.number().int().positive() }),
   response: z.strictObject({ version: z.number().int() }),
 } as const satisfies RouteDef;
 

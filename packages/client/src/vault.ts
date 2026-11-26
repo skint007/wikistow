@@ -1,4 +1,9 @@
-import { VaultWrapper } from '@wikistow/contracts';
+import {
+  VaultWrapper,
+  VaultWrapperV1,
+  VaultWrapperV2,
+  ServedVaultWrapper,
+} from '@wikistow/contracts';
 import { z } from 'zod';
 import {
   aeadDecrypt,
@@ -7,11 +12,12 @@ import {
   canonical,
   fromBase64,
   parseJson,
+  parseWith,
   toBase64,
   utf8,
 } from './encoding.ts';
 import { CryptoError } from './errors.ts';
-import { PublicIdentity, type PrivateIdentity } from './identity.ts';
+import { hasMatchingKeys, PublicIdentity, type PrivateIdentity } from './identity.ts';
 import { AccountId } from './ids.ts';
 import { sodium } from './sodium.ts';
 
@@ -52,9 +58,38 @@ export const DEFAULT_KDF: KdfParams = {
  */
 export const MIN_PASSPHRASE = 12;
 
-export { VaultWrapper };
+export { VaultWrapper, VaultWrapperV1, VaultWrapperV2, ServedVaultWrapper };
 
 const Keyring = z.object({ public: PublicIdentity, boxSecretKey: Base64, signSecretKey: Base64 });
+
+// Format 2's keyring (section 4.6) parses strictly, its keys included.
+const KeyringKey = z.strictObject({
+  public: z.strictObject(PublicIdentity.shape),
+  boxSecretKey: Base64,
+  signSecretKey: Base64,
+});
+const KeyringV2 = z.strictObject({
+  format: z.literal(2),
+  ...KeyringKey.shape,
+  retired: z.array(KeyringKey),
+});
+const KEYRING_V2_INTEGERS = [
+  ['format'],
+  ['public', 'keyVersion'],
+  ['retired', '*', 'public', 'keyVersion'],
+] as const;
+
+/**
+ * The wrapper formats this version unlocks. Format 2 is built (section
+ * 4.6), but this version can't yet open what a person's earlier keys hold or
+ * check the chain to their new key, so it asks to update, as for any newer
+ * format, until it can (#327).
+ */
+export const UNLOCKED_FORMATS: readonly number[] = [1];
+
+/** Whether this version unlocks `wrapper`, and so whether a device should keep it to unlock offline. */
+export const unlocks = (wrapper: { format: number }): boolean =>
+  UNLOCKED_FORMATS.includes(wrapper.format);
 
 /**
  * What unlocks a vault: the passphrase, the recovery key, or the vault key
@@ -76,10 +111,17 @@ export type VaultSecret =
 export type UnlockedVault = {
   accountId: AccountId;
   identity: PrivateIdentity;
+  /**
+   * The person's earlier keys, after they replaced their keys, in ascending
+   * key version: for opening what was sealed to them, never for sealing or
+   * signing (section 4.6). Empty for a format 1 vault.
+   */
+  retired: readonly PrivateIdentity[];
   vaultKey: Uint8Array;
 };
 
 const keyringAd = (accountId: AccountId) => canonical('vault-keyring/v1', [accountId]);
+const keyringV2Ad = (accountId: AccountId) => canonical('vault-keyring/v2', [accountId]);
 const passphraseAd = (accountId: AccountId, salt: string, kdf: KdfParams) =>
   canonical('vault-passphrase-wrap/v1', [accountId, salt, kdf.opsLimit, kdf.memLimit]);
 const recoveryAd = (accountId: AccountId) => canonical('vault-recovery-wrap/v1', [accountId]);
@@ -98,9 +140,7 @@ export function createVault({
   identity: PrivateIdentity;
   passphrase: string;
   kdf?: KdfParams;
-}): { wrapper: VaultWrapper; recoveryKey: string; vault: UnlockedVault } {
-  const vaultKey = sodium.crypto_aead_xchacha20poly1305_ietf_keygen();
-  const recoveryBytes = sodium.randombytes_buf(32);
+}): { wrapper: VaultWrapperV1; recoveryKey: string; vault: UnlockedVault } {
   const keyring = utf8(
     JSON.stringify({
       public: identity.public,
@@ -108,32 +148,161 @@ export function createVault({
       signSecretKey: toBase64(identity.signSecretKey),
     } satisfies z.input<typeof Keyring>),
   );
-  const wrapper: VaultWrapper = {
-    format: 1,
-    accountId,
-    keyring: aeadEncrypt({ key: vaultKey, plaintext: keyring, ad: keyringAd(accountId) }),
-    passphrase: wrapWithPassphrase({ accountId, vaultKey, passphrase, kdf }),
-    recovery: aeadEncrypt({
-      key: recoveryKek(recoveryBytes),
-      plaintext: vaultKey,
-      ad: recoveryAd(accountId),
-    }),
-  };
+  const made = sealVault({ accountId, keyring, ad: keyringAd(accountId), passphrase, kdf });
   return {
-    wrapper,
-    recoveryKey: formatRecoveryKey(recoveryBytes),
-    vault: { accountId, identity, vaultKey },
+    wrapper: { format: 1, ...made.wrapper },
+    recoveryKey: made.recoveryKey,
+    vault: { accountId, identity, retired: [], vaultKey: made.vaultKey },
   };
 }
 
-/** Unlock with either secret. `wrapper` comes from the server, so it is parsed here. */
+/**
+ * Create the format 2 vault of a person who replaces their keys (section
+ * 4.6): a new vault key, passphrase and recovery key, and a keyring holding
+ * `identity`, their new keys, and `retired`, every earlier key, in ascending
+ * key version. Show `recoveryKey` once, as at setup.
+ */
+export function createRotatedVault({
+  accountId,
+  identity,
+  retired,
+  passphrase,
+  kdf = DEFAULT_KDF,
+}: {
+  accountId: AccountId;
+  identity: PrivateIdentity;
+  retired: readonly PrivateIdentity[];
+  passphrase: string;
+  kdf?: KdfParams;
+}): { wrapper: VaultWrapperV2; recoveryKey: string; vault: UnlockedVault } {
+  const exported = (key: PrivateIdentity) => ({
+    public: key.public,
+    boxSecretKey: toBase64(key.boxSecretKey),
+    signSecretKey: toBase64(key.signSecretKey),
+  });
+  const plain = {
+    format: 2,
+    ...exported(identity),
+    retired: retired.map(exported),
+  } satisfies z.input<typeof KeyringV2>;
+  // What `unlockVault` would refuse is never sealed.
+  const opened = readKeyringV2(parseWith(KeyringV2, plain, 'Keyring'));
+  const keyring = utf8(JSON.stringify(plain));
+  const made = sealVault({ accountId, keyring, ad: keyringV2Ad(accountId), passphrase, kdf });
+  return {
+    wrapper: { format: 2, ...made.wrapper },
+    recoveryKey: made.recoveryKey,
+    vault: { accountId, ...opened, vaultKey: made.vaultKey },
+  };
+}
+
+// A new vault key sealing `keyring`, and its passphrase and recovery wraps.
+function sealVault({
+  accountId,
+  keyring,
+  ad,
+  passphrase,
+  kdf,
+}: {
+  accountId: AccountId;
+  keyring: Uint8Array;
+  ad: Uint8Array;
+  passphrase: string;
+  kdf: KdfParams;
+}) {
+  const vaultKey = sodium.crypto_aead_xchacha20poly1305_ietf_keygen();
+  const recoveryBytes = sodium.randombytes_buf(32);
+  return {
+    vaultKey,
+    recoveryKey: formatRecoveryKey(recoveryBytes),
+    wrapper: {
+      accountId,
+      keyring: aeadEncrypt({ key: vaultKey, plaintext: keyring, ad }),
+      passphrase: wrapWithPassphrase({ accountId, vaultKey, passphrase, kdf }),
+      recovery: aeadEncrypt({
+        key: recoveryKek(recoveryBytes),
+        plaintext: vaultKey,
+        ad: recoveryAd(accountId),
+      }),
+    },
+  };
+}
+
+const privateKey = (key: z.infer<typeof KeyringKey>): PrivateIdentity => ({
+  public: key.public,
+  boxSecretKey: fromBase64(key.boxSecretKey),
+  signSecretKey: fromBase64(key.signSecretKey),
+});
+
+// Whether the secret keys are the public keys', without throwing for a
+// secret key of the wrong length. libsodium signs with the copy of the
+// public key the signing secret key ends with, so that copy must match too,
+// or the key would make signatures that don't verify.
+function matches(key: PrivateIdentity): boolean {
+  const { boxSecretKey, signSecretKey } = key;
+  if (boxSecretKey.length !== 32 || signSecretKey.length !== 64) return false;
+  if (toBase64(signSecretKey.subarray(32)) !== key.public.signPublicKey) return false;
+  try {
+    return hasMatchingKeys(key);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A format 2 keyring's keys, once its rules hold (section 4.6): a person's
+ * keys, `retired` holding exactly one earlier key for each key version
+ * below the current one, in ascending order, each of the same ID, and every
+ * secret key matching its public key. Anything else is `malformed`.
+ */
+function readKeyringV2(keyring: z.infer<typeof KeyringV2>): {
+  identity: PrivateIdentity;
+  retired: PrivateIdentity[];
+} {
+  const identity = privateKey(keyring);
+  const retired = keyring.retired.map(privateKey);
+  const { id, keyVersion } = identity.public;
+  const keys = [...retired, identity];
+  if (retired.length !== keyVersion - 1) {
+    throw new CryptoError('malformed', 'The keyring holds one earlier key for each key version');
+  }
+  for (const [index, key] of keys.entries()) {
+    if (
+      key.public.id !== id ||
+      key.public.kind !== 'human' ||
+      key.public.keyVersion !== index + 1
+    ) {
+      throw new CryptoError(
+        'malformed',
+        'The keyring’s earlier keys are not this person’s, in order',
+      );
+    }
+    if (!matches(key)) {
+      throw new CryptoError('malformed', 'A secret key in the keyring is not its public key’s');
+    }
+  }
+  return { identity, retired };
+}
+
+/**
+ * Unlock with either secret. `wrapper` comes from the server, so it is
+ * parsed here. A wrapper of a format not in `formats` (by default, those this
+ * version unlocks) is refused as `unsupported-format`, before any secret is
+ * used: the app asks to update.
+ */
 export function unlockVault({
   wrapper: raw,
   secret,
+  formats = UNLOCKED_FORMATS,
 }: {
   wrapper: unknown;
   secret: VaultSecret;
+  formats?: readonly number[];
 }): UnlockedVault {
+  const format = typeof raw === 'object' && raw !== null && 'format' in raw ? raw.format : null;
+  if (typeof format === 'number' && Number.isInteger(format) && !formats.includes(format)) {
+    throw new CryptoError('unsupported-format', 'This vault is in a newer format. Update the app');
+  }
   const parsed = VaultWrapper.safeParse(raw);
   if (!parsed.success)
     throw new CryptoError('malformed', 'Vault wrapper has an invalid shape', {
@@ -161,6 +330,15 @@ export function unlockVault({
             ad: recoveryAd(accountId),
           });
 
+  if (wrapper.format === 2) {
+    const keyring = parseJson(
+      KeyringV2,
+      aeadDecrypt({ key: vaultKey, sealed: wrapper.keyring, ad: keyringV2Ad(accountId) }),
+      'Keyring',
+      { integers: KEYRING_V2_INTEGERS },
+    );
+    return { accountId, vaultKey, ...readKeyringV2(keyring) };
+  }
   const keyring = parseJson(
     Keyring,
     aeadDecrypt({ key: vaultKey, sealed: wrapper.keyring, ad: keyringAd(accountId) }),
@@ -175,12 +353,14 @@ export function unlockVault({
       boxSecretKey: fromBase64(keyring.boxSecretKey),
       signSecretKey: fromBase64(keyring.signSecretKey),
     },
+    retired: [],
   };
 }
 
 /**
  * Replace only the passphrase wrapper, from any unlocked session (including
- * one unlocked by the recovery key). Documents are not re-encrypted.
+ * one unlocked by the recovery key). Documents are not re-encrypted. Only a
+ * format this version unlocks is changed; another is `unsupported-format`.
  */
 export function changePassphrase({
   vault,
@@ -189,12 +369,15 @@ export function changePassphrase({
   kdf = DEFAULT_KDF,
 }: {
   vault: UnlockedVault;
-  wrapper: VaultWrapper;
+  wrapper: ServedVaultWrapper;
   passphrase: string;
   kdf?: KdfParams;
-}): VaultWrapper {
+}): VaultWrapperV1 {
+  if (wrapper.format !== 1) {
+    throw new CryptoError('unsupported-format', 'This vault is in a newer format. Update the app');
+  }
   return {
-    ...wrapper,
+    ...VaultWrapperV1.parse(wrapper),
     passphrase: wrapWithPassphrase({
       accountId: vault.accountId,
       vaultKey: vault.vaultKey,

@@ -833,5 +833,116 @@
     ],
     "plaintext": "0008000000020013766563746f722d6d65616e696e672d736f7570000000024b5271c9d71c17288911291ed77fb8cf000000003c01020440e01000815f08c0dbea703802a0428b24ed4ac33ee1d3fe000000223bb49c6c0012dc36b75b937f0014766563746f722d6d65616e696e672d656d70747900000000",
     "sealed": "6XqrxWZIJVhdZJSrEDVEMXivofd_KgGLG_kg_2pePGpDj95yXwlcmnm0UoX0BfUaMaW3UeVVOfyygyGzdmJiyIKSEAWqFc7PBGLQMwQ1YfmEjIYyuWe9vSqL9ACmTupopgxzyaKiOA1Yg3O_6VyJ3PjLPXZOzfINZtu2jrUnesynbxMm4Fg0VfHSlt-BtYf4gC02fZUFuzdeveBMdO5ljlo"
+  },
+  "rotation": {
+    "keys": [
+      {
+        "public": {
+          "id": "vector-rotating",
+          "kind": "human",
+          "keyVersion": 1,
+          "boxPublicKey": "6WE9zTHAc_jp3eRUQaa_xOzcjRbxOhRIO6-D3BwYwDk",
+          "signPublicKey": "I_VaB_9XNoFXN8pFWWMgTqB98ZqZHHCnqgYulIQ8S4A"
+        },
+        "boxSecretKey": "QdIlUC-AtetXa1snEu8amT6c1idw-tnt2tWHGAu11L8",
+        "signSecretKey": "FQzgDw_w5KB-y1UmbrZ5lb7PlGaiUyxKWmIjTysRBG4j9VoH_1c2gVc3ykVZYyBOoH3xmpkccKeqBi6UhDxLgA"
+      },
+      {
+        "public": {
+          "id": "vector-rotating",
+          "kind": "human",
+          "keyVersion": 2,
+          "boxPublicKey": "GYQG8to5DxdDmcKIQ9qHYHvtCv_6Vz8S4EBnC1kUWBg",
+          "signPublicKey": "Xmw6vmwgqzYrmb8WhAqwUWH7hz_e2k1briGDlEISNyA"
+        },
+        "boxSecretKey": "f4eGFKiafLIMkEMz1khIm3bDPuBnzqpa06RYfE3LH_8",
+        "signSecretKey": "V8F6zlO01XR68nrMCstnQ-Cg1UJt9yi97WAEkHQmYqNebDq-bCCrNiuZvxaECrBRYfuHP97aTVuuIYOUQhI3IA"
+      },
+      {
+        "public": {
+          "id": "vector-rotating",
+          "kind": "human",
+          "keyVersion": 3,
+          "boxPublicKey": "T7EQwVopH02enb1FNbtvB7cTA_e8a5k0i2JN7tQGY0s",
+          "signPublicKey": "2tbr5K9M5VqJA_o89QMAzJyhGQyumvEIdgUvKRO-kuE"
+        },
+        "boxSecretKey": "amr3JrudqTTD917Ql1-qp_sgo28yjVFQ7GWz00zYuNU",
+        "signSecretKey": "9olPliYTk7ybcz11SDfiFUtPRY8Nk4Gz3YN-iS6Vhhja1uvkr0zlWokD-jz1AwDMnKEZDK6a8Qh2BS8pE76S4Q"
+      }
+    ],
+    "keyHashes": [
+      "c15fM-LD6wiH-FcExIHV03whh4atUFUjVwRto3Or5xA",
+      "5HX6Qu3LTod2zLeZ432Q5kjmUn7GpLKm4NM4icr1VwU",
+      "d7zw4rPpgfzjIzDHPMREjdV2ws4-W8GAm8mtQvqjUfQ"
+    ],
+    "statements": [
+      {
+        "statement": {
+          "installationId": "vector-installation",
+          "id": "vector-rotating",
+          "from": {
+            "keyVersion": 1,
+            "keyHash": "c15fM-LD6wiH-FcExIHV03whh4atUFUjVwRto3Or5xA"
+          },
+          "to": {
+            "keyVersion": 2,
+            "boxPublicKey": "GYQG8to5DxdDmcKIQ9qHYHvtCv_6Vz8S4EBnC1kUWBg",
+            "signPublicKey": "Xmw6vmwgqzYrmb8WhAqwUWH7hz_e2k1briGDlEISNyA"
+          },
+          "contacts": null,
+          "fromSignature": "TOieJCUCFiZcnHzqQhvBFWbmpBCGCDdBP3GA8c7n_6axy8sUk4poU1RpoLyn--ifF-vnTrEmr6Tqd8ifqcq9CQ",
+          "toSignature": "Ypm-6Qk1UrrJYccjJEdtohQH22GSjzVHd39j45SDr7sQ_Mjurs3AqNJ8LUBXgK6B246bqW29mthuayPznsSMCw"
+        },
+        "signedBytes": "010000002177696b6973746f772f6964656e746974792d6b65792d726f746174696f6e2f76310100000013766563746f722d696e7374616c6c6174696f6e010000000f766563746f722d726f746174696e67020000000131010000002b633135664d2d4c44367769482d4663457849485630337768683461745546556a567752746f334f723578410200000001320300000020198406f2da390f174399c28843da87607bed0afffa573f12e040670b5914581803000000205e6c3abe6c20ab362b99bf16840ab05161fb873fdeda4d5bae2183944212372000000000000000000000"
+      },
+      {
+        "statement": {
+          "installationId": "vector-installation",
+          "id": "vector-rotating",
+          "from": {
+            "keyVersion": 2,
+            "keyHash": "5HX6Qu3LTod2zLeZ432Q5kjmUn7GpLKm4NM4icr1VwU"
+          },
+          "to": {
+            "keyVersion": 3,
+            "boxPublicKey": "T7EQwVopH02enb1FNbtvB7cTA_e8a5k0i2JN7tQGY0s",
+            "signPublicKey": "2tbr5K9M5VqJA_o89QMAzJyhGQyumvEIdgUvKRO-kuE"
+          },
+          "contacts": {
+            "version": 3,
+            "contactsHash": "jlL86PSZdyJQegFPJBkH1HJ7Unqzb_LA415Yjcdl8lE"
+          },
+          "fromSignature": "UvYHYbLhi53Y2eCxwlPjCyvc1mN8qvD4CmqoE0Gu3srHRU-85KSD-WnKWZDYFT5mKN1nHWusZd8KeW8mBycRCw",
+          "toSignature": "_szbRiCLPAy8iF8tnmnmdIIs_xQ8LYW544cJewor8ky3HhT5HESYYog20bigI9b4uz_nBbFKPOG3RvORKPu2Dw"
+        },
+        "signedBytes": "010000002177696b6973746f772f6964656e746974792d6b65792d726f746174696f6e2f76310100000013766563746f722d696e7374616c6c6174696f6e010000000f766563746f722d726f746174696e67020000000132010000002b354858365175334c546f64327a4c655a34333251356b6a6d556e3747704c4b6d344e4d346963723156775502000000013303000000204fb110c15a291f4d9e9dbd4535bb6f07b71303f7bc6b99348b624deed406634b0300000020dad6ebe4af4ce55a8903fa3cf50300cc9ca1190cae9af10876052f2913be92e1020000000133010000002b6a6c4c383650535a64794a51656746504a426b4831484a37556e717a625f4c41343135596a63646c386c45"
+      }
+    ],
+    "vault": {
+      "wrapper": {
+        "format": 2,
+        "accountId": "vector-account",
+        "keyring": {
+          "nonce": "VgHoPuTW_zMXdwFn1WQON1SesR1UrIDm",
+          "ciphertext": "d3bM3YKw087eLOUKu2PxpxHxCX_b4qKc_MHSPajeQC8KLemhPOd4hgpFOw9exZ7PN8SvMN_OUUSQp3tJG7Jmlm8qY9a6StuSIjzTEjS9Fem-_BktQf3LTZ3Qu2v2CFW1Oz86li48rg5M3soYDUCZFB5t758iy1PcR-JNUPhr_4Mo7XfBvIILiotBm3y5TZ09NSPKDJ4LBEvoVl0T542Ou6vbaZKMFT_XtRSNd2VpGqW6BePe-KoD8KFL7yOWc4dy1gtkjKHiwLVYLIcODeh0Oh5x48AnoFSFP9Hz7s3x23SUj9JBdY3-ZIvj3boEfetRtF2MdxOdi9bXh_zn5O3OSSPBkoALgdlUIso4UmGu0KN7aOcmV1JzNMUJBtVVkyf2h8Ce1CHLZsk6_DV8CWUiK0fvrLa0Xqie4z6KqSO1VjaJKbpaCAriNzsnxtv_KuBmvRzDmNwOAC1PNFpYOX20n_OwEE1EtfiEAcmzwDcRC0Qf8wYoEECK115dAohApMmcWePchGhY233Xwe8yFsn31JWg00vZRKsNXk5TnOmtHB3PRzOEC08OLPHf7ArupI3qRcbxoBg1P19SAozWxCWP5Cjo13drMgskt0OND4ywap5RJc7M-YOMF_u-FPh_S9B1TJTfJVfxW6E8Rq32oE2G2IKiA4lalht67VUkMu8ptP_biJMJ0GPIj7KjCYgqljBdckMozPXFhMwK1IiK2hNuSVVXrGvlnaOy3KiK7p2prLSaooe9DsgFEfb8sq93bcQfFg3g0Rg6i4MLQ6A1QXrqANDYq2nGMAQlkMZuHnlsFv91-b4WEEAlDMMs7qSsShT_Sd7e8Qyyz9YhF_zW0YHQpX6TvaFk4a2ZoySQUT_9J-lX5ZU9Gt-XyP_Wg8tkSpxcaoqpEuBMHL1WP9fuUM4AOyP9vXlFW34bgcY7t4txH6IJTOPylR397Xjg6kJ3RFejtuuI10Z7uFxsFarSlI0BShgASBFwX48UVhon85ciFUF1k4Jd2lmuXG2yIv-ll6OeAW3_MuSZAmszm40NpQuSJgoCxK9hUwL8R3rRk9Joc0ZpSw3-XqBCGY-Y-6Me7SQ2HcKRXkyJe-jWKZVhA0Vc88TkNhNH-L7eMiUfXXyQr1v0TrG3UWkRt54vx3HT2zQju-qB7uxBtcnEiiRpVTeYQOwUL31cUAm3ONxVemj_nF1S5sYVJZUwpsCc4pEZl2vRrJ4v_AIh97SrwSp0VFuxmZbJ4509wVUR5mN0CCTZLDH_TVQNdwwochpSr4LZb4QsXjue_m7-KMTrxC5yvJyP2HyWi7EX7tSLfCbCkeVQg26aNE_qOFcarpzqVJEKp9F4z4aB3u_VH3n9qmY9VE0ABtR01p3BrTAx51EtOtVZGSG2HcSoG9bMEWANNRiOJU9b4Rs9IAEenyuDZ8pfMnX5QYmcHWB05suY_DwOrnNH-RL7e3N2lq8c8GyXP0F0UM8"
+        },
+        "passphrase": {
+          "nonce": "nnRToEkBp4l3V0J0gMQploY1rMMKVBEj",
+          "ciphertext": "zWKoIiAoIf39wMMrH2zdb-r2IH3io3o6WlxZ1EbLHhDLJ5njFEuA1B5SG5mpYiGu",
+          "salt": "MGuJXHKTREo9I4ZY-vzKkw",
+          "kdf": {
+            "opsLimit": 1,
+            "memLimit": 8192
+          }
+        },
+        "recovery": {
+          "nonce": "JZu7QQS8seksTE9MQfBeYLh7F5D0NTqt",
+          "ciphertext": "iyhvKJbvWObKt8PlVsM-BcPqjVQukye6QzIBwMiiRqx0ocju-UkSXtmKbBfn_kTu"
+        }
+      },
+      "passphrase": "vector rotated passphrase",
+      "recoveryKey": "df63-11d9-1c09-a618-f13e-97ee-c792-30ba-7bff-8260-ecfd-bcbb-8c01-189a-c82a-22a3",
+      "keyringAd": "010000001977696b6973746f772f7661756c742d6b657972696e672f7632010000000e766563746f722d6163636f756e74"
+    }
   }
 }
