@@ -2,6 +2,8 @@
 
 This log records the focused security review of [`protocol.md`](protocol.md). `wikistow.md` L333 and L357 require that review before the protocol is final, and before any production rollout. For Milestone 2 it is a series of adversarial review rounds, each with a different brief. Every finding is logged here with its outcome.
 
+Round 64 was the last. From 2026-11-25 a protocol change is reviewed in the pull request that builds it, not in rounds (Scott; `protocol.md` section 18).
+
 ## How rounds run
 
 1. **Each round runs three briefs** against the current text of `protocol.md`, together with the code it describes.

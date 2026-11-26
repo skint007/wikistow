@@ -14,8 +14,6 @@
 // Every run looks up the board's IDs by name, so nothing here or in the docs
 // names an ID.
 import { execFileSync } from 'node:child_process';
-import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -689,26 +687,6 @@ function list(onlyWaiting: boolean, area: string | undefined) {
 
 // --- check ------------------------------------------------------------------
 
-type AdrStep = { adr: string; status: string; n: string; text: string };
-
-/** Each numbered step under an ADR's "Implementation, in pull requests". */
-async function adrSteps(): Promise<AdrStep[]> {
-  const dir = join(root, 'docs/adr');
-  const steps: AdrStep[] = [];
-  for (const file of (await readdir(dir)).filter((f) => f.endsWith('.md')).sort()) {
-    const text = await readFile(join(dir, file), 'utf8');
-    const status = /^status:\s*(\S+)/m.exec(text)?.[1] ?? '';
-    const start = text.indexOf('\n## Implementation, in pull requests');
-    if (start < 0) continue;
-    const end = text.indexOf('\n## ', start + 1);
-    const section = text.slice(start, end < 0 ? undefined : end);
-    for (const match of section.matchAll(/^(\d+)\. (.*)$/gm)) {
-      steps.push({ adr: file.slice(0, 4), status, n: match[1] ?? '', text: match[2] ?? '' });
-    }
-  }
-  return steps;
-}
-
 async function check() {
   const problems: string[] = [];
   const notes: string[] = [];
@@ -742,20 +720,6 @@ async function check() {
     '--json',
     'number,body',
   ]);
-  const merged = new Set(
-    json([
-      'pr',
-      'list',
-      '--repo',
-      REPO,
-      '--state',
-      'merged',
-      '--limit',
-      '2000',
-      '--json',
-      'number',
-    ]).map((p) => p.number),
-  );
   const names = (body: string | undefined, n: number) => new RegExp(`#${n}\\b`).test(body ?? '');
   const closes = (body: string | undefined, n: number) =>
     new RegExp(`\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s+#${n}\\b`, 'i').test(body ?? '');
@@ -820,36 +784,6 @@ async function check() {
       problems.push(`#${n} waits on ${i.waiting.name} with no Next step.`);
     if (!labels.some((l) => l.startsWith('area:')) && !labels.includes('question'))
       notes.push(`#${n} has no area: label.`);
-  }
-
-  const BUILT = /\((?:built|done)\b([^()]|\([^()]*\))*\)/i;
-  const DROPPED = /\(dropped, #(\d+)\)/i;
-  const steps = (await adrSteps()).filter((s) => !/^\*\*This ADR\b/.test(s.text));
-  // ADRs before 0014 marked the ADR built, not each step: skip those.
-  const marking = new Set(
-    steps.filter((s) => BUILT.test(s.text) || DROPPED.test(s.text)).map((s) => s.adr),
-  );
-  for (const step of steps) {
-    const where = `ADR ${step.adr} step ${step.n}`;
-    if (step.status === 'built' && !marking.has(step.adr)) continue;
-    const built = BUILT.exec(step.text);
-    const dropped = DROPPED.exec(step.text);
-    if (built) {
-      for (const pr of built[0].matchAll(/#(\d+)/g)) {
-        if (!merged.has(Number(pr[1])))
-          problems.push(`${where} is marked built with #${pr[1]}, which isn’t a merged PR.`);
-      }
-    } else if (dropped) {
-      const item = byNumber.get(Number(dropped[1]));
-      if (item?.status?.name !== 'Dropped')
-        problems.push(`${where} is marked dropped with #${dropped[1]}, which isn’t Dropped.`);
-    } else if (step.status === 'built') {
-      problems.push(`${where} is neither built nor dropped, but the ADR is built.`);
-    } else if (step.status === 'accepted') {
-      const refs = [...step.text.matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
-      if (!refs.some((r) => openIssues.some((o) => o.number === r)))
-        problems.push(`${where} isn’t built and names no open issue.`);
-    }
   }
 
   let newest = '';
