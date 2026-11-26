@@ -1,6 +1,6 @@
 # Project board
 
-Work on WikiStow is tracked on the public [WikiStow board](https://github.com/users/skint007/projects/2), project 2 of the `skint007` account. Its items are this repo's issues and pull requests. The board holds where each one stands, including what waits on Scott. The ADRs hold decisions and the steps that build them.
+Work on WikiStow is tracked on the public [WikiStow board](https://github.com/users/skint007/projects/2), project 2 of the `skint007` account. Its items are this repo's issues and pull requests. The board holds where each one stands, including what waits on Scott. Each issue says what to build, and holds Scott's decisions on it.
 
 Change the board with `scripts/board.ts`, which looks up the board's IDs by name on every run:
 
@@ -44,9 +44,9 @@ Reopening a Done or Dropped issue puts it back in Todo.
 | Scott: do it | Accounts, certificates, store listings, browser-only settings, his hardware |
 | Outside | A store review, an upstream fix or a certificate authority |
 
-A question that outlives your turn gets a card. File a new one with `board ask`, which labels it `question`, or mark an issue already open with `board wait`. When Scott answers, record it in the ADR's **Decided** section with the date, or quote it in a comment on the issue. Then clear Waiting, or close the question.
+A question that outlives your turn gets a card. File a new one with `board ask`, which labels it `question`, or mark an issue already open with `board wait`. When Scott answers, quote him with the date in a comment on the issue. Then clear Waiting, or close the question.
 
-The **Waiting** view lists these cards. Choices you make without Scott go in the PR body under "Decided without you", and in the ADR's **Decided while building it**. They get no card. Never record one as Scott's decision.
+The **Waiting** view lists these cards. Choices you make without Scott go in the PR body under "Decided without you". They get no card. Never record one as Scott's decision.
 
 After you push a beta tag, ask whether it is good: `board ask "Is 0.27.0-beta.1 good?" --waiting try --next "…"`, with what to try, taken from the highlights. A later beta updates the same question, and the version PR that promotes it closes it.
 
@@ -56,8 +56,6 @@ Only Scott drops a feature or an issue. If you think one isn't worth doing, ask 
 
 Folding Lows into one checklist issue, as #600 does, isn't dropping. Take the folded issue off the board; the fold issue carries it.
 
-An ADR step we won't build is marked "(dropped, #N)", with the reason in the ADR's Decided section.
-
 ## Areas and labels
 
 An issue's area is its `area:` label. Give every issue you file one or more of them; list them with `gh label list --search "area:"`. If none fits, use `--no-area` and say so in your reply, rather than adding a label.
@@ -65,10 +63,6 @@ An issue's area is its `area:` label. Give every issue you file one or more of t
 `question` marks an issue only Scott can settle. `low` marks a Low review finding that is a real bug and got an issue of its own. Other Lows go in the PR body. The Board view hides `low` and Dropped cards; the **Lows** view lists the Lows.
 
 The board's Priority field (P0 now, P1 next, P2 later) is Scott's to set. Leave it as it is; `set` refuses it.
-
-## ADR steps
-
-An ADR's **Implementation, in pull requests** lists its steps. A step not yet built names its issue. The PR that builds it marks the step "(built, PR #N)" in the same PR. `check` reads these. ADRs before 0014 marked the whole ADR built, not each step, and `check` skips them.
 
 ## Check
 
@@ -79,8 +73,6 @@ Run `node scripts/board.ts check` after each batch and before cutting a release.
 - an issue closed as not planned or as a duplicate that isn't Dropped;
 - In Review with no open PR naming the issue, or In Progress with an open PR that closes it;
 - a `question` with no Waiting, Waiting with no Next step, or Waiting on a closed card;
-- an ADR step marked built with a PR that hasn't merged, or marked dropped with an issue that isn't Dropped;
-- a step neither built nor dropped in a built ADR, or one naming no open issue in an accepted ADR;
 - a beta as the newest tag with no open question asking whether it is good.
 
 Its notes only warn: an issue without an `area:` label, In Progress for over three days with no open PR, a draft item on the board, and a Dropped issue with no "Dropped:" comment giving the reason.
