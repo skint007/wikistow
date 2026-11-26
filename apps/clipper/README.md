@@ -1,6 +1,6 @@
 # WikiStow Web Clipper
 
-The browser extension that saves pages to the WikiStow desktop app, for Chrome, Edge, Brave and Firefox ([ADR 0017](../../docs/adr/0017-web-clipper.md), [privacy](../../docs/web-clipper-privacy.md)). It hands each clip to the desktop app through native messaging; the app makes it a draft.
+The browser extension that saves pages to the WikiStow desktop app, for Chrome, Edge, Brave and Firefox ([ADR 0017](../../docs/adr/0017-web-clipper.md), [privacy](../../docs/web-clipper-privacy.md)). It hands each clip to the desktop app through native messaging; the app makes it a draft. It's listed in the [Chrome Web Store](https://chromewebstore.google.com/detail/wikistow-web-clipper/gldgjbchfcmlbbmjbgmamconolliokpj) and on [Mozilla Add-ons](https://addons.mozilla.org/firefox/addon/wikistow-clipper/).
 
 ## Building it
 
