@@ -166,6 +166,8 @@ const minted = Symbol('RotationChain');
  * makes one, so holding one means it was checked.
  */
 export class RotationChain {
+  /** The installation the chain was checked for. */
+  readonly installationId: InstallationId;
   /** The keys along the chain, in ascending key version: where it starts, and each one a statement moved to. */
   readonly keys: readonly Readonly<PublicIdentity>[];
   /** The statements, one per key version from the first key's. */
@@ -173,11 +175,13 @@ export class RotationChain {
 
   constructor(
     token: typeof minted,
+    installationId: InstallationId,
     keys: readonly PublicIdentity[],
     statements: readonly IdentityRotation[],
   ) {
     if (token !== minted)
       throw new CryptoError('malformed', 'Only verifyRotationChain makes chains');
+    this.installationId = installationId;
     this.keys = Object.freeze(keys.map((key) => Object.freeze({ ...key })));
     this.statements = Object.freeze([...statements]);
     Object.freeze(this);
@@ -264,5 +268,5 @@ export function verifyRotationChain({
   if (box.size !== keys.length || signing.size !== keys.length) {
     throw notAChain('a key comes back');
   }
-  return new RotationChain(minted, keys, statements);
+  return new RotationChain(minted, installationId, keys, statements);
 }

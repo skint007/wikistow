@@ -182,8 +182,8 @@ describe('a chain of rotations', () => {
   });
 
   it('is made only by checking', () => {
-    expect(() => new RotationChain(Symbol('RotationChain') as never, [k1.public], [])).toThrow(
-      code('malformed'),
-    );
+    expect(
+      () => new RotationChain(Symbol('RotationChain') as never, installationId, [k1.public], []),
+    ).toThrow(code('malformed'));
   });
 });

@@ -299,18 +299,22 @@ export class TrustStore {
     keyVersion: number,
   ): { identity: PublicIdentity; earlier: boolean } {
     const pinned = this.#pins.get(id);
-    if (pinned?.keyVersion === keyVersion) return { identity: pinned, earlier: false };
-    const earlier = this.#earlier.get(id)?.get(keyVersion);
-    if (!earlier || this.#removed.has(keyHash(earlier))) {
+    const found =
+      pinned?.keyVersion === keyVersion
+        ? { identity: pinned, earlier: false }
+        : { identity: this.#earlier.get(id)?.get(keyVersion), earlier: true };
+    const { identity, earlier } = found;
+    if (!identity || this.#removed.has(keyHash(identity))) {
       throw new CryptoError('unknown-identity', `No key for ${id} version ${keyVersion}`);
     }
-    return { identity: earlier, earlier: true };
+    return { identity, earlier };
   }
 
   /**
    * Take the earlier keys of a pinned person from `chain`, which must end at
    * their pin (section 4.6). Earlier keys from another chain, as from a
-   * shorter fetch, must agree with it at every key version both hold. A
+   * shorter fetch, must agree with it at every key version both hold. One
+   * checked for another installation is `binding-mismatch`. A
    * chain that ends at another key, passes through a key in `removed`, or
    * disagrees with earlier keys taken before is `identity-key-changed`,
    * and nothing is taken. A person not pinned is `unknown-identity`.
@@ -318,6 +322,9 @@ export class TrustStore {
   addEarlierKeys(chain: RotationChain): void {
     if (!(chain instanceof RotationChain)) {
       throw new CryptoError('malformed', 'Only a checked chain gives earlier keys');
+    }
+    if (chain.installationId !== this.installationId) {
+      throw new CryptoError('binding-mismatch', 'The chain was checked for another installation');
     }
     const end = chain.last;
     const pinned = this.#pins.get(end.id);

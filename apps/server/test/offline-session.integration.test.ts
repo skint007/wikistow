@@ -2,9 +2,11 @@ import {
   changeVaultPassphrase,
   confirmSession,
   createApiClient,
+  createRotatedVault,
   generateIdentity,
   IdentityId,
   inlineVaultCrypto,
+  keepWrapper,
   KeptMarks,
   keptUnlock,
   keyHash,
@@ -19,7 +21,7 @@ import {
   type KeptFile,
 } from '@wikistow/client';
 import { directoryEntry, FAST_KDF } from '@wikistow/client/testing';
-import { contactsRoutes } from '@wikistow/contracts';
+import { AccountId, contactsRoutes, vaultRoutes } from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
@@ -119,5 +121,31 @@ describe('a session opened offline', () => {
     expect(await confirmSession(changed.backOnline)).toBe('passphrase-changed');
     // The wrapper kept for the next offline unlock is the new one.
     expect((await keptUnlock(changed.content).vault())?.version).toBe(2);
+  });
+
+  // As after someone replaced their keys with a newer app (section 4.6).
+  it('asks to update for a vault in a format this version doesn’t unlock, keeping its wrapper', async () => {
+    const { alice, opened, content } = await keptDevice();
+    const id = alice.vault.identity.public.id;
+    const rotated = createRotatedVault({
+      accountId: AccountId.parse(alice.id),
+      identity: generateIdentity({ kind: 'human', id, keyVersion: 2 }),
+      retired: [alice.vault.identity],
+      passphrase: 'a passphrase from elsewhere',
+      kdf: FAST_KDF,
+    });
+    const newer: ClientContext = {
+      ...opened,
+      api: createApiClient({
+        fetch: (url, init) =>
+          new URL(url, 'http://app').pathname === vaultRoutes.getVault.path
+            ? Promise.resolve(Response.json({ wrapper: rotated.wrapper, version: 2 }))
+            : alice.browser.fetch(url, init),
+      }),
+    };
+    // What the device kept at its last online unlock.
+    await keepWrapper(content, await alice.api.call(vaultRoutes.getVault));
+    expect(await confirmSession(newer)).toBe('update-app');
+    expect((await keptUnlock(content).vault())?.version).toBe(1);
   });
 });

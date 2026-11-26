@@ -17,7 +17,7 @@ import { MemoryKeyVersionMarks, type KeyVersionMarks } from '../key-versions.ts'
 import { unseenRestore } from '../restore.ts';
 import { RevisionCache } from '../revision-cache.ts';
 import { TrustStore } from '../trust.ts';
-import type { UnlockedVault } from '../vault.ts';
+import { unlocks, type UnlockedVault } from '../vault.ts';
 import {
   openKeptContacts,
   readContacts,
@@ -243,14 +243,17 @@ export async function openKeptSession(
  * contacts record against the session's mark. Another installation means
  * nothing kept opens for it, and a newer vault version that the passphrase
  * changed elsewhere: either ends the session, which the app does by
- * locking. A restore not seen starts the marks over, as `openSession` does.
+ * locking. A vault now in a format this version doesn't unlock, as after
+ * someone replaced their keys with a newer app, ends it too, but asks to
+ * update (`update-app`): the app keeps a remembered unlock and the wrapper
+ * it kept. A restore not seen starts the marks over, as `openSession` does.
  * The wrapper served is kept for the next offline unlock. A record that
  * fails its checks throws a `CryptoError`, and the session must stop.
  * Otherwise the session is confirmed and goes on as one opened online.
  */
 export async function confirmSession(
   ctx: ClientContext,
-): Promise<'confirmed' | 'other-installation' | 'passphrase-changed'> {
+): Promise<'confirmed' | 'other-installation' | 'passphrase-changed' | 'update-app'> {
   const unconfirmed = ctx.unconfirmed;
   if (!unconfirmed) return 'confirmed';
   const { installationId, restore } = await ctx.api.call(systemRoutes.installation);
@@ -258,6 +261,7 @@ export async function confirmSession(
   const served = await ctx.api.call(vaultRoutes.getVault);
   const store = ctx.keptContent?.store;
   if (store) await keepWrapper(store, served);
+  if (!unlocks(served.wrapper)) return 'update-app';
   if (served.version !== unconfirmed.vaultVersion) return 'passphrase-changed';
   const unseen = ctx.kept && unseenRestore(restore, ctx.kept.restoredAt);
   if (unseen) ctx.kept?.startOver(unseen.restoredAt);

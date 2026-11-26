@@ -235,8 +235,13 @@ const privateKey = (key: z.infer<typeof KeyringKey>): PrivateIdentity => ({
 });
 
 // Whether the secret keys are the public keys', without throwing for a
-// secret key of the wrong length.
+// secret key of the wrong length. libsodium signs with the copy of the
+// public key the signing secret key ends with, so that copy must match too,
+// or the key would make signatures that don't verify.
 function matches(key: PrivateIdentity): boolean {
+  const { boxSecretKey, signSecretKey } = key;
+  if (boxSecretKey.length !== 32 || signSecretKey.length !== 64) return false;
+  if (toBase64(signSecretKey.subarray(32)) !== key.public.signPublicKey) return false;
   try {
     return hasMatchingKeys(key);
   } catch {

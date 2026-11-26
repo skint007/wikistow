@@ -227,6 +227,16 @@ describe('earlier keys (section 4.6)', () => {
     expect(() => pinnedAt(k3).addEarlierKeys({ keys: [k1.public, k3.public] } as never)).toThrow(
       expect.objectContaining({ code: 'malformed' }),
     );
+    const elsewhere = InstallationId.parse('another-installation');
+    const theirs = verifyRotationChain({
+      installationId: elsewhere,
+      start: k2.public,
+      end: k3.public,
+      statements: [signIdentityRotation({ installationId: elsewhere, from: k2, to: k3, contacts })],
+    });
+    expect(() => pinnedAt(k3).addEarlierKeys(theirs)).toThrow(
+      expect.objectContaining({ code: 'binding-mismatch' }),
+    );
   });
 
   it('agree across chains, and stop at a key declined later', () => {
@@ -237,6 +247,9 @@ describe('earlier keys (section 4.6)', () => {
     trust.declineKey(k1.public);
     expect(() => trust.requireForOpening(id, 1)).toThrow(unknown);
     expect(trust.requireForOpening(id, 2).identity).toEqual(k2.public);
+    // A pin declined too, as another device's decline can make it, opens nothing.
+    trust.declineKey(k3.public);
+    expect(() => trust.requireForOpening(id, 3)).toThrow(unknown);
   });
 
   it('refuse a second chain to the pin through other keys', () => {

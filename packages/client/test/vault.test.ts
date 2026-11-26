@@ -244,6 +244,21 @@ describe('format 2 vaults (section 4.6)', () => {
           exported(second),
         ],
       },
+      // libsodium would sign with the public key this one ends with.
+      'a signing key ending in another public key': {
+        retired: [
+          {
+            ...exported(first),
+            signSecretKey: toBase64(
+              Uint8Array.of(
+                ...first.signSecretKey.subarray(0, 32),
+                ...second.signSecretKey.subarray(32),
+              ),
+            ),
+          },
+          exported(second),
+        ],
+      },
       'another format': { format: 1 },
       'an unknown property': { reason: 'leak' },
       'an unknown property in a key': {
