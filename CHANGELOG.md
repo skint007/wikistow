@@ -4,6 +4,14 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.31.0-beta.1 - 2026-11-26
+
+### Highlights
+
+#### Maintenance
+
+- A vault saved by a newer version of WikiStow now asks you to update the app to unlock it, where it said “Try again in a moment”. This prepares for replacing your keys, which comes in a later release.
+
 ### Changes
 
 #### App
@@ -13,6 +21,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 #### Development
 
 - The formats and checks for replacing a person's identity keys (ADR 0018, #327): the rotation statement and chains of them, the format 2 vault and its keyring, earlier keys in `TrustStore`, and their test vectors. Nothing uses them yet, and the server still registers people at key version 1 only. (#751)
+- Work is now built from its issue, with no new ADRs or protocol review rounds; a pull request's code review is the design review, and `board check` no longer reads ADR steps. (#750)
+- The web clipper is marked built, now that both store listings are public, and the docs link to the Chrome Web Store and Mozilla Add-ons. (#749)
 
 ## 0.30.4 - 2026-11-25
 
