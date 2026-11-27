@@ -521,6 +521,18 @@ export async function giveKeys(
     // yet, may be one the member's app doesn't accept: what the member
     // holds stays, whoever sealed it, even where it gives less.
     const keepAll = sealer.keyVersion > 1 && unvouched;
+    // The current key of each sealer of what they hold: one since replaced
+    // opens only, so what it sealed gives way to what a giver they accept
+    // gives (`keepAll` aside).
+    const sealers = new Map(
+      (
+        await lookupIdentities(
+          tx,
+          [...new Set(held.map((h) => (h.envelope as { sealerId: string }).sealerId))],
+          { hold: false },
+        )
+      ).map((identity) => [identity.id as string, identity.keyVersion]),
+    );
     const keyOf = (id: string) =>
       people.find(({ identity }) => identity.id === id)?.identity.keyVersion ?? 0;
     const replaced = held.filter((h) => {
@@ -537,7 +549,9 @@ export async function giveKeys(
         sealerKeyVersion: number;
       };
       const givers = sealerId === sealer.id && sealerKeyVersion === sealer.keyVersion;
-      if (drafts !== undefined && (h.drafts || !drafts || (keepAll && !givers))) {
+      const replacedSince = (sealers.get(sealerId) ?? sealerKeyVersion) > sealerKeyVersion;
+      const covers = h.drafts || !drafts;
+      if (drafts !== undefined && ((covers && !replacedSince) || (keepAll && !givers))) {
         kept.add(key);
         return false;
       }

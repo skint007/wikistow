@@ -56,6 +56,8 @@ export type RotationOffer = {
   reason: 'old-key' | 'replaced-keys';
   identity: PublicIdentity;
   role: 'reader' | 'editor';
+  /** Whether an envelope of the current version from an owner that counts backs it: ticked by default only then. */
+  vouched: boolean;
 };
 
 /** Who a rotation from version `keyVersion - 1` seals `keyVersion` to (section 7.5). */
@@ -289,10 +291,17 @@ export function planRotation({
           reason: 'replaced-keys',
           identity,
           role: most === 'editor' ? (held ?? 'editor') : 'reader',
+          vouched: counted !== undefined,
         }
       : counted
         ? null
-        : { identityId: member.identityId, reason: 'old-key', identity, role: held ?? 'reader' };
+        : {
+            identityId: member.identityId,
+            reason: 'old-key',
+            identity,
+            role: held ?? 'reader',
+            vouched: false,
+          };
     let role: 'reader' | 'editor' = counted ?? 'reader';
     if (offered) {
       const choice = ticked.get(member.identityId);

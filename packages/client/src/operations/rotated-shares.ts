@@ -149,7 +149,7 @@ export async function applyWithTicks(
       p.plan.keyVersion,
       p.plan.remaining
         .filter(({ identity }) => !ticked.has(identity.id))
-        .map(({ identity }) => `${identity.id} ${keyHash(identity)}`)
+        .map(({ identity, role }) => `${identity.id} ${keyHash(identity)} ${role}`)
         .sort(),
       [...p.plan.removed].sort(),
     ]);
@@ -194,11 +194,15 @@ export async function planRekey(
     if (!row || row.keyVersion >= person.identity.keyVersion) continue;
     let planned: PlannedRotation;
     try {
+      // Ticked as their row's role where an owner this app accepts vouched
+      // for them, and as a reader where only an earlier key did (section 4.6).
+      const first = await planShareRotation(ctx, { spaceId, shareId: share.shareId, keys });
+      const offer = first.plan.offers.find((o) => o.identityId === person.identity.id);
       planned = await planShareRotation(ctx, {
         spaceId,
         shareId: share.shareId,
         keys,
-        tick: [{ identityId: person.identity.id, role: row.role }],
+        tick: [{ identityId: person.identity.id, role: offer?.vouched ? row.role : 'reader' }],
       });
     } catch (error) {
       // A share rooted in the trash gives nobody anything until restored.
