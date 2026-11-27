@@ -129,6 +129,21 @@ function sends(runtime: PluginRuntime, first: Promise<unknown> = Promise.resolve
   return sent;
 }
 
+/** Each change the app sends from now on, held until the test lands or refuses it. */
+function held(runtime: PluginRuntime) {
+  const calls: { change: unknown; land: () => Promise<void>; refuse: (why: string) => void }[] = [];
+  const update = runtime.updateSettings.bind(runtime);
+  runtime.updateSettings = (plugin, change) =>
+    new Promise((resolve, reject) => {
+      calls.push({
+        change,
+        land: () => update(plugin, change).then(resolve, reject),
+        refuse: (why) => reject(new Error(why)),
+      });
+    });
+  return calls;
+}
+
 it('says to unlock the vault in the dialog while it is locked', async () => {
   await draw('/settings/plugins', { open: false });
   expect(vaultStore.get().status).not.toBe('unlocked');
@@ -221,6 +236,10 @@ it('opens the dialog at once for ?plugin=, and forgets the search', async () => 
   await expect.poll(() => dialog()).not.toBeNull();
   expect(field('Greeting').value).toBe('Hello');
   await expect.poll(() => router.state.location.search).toEqual({});
+  // Closed, the keyboard carries on from the plugin's Settings, as when it opened it.
+  await act(() => userEvent.keyboard('{Escape}'));
+  expect(dialog()).toBeNull();
+  expect(document.activeElement).toBe(button());
 });
 
 it('sends an edit once, though Enter sent it and Close blurs it before it lands', async () => {
@@ -274,4 +293,44 @@ it('says in the row why a save failed once the dialog has closed', async () => {
   expect(
     [...row()!.querySelectorAll('[role=alert]')].filter((item) => !item.closest('dialog')),
   ).toHaveLength(0);
+});
+
+it('keeps an edit sent since an earlier save that lands, and sends it again if refused', async () => {
+  const { runtime } = await draw();
+  const calls = held(runtime);
+  await act(() => userEvent.click(button()));
+  await act(() => userEvent.fill(field('Greeting'), 'First'));
+  await act(() => userEvent.keyboard('{Escape}'));
+  await act(() => userEvent.click(button()));
+  await act(() => userEvent.fill(field('Greeting'), 'Second'));
+  await act(() => userEvent.keyboard('{Enter}'));
+  await act(() => calls[0]!.land());
+  expect(saved(runtime)()).toMatchObject({ greeting: 'First' });
+  expect(field('Greeting').value).toBe('Second');
+  await act(async () => calls[1]!.refuse('Offline.'));
+  await expect.poll(() => dialog()!.textContent).toContain('Offline.');
+  // Refused, Enter sends it again.
+  await act(() => userEvent.keyboard('{Enter}'));
+  expect(calls.map(({ change }) => change)).toEqual([
+    { greeting: 'First' },
+    { greeting: 'Second' },
+    { greeting: 'Second' },
+  ]);
+  await act(() => calls[2]!.land());
+  expect(saved(runtime)()).toMatchObject({ greeting: 'Second' });
+  expect(dialog()!.textContent).not.toContain('Offline.');
+});
+
+it('says nothing of a save a newer one of the same field replaced', async () => {
+  const { runtime } = await draw();
+  const calls = held(runtime);
+  await act(() => userEvent.click(button()));
+  await act(() => userEvent.fill(field('Greeting'), 'First'));
+  await act(() => userEvent.keyboard('{Enter}'));
+  await act(() => userEvent.fill(field('Greeting'), 'Latest'));
+  await act(() => userEvent.keyboard('{Escape}'));
+  await act(() => calls[1]!.land());
+  await act(async () => calls[0]!.refuse('Offline.'));
+  expect(saved(runtime)()).toMatchObject({ greeting: 'Latest' });
+  expect(row()!.textContent).not.toContain('wasn’t saved');
 });

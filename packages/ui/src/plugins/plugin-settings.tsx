@@ -33,7 +33,7 @@ import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
 import { ChooseFolder } from './choose-folder';
 import { CommandShortcuts } from './command-shortcuts';
-import { DeclaredSettings } from './declared-settings';
+import { DeclaredSettings, type SaveFailures } from './declared-settings';
 import { ApprovalDevices } from './devices';
 import { pickFolder } from './development';
 import { ConfirmUpload, Library } from './library-settings';
@@ -768,8 +768,9 @@ export function PluginRow({
   const { manifest, level, development, enabled } = plugin;
   const { regions } = usePlugins();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Why a save from its settings failed, kept here, as the dialog may have closed meanwhile.
-  const failed = useState<string | null>(null);
+  // Why saves from its settings failed, kept here, as the dialog may have closed meanwhile.
+  const failed = useState<SaveFailures>({});
+  const opener = useRef<HTMLButtonElement>(null);
   const sections = here
     ? regions['settings.section'].filter(({ pluginId }) => pluginId === manifest.id)
     : [];
@@ -785,6 +786,8 @@ export function PluginRow({
   const navigate = useNavigate();
   useEffect(() => {
     if (!asked) return;
+    // Where closing it goes back to, as when Settings opened it.
+    opener.current?.focus({ preventScroll: true });
     setSettingsOpen(true);
     row.current?.scrollIntoView({ block: 'start' });
     // Done with, so the Installed tab shows as current, and asking again opens them again.
@@ -836,14 +839,16 @@ export function PluginRow({
           {problem}
         </p>
       )}
-      {failed[0] && !settingsOpen && (
-        <p role="alert" className="text-sm text-destructive">
-          A setting wasn’t saved: {failed[0]}
-        </p>
-      )}
+      {!settingsOpen &&
+        Object.entries(failed[0]).map(([key, error]) => (
+          <p key={key} role="alert" className="text-sm text-destructive">
+            A setting wasn’t saved: {error}
+          </p>
+        ))}
       <div className="flex flex-wrap gap-2">
         {hasSettings && (
           <Button
+            ref={opener}
             size="sm"
             variant="outline"
             aria-haspopup="dialog"

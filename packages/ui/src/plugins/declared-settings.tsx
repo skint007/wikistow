@@ -1,7 +1,15 @@
 import type { InstalledPlugin } from '@wikistow/contracts';
 import type { Json, SettingField } from '@wikistow/plugin-sdk';
 import { settingFits } from '@wikistow/plugin-sdk/manifest';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Input } from '@/components/ui/input';
 import { Picker } from '@/components/ui/picker';
@@ -10,6 +18,12 @@ import { useVault } from '../vault/store';
 import { usePluginRuntime, usePlugins } from './runtime';
 
 const message = (error: unknown) => (error instanceof Error ? error.message : 'It wasn’t saved.');
+
+/** Why each field's newest save failed, by its key. */
+export type SaveFailures = Readonly<Record<string, string>>;
+
+/** The newest save of each plugin's field (`<id>\n<key>`), so only it says how it went. */
+const newest = new Map<string, number>();
 
 /**
  * The settings a plugin's manifest declares (`settings`, #310), drawn by
@@ -24,17 +38,17 @@ export function DeclaredSettings({
 }: {
   plugin: InstalledPlugin;
   /**
-   * Where why a save failed is kept, by whatever outlives these fields, as
+   * Where why saves failed is kept, by whatever outlives these fields, as
    * a dialog's are taken away while a save they sent is on its way.
    */
-  failed?: [string | null, (error: string | null) => void];
+  failed?: [SaveFailures, Dispatch<SetStateAction<SaveFailures>>];
 }) {
   const runtime = usePluginRuntime();
   // Drawn again as the settings change, here or from the plugin.
   usePlugins();
   const vault = useVault();
-  const own = useState<string | null>(null);
-  const [error, setError] = failed ?? own;
+  const own = useState<SaveFailures>({});
+  const [errors, setErrors] = failed ?? own;
   const fields = plugin.manifest.settings ?? [];
   if (fields.length === 0) return null;
   if (vault.status !== 'unlocked') {
@@ -43,13 +57,30 @@ export function DeclaredSettings({
     );
   }
   const values = runtime.settings(plugin);
-  /** Resolves whether it was saved. */
+  /**
+   * Resolves whether it was saved. Only a field's newest save says so, as
+   * an earlier one may settle after it.
+   */
   const save = (key: string, value: Json) => {
-    setError(null);
+    const at = `${plugin.manifest.id}\n${key}`;
+    const mine = (newest.get(at) ?? 0) + 1;
+    newest.set(at, mine);
+    const settled = (error: string | null) => {
+      if (newest.get(at) !== mine) return;
+      setErrors((was) => {
+        const next = { ...was };
+        if (error) next[key] = error;
+        else delete next[key];
+        return next;
+      });
+    };
     return runtime.updateSettings(plugin, { [key]: value }).then(
-      () => true,
+      () => {
+        settled(null);
+        return true;
+      },
       (failure: unknown) => {
-        setError(message(failure));
+        settled(message(failure));
         return false;
       },
     );
@@ -67,7 +98,9 @@ export function DeclaredSettings({
           onSave={(value) => save(field.key, value)}
         />
       ))}
-      {error && <FormMessage>{error}</FormMessage>}
+      {Object.entries(errors).map(([key, error]) => (
+        <FormMessage key={key}>{error}</FormMessage>
+      ))}
     </section>
   );
 }
@@ -160,17 +193,21 @@ function TypedSetting({
   // after Enter or by going, before it comes back as `shown`.
   const sent = useRef<string | null>(null);
   const was = useRef(shown);
-  // A new value, from here or elsewhere, replaces what is typed unless
-  // something else has been typed since, as after the dialog that sent it
-  // was closed and opened again.
+  const number = field.type === 'number';
+  /** Whether two texts give the same value: `7.0` is 7. */
+  const same = (one: string, other: string) =>
+    number ? one.trim() !== '' && Number(one) === Number(other) : one === other;
+  // A new value, from here or elsewhere, replaces what is typed only if
+  // nothing was typed since the value before, or it is what was typed: an
+  // earlier save landing after the dialog closed and opened again leaves
+  // what was typed since, and what was sent for it.
   useEffect(() => {
     if (was.current === shown) return;
-    const from = [was.current, sent.current];
-    setText((typed) => (from.includes(typed) ? shown : typed));
+    const untouched = was.current;
+    setText((typed) => (typed === untouched || same(typed, shown) ? shown : typed));
     was.current = shown;
-    sent.current = null;
+    if (sent.current !== null && same(sent.current, shown)) sent.current = null;
   }, [shown]);
-  const number = field.type === 'number';
   const commit = () => {
     if (text === shown) return setWrong(false);
     if (text === sent.current) return;
