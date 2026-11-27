@@ -284,7 +284,12 @@ describe('following a rotation (section 8.4)', () => {
     generateIdentity({ kind: 'human', id, keyVersion }),
   ) as [PrivateIdentity, PrivateIdentity];
   const s12 = signIdentityRotation({ installationId, from: k1, to: k2, contacts: null });
-  const chain = verifyRotationChain({ installationId, start: k1.public, end: k2.public, statements: [s12] });
+  const chain = verifyRotationChain({
+    installationId,
+    start: k1.public,
+    end: k2.public,
+    statements: [s12],
+  });
   const pinnedAt = (key: PrivateIdentity) => {
     const trust = new TrustStore(installationId);
     trust.use(directoryEntry(key.public));

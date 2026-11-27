@@ -760,7 +760,10 @@ export function applyContactsChange(
       return forgetFollows(
         {
           shared: { ...shared, contacts: shared.contacts.with(index, change.pin), removed },
-          private: { ...own, labels: relabelled(own.labels, identity.id, change.replaced, pinHash) },
+          private: {
+            ...own,
+            labels: relabelled(own.labels, identity.id, change.replaced, pinHash),
+          },
         },
         identity.id,
       );
@@ -774,7 +777,10 @@ export function applyContactsChange(
       if (!held || held.to.keyHash !== change.keyHash) return base;
       return {
         shared,
-        private: { ...own, extensions: asExtensions(withFollowed(own.extensions, change.id, null)) },
+        private: {
+          ...own,
+          extensions: asExtensions(withFollowed(own.extensions, change.id, null)),
+        },
       };
     }
     case 'decline-key': {
@@ -930,7 +936,9 @@ export function applyContactsChange(
 
 // The labels with `id`'s label moved from the key hash `from` to `to`.
 const relabelled = (labels: readonly Label[], id: string, from: string, to: string) =>
-  labels.map((label) => (label.id === id && label.keyHash === from ? { ...label, keyHash: to } : label));
+  labels.map((label) =>
+    label.id === id && label.keyHash === from ? { ...label, keyHash: to } : label,
+  );
 
 // A write that replaces `id`'s pin otherwise (a pin, a confirmed key) drops
 // their declines and the notice of a follow (section 8.4).

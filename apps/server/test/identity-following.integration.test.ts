@@ -16,8 +16,9 @@ import {
   signIdentityRotation,
   spaceKeys,
   type ClientContext,
-  type PageRef,
 } from '@wikistow/client';
+
+type PageRef = pages.PageRef;
 import { FAST_KDF } from '@wikistow/client/testing';
 import { identityRoutes, type RouteDef } from '@wikistow/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
@@ -51,7 +52,12 @@ async function rotate(person: Person, keep: readonly string[] = []) {
   });
   await replaceKeys.sendRotation(person.api, prepared);
   const ctx = await openSession(person.api, prepared.vault);
-  return { ctx, vault: prepared.vault, old: person.vault.identity.public, next: prepared.vault.identity.public };
+  return {
+    ctx,
+    vault: prepared.vault,
+    old: person.vault.identity.public,
+    next: prepared.vault.identity.public,
+  };
 }
 
 const draftOf = async (ctx: ClientContext, page: PageRef) => {
@@ -87,7 +93,9 @@ describe('the rotated person', () => {
     expect(await draftOf(ctx, lib.beside)).toMatchObject({ payload: { markdown: '' } });
     expect(await draftOf(ctx, lib.page)).toMatchObject({ payload: { markdown: 'draft words' } });
     // Bob's share, whose keys were sealed to her old key.
-    expect(await draftOf(ctx, theirs.page)).toMatchObject({ payload: { markdown: 'Alice, before' } });
+    expect(await draftOf(ctx, theirs.page)).toMatchObject({
+      payload: { markdown: 'Alice, before' },
+    });
     // Those keys only open: she waits for Bob to give her the share at her new key.
     expect(
       await rejection(pages.editDraft(ctx, theirs.page, { markdown: 'under the old keys' })),
@@ -107,12 +115,13 @@ describe('agents and the history routes', () => {
     const id = alice.vault.identity.public.id;
     const mine = await asAgent(t, agent.token, `/api/identities/${id}/rotations`);
     expect(mine.status).toBe(200);
-    expect(
-      (await asAgent(t, agent.token, `/api/identities/${id}/versions/1`)).status,
-    ).toBe(200);
+    expect((await asAgent(t, agent.token, `/api/identities/${id}/versions/1`)).status).toBe(200);
     // Carol wrote nothing it can read.
     const other = carol.vault.identity.public.id;
-    for (const path of [`/api/identities/${other}/rotations`, `/api/identities/${other}/versions/1`]) {
+    for (const path of [
+      `/api/identities/${other}/rotations`,
+      `/api/identities/${other}/versions/1`,
+    ]) {
       expect((await asAgent(t, agent.token, path)).status).toBe(404);
     }
   });
@@ -192,7 +201,9 @@ describe('a contact', () => {
 
   it('declines: the pin goes back, nothing is sealed to either key, and no device follows again', async () => {
     const { bob, old, next } = await rotatedContact();
-    const before = bob.ctx.contacts.book.payloads.shared.contacts.find((c) => c.identity.id === old.id);
+    const before = bob.ctx.contacts.book.payloads.shared.contacts.find(
+      (c) => c.identity.id === old.id,
+    );
     await lookupPeople(bob.ctx, [old.id]);
     const [notice] = follow.unseenFollows(bob.ctx);
     if (!notice) throw new Error('expected a notice');
@@ -294,7 +305,11 @@ describe('an agent', () => {
         return r === identityRoutes.rotations ? { ...(answer as object), rotations: [] } : answer;
       }) as typeof agent.api.call,
     };
-    const opened = openAgentSession(lying, { identity: agent.identity, person: old, ...agent.kept });
+    const opened = openAgentSession(lying, {
+      identity: agent.identity,
+      person: old,
+      ...agent.kept,
+    });
     expect(await rejection(opened)).toBe('identity-key-changed');
   });
 });

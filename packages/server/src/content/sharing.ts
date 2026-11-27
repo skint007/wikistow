@@ -1181,11 +1181,7 @@ export async function versionEnvelopes(
   const rows = await db
     .select()
     .from(folderKeyEnvelopes)
-    .where(
-      owner
-        ? of
-        : and(of, eq(folderKeyEnvelopes.recipientIdentityId, identity.id)),
-    )
+    .where(owner ? of : and(of, eq(folderKeyEnvelopes.recipientIdentityId, identity.id)))
     .orderBy(folderKeyEnvelopes.recipientIdentityId, folderKeyEnvelopes.recipientKeyVersion);
   return readEnvelopes(rows, report);
 }

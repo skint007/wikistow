@@ -441,7 +441,13 @@ describe('across a rotation of the owner (sections 8.5 and 4.6)', () => {
   it('checks each version under the key it was signed with', () => {
     const chain = [signedOnly(v2), signedOnly(v3)];
     expect(
-      requireContactsChain({ owner: next.public, earlier: [owner.public], installationId, mark, chain }),
+      requireContactsChain({
+        owner: next.public,
+        earlier: [owner.public],
+        installationId,
+        mark,
+        chain,
+      }),
     ).toEqual(v3.record);
     // Without the earlier key, the version it signed doesn't verify.
     expect(() =>
@@ -453,7 +459,13 @@ describe('across a rotation of the owner (sections 8.5 and 4.6)', () => {
     const v4 = sealContacts({ owner, installationId, previous: v3.record, ...payloads });
     const chain = [signedOnly(v2), signedOnly(v3), signedOnly(v4)];
     expect(() =>
-      requireContactsChain({ owner: next.public, earlier: [owner.public], installationId, mark, chain }),
+      requireContactsChain({
+        owner: next.public,
+        earlier: [owner.public],
+        installationId,
+        mark,
+        chain,
+      }),
     ).toThrow(code('contacts-fork'));
   });
 });
@@ -470,7 +482,8 @@ describe('following and declining (sections 8.4 and 8.6)', () => {
   const hashes = (...keys: (typeof later)[]) => keys.map((key) => keyHash(key.public));
   const follow = (key = later, chain = hashes(friend, later)) =>
     ({ kind: 'follow-key', from: pin, to: to(key), chain }) as const;
-  const pinOf = (p: ContactsPayloads) => p.shared.contacts.find((c) => c.identity.id === friend.public.id);
+  const pinOf = (p: ContactsPayloads) =>
+    p.shared.contacts.find((c) => c.identity.id === friend.public.id);
 
   it('moves the pin and its label, unchecked, and keeps the notice with the key it came from', () => {
     const followed = applyContactsChange(payloads, follow());

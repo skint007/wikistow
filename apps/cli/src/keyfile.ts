@@ -188,7 +188,11 @@ export function withPerson(
   const json = secretsJson({ ...secrets, person });
   return KeyFile.parse({
     ...file,
-    secrets: aeadEncrypt({ key: dataKey, plaintext: utf8(JSON.stringify(json)), ad: secretsAd(file) }),
+    secrets: aeadEncrypt({
+      key: dataKey,
+      plaintext: utf8(JSON.stringify(json)),
+      ad: secretsAd(file),
+    }),
   });
 }
 

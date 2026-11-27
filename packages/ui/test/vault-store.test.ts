@@ -74,7 +74,14 @@ describe('the vault store', () => {
     vaultStore.unlock(ctx, vault);
     const keys = { draftKey: filled(32), publishedKey: filled(32) };
     const [spaceId, shareId] = [newId(SpaceId), newId(ShareId)];
-    ctx.keyring.add({ spaceId, shareId, keyVersion: 1, ...keys, sealer: vault.identity.public });
+    ctx.keyring.add({
+      spaceId,
+      shareId,
+      keyVersion: 1,
+      ...keys,
+      sealer: vault.identity.public,
+      earlier: false,
+    });
     vaultStore.lock();
     expect(ctx.keyring.versions(spaceId, shareId)).toEqual([]);
     expect([keys.draftKey, keys.publishedKey].every((key) => key.every((b) => b === 0))).toBe(true);

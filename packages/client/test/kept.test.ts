@@ -478,7 +478,11 @@ describe('after replacing keys (section 4.6)', () => {
       }),
     ).toBe(false);
     // Running again changes nothing.
-    await keptOperations.sealKeptAgain(store, { identity: second, installationId, retired: [first] });
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
     expect(await items()).toEqual(now);
   });
 });

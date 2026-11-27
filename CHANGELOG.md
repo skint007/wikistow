@@ -8,10 +8,11 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Server
 
-- A setting, `IDENTITY_ROTATION`, off unless set to `on`, for the route that replaces a person's identity keys. Leave it off: until replacing keys is fully built, someone who replaced theirs couldn't open what was shared with their earlier keys. (#755)
+- A setting, `IDENTITY_ROTATION`, off unless set to `on`, for the route that replaces a person's identity keys. Leave it off: until replacing keys is fully built, someone who replaced theirs can't write in what was shared with their earlier keys, their own shares included. (#755)
 
 #### Development
 
+- Following a rotation (#327), for where the server's `IDENTITY_ROTATION` is on: apps and the CLI move a contact's pin along a checked chain of statements to their new key, a decline puts it back and stops following them on every device, and a chain that doesn't check out stays a key change. Someone who replaced their keys opens what was sealed to their earlier ones, the server serves envelopes at every key version, and devices seal what they kept again under the new key. The app doesn't show the notice yet. (#PR)
 - **Replace my keys** in Settings → Security (#327), shown only where the server's `IDENTITY_ROTATION` is on: new keys, a new passphrase and recovery key, and the agents you tick kept. The app now unlocks a format 2 vault, and a device whose keys were replaced elsewhere asks **Did you replace your keys?** before it asks for a passphrase. (#756)
 - The server's route for replacing a person's identity keys (#327), behind `IDENTITY_ROTATION`: it takes the statement both keys sign, the new vault, the first contacts version at the new key and the agents kept or revoked in one transaction, signs out the person's other devices and ends live sessions in their spaces, and from then on refuses anything signed with the old key. Two routes serve a person's statements and earlier keys, and the client builds the request (`prepareRotation`). (#755)
 
