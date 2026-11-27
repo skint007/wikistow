@@ -17,7 +17,13 @@ import {
   type OpensOwner,
 } from './envelope.ts';
 import { CryptoError } from './errors.ts';
-import { sign, verifySignature, type PrivateIdentity, type PublicIdentity } from './identity.ts';
+import {
+  readerAt,
+  sign,
+  verifySignature,
+  type PrivateIdentity,
+  type PublicIdentity,
+} from './identity.ts';
 import type { InstallationId } from './ids.ts';
 import type { Region } from './regions.ts';
 import { sodium } from './sodium.ts';
@@ -291,13 +297,21 @@ export type OpenedFolderKeys = {
   draftKey: Uint8Array | null;
   publishedKey: Uint8Array;
   sealer: PublicIdentity;
+  /**
+   * Opened through one of this reader's retired keys, or sealed with an
+   * earlier key of its sealer (section 4.6): it opens what it wraps, and
+   * counts for nothing else, writing, rotating from and sealing to agents
+   * included (`countsForWriting`).
+   */
+  earlier: boolean;
 };
 
 /**
  * Verify and open a folder key envelope addressed to `reader` (section 6.4):
- * the space and share asked for, this reader at its current key version, a
- * sealer `sealers` trusts at a pinned key, a valid signature, and both keys
- * opening. For a person, `sealers` is the space's accepted owners for
+ * the space and share asked for, this reader at its current key version or
+ * a retired one, a sealer `sealers` trusts at a pinned key or an earlier key
+ * of theirs, a valid signature, and both keys opening. Either earlier key
+ * makes the version one for opening only (`earlier`). For a person, `sealers` is the space's accepted owners for
  * opening; for an agent, its own person. Throws a `CryptoError`.
  */
 export function openFolderKeys({
@@ -319,13 +333,14 @@ export function openFolderKeys({
   if (envelope.spaceId !== expect.spaceId || envelope.shareId !== expect.shareId) {
     throw new CryptoError('binding-mismatch', 'Folder key envelope is for another share');
   }
-  if (
-    envelope.recipientId !== reader.public.id ||
-    envelope.recipientKeyVersion !== reader.public.keyVersion
-  ) {
+  const at = readerAt(reader, envelope.recipientId, envelope.recipientKeyVersion);
+  if (!at) {
     throw new CryptoError('wrong-recipient', 'Folder key envelope is not for this reader');
   }
-  const sealer = trust.require(envelope.sealerId, envelope.sealerKeyVersion);
+  const { identity: sealer, earlier: sealedEarlier } = trust.requireForOpening(
+    envelope.sealerId,
+    envelope.sealerKeyVersion,
+  );
   requireAcceptedOwner(sealers, sealer, 'sealer');
   if (
     !verifySignature(sealer, folderKeyEnvelopeBytes(installationId, envelope), envelope.signature)
@@ -333,10 +348,11 @@ export function openFolderKeys({
     throw new CryptoError('bad-signature', 'Folder key envelope signature is invalid');
   }
   // The shape fixes each sealed key at 80 bytes, so each opens to 32.
-  const publishedKey = openSealedKey(reader, envelope.publishedKey);
+  const publishedKey = openSealedKey(at.key, envelope.publishedKey);
   try {
-    const draftKey = envelope.draftKey === null ? null : openSealedKey(reader, envelope.draftKey);
-    return { ...expect, keyVersion: envelope.keyVersion, draftKey, publishedKey, sealer };
+    const draftKey = envelope.draftKey === null ? null : openSealedKey(at.key, envelope.draftKey);
+    const earlier = at.earlier || sealedEarlier;
+    return { ...expect, keyVersion: envelope.keyVersion, draftKey, publishedKey, sealer, earlier };
   } catch (error) {
     sodium.memzero(publishedKey);
     throw error;
@@ -363,7 +379,9 @@ export class FolderKeyring {
    * them when they are replaced or it is wiped. A later envelope from the
    * same sealer for the same version replaces the earlier one, as when a
    * reader becomes an editor, but a reader's envelope never takes away a
-   * draft key held for that version: only a rotation demotes (section 7.4).
+   * draft key held for that version: only a rotation demotes (section 7.4),
+   * and one that opens only never takes the place of one that counts for
+   * writing (`earlier`).
    * Once the keyring is wiped, it wipes what it is given and refuses it
    * (`missing-key`), so a load still running when the app locked keeps
    * nothing.
@@ -379,6 +397,12 @@ export class FolderKeyring {
     const sealers = versions.get(opened.keyVersion) ?? new Map<IdentityId, HeldKeyVersion>();
     versions.set(opened.keyVersion, sealers);
     const replaced = sealers.get(opened.sealer.id);
+    // One that counts for writing is never replaced by one that only opens,
+    // as when the same version was sealed to a retired key too (section 4.6).
+    if (replaced && !replaced.earlier && opened.earlier) {
+      wipe(opened, replaced);
+      return;
+    }
     if (replaced?.draftKey && opened.draftKey === null) {
       wipe(opened, replaced);
       return;

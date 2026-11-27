@@ -350,7 +350,8 @@ export function openCommentKey({
   ) {
     throw new CryptoError('binding-mismatch', 'The comment isn’t the one asked for');
   }
-  const author = trust.require(record.authorId, record.authorKeyVersion);
+  // What an earlier key of the author signed opens, as their earlier writing (section 4.6).
+  const { identity: author } = trust.requireForOpening(record.authorId, record.authorKeyVersion);
   if (!verifySignature(author, metadataRecordV2Bytes(record), signature)) {
     throw new CryptoError('bad-signature', 'Comment record signature is invalid');
   }
@@ -372,7 +373,7 @@ export function openCommentKey({
       })
     : openAnyEnvelope(sealed.envelopes, (raw) => {
         const envelope = parseWith(MetadataEnvelopeV2, raw, 'Comment envelope');
-        checkEnvelopeV2({
+        const key = checkEnvelopeV2({
           reader,
           trust,
           owners,
@@ -380,7 +381,7 @@ export function openCommentKey({
           namesThisVersion: envelope.metadataRevisionId === record.metadataRevisionId,
           signedBytes: () => metadataEnvelopeV2Bytes(record, envelope),
         });
-        return unsealCommitted(reader, envelope.sealedKey, record.keyCommitment);
+        return unsealCommitted(key, envelope.sealedKey, record.keyCommitment);
       });
   try {
     const plaintext = aeadDecrypt({ key: contentKey, sealed: payload, ad: metadataAd(record) });

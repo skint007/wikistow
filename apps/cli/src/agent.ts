@@ -4,6 +4,7 @@ import {
   agentContactsMark,
   createApiClient,
   CryptoError,
+  fingerprint,
   openAgentSession,
   restoreNotice,
   saveContacts,
@@ -14,10 +15,18 @@ import {
 import { systemRoutes } from '@wikistow/contracts';
 import { join } from 'node:path';
 import { CliError } from './exit.ts';
-import { configDir, readPrivateFile, WINDOWS } from './files.ts';
+import { configDir, readPrivateFile, WINDOWS, writePrivateFile } from './files.ts';
 import type { Io } from './io.ts';
 import { Journal } from './journal.ts';
-import { openKeyFile, parseKeyFile, type KeyFile, type Secrets, type Unlock } from './keyfile.ts';
+import {
+  keyFileBytes,
+  openKeyFile,
+  parseKeyFile,
+  withPerson,
+  type KeyFile,
+  type Secrets,
+  type Unlock,
+} from './keyfile.ts';
 import { PROGRAM } from './program.ts';
 import { REMEDIES, systemStore, type SecretStore } from './secret-store.ts';
 import { LocalState } from './state.ts';
@@ -202,8 +211,20 @@ export async function openAgent(
   if (ctx.installationId !== secrets.installationId) {
     throw new CryptoError('binding-mismatch', 'The server is another installation');
   }
+  // Its person replaced their keys, and the chain from the key it pinned
+  // checked out: it keeps the new key, and says so once (section 4.6).
+  let opened = { file, secrets };
+  const followed = ctx.agent?.followedFrom ? ctx.agent.person : null;
+  if (followed) {
+    const next = withPerson(file, dataKey, secrets, followed);
+    writePrivateFile(join(dir, KEY_FILE), keyFileBytes(next));
+    opened = { file: next, secrets: { ...secrets, person: followed } };
+    io.stderr.write(
+      `Your person replaced their keys. This agent checked the change and now uses their new key (fingerprint ${fingerprint(followed)}).\n`,
+    );
+  }
   state.keepContactsMark(agentContactsMark(ctx));
-  return { dir, file, secrets, dataKey, state, journal, ctx };
+  return { dir, ...opened, dataKey, state, journal, ctx };
 }
 
 /** Keep the session's first-seen pins and contacts mark for the next run. */

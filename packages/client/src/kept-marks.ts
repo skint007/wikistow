@@ -142,10 +142,10 @@ export class KeptMarks implements KeyVersionMarks {
       identity: PrivateIdentity;
       installationId: InstallationId;
       /**
-       * The person's earlier keys (section 4.6): marks sealed under one,
-       * before they replaced their keys, are read, and sealed under the
-       * current key at the next write. Their contacts mark isn't: checking
-       * the record's chain across a rotation is not built yet (#327).
+       * The person's earlier keys (section 4.6): what was kept under one,
+       * before they replaced their keys, marks, contacts mark and record
+       * included, is read and sealed again under the current key at once.
+       * The record then checks across the rotation as a served one does.
        */
       retired?: readonly PrivateIdentity[];
     },
@@ -173,22 +173,26 @@ export class KeptMarks implements KeyVersionMarks {
         const plain = bytes && openOnDevice(key, KEY, marksAd(installationId, key), bytes);
         if (!plain) continue;
         try {
-          const found = parseJson(Contents, plain, 'Kept marks', {
+          return parseJson(Contents, plain, 'Kept marks', {
             integers: [
               ['contactsMark', 'version'],
               ['marks', '*'],
             ],
           });
-          return { ...NONE, marks: found.marks, restoredAt: found.restoredAt };
         } catch {
           return null;
         }
       }
       return null;
     };
-    const contents = open(bytes) ?? earlier() ?? NONE;
+    const current = open(bytes);
+    const resealing = current ? null : earlier();
+    const contents = current ?? resealing ?? NONE;
     const who = `${installationId} ${identity.public.id}`;
     const marks = new KeptMarks(file, { seal, open }, contents, file.channel ?? null, who);
+    // Sealed again under the current key at once, so the retired key is
+    // tried no more.
+    if (resealing) void marks.#change(contents);
     // Answers a closed session of this person heard after it closed. A
     // restore that session didn't know of drops its raises, as it drops
     // every mark (`startOver`); its clears and losses still hold. The

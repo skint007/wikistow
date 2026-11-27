@@ -129,7 +129,10 @@ export function planRotation({
   // Step 1: v must count for writing and be at or above the mark.
   const holdsV = keyring
     .versions(spaceId, shareId)
-    .some((version) => version.keyVersion === currentKeyVersion && counts(version.sealer));
+    .some(
+      (version) =>
+        version.keyVersion === currentKeyVersion && !version.earlier && counts(version.sealer),
+    );
   if (!holdsV) {
     throw new CryptoError(
       'key-version',

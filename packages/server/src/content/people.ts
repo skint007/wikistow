@@ -211,6 +211,23 @@ async function agentDirectory(db: Database, caller: Caller, ids: readonly string
 }
 
 /**
+ * Whether the caller may read the key history of the person `identityId`
+ * (section 4.6): their statements and earlier keys. A person may, of
+ * anyone, as the history routes always allowed; an agent only of the
+ * people it may look up (`agentDirectory`): its own person, to follow
+ * them, and the authors it needs to check.
+ */
+export async function mayReadKeyHistory(
+  db: Database,
+  actor: Actor,
+  identityId: string,
+): Promise<boolean> {
+  if (actor.agentId === null) return true;
+  const caller = await requireCaller(db, actor);
+  return (await agentDirectory(db, caller, [identityId])).length > 0;
+}
+
+/**
  * Agents among `ids` that wrote a record the caller can reach: in a space
  * it owns or a share it holds, or for an agent, at or under its pick.
  * A person's own agents are always listed to them, and an agent to itself.

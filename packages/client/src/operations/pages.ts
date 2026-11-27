@@ -380,7 +380,10 @@ export async function loadHistory(ctx: ClientContext, page: PageRef) {
     if (version.publisher.identityId !== signed.authorId || !basedOnMatches) {
       throw new CryptoError('binding-mismatch', 'History does not match the signed version');
     }
-    const author = ctx.trust.require(record.authorId, record.authorKeyVersion);
+    const { identity: author } = ctx.trust.requireForOpening(
+      record.authorId,
+      record.authorKeyVersion,
+    );
     const { personId } = version.publisher;
     const forPerson =
       personId !== null &&

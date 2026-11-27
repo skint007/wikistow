@@ -58,6 +58,7 @@ import {
 import { newId } from '../ids.ts';
 import {
   changePending,
+  countsForWriting,
   highestWritable,
   requireNotBehind,
   type KeyVersionMarks,
@@ -432,7 +433,7 @@ function openWrap({
   const held = keyring
     .versions(record.spaceId, wrap.shareId)
     .filter((version) => version.keyVersion === wrap.keyVersion && version.draftKey);
-  const counting = held.filter((version) => owners.writes(version.sealer));
+  const counting = held.filter((version) => countsForWriting(version, owners.writes));
   if (counting.length === 0) {
     throw held.length > 0
       ? new CryptoError(
@@ -498,7 +499,7 @@ function openGrantedKey({
   }
   return openAnyEnvelope(envelopes, (raw) => {
     const envelope = parseWith(MetadataEnvelopeV2, raw, 'Session envelope');
-    checkEnvelopeV2({
+    const key = checkEnvelopeV2({
       reader,
       trust,
       owners: owners.opens,
@@ -506,7 +507,7 @@ function openGrantedKey({
       namesThisVersion: envelope.metadataRevisionId === record.metadataRevisionId,
       signedBytes: () => metadataEnvelopeV2Bytes(record, envelope),
     });
-    return unsealCommitted(reader, envelope.sealedKey, record.keyCommitment);
+    return unsealCommitted(key, envelope.sealedKey, record.keyCommitment);
   });
 }
 

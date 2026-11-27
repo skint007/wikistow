@@ -544,8 +544,8 @@ async function servedVersions(
       .where(
         and(
           anyId(commentEnvelopes.versionId, versionIds),
+          // At every key version of theirs (section 4.6).
           eq(commentEnvelopes.recipientIdentityId, identity.id),
-          eq(commentEnvelopes.recipientKeyVersion, identity.keyVersion),
         ),
       ),
     (row) => row.id,

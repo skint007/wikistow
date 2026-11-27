@@ -20,6 +20,7 @@ import { markOpened } from '../key-versions.ts';
 import { opensFor, type OpensOwner } from '../owner-predicates.ts';
 import { acceptOwners, agentOwners, type AcceptedOwners } from '../owners.ts';
 import type { DirectoryEntry } from '../trust.ts';
+import { followRotations, takeEarlierKeys } from './follow.ts';
 import { saveContacts, type ClientContext } from './session.ts';
 
 /** One space as this app sees it. */
@@ -103,7 +104,15 @@ async function loadSpaceKeys(
   }
   for (const envelope of envelopes) named.add(envelope.sealerId);
   for (const owner of listed) named.delete(owner.identity.id);
+  // Owners the server lists who replaced their keys are followed first, as
+  // the people looked up are (`lookupDirectory`).
+  await followRotations(ctx, listed);
   const directory = [...listed, ...(await lookupPeople(ctx, [...named]))];
+  // What owners signed and sealed with keys they have since replaced.
+  await takeEarlierKeys(ctx, [
+    ...statements.map((s) => ({ id: s.signerId, keyVersion: s.signerKeyVersion })),
+    ...envelopes.map((e) => ({ id: e.sealerId, keyVersion: e.sealerKeyVersion })),
+  ]);
   const owners = acceptOwners({
     installationId: ctx.installationId,
     spaceId,
@@ -227,7 +236,9 @@ export async function lookupPeople(
 
 /**
  * The directory's people for these identities, and its agents among them,
- * each with the enrollment its person signed (section 9.5).
+ * each with the enrollment its person signed (section 9.5). People who
+ * replaced their keys are followed along their chain first
+ * (`followRotations`).
  */
 export async function lookupDirectory(
   ctx: ClientContext,
@@ -243,6 +254,7 @@ export async function lookupDirectory(
     people.push(...found.people);
     agents.push(...found.agents);
   }
+  await followRotations(ctx, people);
   return { people, agents };
 }
 
@@ -259,9 +271,14 @@ export async function pinAuthors(
   ctx: ClientContext,
   authors: readonly { authorId: IdentityId; authorKeyVersion: number }[],
 ): Promise<void> {
+  // Authors who wrote with a key they have since replaced.
+  await takeEarlierKeys(
+    ctx,
+    authors.map((author) => ({ id: author.authorId, keyVersion: author.authorKeyVersion })),
+  );
   const unpinned = authors.filter(({ authorId, authorKeyVersion }) => {
     try {
-      ctx.trust.require(authorId, authorKeyVersion);
+      ctx.trust.requireForOpening(authorId, authorKeyVersion);
       return false;
     } catch {
       return true;

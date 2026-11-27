@@ -1,7 +1,12 @@
 import type { IdentityId } from '@wikistow/contracts';
 import { CryptoError } from './errors.ts';
 import { canonical, fromBase64, hash, toBase64 } from './encoding.ts';
-import { verifySignature, type PrivateIdentity, type PublicIdentity } from './identity.ts';
+import {
+  readerAt,
+  verifySignature,
+  type PrivateIdentity,
+  type PublicIdentity,
+} from './identity.ts';
 import type { OpensOwner } from './owner-predicates.ts';
 import { sodium } from './sodium.ts';
 import type { TrustStore } from './trust.ts';
@@ -49,18 +54,18 @@ export function openSealedKey(reader: PrivateIdentity, sealedKey: string): Uint8
   }
 }
 
+// The reader's key the envelope is addressed to: its current key, or a
+// retired one, which opens what was sealed to it (section 4.6).
 function requireRecipient(
   reader: PrivateIdentity,
   envelope: Pick<EnvelopeParties, 'recipientId' | 'recipientKeyVersion'>,
   namesThisVersion: boolean,
-): void {
-  if (
-    !namesThisVersion ||
-    envelope.recipientId !== reader.public.id ||
-    envelope.recipientKeyVersion !== reader.public.keyVersion
-  ) {
+): PrivateIdentity {
+  const at = readerAt(reader, envelope.recipientId, envelope.recipientKeyVersion);
+  if (!namesThisVersion || !at) {
     throw new CryptoError('wrong-recipient', 'Key envelope is not for this reader and version');
   }
+  return at.key;
 }
 
 /** Throws `untrusted-sealer` unless `owners` accepts `who`, named in the message as `role`. */
@@ -76,7 +81,7 @@ export function requireAcceptedOwner(owners: OpensOwner, who: PublicIdentity, ro
 /**
  * Check a v1 envelope that arrived with a v1 record, then open its key. It
  * must name that exact record version and this reader at its current key
- * version, be granted by the record's own author (as every Milestone 1
+ * version or a retired one, be granted by the record's own author (as every Milestone 1
  * envelope was), and carry a valid signature over `signedBytes()`. The
  * caller has already required the author to be an accepted owner.
  */
@@ -96,15 +101,19 @@ export function openEnvelope({
   /** Built only after the recipient checks, so a malformed envelope for someone else is still `wrong-recipient`. */
   signedBytes: () => Uint8Array;
 }): Uint8Array {
-  requireRecipient(reader, envelope, namesThisVersion);
+  const key = requireRecipient(reader, envelope, namesThisVersion);
   if (envelope.granterId !== author.id || envelope.granterKeyVersion !== author.keyVersion) {
     throw new CryptoError('binding-mismatch', 'A v1 key envelope must be granted by its author');
   }
-  const granter = trust.require(envelope.granterId, envelope.granterKeyVersion);
+  // Opening only: an earlier key of the granter checks what it sealed.
+  const { identity: granter } = trust.requireForOpening(
+    envelope.granterId,
+    envelope.granterKeyVersion,
+  );
   if (!verifySignature(granter, signedBytes(), envelope.signature)) {
     throw new CryptoError('bad-signature', 'Key envelope signature is invalid');
   }
-  return openSealedKey(reader, envelope.sealedKey);
+  return openSealedKey(key, envelope.sealedKey);
 }
 
 /**
@@ -152,7 +161,9 @@ export function requireCommittedKey(contentKey: Uint8Array, commitment: string):
 /**
  * The checks of a v2 envelope before its key is unsealed (section 5.8): it
  * names this record and reader, and an accepted owner of the space signed
- * the v2 bytes at a key this app has pinned.
+ * the v2 bytes at a key this app has pinned, or at an earlier key of theirs,
+ * for opening (section 4.6). Returns the reader's key to unseal it with:
+ * the current one, or the retired one it was sealed to.
  */
 export function checkEnvelopeV2({
   reader,
@@ -168,13 +179,17 @@ export function checkEnvelopeV2({
   envelope: EnvelopeParties;
   namesThisVersion: boolean;
   signedBytes: () => Uint8Array;
-}): void {
-  requireRecipient(reader, envelope, namesThisVersion);
-  const granter = trust.require(envelope.granterId, envelope.granterKeyVersion);
+}): PrivateIdentity {
+  const key = requireRecipient(reader, envelope, namesThisVersion);
+  const { identity: granter } = trust.requireForOpening(
+    envelope.granterId,
+    envelope.granterKeyVersion,
+  );
   requireAcceptedOwner(owners, granter, 'granter');
   if (!verifySignature(granter, signedBytes(), envelope.signature)) {
     throw new CryptoError('bad-signature', 'Key envelope signature is invalid');
   }
+  return key;
 }
 
 /** Open a checked v2 envelope's key and require the record's key commitment. */

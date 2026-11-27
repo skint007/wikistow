@@ -6,7 +6,9 @@ import {
   normalizeEmail,
   type ContactsChange,
   type OpenedContacts,
+  type Pin,
 } from './contacts.ts';
+import { declinedIn } from './followed.ts';
 import {
   agentIdentityId,
   enrollmentFingerprint,
@@ -14,6 +16,7 @@ import {
   keyHash,
   PublicIdentity,
   requireUsableKeys,
+  retiredKeys,
   sameKeys,
   sign,
   verifySignature,
@@ -180,6 +183,12 @@ export class TrustStore {
   // that ended at their pin, and goes when the pin does.
   readonly #earlier = new Map<IdentityId, ReadonlyMap<number, Readonly<PublicIdentity>>>();
   readonly #removed = new Set<string>();
+  // Each person whose rotation the person declined, and the key hash of the
+  // pin it restored (`wikistow.declined`, section 8.4): while it is their
+  // pin, it counts for opening only, and nothing of theirs is followed.
+  readonly #declined = new Map<IdentityId, Set<string>>();
+  // Each pin as the record holds it, with its method and when it was made.
+  readonly #pinRecords = new Map<IdentityId, Pin>();
   // Each label's key, by its normalized email.
   readonly #labels = new Map<string, { id: string; keyHash: string }>();
   readonly #now: () => Date;
@@ -190,12 +199,27 @@ export class TrustStore {
     this.#now = now;
   }
 
-  /** Pin this client's own identity, proven by holding its secret keys. */
+  /**
+   * Pin this client's own identity, proven by holding its secret keys. The
+   * retired keys its vault holds (`openWithRetired`) are its earlier keys,
+   * for opening what it signed and sealed with them (section 4.6).
+   */
   pinSelf(identity: PrivateIdentity): void {
     if (!hasMatchingKeys(identity)) {
       throw new CryptoError('malformed', 'Secret keys do not match the public identity');
     }
     this.#pin(identity.public);
+    const earlier = new Map(this.#earlier.get(identity.public.id));
+    for (const key of retiredKeys(identity)) {
+      if (
+        key.public.id === identity.public.id &&
+        key.public.keyVersion < identity.public.keyVersion &&
+        hasMatchingKeys(key)
+      ) {
+        earlier.set(key.public.keyVersion, Object.freeze({ ...key.public }));
+      }
+    }
+    if (earlier.size > 0) this.#earlier.set(identity.public.id, earlier);
   }
 
   /**
@@ -203,8 +227,25 @@ export class TrustStore {
    * record. An agent, which never sees the private payload, has no labels.
    */
   load({ shared, private: own }: Pick<OpenedContacts, 'shared' | 'private'>): void {
-    for (const { identity } of shared.contacts) this.#pin(identity);
+    for (const pin of shared.contacts) {
+      const held = this.#pins.get(pin.identity.id);
+      // The record moved the pin since this session took it, as when another
+      // device confirmed a key or followed a rotation: the record, which
+      // only the person signs, wins.
+      if (held && !sameKeys(held, pin.identity)) {
+        this.#pins.delete(pin.identity.id);
+        this.#earlier.delete(pin.identity.id);
+      }
+      this.#pin(pin.identity);
+      this.#pinRecords.set(pin.identity.id, pin);
+    }
     for (const { keyHash: removed } of shared.removed) this.#removed.add(removed);
+    this.#declined.clear();
+    for (const { id, keyHash: hashed } of declinedIn(shared.extensions)) {
+      const ids = this.#declined.get(id) ?? new Set<string>();
+      ids.add(hashed);
+      this.#declined.set(id, ids);
+    }
     for (const { id, keyHash: hashed, email } of own?.labels ?? []) {
       this.#labels.set(email, { id, keyHash: hashed });
     }
@@ -264,6 +305,8 @@ export class TrustStore {
   check(identity: PublicIdentity, email?: string): TrustCheck {
     if (this.#removed.has(keyHash(identity))) return { kind: 'removed' };
     const pinned = this.#pins.get(identity.id);
+    // A pin a decline restored counts for opening only (section 8.4).
+    if (pinned && this.isDeclined(pinned)) return { kind: 'removed' };
     if (pinned && !sameKeys(pinned, identity)) return { kind: 'changed', pinned };
     const label = email === undefined ? undefined : this.#labels.get(normalizeEmail(email));
     if (label && (label.id !== identity.id || label.keyHash !== keyHash(identity))) {
@@ -308,6 +351,72 @@ export class TrustStore {
       throw new CryptoError('unknown-identity', `No key for ${id} version ${keyVersion}`);
     }
     return { identity, earlier };
+  }
+
+  /** Whether `identity` is an earlier key of its person: one a valid chain moved past. */
+  isEarlier(identity: PublicIdentity): boolean {
+    const held = this.#earlier.get(identity.id)?.get(identity.keyVersion);
+    return held !== undefined && sameKeys(held, identity);
+  }
+
+  /** The earlier keys of `id` this store holds, in ascending key version. */
+  earlierKeys(id: IdentityId): PublicIdentity[] {
+    return [...(this.#earlier.get(id)?.values() ?? [])].sort((a, b) => a.keyVersion - b.keyVersion);
+  }
+
+  /** The pin of `id` as the record holds it, or null. */
+  pinOf(id: IdentityId): Pin | null {
+    return this.#pinRecords.get(id) ?? null;
+  }
+
+  /**
+   * Whether `pin` is a pin the person's decline restored (`wikistow.declined`):
+   * it counts for opening only, and no rotation of theirs is followed.
+   */
+  isDeclined(pin: PublicIdentity): boolean {
+    return this.#declined.get(pin.id)?.has(keyHash(pin)) ?? false;
+  }
+
+  /**
+   * The contacts change that follows `chain` (section 8.4): from the pin of
+   * its person, which must be where it starts, to its end, a key no
+   * decline, removed key or earlier follow stands in the way of. It changes
+   * nothing here: following is a confirmed write, and the pin moves when
+   * the record holding it is loaded (`load`). Null when there is nothing to
+   * follow; `identity-key-changed` when the chain can't be followed, which
+   * is then a key change.
+   */
+  followChange(chain: RotationChain): Extract<ContactsChange, { kind: 'follow-key' }> | null {
+    if (!(chain instanceof RotationChain)) {
+      throw new CryptoError('malformed', 'Only a checked chain is followed');
+    }
+    if (chain.installationId !== this.installationId) {
+      throw new CryptoError('binding-mismatch', 'The chain was checked for another installation');
+    }
+    const [start] = chain.keys;
+    const end = chain.last;
+    if (!start || chain.keys.length < 2) return null;
+    const pinned = this.#pins.get(end.id);
+    const record = this.#pinRecords.get(end.id);
+    if (!pinned || !record || !sameKeys(pinned, start)) {
+      throw new CryptoError('identity-key-changed', `The chain of ${end.id} starts at another key`);
+    }
+    if (this.isDeclined(pinned)) {
+      throw new CryptoError('identity-key-changed', `A rotation of ${end.id} was declined`);
+    }
+    if (chain.keys.some((key) => this.#removed.has(keyHash(key)))) {
+      throw new CryptoError('identity-key-changed', `The chain of ${end.id} has a declined key`);
+    }
+    return {
+      kind: 'follow-key',
+      from: record,
+      to: {
+        identity: asHuman(PublicIdentity.parse(end)),
+        verifiedAt: this.#timestamp(),
+        method: 'first-seen',
+      },
+      chain: chain.keys.map((key) => keyHash(key)),
+    };
   }
 
   /**
@@ -435,12 +544,16 @@ export class TrustStore {
         `The directory gives ${identity.id} no usable name and email to label them by`,
       );
     }
-    if (pinned && sameKeys(pinned, identity) && !this.#removed.has(hashed)) return pinned;
+    const declined = pinned !== undefined && this.isDeclined(pinned);
+    if (pinned && sameKeys(pinned, identity) && !this.#removed.has(hashed) && !declined) {
+      return pinned;
+    }
     const confirmed = Object.freeze(PublicIdentity.parse(identity));
     this.#pins.set(identity.id, confirmed);
     // Earlier keys came from a chain to the pin this replaces.
     if (pinned && !sameKeys(pinned, confirmed)) this.#earlier.delete(identity.id);
     this.#removed.delete(hashed);
+    this.#declined.delete(identity.id);
     const pin = {
       identity: asHuman(confirmed),
       verifiedAt: this.#timestamp(),
@@ -452,9 +565,11 @@ export class TrustStore {
         if (named.id === identity.id) this.#labels.set(email, { id: identity.id, keyHash: hashed });
       }
       this.#changes.push({ kind: 'confirm-key', pin, replaced });
+      this.#pinRecords.set(identity.id, pin);
     } else {
       this.#labels.set(email, { id: identity.id, keyHash: hashed });
       this.#changes.push({ kind: 'pin', pin, label: { name: entry.name, email } });
+      this.#pinRecords.set(identity.id, pin);
     }
     return confirmed;
   }
@@ -488,11 +603,13 @@ export class TrustStore {
     const pinned = this.#pin(identity);
     const normalized = labelEmail(entry);
     this.#labels.set(normalized, { id: identity.id, keyHash: keyHash(pinned) });
-    this.#changes.push({
-      kind: 'pin',
-      pin: { identity: asHuman(pinned), verifiedAt: this.#timestamp(), method: 'first-seen' },
-      label: { name, email: normalized },
-    });
+    const pin = {
+      identity: asHuman(pinned),
+      verifiedAt: this.#timestamp(),
+      method: 'first-seen',
+    } as const;
+    this.#changes.push({ kind: 'pin', pin, label: { name, email: normalized } });
+    this.#pinRecords.set(identity.id, pin);
     return pinned;
   }
 

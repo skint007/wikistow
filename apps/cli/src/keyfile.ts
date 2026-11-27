@@ -145,17 +145,7 @@ export function createKeyFile({
 }): KeyFile {
   const header = { server, agentId: AgentId.parse(secrets.identity.public.id) };
   const dataKey = randomBytes(32);
-  const json = {
-    installationId: secrets.installationId,
-    identity: {
-      public: secrets.identity.public,
-      boxSecretKey: toBase64(secrets.identity.boxSecretKey),
-      signSecretKey: toBase64(secrets.identity.signSecretKey),
-    },
-    person: secrets.person,
-    token: secrets.token,
-    stateKey: toBase64(secrets.stateKey),
-  } satisfies z.input<typeof SecretsJson>;
+  const json = secretsJson(secrets);
   const file = KeyFile.parse({
     format: KEY_FILE_FORMAT,
     ...header,
@@ -169,6 +159,37 @@ export function createKeyFile({
   });
   dataKey.fill(0);
   return file;
+}
+
+const secretsJson = (secrets: Secrets) =>
+  ({
+    installationId: secrets.installationId,
+    identity: {
+      public: secrets.identity.public,
+      boxSecretKey: toBase64(secrets.identity.boxSecretKey),
+      signSecretKey: toBase64(secrets.identity.signSecretKey),
+    },
+    person: secrets.person,
+    token: secrets.token,
+    stateKey: toBase64(secrets.stateKey),
+  }) satisfies z.input<typeof SecretsJson>;
+
+/**
+ * The key file with its person at `person`, the key the agent followed
+ * them to (protocol section 4.6, **Agents**), sealed again under the same
+ * data key; everything else as it was.
+ */
+export function withPerson(
+  file: KeyFile,
+  dataKey: Uint8Array,
+  secrets: Secrets,
+  person: PublicIdentity,
+): KeyFile {
+  const json = secretsJson({ ...secrets, person });
+  return KeyFile.parse({
+    ...file,
+    secrets: aeadEncrypt({ key: dataKey, plaintext: utf8(JSON.stringify(json)), ad: secretsAd(file) }),
+  });
 }
 
 /** The file's bytes as written: JSON from a serializer, never joined strings. */

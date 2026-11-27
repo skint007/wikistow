@@ -11,7 +11,7 @@ import {
   type PublicIdentity,
 } from '@wikistow/contracts';
 import { z } from 'zod';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import {
   keyEnvelopes,
@@ -30,8 +30,10 @@ const AnyKeyEnvelope = z.union([KeyEnvelope, KeyEnvelopeV2]);
 export type KeyMaterial<E> = { wrap: KeyWrap; envelopes: [] } | { wrap: null; envelopes: E[] };
 
 /**
- * The key material each of `ids` is served with to `identity`, at its
- * current key. A record with neither a wrap nor an envelope of theirs is
+ * The key material each of `ids` is served with to `identity`: its
+ * envelopes at every key version of theirs, so that after they replaced
+ * their keys they still open what was sealed to an earlier one (section
+ * 4.6), which their app uses for opening only. A record with neither a wrap nor an envelope of theirs is
  * left out, as is a stored wrap or envelope the current schemas refuse,
  * which is reported.
  */
@@ -73,9 +75,9 @@ async function keyMaterial<E>(
         eq(keyEnvelopes.subjectKind, subjectKind),
         inArray(keyEnvelopes.subjectId, rest),
         eq(keyEnvelopes.recipientIdentityId, identity.id),
-        eq(keyEnvelopes.recipientKeyVersion, identity.keyVersion),
       ),
-    );
+    )
+    .orderBy(desc(keyEnvelopes.recipientKeyVersion));
   for (const row of envelopes) {
     const stored = { table: 'key_envelopes', id: row.subjectId };
     const parsed = readStored(envelope, row.envelope, stored, report);

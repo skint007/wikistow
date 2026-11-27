@@ -55,6 +55,7 @@ const holding = (versions: [number, PrivateIdentity, boolean][], share = shareId
       shareId: share,
       keyVersion,
       sealer: sealer.public,
+      earlier: false,
       draftKey: drafts ? keys.draftKey : null,
       publishedKey: keys.publishedKey,
     });

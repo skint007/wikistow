@@ -39,7 +39,7 @@ import {
 } from '../folder-keys.ts';
 import { isAgentId, keyHash, type PublicIdentity } from '../identity.ts';
 import { FolderId as FolderIdSchema, newId, ShareId as ShareIdSchema } from '../ids.ts';
-import { highestWritable, requireNotBehind } from '../key-versions.ts';
+import { countsForWriting, highestWritable, requireNotBehind } from '../key-versions.ts';
 import { unsealMetadataKey } from '../metadata.ts';
 import { unsealRevisionKey } from '../revision.ts';
 import { OWNER_REGION, sameRegion, type Region } from '../regions.ts';
@@ -55,6 +55,7 @@ import {
   type SpaceKeys,
 } from './keys.ts';
 import { openServedMetadata, treeTarget, type LoadedMetadata } from './records.ts';
+import { followRotations } from './follow.ts';
 import { saveContacts, type ClientContext } from './session.ts';
 import { loadTree } from './spaces.ts';
 
@@ -105,6 +106,7 @@ async function groupRoles(
  */
 export async function findPerson(ctx: ClientContext, email: string): Promise<Lookup | null> {
   const { person } = await ctx.api.call(peopleRoutes.lookupPerson, { body: { email } });
+  if (person) await followRotations(ctx, [person]);
   return person && { ...person, foundBy: email };
 }
 
@@ -116,6 +118,7 @@ export async function findPerson(ctx: ClientContext, email: string): Promise<Loo
  */
 export async function listPeople(ctx: ClientContext) {
   const { people, withoutVault } = await ctx.api.call(peopleRoutes.listPeople);
+  await followRotations(ctx, people);
   return {
     people: people.map((person): Lookup => ({ ...person, foundBy: person.email })),
     withoutVault,
@@ -849,8 +852,11 @@ export function versionsToGive(
   return Array.from({ length: currentKeyVersion }, (_, i) => {
     const keyVersion = i + 1;
     const ofVersion = held.filter((h) => h.keyVersion === keyVersion);
-    const chosen = ofVersion.find((h) => keys.owners.writes(h.sealer)) ?? ofVersion[0];
-    if (!chosen || (keyVersion === currentKeyVersion && !keys.owners.writes(chosen.sealer))) {
+    const chosen = ofVersion.find((h) => countsForWriting(h, keys.owners.writes)) ?? ofVersion[0];
+    if (
+      !chosen ||
+      (keyVersion === currentKeyVersion && !countsForWriting(chosen, keys.owners.writes))
+    ) {
       throw new CryptoError(
         chosen ? 'key-version' : 'missing-key',
         `Version ${keyVersion} of share ${shareId} can't be passed on from this app`,

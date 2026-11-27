@@ -368,6 +368,56 @@ const filesOf = (entry: QueueEntry): string[] =>
       : []
   ).map((ref) => ref.blobHash);
 
+// The name a queued change of `kind` for `id` is kept under, by `sealer`.
+const entryNameOf = (sealer: KeptSealer, kind: string, id: string) =>
+  ENTRY +
+  sealer.name(kind === 'page' || kind === 'folder' ? `queued ${id}` : `queued ${kind} ${id}`);
+const blobNameOf = (sealer: KeptSealer, blobHash: string) =>
+  BLOB + sealer.name(`queued blob ${blobHash}`);
+
+/**
+ * Seal the changes queued offline under `from`, one of the person's earlier
+ * keys, again under `to`, their current key, with the files they name, and
+ * remove the old items (section 4.6, **Opening with earlier keys**), so a
+ * rotation drops nothing typed offline. Only from within `queueExclusive`.
+ * An item that doesn't open under `from` is left as it is.
+ */
+export async function sealQueueAgain(
+  store: KeptStore,
+  { from, to }: { from: KeptSealer; to: KeptSealer },
+): Promise<void> {
+  const names = (await store.queue.list()).map((item) => item.name);
+  const done: string[] = [];
+  for (const name of names.filter((n) => n.startsWith(ENTRY))) {
+    const sealed = await store.queue.read(name).catch(() => null);
+    const plaintext = sealed && from.open(name, sealed);
+    if (!plaintext) continue;
+    let json: unknown;
+    try {
+      json = JSON.parse(decodeUtf8(plaintext, 'queued change'));
+    } catch {
+      continue;
+    }
+    const kind = typeof json === 'object' && json !== null ? Reflect.get(json, 'kind') : null;
+    const id = typeof json === 'object' && json !== null ? Reflect.get(json, 'id') : null;
+    if (typeof kind !== 'string' || typeof id !== 'string') continue;
+    const parsed = QueueEntryJson.safeParse(json);
+    for (const blobHash of parsed.success ? filesOf(parsed.data) : []) {
+      const old = blobNameOf(from, blobHash);
+      const blob = await store.queue.read(old).catch(() => null);
+      const opened = blob && from.open(old, blob);
+      if (!opened) continue;
+      const renamed = blobNameOf(to, blobHash);
+      await store.queue.write(renamed, to.seal(renamed, opened));
+      done.push(old);
+    }
+    const renamed = entryNameOf(to, kind, id);
+    await store.queue.write(renamed, to.seal(renamed, plaintext));
+    done.push(name);
+  }
+  if (done.length > 0) await store.queue.remove(done);
+}
+
 // Whether a page made offline needs two steps: uploads need the page.
 const hasFiles = (payload: PagePayload) => payload.attachments.length > 0;
 
@@ -493,12 +543,8 @@ export class OfflineQueue {
 
   // An item's own entry keeps the name it always had, so queues kept before
   // other kinds existed still open.
-  #entryName = ({ kind, id }: QueueKey) =>
-    ENTRY +
-    this.#sealer.name(
-      kind === 'page' || kind === 'folder' ? `queued ${id}` : `queued ${kind} ${id}`,
-    );
-  #blobName = (blobHash: string) => BLOB + this.#sealer.name(`queued blob ${blobHash}`);
+  #entryName = ({ kind, id }: QueueKey) => entryNameOf(this.#sealer, kind, id);
+  #blobName = (blobHash: string) => blobNameOf(this.#sealer, blobHash);
 
   // A new entry's first version: never one an entry for the page had before,
   // so a window that saw an entry that went can't take a new one for it.

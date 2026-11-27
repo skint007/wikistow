@@ -26,7 +26,7 @@ import { keptSealer, type KeptSealer, type KeptStore } from '../kept-store.ts';
 import type { PrivateIdentity } from '../identity.ts';
 import type { InstallationId } from '../ids.ts';
 import { fetchRevisions, pageLabels, type PageRef, type Wanted } from './pages.ts';
-import { OfflineQueue } from './queue.ts';
+import { OfflineQueue, sealQueueAgain } from './queue.ts';
 import { sharedWithMe, type SharedItem } from './sharing.ts';
 import type { LoadedMetadata, OpenedRevision } from './records.ts';
 import { unreachable } from './search.ts';
@@ -191,9 +191,7 @@ const INDEX = 'index';
 /**
  * Whether what this device kept for offline use is sealed under one of the
  * person's earlier keys and not the current one, as after they replaced
- * their keys (section 4.6). Then the session keeps nothing there, and
- * collects nothing, so it stays for sealing again under the new key, which
- * is not built yet (#327).
+ * their keys (section 4.6), until `sealKeptAgain` seals it again.
  */
 export async function keptUnderEarlierKeys(
   store: KeptStore,
@@ -208,15 +206,90 @@ export async function keptUnderEarlierKeys(
   },
 ): Promise<boolean> {
   if (retired.length === 0) return false;
-  const readable = async (key: PrivateIdentity) => {
-    const sealer = keptSealer({ identity: key, installationId });
-    const name = sealer.name(INDEX);
-    const sealed = await store.items.read(name).catch(() => null);
-    return sealed !== null && sealer.open(name, sealed) !== null;
-  };
-  if (await readable(identity)) return false;
-  for (const key of retired) if (await readable(key)) return true;
+  if (await indexOpens(store, keptSealer({ identity, installationId }))) return false;
+  for (const key of retired) {
+    if (await indexOpens(store, keptSealer({ identity: key, installationId }))) return true;
+  }
   return false;
+}
+
+const indexOpens = async (store: KeptStore, sealer: KeptSealer) => {
+  const name = sealer.name(INDEX);
+  const sealed = await store.items.read(name).catch(() => null);
+  return sealed !== null && sealer.open(name, sealed) !== null;
+};
+
+/**
+ * Seal again under the person's current key what this device kept for
+ * offline use under an earlier one, after they replaced their keys (section
+ * 4.6, **Opening with earlier keys**): every kept page, tree, image and the
+ * index, and the changes queued offline with their files, each under its
+ * name worked out again under the current key; then the old items go. The
+ * index is written last, so a run that stops half way runs again at the
+ * next session. What a newer key kept wins over an older one's.
+ */
+export async function sealKeptAgain(
+  store: KeptStore,
+  {
+    identity,
+    installationId,
+    retired,
+  }: {
+    identity: PrivateIdentity;
+    installationId: InstallationId;
+    retired: readonly PrivateIdentity[];
+  },
+): Promise<void> {
+  if (retired.length === 0) return;
+  const to = keptSealer({ identity, installationId });
+  for (const key of [...retired].reverse()) {
+    const from = keptSealer({ identity: key, installationId });
+    await store.queueExclusive(() => sealQueueAgain(store, { from, to }));
+  }
+  await store.exclusive(async () => {
+    if (await indexOpens(store, to)) return;
+    for (const key of [...retired].reverse()) {
+      const from = keptSealer({ identity: key, installationId });
+      const read = async (what: string) => {
+        const name = from.name(what);
+        const sealed = await store.items.read(name).catch(() => null);
+        return { name, plaintext: sealed && from.open(name, sealed) };
+      };
+      const json = <T>(plaintext: Uint8Array | null, schema: z.ZodType<T, unknown>) => {
+        if (!plaintext) return null;
+        try {
+          return schema.parse(JSON.parse(decodeUtf8(plaintext, 'kept item')));
+        } catch {
+          return null;
+        }
+      };
+      const index = await read(INDEX);
+      const kept = json(index.plaintext, KeptIndexJson);
+      if (!index.plaintext || !kept) continue;
+      const items: string[] = [];
+      for (const spaceId of kept.spaces) {
+        const space = json((await read(spaceItem(spaceId))).plaintext, KeptSpaceJson);
+        items.push(spaceItem(spaceId));
+        for (const page of space?.pages ?? []) {
+          for (const version of page.versions) {
+            items.push(versionItem(version.id), ...version.blobs.map(blobItem));
+          }
+        }
+      }
+      const old: string[] = [index.name];
+      for (const what of new Set(items)) {
+        const { name, plaintext } = await read(what);
+        if (!plaintext) continue;
+        const renamed = to.name(what);
+        await store.items.write(renamed, to.seal(renamed, plaintext));
+        old.push(name);
+      }
+      const renamed = to.name(INDEX);
+      await store.items.write(renamed, to.seal(renamed, index.plaintext));
+      await store.items.remove(old);
+      return;
+    }
+  });
 }
 const spaceItem = (spaceId: SpaceId) => `space ${spaceId}`;
 const versionItem = (revisionId: RevisionId) => `version ${revisionId}`;
