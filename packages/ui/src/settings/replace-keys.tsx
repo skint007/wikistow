@@ -1,0 +1,337 @@
+// Settings → Security → Replace my keys (protocol section 4.6, #327): new
+// identity keys at the next key version, a new vault, passphrase and
+// recovery key, and the agents the person ticks kept at the new key. Shown
+// only where the server takes it (`IDENTITY_ROTATION`), which stays off
+// until replacing keys is fully built.
+import {
+  replaceKeysOperations as replaceKeys,
+  type ClientContext,
+  type UnlockedVault,
+} from '@wikistow/client';
+import { ApiError, noAnswer } from '@wikistow/client/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { Field } from '@/components/form/field';
+import { submitData } from '@/components/form/submit';
+import { FormMessage } from '@/components/layout/auth-card';
+import { Button } from '@/components/ui/button';
+import { api, installationQuery, meQuery } from '../api';
+import { useReauth } from '../auth/reauth';
+import { errorMessage } from '../errors';
+import { PassphraseFields, readPassphrase } from '../routes/_app/vault/setup';
+import { vaultMessage } from '../vault/messages';
+import { keepAnchor, keepChangedWrapper, startSession } from '../vault/open';
+import { forgetKeptUnlock, useVault, vaultStore } from '../vault/store';
+import { workerVaultCrypto } from '../vault/worker-crypto';
+import { FormRow, useOpenedRow } from './rows';
+
+/**
+ * A rotation made here and not yet answered, kept in memory, not in the
+ * form, so closing the form or a lost answer sends the same one again, never
+ * new keys with a recovery key nobody saved. A lock drops it, with the keys.
+ */
+let pending: { prepared: replaceKeys.PreparedRotation; epoch: number; password: boolean } | null =
+  null;
+const current = () => (pending && pending.epoch === vaultStore.epoch() ? pending : null);
+
+const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+
+export function ReplaceKeys() {
+  const { data: installation } = useQuery(installationQuery);
+  const vault = useVault();
+  if (!installation?.identityRotation) return null;
+  const retired = vault.status === 'unlocked' && vault.vault.retired.length > 0;
+  return (
+    <FormRow
+      id="replace-keys"
+      name="Replace my keys"
+      label="Start"
+      close="Close"
+      state={
+        retired
+          ? 'You replaced your keys. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
+          : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
+      }
+    >
+      {vault.status === 'unlocked' ? (
+        <ReplaceKeysFlow ctx={vault.ctx} vault={vault.vault} />
+      ) : (
+        <p className="text-sm">
+          Unlock your vault first. If you lost your passphrase, use your recovery key.
+        </p>
+      )}
+    </FormRow>
+  );
+}
+
+function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVault }) {
+  const [step, setStep] = useState<'choose' | 'save' | 'done'>(() =>
+    current() ? 'save' : 'choose',
+  );
+  const [password, setPassword] = useState(false);
+  if (step === 'done') return <Replaced password={password} />;
+  if (step === 'save') {
+    return (
+      <SaveAndSend
+        onSent={(changePassword) => {
+          setPassword(changePassword);
+          setStep('done');
+        }}
+        onRestart={() => setStep('choose')}
+      />
+    );
+  }
+  return <Choose ctx={ctx} vault={vault} onPrepared={() => setStep('save')} />;
+}
+
+function Choose({
+  ctx,
+  vault,
+  onPrepared,
+}: {
+  ctx: ClientContext;
+  vault: UnlockedVault;
+  onPrepared: () => void;
+}) {
+  const agents = useQuery({
+    queryKey: ['keepable-agents', vault.identity.public.keyVersion],
+    queryFn: () => replaceKeys.keepableAgents(ctx),
+  });
+  const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
+  const [password, setPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(form: FormData) {
+    setBusy(true);
+    setError(null);
+    try {
+      const passphrase = await readPassphrase(form);
+      if ('error' in passphrase) return setError(passphrase.error);
+      const epoch = vaultStore.epoch();
+      const prepared = await replaceKeys.prepareRotation(ctx, {
+        vault,
+        crypto: workerVaultCrypto,
+        passphrase: passphrase.value,
+        keep: [...kept],
+      });
+      if (vaultStore.epoch() !== epoch) return;
+      vaultStore.stage(prepared.vault);
+      pending = { prepared, epoch, password };
+      onPrepared();
+    } catch (caught) {
+      setError(vaultMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const toggle = (agentId: string, on: boolean) =>
+    setKept((was) => {
+      const next = new Set(was);
+      if (on) next.add(agentId);
+      else next.delete(agentId);
+      return next;
+    });
+
+  return (
+    <form onSubmit={submitData(submit)} className="grid max-w-xl gap-4 text-sm">
+      <p>
+        This makes new keys for you, and a new vault: a new passphrase and a new recovery key. Your
+        earlier keys stay in it, only to open what was shared with them. Your other devices are
+        signed out, and live editing in your spaces stops, to start again with the new keys.
+      </p>
+      <fieldset className="grid gap-2">
+        <legend className="mb-1 font-bold">Agents to keep</legend>
+        {agents.isPending ? (
+          <p className="text-muted-foreground">Loading your agents…</p>
+        ) : agents.error ? (
+          <FormMessage>{errorMessage(agents.error)}</FormMessage>
+        ) : agents.data.length === 0 ? (
+          <p className="text-muted-foreground">You have no agents to keep.</p>
+        ) : (
+          <>
+            <p className="text-muted-foreground">
+              Every agent you don’t tick is revoked. Before you tick one, run{' '}
+              <code>wikistow whoami</code> on its computer and check it prints the same ID: someone
+              holding your earlier keys could have named their own agent after one of yours.
+            </p>
+            {agents.data.map((agent) => (
+              <label key={agent.agentId} className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={kept.has(agent.agentId)}
+                  onChange={(event) => toggle(agent.agentId, event.target.checked)}
+                />
+                <span>
+                  <span className="font-bold">{agent.name}</span>, enrolled {day(agent.enrolledAt)}
+                  <br />
+                  <code className="break-all text-muted-foreground">{agent.agentId}</code>
+                </span>
+              </label>
+            ))}
+          </>
+        )}
+        <p className="text-muted-foreground">
+          The agents WikiStow runs for the page chat are revoked, and made again when you next use
+          it.
+        </p>
+      </fieldset>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={password}
+          onChange={(event) => setPassword(event.target.checked)}
+        />
+        <span>
+          Change the password I sign in with too, if someone may know it. That also ends every
+          agent’s access, the ones you keep included, so you enroll them again.
+        </span>
+      </label>
+      <PassphraseFields />
+      {error && <FormMessage>{error}</FormMessage>}
+      <Button
+        type="submit"
+        disabled={busy || agents.isPending || Boolean(agents.error)}
+        className="justify-self-start"
+      >
+        {busy ? 'Making new keys…' : 'Make new keys'}
+      </Button>
+    </form>
+  );
+}
+
+/** Two groups of the key, chosen at random, to type back as proof it was saved. */
+function pickGroups(count: number): [number, number] {
+  const first = Math.floor(Math.random() * count);
+  const second = (first + 1 + Math.floor(Math.random() * (count - 1))) % count;
+  return first < second ? [first, second] : [second, first];
+}
+
+function SaveAndSend({
+  onSent,
+  onRestart,
+}: {
+  onSent: (changePassword: boolean) => void;
+  onRestart: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const withReauth = useReauth();
+  const [held] = useState(current);
+  const groups = held?.prepared.recoveryKey.split('-') ?? [];
+  const [asked] = useState(() => pickGroups(groups.length));
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!held) {
+    return (
+      <div className="grid gap-3 text-sm">
+        <p>Your vault locked before the new keys were sent, so nothing changed.</p>
+        <Button size="sm" className="justify-self-start" onClick={onRestart}>
+          Start again
+        </Button>
+      </div>
+    );
+  }
+  const { prepared } = held;
+
+  async function submit(form: FormData) {
+    const typed = asked.map((index) => {
+      const value = form.get(`rotation-group-${index}`);
+      return typeof value === 'string' ? value.trim().toLowerCase() : '';
+    });
+    if (typed.some((value, i) => value !== groups[asked[i] ?? -1])) {
+      return setError('Those groups don’t match. Check the key you saved.');
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const answer = await withReauth(() => replaceKeys.sendRotation(api, prepared));
+      pending = null;
+      // The old vault key no longer opens anything served: a remembered unlock is no use.
+      await forgetKeptUnlock();
+      await keepChangedWrapper({ wrapper: prepared.request.wrapper, version: answer.vaultVersion });
+      const ctx = await startSession(prepared.vault);
+      vaultStore.unlock(ctx, prepared.vault);
+      await keepAnchor(prepared.vault.identity.public).catch(() => {});
+      await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
+      onSent(held?.password ?? false);
+    } catch (caught) {
+      if (noAnswer(caught)) {
+        setError('The server didn’t answer. Try again: the same keys are sent.');
+      } else if (caught instanceof ApiError) {
+        // A definite refusal: nothing was stored, and these keys are of no use.
+        pending = null;
+        vaultStore.dropStaged();
+        setError(
+          caught.code === 'rotation-exists'
+            ? 'Your keys were replaced already, maybe on another device. Lock your vault and unlock again.'
+            : `${errorMessage(caught)} Nothing changed, and the recovery key above won’t work: start again, and save the new one.`,
+        );
+      } else {
+        setError(vaultMessage(caught));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submitData(submit)} className="grid max-w-xl gap-4 text-sm">
+      <p className="font-bold">Save your new recovery key</p>
+      <p>
+        If you forget your new passphrase, this key is the only way back in. Your old recovery key
+        stops working once your keys are replaced. It won’t be shown again.
+      </p>
+      <p
+        data-testid="rotation-recovery-key"
+        className="rounded-control bg-muted p-3 font-mono break-words"
+      >
+        {groups.join(' ')}
+      </p>
+      <p>To confirm you saved it, type two of its groups.</p>
+      <div className="grid grid-cols-2 gap-3">
+        {asked.map((index) => (
+          <Field
+            key={index}
+            id={`rotation-group-${index}`}
+            name={`rotation-group-${index}`}
+            label={`Group ${index + 1}`}
+            spellCheck={false}
+            required
+          />
+        ))}
+      </div>
+      {error && <FormMessage>{error}</FormMessage>}
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" disabled={busy}>
+          {busy ? 'Replacing…' : 'Replace my keys'}
+        </Button>
+        {!pending && error && (
+          <Button type="button" variant="outline" onClick={onRestart}>
+            Start again
+          </Button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function Replaced({ password }: { password: boolean }) {
+  const { setOpen } = useOpenedRow();
+  return (
+    <div className="grid gap-3 text-sm" role="status">
+      <p className="font-bold">Your keys are replaced.</p>
+      <p>
+        Your other devices are signed out. When they sign in again, unlock them with your new
+        passphrase.
+      </p>
+      {password && (
+        <Button size="sm" className="justify-self-start" onClick={() => setOpen('password')}>
+          Change your password now
+        </Button>
+      )}
+    </div>
+  );
+}

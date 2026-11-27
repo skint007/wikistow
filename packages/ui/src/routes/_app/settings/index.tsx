@@ -34,6 +34,7 @@ import { useMeaningStatus } from '../../../meaning/background';
 import { meaningSettingState, searchByMeaning, useMeaningOffer } from '../../../meaning/setting';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
 import { BrowserClipping } from '../../../settings/browser-clipping';
+import { ReplaceKeys } from '../../../settings/replace-keys';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
 import { ThemePicker } from '../../../theme/theme-picker';
 import { IDLE_DELAYS, idleLockDelay, useIdleLockDelay } from '../../../vault/idle-lock';
@@ -90,6 +91,7 @@ function Settings() {
               <ChangePassword />
               <TwoFactor />
               <Passkeys />
+              <ReplaceKeys />
               <IdleLock />
               {!desktop && <RememberUnlock />}
               <DesktopApps />

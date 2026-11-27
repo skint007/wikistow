@@ -123,8 +123,7 @@ describe('a session opened offline', () => {
     expect((await keptUnlock(changed.content).vault())?.version).toBe(2);
   });
 
-  // As after someone replaced their keys with a newer app (section 4.6).
-  it('asks to update for a vault in a format this version doesn’t unlock, keeping its wrapper', async () => {
+  it('keeps its wrapper when the vault was replaced elsewhere, as after a rotation', async () => {
     const { alice, opened, content } = await keptDevice();
     const id = alice.vault.identity.public.id;
     const rotated = createRotatedVault({
@@ -134,12 +133,32 @@ describe('a session opened offline', () => {
       passphrase: 'a passphrase from elsewhere',
       kdf: FAST_KDF,
     });
-    const newer: ClientContext = {
+    const elsewhere: ClientContext = {
       ...opened,
       api: createApiClient({
         fetch: (url, init) =>
           new URL(url, 'http://app').pathname === vaultRoutes.getVault.path
             ? Promise.resolve(Response.json({ wrapper: rotated.wrapper, version: 2 }))
+            : alice.browser.fetch(url, init),
+      }),
+    };
+    await keepWrapper(content, await alice.api.call(vaultRoutes.getVault));
+    expect(await confirmSession(elsewhere)).toBe('passphrase-changed');
+    // Kept until the person says whether they replaced their keys, and unlocks.
+    expect((await keptUnlock(content).vault())?.version).toBe(1);
+  });
+
+  // As after someone replaced their keys with a later app (section 4.6).
+  it('asks to update for a vault in a format this version doesn’t unlock, keeping its wrapper', async () => {
+    const { alice, opened, content } = await keptDevice();
+    const newer: ClientContext = {
+      ...opened,
+      api: createApiClient({
+        fetch: (url, init) =>
+          new URL(url, 'http://app').pathname === vaultRoutes.getVault.path
+            ? Promise.resolve(
+                Response.json({ wrapper: { format: 3, accountId: alice.id }, version: 2 }),
+              )
             : alice.browser.fetch(url, init),
       }),
     };

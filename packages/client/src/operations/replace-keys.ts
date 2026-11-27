@@ -4,6 +4,7 @@
 // in one request, so the server takes all of it or none.
 import {
   identityRoutes,
+  systemRoutes,
   vaultRoutes,
   type AgentEnrollment,
   type IdentityId,
@@ -18,9 +19,15 @@ import {
   enrollmentFingerprint,
   generateIdentity,
   keyHash,
+  sameKeys,
   type PrivateIdentity,
 } from '../identity.ts';
-import { signIdentityRotation } from '../identity-rotation.ts';
+import {
+  parseIdentityRotation,
+  signIdentityRotation,
+  verifyRotationChain,
+} from '../identity-rotation.ts';
+import type { KeptAnchor } from '../kept-unlock.ts';
 import { enrollAgent } from '../trust.ts';
 import type { KdfParams, UnlockedVault } from '../vault.ts';
 import { listAgents } from './agents.ts';
@@ -257,4 +264,65 @@ function afterRotation(
  */
 export function sendRotation(api: ApiClient, prepared: PreparedRotation) {
   return api.call(identityRoutes.rotate, { body: prepared.request });
+}
+
+/**
+ * What the directory says of the key this device last unlocked with, its
+ * anchor (section 4.6, **When someone else rotated**): still current; or
+ * `replaced`, by a valid chain of statements from it to `current`, which
+ * only the person or someone holding their old key could sign; or
+ * `substituted`, a key the anchor has no valid chain to, reported as a
+ * possible attack. Public routes only, so it runs while locked.
+ */
+export type KeysCheck =
+  | { kind: 'same' }
+  | { kind: 'replaced'; current: PublicIdentity }
+  | { kind: 'substituted' };
+
+export async function checkKeys(api: ApiClient, anchor: PublicIdentity): Promise<KeysCheck> {
+  const { installationId } = await api.call(systemRoutes.installation);
+  const { current, rotations } = await api.call(identityRoutes.rotations, {
+    params: { identityId: anchor.id },
+    query: { from: anchor.keyVersion },
+  });
+  if (current && sameKeys(current, anchor)) return { kind: 'same' };
+  if (!current || current.keyVersion <= anchor.keyVersion) return { kind: 'substituted' };
+  try {
+    verifyRotationChain({
+      installationId,
+      start: anchor,
+      end: current,
+      statements: rotations.map(parseIdentityRotation),
+    });
+    return { kind: 'replaced', current };
+  } catch {
+    return { kind: 'substituted' };
+  }
+}
+
+/**
+ * Whether this device may open a vault that unlocked to `vault`, judged
+ * against what it kept: `ok` at its anchor, or at a later key whose keyring
+ * holds the anchor among its retired keys; `replaced-elsewhere` while a
+ * successor is recorded and the keyring is older than it, so the device
+ * signs and seals nothing with the old keys; and `rollback` for any other
+ * keyring, older than the anchor or not holding it. With nothing kept, the
+ * device takes the server's word (A15).
+ */
+export function judgeUnlock(
+  kept: KeptAnchor | null,
+  vault: Pick<UnlockedVault, 'identity' | 'retired'>,
+): 'ok' | 'replaced-elsewhere' | 'rollback' {
+  if (!kept) return 'ok';
+  const at = vault.identity.public;
+  const { anchor, successor } = kept;
+  const fromAnchor =
+    sameKeys(at, anchor) ||
+    (at.keyVersion > anchor.keyVersion &&
+      vault.retired.some((key) => sameKeys(key.public, anchor)));
+  if (!fromAnchor) return 'rollback';
+  if (successor && !sameKeys(at, successor) && at.keyVersion <= successor.keyVersion) {
+    return at.keyVersion === successor.keyVersion ? 'rollback' : 'replaced-elsewhere';
+  }
+  return 'ok';
 }

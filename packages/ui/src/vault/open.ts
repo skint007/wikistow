@@ -6,6 +6,7 @@ import {
   keptUnlock,
   openKeptSession,
   openSession,
+  replaceKeysOperations,
   vaultWrapper,
   unlocks,
   type ClientContext,
@@ -100,7 +101,9 @@ export async function unlockWith(
     vaultStore.dropStaged();
     return new Error('The vault was locked while it opened');
   };
-  const opened = await vaultWrapper(api, await keptContent());
+  const content = await keptContent();
+  // Kept only once it opened to keys this device takes (section 4.6).
+  const opened = await vaultWrapper(api, content, { keep: false });
   const unlocked = await crypto
     .unlock({ wrapper: opened.wrapper, secret })
     .catch((error: unknown) => {
@@ -113,6 +116,14 @@ export async function unlockWith(
     });
   const vault = vaultStore.stage(unlocked);
   if (lockedSince()) throw refused();
+  // Never down from the keys this device last unlocked with, nor below keys
+  // the directory showed replaced them (section 4.6).
+  const judged = replaceKeysOperations.judgeUnlock(await keptAnchor(), vault);
+  if (judged !== 'ok') {
+    vaultStore.dropStaged();
+    throw new KeysRefused(judged);
+  }
+  if (content && !opened.keptAt) await keepWrapper(content, opened);
   const vaultVersion = version ?? opened.version;
   const ctx = await startSession(vault, { vaultVersion });
   // The server answered the session but not the wrapper: what that skipped is checked now.
@@ -122,6 +133,7 @@ export async function unlockWith(
     throw refused();
   }
   vaultStore.unlock(ctx, vault);
+  await keepAnchor(vault.identity.public).catch(() => {});
   return vault;
 }
 
@@ -132,6 +144,60 @@ export async function unlockWith(
 export async function keepChangedWrapper(changed: Parameters<typeof keepWrapper>[1]) {
   const content = await keptContent();
   if (content) await keepWrapper(content, changed);
+}
+
+/**
+ * A vault that unlocked to keys this device won't open (section 4.6, **When
+ * someone else rotated**): older than keys the directory showed replaced
+ * them (`replaced-elsewhere`), so unlock with the new passphrase; or keys
+ * that don't follow from the ones it last unlocked with (`rollback`), which
+ * may be an attack.
+ */
+export class KeysRefused extends Error {
+  readonly code: 'keys-replaced-elsewhere' | 'keys-rollback';
+  constructor(kind: 'replaced-elsewhere' | 'rollback') {
+    super(
+      kind === 'rollback' ? 'These keys are older than this device’s' : 'Your keys were replaced',
+    );
+    this.code = kind === 'rollback' ? 'keys-rollback' : 'keys-replaced-elsewhere';
+    this.name = 'KeysRefused';
+  }
+}
+
+/** The anchor this device kept, or null where it keeps nothing, which takes the server's word (A15). */
+export async function keptAnchor() {
+  const content = await keptContent();
+  return content ? keptUnlock(content).anchor() : null;
+}
+
+/** Move the anchor to keys this device unlocked with or replaced its keys with. */
+export async function keepAnchor(identity: UnlockedVault['identity']['public']) {
+  const content = await keptContent();
+  if (content) await keptUnlock(content).keepAnchor({ anchor: identity, successor: null });
+}
+
+/**
+ * Before anything kept is replaced or forgotten because the vault changed,
+ * or a passphrase is asked for: what the directory says of the key this
+ * device last unlocked with (`checkKeys`). A valid chain to keys it doesn't
+ * hold is recorded beside the anchor, so the device opens nothing older
+ * until it unlocks at those keys. Null where nothing is kept, or with no
+ * answer.
+ */
+export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck | null> {
+  const content = await keptContent();
+  const kept = content && (await keptUnlock(content).anchor());
+  if (!content || !kept) return null;
+  try {
+    const check = await replaceKeysOperations.checkKeys(api, kept.anchor);
+    if (check.kind === 'replaced') {
+      await keptUnlock(content).keepAnchor({ ...kept, successor: check.current });
+    }
+    return check;
+  } catch (error) {
+    if (noAnswer(error)) return null;
+    throw error;
+  }
 }
 
 let restoring: Promise<void> | null = null;
@@ -180,6 +246,10 @@ async function restore(accountId: string) {
     const served = version === undefined ? null : await servedVault();
     if (served && !unlocks(served.wrapper)) return;
     if (served !== null && served.version !== version) {
+      // Keys replaced elsewhere keep what's remembered: the unlock page asks
+      // whether the person did it (section 4.6).
+      const check = await checkKeptKeys().catch(() => null);
+      if (check && check.kind !== 'same') return;
       await forgetInBrowser();
       return;
     }

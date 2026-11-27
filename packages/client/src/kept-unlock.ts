@@ -4,7 +4,7 @@
 // read before any vault opens; they hold no page content. The wrapper is
 // what the server keeps: with it, someone who has the device can guess the
 // passphrase offline, as someone with the server's database can.
-import { accountRoutes, InstallationId, vaultRoutes } from '@wikistow/contracts';
+import { accountRoutes, InstallationId, PublicIdentity, vaultRoutes } from '@wikistow/contracts';
 import { z } from 'zod';
 import { decodeUtf8, utf8 } from './encoding.ts';
 import type { KeptStore } from './kept-store.ts';
@@ -17,6 +17,19 @@ export const KeptVault = vaultRoutes.getVault.response.extend({ keptAt: z.iso.da
 export type KeptVault = z.infer<typeof KeptVault>;
 
 const Installation = z.strictObject({ installationId: InstallationId });
+
+/**
+ * The public key of the identity this device last unlocked with, its
+ * anchor (section 4.6, **When someone else rotated**), and the key the
+ * directory showed it was replaced by, once a valid chain from the anchor
+ * said so: until the device unlocks at that key or after it, it opens
+ * nothing (`replacedElsewhere`).
+ */
+export const KeptAnchor = z.strictObject({
+  anchor: PublicIdentity,
+  successor: PublicIdentity.nullable(),
+});
+export type KeptAnchor = z.infer<typeof KeptAnchor>;
 
 async function read<T>(store: KeptStore, name: string, schema: z.ZodType<T, unknown>) {
   const bytes = await store.unlock.read(name).catch(() => null);
@@ -42,4 +55,6 @@ export const keptUnlock = (store: KeptStore) => ({
   installationId: async () => (await read(store, 'installation', Installation))?.installationId,
   keepInstallationId: (installationId: InstallationId) =>
     write(store, 'installation', { installationId }),
+  anchor: () => read(store, 'anchor', KeptAnchor),
+  keepAnchor: (anchor: KeptAnchor) => write(store, 'anchor', anchor),
 });

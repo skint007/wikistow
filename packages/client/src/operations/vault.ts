@@ -126,17 +126,19 @@ export async function openVault({
 
 /**
  * The wrapper to unlock with (ADR 0009, decision 5): the server's, which is
- * kept in `kept` for unlocking offline, or, when the server doesn't answer,
+ * kept in `kept` for unlocking offline (unless `keep` is false, for a caller
+ * that keeps it once it opened), or, when the server doesn't answer,
  * the one kept, with when it was kept (`keptAt`). With none kept, the
  * server's failure stands.
  */
 export async function vaultWrapper(
   api: ApiClient,
   kept: KeptStore | null,
+  { keep = true }: { keep?: boolean } = {},
 ): Promise<{ wrapper: ServedVaultWrapper; version: number; keptAt: string | null }> {
   try {
     const served = await api.call(vaultRoutes.getVault);
-    if (kept) await keepWrapper(kept, served);
+    if (kept && keep) await keepWrapper(kept, served);
     return { ...served, keptAt: null };
   } catch (error) {
     const found = kept && noAnswer(error) ? await keptUnlock(kept).vault() : null;

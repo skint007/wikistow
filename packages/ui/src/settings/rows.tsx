@@ -102,6 +102,9 @@ type Opened = { open: string | null; setOpen: (id: string | null) => void };
 
 const OpenedContext = createContext<Opened>({ open: null, setOpen: () => {} });
 
+/** Which row's form is open, to open another's from inside one. */
+export const useOpenedRow = () => use(OpenedContext);
+
 /** Around the rows whose forms open in place, so only one is open at a time. */
 export function OneOpen({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState<string | null>(null);

@@ -1,4 +1,10 @@
-import { systemRoutes, vaultRoutes, type InstallationId, type SpaceId } from '@wikistow/contracts';
+import {
+  systemRoutes,
+  vaultRoutes,
+  type InstallationId,
+  type ServedVaultWrapper,
+  type SpaceId,
+} from '@wikistow/contracts';
 import type { ApiClient } from '../api/client.ts';
 import {
   applyContactsChange,
@@ -259,9 +265,16 @@ export async function confirmSession(
   const { installationId, restore } = await ctx.api.call(systemRoutes.installation);
   if (installationId !== ctx.installationId) return 'other-installation';
   const served = await ctx.api.call(vaultRoutes.getVault);
-  const store = ctx.keptContent?.store;
-  if (store) await keepWrapper(store, served);
   if (!unlocks(served.wrapper)) return 'update-app';
+  const store = ctx.keptContent?.store;
+  // A passphrase changed elsewhere keeps the keyring as it was: its new
+  // wrapper is kept for unlocking offline. A new keyring, as after keys
+  // were replaced elsewhere, isn't kept yet: the person may say they didn't,
+  // and the device keeps what it had (section 4.6).
+  const kept = store && (await keptUnlock(store).vault());
+  if (store && (!kept || sameKeyring(kept.wrapper, served.wrapper))) {
+    await keepWrapper(store, served);
+  }
   if (served.version !== unconfirmed.vaultVersion) return 'passphrase-changed';
   const unseen = ctx.kept && unseenRestore(restore, ctx.kept.restoredAt);
   if (unseen) ctx.kept?.startOver(unseen.restoredAt);
@@ -541,4 +554,15 @@ function changeHolds(change: ContactsChange, { shared }: ContactsPayloads): bool
     default:
       return true;
   }
+}
+
+// Whether two wrappers seal the same keyring: a passphrase change leaves it
+// byte for byte as it was.
+function sameKeyring(a: ServedVaultWrapper, b: ServedVaultWrapper): boolean {
+  const keyring = (w: ServedVaultWrapper) =>
+    'keyring' in w && typeof w.keyring === 'object' && w.keyring !== null
+      ? (w.keyring as { nonce?: unknown; ciphertext?: unknown })
+      : null;
+  const [x, y] = [keyring(a), keyring(b)];
+  return x !== null && y !== null && x.nonce === y.nonce && x.ciphertext === y.ciphertext;
 }
