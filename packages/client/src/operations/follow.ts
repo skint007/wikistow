@@ -206,7 +206,12 @@ export async function declineFollow(
  * it by first sight. The app warns, names them, and says what the person
  * can do; it closes nothing.
  */
-export type DeclinedOwnerSpace = { spaceId: SpaceId; addedBy: IdentityId[] };
+export type DeclinedOwnerSpace = {
+  spaceId: SpaceId;
+  addedBy: IdentityId[];
+  /** Whether the server lists this person as an owner there, who can remove them, then leave. */
+  owner: boolean;
+};
 
 /** The spaces where the record accepts a key of `id` it removed as an owner. */
 export async function declinedOwnerSpaces(
@@ -222,10 +227,13 @@ export async function declinedOwnerSpaces(
     const hashes = new Set(declined.map((o) => o.keyHash));
     // Who named a declined key in a statement, by the statements served.
     let addedBy: IdentityId[] = [];
+    let owner = false;
     try {
-      const { statements } = await ctx.api.call(ownerRoutes.statements, {
-        params: { spaceId: entry.spaceId },
-      });
+      const [{ statements }, { owners }] = await Promise.all([
+        ctx.api.call(ownerRoutes.statements, { params: { spaceId: entry.spaceId } }),
+        ctx.api.call(ownerRoutes.owners, { params: { spaceId: entry.spaceId } }),
+      ]);
+      owner = owners.some((listed) => listed.identity.id === ctx.identity.public.id);
       addedBy = [
         ...new Set(
           statements
@@ -236,7 +244,7 @@ export async function declinedOwnerSpaces(
     } catch (error) {
       if (!notFollowed(error)) throw error;
     }
-    out.push({ spaceId: entry.spaceId, addedBy });
+    out.push({ spaceId: entry.spaceId, addedBy, owner });
   }
   return out;
 }

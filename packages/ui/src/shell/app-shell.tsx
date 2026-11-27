@@ -39,6 +39,7 @@ import { Rail, UpdateDot, useSignOut } from './rail';
 import { useConfirmSession, useSessionConfirmed } from '../vault/confirm';
 import { useVault, vaultStore } from '../vault/store';
 import { UndoNotice } from '../page/undo-notice';
+import { FollowNotice } from '../sharing/follow-notice';
 import { RestoreNotice } from './restore-notice';
 import { SearchDialog } from './search-dialog';
 import { SignOutHere } from './session-error';
@@ -316,6 +317,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <SafeModeBanner />
             {vault.status === 'unlocked' && <PluginTrashPrompt />}
             <RestoreNotice />
+            {vault.status === 'unlocked' && <FollowNotice ctx={vault.ctx} />}
             {vault.status === 'unlocked' && <UndoNotice ctx={vault.ctx} />}
             {vault.status === 'unlocked' && <OfflineChangesNote ctx={vault.ctx} />}
           </SpaceMoves>
