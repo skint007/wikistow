@@ -41,6 +41,8 @@ type Held = {
   password: boolean;
   /** The send under way, which a panel opened again waits for too. */
   run: Promise<Outcome> | null;
+  /** Sent at least once: it may have landed, so it is never replaced. */
+  sent: boolean;
 };
 let pending: Held | null = null;
 
@@ -178,6 +180,8 @@ function Choose({
   const [busy, setBusy] = useState(false);
 
   async function submit(form: FormData) {
+    // Numbered first, so only the latest submit's preparation can be kept.
+    const mine = ++preparing;
     setBusy(true);
     setError(null);
     try {
@@ -204,7 +208,6 @@ function Choose({
       const epoch = vaultStore.epoch();
       const keepable = (agents.data?.keepable ?? []).map((agent) => agent.agentId);
       const others = (agents.data?.others ?? []).map((agent) => agent.agentId);
-      const mine = ++preparing;
       const prepared = await replaceKeys.prepareRotation(ctx, {
         vault,
         crypto: workerVaultCrypto,
@@ -214,12 +217,19 @@ function Choose({
       });
       // Locked meanwhile, or another preparation started since, as in a
       // panel closed and opened again: this one goes.
-      if (vaultStore.epoch() !== epoch || mine !== preparing) {
+      // Nor ever over a rotation being sent, or sent with no answer yet.
+      const sending = pending !== null && (pending.run !== null || pending.sent);
+      if (vaultStore.epoch() !== epoch || mine !== preparing || sending) {
         zeroVault(prepared.vault);
+        if (sending) {
+          setError(
+            'New keys were already sent. Close this and open it again to see how that went.',
+          );
+        }
         return;
       }
       vaultStore.stage(prepared.vault);
-      pending = { prepared, epoch, password, run: null };
+      pending = { prepared, epoch, password, run: null, sent: false };
       landedFor = null;
       finished = null;
       onPrepared();
@@ -393,6 +403,7 @@ async function sendAndFinish(
     await withReauth(() => {
       // Locked meanwhile, as while signing in again: nothing is sent.
       if (current() !== held) throw new LockedMeanwhile();
+      held.sent = true;
       return replaceKeys.sendRotation(api, prepared);
     });
   } catch (caught) {
@@ -431,10 +442,12 @@ async function sendAndFinish(
   // account is signed in here, even if the vault locked meanwhile.
   landedFor = prepared.vault.accountId;
   try {
+    // The old vault key opens nothing served now: a remembered unlock goes,
+    // whoever is signed in, so nothing reopens the old vault on its own.
+    await forgetKeptUnlock();
     // Asked afresh: another tab may have signed in as someone else meanwhile.
     const me = await api.call(accountRoutes.me).catch(() => null);
     if (me?.account.id === prepared.vault.accountId) {
-      await forgetKeptUnlock();
       await keepAnchor(prepared.vault.identity.public);
       // The new vault as served, kept for unlocking offline if it is this
       // rotation's, at the version served. Without an answer, the next

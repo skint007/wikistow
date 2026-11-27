@@ -214,8 +214,11 @@ export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck |
   if (!content || !kept) return null;
   try {
     const check = await replaceKeysOperations.checkKeys(api, kept.anchor);
-    if (check.kind === 'replaced') {
-      await keptUnlock(content).keepAnchor({ ...kept, successor: check.current });
+    // Recorded only over the anchor it checked: another tab's rotation may
+    // have moved it meanwhile.
+    const now = await keptUnlock(content).anchor();
+    if (check.kind === 'replaced' && now && sameKeys(now.anchor, kept.anchor)) {
+      await keptUnlock(content).keepAnchor({ ...now, successor: check.current });
     }
     return check;
   } catch (error) {
