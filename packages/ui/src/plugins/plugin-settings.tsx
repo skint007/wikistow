@@ -768,6 +768,8 @@ export function PluginRow({
   const { manifest, level, development, enabled } = plugin;
   const { regions } = usePlugins();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Why a save from its settings failed, kept here, as the dialog may have closed meanwhile.
+  const failed = useState<string | null>(null);
   const sections = here
     ? regions['settings.section'].filter(({ pluginId }) => pluginId === manifest.id)
     : [];
@@ -834,6 +836,11 @@ export function PluginRow({
           {problem}
         </p>
       )}
+      {failed[0] && !settingsOpen && (
+        <p role="alert" className="text-sm text-destructive">
+          A setting wasn’t saved: {failed[0]}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {hasSettings && (
           <Button
@@ -861,7 +868,7 @@ export function PluginRow({
             <DialogTitle>{manifest.name} settings</DialogTitle>
             <DialogDescription>Each change is saved as you make it.</DialogDescription>
           </DialogHeader>
-          {declared && <DeclaredSettings plugin={plugin} />}
+          {declared && <DeclaredSettings plugin={plugin} failed={failed} />}
           <RegionPlace name="settings.section" pluginId={manifest.id} />
         </DialogContent>
       </Dialog>

@@ -18,12 +18,23 @@ const message = (error: unknown) => (error instanceof Error ? error.message : 'I
  * each field with its value or default, saved as it is committed (on blur
  * or Enter for text and numbers, at once for the rest).
  */
-export function DeclaredSettings({ plugin }: { plugin: InstalledPlugin }) {
+export function DeclaredSettings({
+  plugin,
+  failed,
+}: {
+  plugin: InstalledPlugin;
+  /**
+   * Where why a save failed is kept, by whatever outlives these fields, as
+   * a dialog's are taken away while a save they sent is on its way.
+   */
+  failed?: [string | null, (error: string | null) => void];
+}) {
   const runtime = usePluginRuntime();
   // Drawn again as the settings change, here or from the plugin.
   usePlugins();
   const vault = useVault();
-  const [error, setError] = useState<string | null>(null);
+  const own = useState<string | null>(null);
+  const [error, setError] = failed ?? own;
   const fields = plugin.manifest.settings ?? [];
   if (fields.length === 0) return null;
   if (vault.status !== 'unlocked') {
@@ -32,11 +43,16 @@ export function DeclaredSettings({ plugin }: { plugin: InstalledPlugin }) {
     );
   }
   const values = runtime.settings(plugin);
+  /** Resolves whether it was saved. */
   const save = (key: string, value: Json) => {
     setError(null);
-    runtime.updateSettings(plugin, { [key]: value }).catch((failure: unknown) => {
-      setError(message(failure));
-    });
+    return runtime.updateSettings(plugin, { [key]: value }).then(
+      () => true,
+      (failure: unknown) => {
+        setError(message(failure));
+        return false;
+      },
+    );
   };
   return (
     <section
@@ -63,7 +79,7 @@ function Setting({
 }: {
   field: SettingField;
   value: Json | undefined;
-  onSave: (value: Json) => void;
+  onSave: (value: Json) => Promise<boolean>;
 }) {
   const id = useId();
   const described = field.description ? `${id}-about` : undefined;
@@ -95,7 +111,7 @@ function Setting({
             id={id}
             aria-describedby={described}
             checked={value === true}
-            onCheckedChange={(on) => onSave(on)}
+            onCheckedChange={(on) => void onSave(on)}
           />
         </div>
       );
@@ -108,7 +124,7 @@ function Setting({
           className="w-auto min-w-48 justify-self-start"
           value={typeof value === 'string' ? value : null}
           options={field.options}
-          onChange={(chosen) => onSave(chosen)}
+          onChange={(chosen) => void onSave(chosen)}
         />,
       );
     case 'text':
@@ -135,27 +151,38 @@ function TypedSetting({
   described: string | undefined;
   field: Extract<SettingField, { type: 'text' | 'number' }>;
   value: Json | undefined;
-  onSave: (value: Json) => void;
+  onSave: (value: Json) => Promise<boolean>;
 }) {
   const shown = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
   const [text, setText] = useState(shown);
   const [wrong, setWrong] = useState(false);
-  // What was last sent, so going doesn't send it again before it comes back as `shown`.
+  // What was last sent and not refused, so it isn't sent again, by a blur
+  // after Enter or by going, before it comes back as `shown`.
   const sent = useRef<string | null>(null);
-  // What is typed starts again from the value whenever it changes, here or elsewhere.
+  const was = useRef(shown);
+  // A new value, from here or elsewhere, replaces what is typed unless
+  // something else has been typed since, as after the dialog that sent it
+  // was closed and opened again.
   useEffect(() => {
-    setText(shown);
+    if (was.current === shown) return;
+    const from = [was.current, sent.current];
+    setText((typed) => (from.includes(typed) ? shown : typed));
+    was.current = shown;
     sent.current = null;
   }, [shown]);
   const number = field.type === 'number';
   const commit = () => {
     if (text === shown) return setWrong(false);
+    if (text === sent.current) return;
     const next = number ? Number(text) : text;
     const fits = (!number || text.trim() !== '') && settingFits(field, next);
     setWrong(!fits);
     if (!fits) return;
     sent.current = text;
-    onSave(next);
+    void onSave(next).then((saved) => {
+      // Refused, it can be sent again.
+      if (!saved && sent.current === text) sent.current = null;
+    });
   };
   // Going, it commits what was typed unless that was sent: a browser may
   // blur a field it takes away, as Chromium does, or may not, as Firefox.

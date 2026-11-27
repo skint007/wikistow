@@ -36,6 +36,8 @@ let opened = false;
 
 /** Each view drawn into the plugin's section, with the props it was given. */
 const sections: SettingsViewProps[] = [];
+/** How wide each drawing found its section as it drew, as for sizing a canvas. */
+const widths: number[] = [];
 
 async function draw(at = '/settings/plugins', { open = true } = {}) {
   if (open && !opened) {
@@ -58,6 +60,7 @@ async function draw(at = '/settings/plugins', { open = true } = {}) {
             const button = document.createElement('button');
             button.textContent = 'A plugin button';
             element.append(button);
+            widths.push(element.parentElement!.getBoundingClientRect().width);
           },
         }),
     },
@@ -115,13 +118,13 @@ const field = (label: string) =>
     .control as HTMLInputElement;
 const saved = (runtime: PluginRuntime) => () => runtime.settings(runtime.get().plugins[0]!.plugin);
 
-/** Each change the app sends from now on. */
-function sends(runtime: PluginRuntime) {
+/** Each change the app sends from now on, each after `first` settles. */
+function sends(runtime: PluginRuntime, first: Promise<unknown> = Promise.resolve()) {
   const sent: unknown[] = [];
   const update = runtime.updateSettings.bind(runtime);
   runtime.updateSettings = (plugin, change) => {
     sent.push(change);
-    return update(plugin, change);
+    return first.then(() => update(plugin, change));
   };
   return sent;
 }
@@ -159,6 +162,8 @@ it('opens the settings in a dialog, and closing it leaves the row as it was', as
   expect(outside('section')).toHaveLength(0);
 
   // Its own section takes focus as any part of the dialog does.
+  // Drawn once the dialog shows, so it measures the box it is in.
+  expect(widths.at(-1)).toBeGreaterThan(0);
   const inSection = section.querySelector('button')!;
   inSection.focus();
   expect(document.activeElement).toBe(inSection);
@@ -216,4 +221,57 @@ it('opens the dialog at once for ?plugin=, and forgets the search', async () => 
   await expect.poll(() => dialog()).not.toBeNull();
   expect(field('Greeting').value).toBe('Hello');
   await expect.poll(() => router.state.location.search).toEqual({});
+});
+
+it('sends an edit once, though Enter sent it and Close blurs it before it lands', async () => {
+  const { runtime } = await draw();
+  let land = () => {};
+  const sent = sends(runtime, new Promise<void>((resolve) => (land = resolve)));
+  await act(() => userEvent.click(button()));
+  await act(() => userEvent.fill(field('Greeting'), 'Once'));
+  await act(() => userEvent.keyboard('{Enter}'));
+  const close = [...dialog()!.querySelectorAll('button')].find(
+    (item) => item.textContent === 'Close',
+  )!;
+  await act(() => userEvent.click(close));
+  land();
+  await expect.poll(saved(runtime)).toMatchObject({ greeting: 'Once' });
+  expect(sent).toEqual([{ greeting: 'Once' }]);
+});
+
+it('keeps what is typed again when an earlier save lands', async () => {
+  const { runtime } = await draw();
+  let land = () => {};
+  sends(runtime, new Promise<void>((resolve) => (land = resolve)));
+  await act(() => userEvent.click(button()));
+  await act(() => userEvent.fill(field('Greeting'), 'First'));
+  await act(() => userEvent.keyboard('{Escape}'));
+  // Opened again before it landed: the field shows the value stored.
+  await act(() => userEvent.click(button()));
+  expect(field('Greeting').value).toBe('Hello');
+  await act(() => userEvent.fill(field('Greeting'), 'Second'));
+  await act(async () => land());
+  await expect.poll(saved(runtime)).toMatchObject({ greeting: 'First' });
+  expect(field('Greeting').value).toBe('Second');
+  // And a value landing on a field not typed in since shows it.
+  await act(() => userEvent.keyboard('{Enter}'));
+  await expect.poll(saved(runtime)).toMatchObject({ greeting: 'Second' });
+  expect(field('Greeting').value).toBe('Second');
+});
+
+it('says in the row why a save failed once the dialog has closed', async () => {
+  const { runtime } = await draw();
+  runtime.updateSettings = () => Promise.reject(new Error('Settings can be at most 16 KB.'));
+  await act(() => userEvent.click(button()));
+  await act(() => userEvent.fill(field('Greeting'), 'Too long'));
+  await act(() => userEvent.keyboard('{Escape}'));
+  await expect
+    .poll(() => row()!.querySelector('[role=alert]')?.textContent)
+    .toBe('A setting wasn’t saved: Settings can be at most 16 KB.');
+  // Opened again, the dialog says so instead.
+  await act(() => userEvent.click(button()));
+  expect(dialog()!.textContent).toContain('Settings can be at most 16 KB.');
+  expect(
+    [...row()!.querySelectorAll('[role=alert]')].filter((item) => !item.closest('dialog')),
+  ).toHaveLength(0);
 });
