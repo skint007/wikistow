@@ -51,6 +51,10 @@ const DETAILS = {
     keyVersion: z.number().int(),
     removed: z.array(z.string()),
     demoted: z.array(z.string()),
+    /** Members given every version at the keys they replaced theirs with (section 4.6). */
+    rekeyed: z.array(z.string()).optional(),
+    /** Members kept without the new version, waiting for an owner. */
+    waiting: z.array(z.string()).optional(),
     /** The group whose change made the rotation, if one did. */
     groupId: z.string().optional(),
   }),

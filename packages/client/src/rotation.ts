@@ -30,12 +30,33 @@ export type RotationRecipient = { identity: PublicIdentity; role: 'reader' | 'ed
 export type LeftOutReason =
   /** The owner left them out, or this is the removal of them. */
   | 'left-out'
-  /** No verified envelope of the current version is theirs, at the key the server lists. */
+  /** No verified envelope of the current version is theirs, at the key the server lists: they wait. */
   | 'no-envelope'
   /** Their key changed and the change isn't confirmed (section 8.4). */
   | 'key-changed'
   /** Neither the directory nor this app's pins give a key for them that it can seal to. */
-  | 'unknown-key';
+  | 'unknown-key'
+  /**
+   * Their only verified envelope of the current version was sealed with an
+   * earlier key of an owner (section 4.6): they wait unless the owner ticks them.
+   */
+  | 'old-key'
+  /** They replaced their keys (section 4.6): they wait unless the owner ticks them. */
+  | 'replaced-keys';
+
+/**
+ * A member the owner may tick into a rotation (section 4.6): one whose only
+ * envelope of the current version an earlier key of an owner sealed, as a
+ * reader unless the owner raises them; or one who replaced their keys, who
+ * gets every version at their new key (`rekeyed`). `identity` is the key
+ * it would seal to, `role` the most the envelope gives.
+ */
+export type RotationOffer = {
+  identityId: IdentityId;
+  reason: 'old-key' | 'replaced-keys';
+  identity: PublicIdentity;
+  role: 'reader' | 'editor';
+};
 
 /** Who a rotation from version `keyVersion - 1` seals `keyVersion` to (section 7.5). */
 export type RotationPlan = {
@@ -45,11 +66,20 @@ export type RotationPlan = {
   keyVersion: number;
   remaining: RotationRecipient[];
   leftOut: { identityId: IdentityId; reason: LeftOutReason }[];
-  /** Every listed member left out, for the request's `removed`. */
+  /** Every listed member left out for good, for the request's `removed`. */
   removed: IdentityId[];
   /** Remaining members who become readers, for the request's `demoted`. */
   demoted: IdentityId[];
+  /** Remaining members given every version at their new key, for the request's `rekeyed`. */
+  rekeyed: IdentityId[];
+  /** Members kept without the new version, for the request's `waiting`. */
+  waiting: IdentityId[];
+  /** Members left out that the owner may tick in (`tick`), unticked. */
+  offers: RotationOffer[];
 };
+
+// Reasons a member waits rather than leaves: their row stays, sealed nothing new.
+const WAITS: ReadonlySet<LeftOutReason> = new Set(['no-envelope', 'old-key', 'replaced-keys']);
 
 /**
  * Work out who keeps a share after a removal or a key rotation (section 7.5):
@@ -60,10 +90,11 @@ export type RotationPlan = {
  * sealed by an owner in its writing set, with a valid signature. M is the
  * share's members as the server lists them, O the space's sealing owners
  * less any owner this action removes, and X the people being removed or left
- * out, with that owner. A listed member with no verified envelope at their
- * listed key, or no key this app can seal to, is left out too. So the server
- * can't slip anyone into the new version: everyone in it either held `v` or
- * is an owner this app accepts.
+ * out, with that owner. A listed member with no key this app can seal to is
+ * left out; one with no verified envelope at their listed key waits, kept
+ * with no new version. So the server can't slip anyone into the new
+ * version: everyone in it either held `v` or is an owner this app accepts,
+ * or the owner ticked them by name.
  *
  * Refuses as `key-version` if this app holds no version `v` that counts for
  * writing, or `v` is below its No going back mark. When the action removes
@@ -73,6 +104,16 @@ export type RotationPlan = {
  * removing a server-made owner is refused as `unaccepted-owner`, and so is a
  * plain rotation while the server lists them (`sealingOwners`): the space
  * stays blocked until the server stops listing them.
+ *
+ * After a rotation of identity keys (section 4.6), a version `v` that an
+ * earlier key of an accepted owner sealed, or that this app holds only
+ * through its own earlier key, counts here for verifying, never for
+ * writing: the rotation moves away from it. Envelopes such a key sealed add
+ * nobody to E: those members are offered unticked, as readers unless the
+ * owner raises them, and otherwise wait. A member whom the directory lists
+ * at a key version above their row's replaced their keys: they wait, or,
+ * ticked, get every version at their new key, which this app must accept
+ * (section 8.4).
  */
 export function planRotation({
   installationId,
@@ -85,6 +126,7 @@ export function planRotation({
   removing,
   leaveOut = [],
   demote = [],
+  tick = [],
   keyring,
   marks,
   trust,
@@ -98,7 +140,7 @@ export function planRotation({
   /** Every envelope of version `v`, to people and agents, as the server serves them. */
   envelopes: readonly unknown[];
   /** The share's members and their key versions, as the server lists them (M). */
-  members: readonly { identityId: IdentityId; keyVersion: number }[];
+  members: readonly { identityId: IdentityId; keyVersion: number; role?: 'reader' | 'editor' }[];
   /** The space's accepted owners, as `acceptOwners` made them. */
   owners: AcceptedOwners;
   /** The owner this action removes, at the key this app accepted for them (section 7.6). */
@@ -107,6 +149,8 @@ export function planRotation({
   leaveOut?: readonly IdentityId[];
   /** Members who stay as readers. */
   demote?: readonly IdentityId[];
+  /** Offers the owner ticked, each with the role to give, at most the offer's. */
+  tick?: readonly { identityId: IdentityId; role: 'reader' | 'editor' }[];
   keyring: FolderKeyring;
   marks: KeyVersionMarks;
   trust: TrustStore;
@@ -126,12 +170,14 @@ export function planRotation({
   const counts = (sealer: PublicIdentity) =>
     owners.writes(sealer) || (removedKey !== undefined && keyHash(sealer) === removedKey);
 
-  // Step 1: v must count for writing and be at or above the mark.
+  // Step 1: v must count for writing, or for verifying after a rotation of
+  // identity keys, and be at or above the mark.
   const holdsV = keyring
     .versions(spaceId, shareId)
     .some(
       (version) =>
-        version.keyVersion === currentKeyVersion && !version.earlier && counts(version.sealer),
+        version.keyVersion === currentKeyVersion &&
+        (counts(version.sealer) || owners.earlier(version.sealer)),
     );
   if (!holdsV) {
     throw new CryptoError(
@@ -143,8 +189,10 @@ export function planRotation({
   if (writable) marks.raise(spaceId, shareId, writable.keyVersion);
   requireNotBehind({ marks, spaceId, shareId, keyVersion: currentKeyVersion });
 
-  // E: who holds v, by a verified envelope from an owner that counts.
+  // E: who holds v, by a verified envelope from an owner that counts; and
+  // who holds it only through an earlier key of an owner.
   const holders = new Map<string, 'reader' | 'editor'>();
+  const throughEarlier = new Map<string, 'reader' | 'editor'>();
   for (const raw of envelopes) {
     const parsed = FolderKeyEnvelope.safeParse(raw);
     if (!parsed.success) continue;
@@ -159,16 +207,17 @@ export function planRotation({
     }
     let sealer: PublicIdentity;
     try {
-      sealer = trust.require(envelope.sealerId, envelope.sealerKeyVersion);
+      sealer = trust.requireForOpening(envelope.sealerId, envelope.sealerKeyVersion).identity;
     } catch {
       continue;
     }
     const bytes = folderKeyEnvelopeBytes(installationId, envelope);
-    if (!counts(sealer) || !verifySignature(sealer, bytes, envelope.signature)) continue;
+    const into = counts(sealer) ? holders : owners.earlier(sealer) ? throughEarlier : null;
+    if (!into || !verifySignature(sealer, bytes, envelope.signature)) continue;
     const holder = `${envelope.recipientId} ${envelope.recipientKeyVersion}`;
     // An editor's envelope wins over a reader's for the same key.
-    if (holders.get(holder) !== 'editor') {
-      holders.set(holder, envelope.draftKey === null ? 'reader' : 'editor');
+    if (into.get(holder) !== 'editor') {
+      into.set(holder, envelope.draftKey === null ? 'reader' : 'editor');
     }
   }
 
@@ -181,27 +230,70 @@ export function planRotation({
     }
   }
   const demoting = new Set<string>(demote);
+  const ticked = new Map(tick.map((t) => [t.identityId as string, t.role]));
   const remaining: RotationRecipient[] = sealingOwners.map((identity) => ({
     identity,
     role: 'editor',
   }));
   const leftOut: RotationPlan['leftOut'] = [];
   const demoted: IdentityId[] = [];
+  const rekeyed: IdentityId[] = [];
+  const offers: RotationOffer[] = [];
   for (const member of members) {
     if (ownerIds.has(member.identityId)) continue;
-    const role = excluded.has(member.identityId)
-      ? 'left-out'
-      : (holders.get(`${member.identityId} ${member.keyVersion}`) ?? 'no-envelope');
-    if (role === 'left-out' || role === 'no-envelope') {
-      leftOut.push({ identityId: member.identityId, reason: role });
+    if (excluded.has(member.identityId)) {
+      leftOut.push({ identityId: member.identityId, reason: 'left-out' });
       continue;
     }
-    const identity = usableKey(trust, directory, member);
+    const at = `${member.identityId} ${member.keyVersion}`;
+    const counted = holders.get(at);
+    const earlier = throughEarlier.get(at);
+    const listed = directory.find(({ identity }) => identity.id === member.identityId);
+    const replaced = !!listed && listed.identity.keyVersion > member.keyVersion;
+    const held: 'reader' | 'editor' | undefined = counted ?? earlier;
+    if (!held) {
+      leftOut.push({ identityId: member.identityId, reason: 'no-envelope' });
+      continue;
+    }
+    // The key to seal to: their row's, or after they replaced their keys,
+    // the directory's current one, which this app must accept.
+    const identity = replaced
+      ? usableKey(trust, directory, {
+          identityId: member.identityId,
+          keyVersion: listed.identity.keyVersion,
+        })
+      : usableKey(trust, directory, member);
     if (typeof identity === 'string') {
-      leftOut.push({ identityId: member.identityId, reason: identity });
+      leftOut.push({
+        identityId: member.identityId,
+        reason: replaced ? 'replaced-keys' : identity,
+      });
       continue;
     }
-    const demotes = demoting.has(member.identityId);
+    // Earlier-key envelopes and replaced keys are the owner's call, by name.
+    const offered: RotationOffer | null = replaced
+      ? {
+          identityId: member.identityId,
+          reason: 'replaced-keys',
+          identity,
+          role: counted ?? 'reader',
+        }
+      : counted
+        ? null
+        : { identityId: member.identityId, reason: 'old-key', identity, role: held };
+    let role: 'reader' | 'editor' = counted ?? 'reader';
+    if (offered) {
+      const choice = ticked.get(member.identityId);
+      if (!choice) {
+        offers.push(offered);
+        leftOut.push({ identityId: member.identityId, reason: offered.reason });
+        continue;
+      }
+      // Raised only as far as the row's role allows: the server seals by it.
+      role = choice === 'editor' && (member.role ?? held) === 'editor' ? 'editor' : 'reader';
+      if (replaced) rekeyed.push(member.identityId);
+    }
+    const demotes = demoting.has(member.identityId) || (role === 'reader' && held === 'editor');
     if (demotes) demoted.push(member.identityId);
     remaining.push({ identity, role: demotes ? 'reader' : role });
   }
@@ -211,8 +303,11 @@ export function planRotation({
     keyVersion: currentKeyVersion + 1,
     remaining,
     leftOut,
-    removed: leftOut.map((entry) => entry.identityId),
+    removed: leftOut.filter((entry) => !WAITS.has(entry.reason)).map((e) => e.identityId),
     demoted,
+    rekeyed,
+    waiting: leftOut.filter((entry) => WAITS.has(entry.reason)).map((e) => e.identityId),
+    offers,
   };
 }
 
@@ -223,7 +318,7 @@ function usableKey(
   trust: TrustStore,
   directory: readonly DirectoryEntry[],
   member: { identityId: IdentityId; keyVersion: number },
-): PublicIdentity | LeftOutReason {
+): PublicIdentity | 'key-changed' | 'unknown-key' {
   const entry = directory.find(
     ({ identity }) =>
       identity.id === member.identityId && identity.keyVersion === member.keyVersion,

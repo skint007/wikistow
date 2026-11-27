@@ -71,6 +71,7 @@ export * as contactsOperations from './operations/contacts.ts';
 export * as pluginOperations from './operations/plugins.ts';
 export * as spaceOperations from './operations/spaces.ts';
 export * as sharingOperations from './operations/sharing.ts';
+export * as rotatedShareOperations from './operations/rotated-shares.ts';
 export * as groupOperations from './operations/groups.ts';
 export * as moveOperations from './operations/moves.ts';
 export * as orderOperations from './operations/order.ts';

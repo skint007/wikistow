@@ -63,12 +63,17 @@ const Envelopes = z.array(FolderKeyEnvelope).max(100_000);
 /**
  * A new key version, `expectedKeyVersion + 1`, sealed to everyone who keeps
  * the share (protocol section 7.5). `removed` names every listed member left
- * out, `demoted` the members who become readers.
+ * out, `demoted` the members who become readers. `rekeyed` names members
+ * who replaced their keys and get every version, the new one included, at
+ * their new key; `waiting` names members kept without the new version, who
+ * wait for an owner (section 4.6). Older apps send neither.
  */
 export const Rotation = z.object({
   expectedKeyVersion: PositiveInt,
   removed: z.array(IdentityId).max(1000),
   demoted: z.array(IdentityId).max(1000),
+  rekeyed: z.array(IdentityId).max(1000).default([]),
+  waiting: z.array(IdentityId).max(1000).default([]),
   envelopes: Envelopes,
 });
 

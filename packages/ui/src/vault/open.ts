@@ -278,7 +278,7 @@ export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck |
     return check;
   } catch (error) {
     // Without a clear answer, what the device recorded before stands.
-    if (kept.successor) return { kind: 'replaced', current: kept.successor };
+    if (kept.successor) return { kind: 'replaced', current: kept.successor, own: false };
     if (noAnswer(error)) return null;
     throw error;
   }

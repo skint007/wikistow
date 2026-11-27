@@ -21,6 +21,7 @@ import { isAgentId } from '../identity.ts';
 import { MetadataRevisionId, newId } from '../ids.ts';
 import { newFolderMetadata, reviseMetadata, sealMetadataV2 } from '../metadata.ts';
 import type { DirectoryEntry, Lookup } from '../trust.ts';
+import { followRotations } from './follow.ts';
 import { forgetSpaces, pinAuthors } from './keys.ts';
 import { openServedMetadata, treeTarget, type LoadedMetadata } from './records.ts';
 import { saveContacts, type ClientContext } from './session.ts';
@@ -868,6 +869,12 @@ export type Waiting = {
  */
 export async function loadWaiting(ctx: ClientContext): Promise<Waiting[]> {
   const { waiting } = await ctx.api.call(groupRoutes.waiting);
+  // Someone who replaced their keys is followed first, so they read as
+  // having replaced them, not as a key change (section 4.6).
+  await followRotations(
+    ctx,
+    waiting.map(({ person }) => person),
+  ).catch(() => []);
   const out: Waiting[] = [];
   for (const { spaceId, person, ...share } of waiting) {
     let entry = out.find(
