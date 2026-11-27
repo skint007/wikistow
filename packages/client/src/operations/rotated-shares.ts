@@ -92,7 +92,15 @@ export async function planFinishing(ctx: ClientContext): Promise<Finishing[]> {
       continue;
     }
     const finishing: Finishing = { spaceId: space.id, rotations: [], failed: [] };
-    for (const share of await listShares(ctx, space.id)) {
+    let shares: Awaited<ReturnType<typeof listShares>>;
+    try {
+      shares = await listShares(ctx, space.id);
+    } catch (error) {
+      if (!(error instanceof CryptoError || error instanceof ApiError)) throw error;
+      out.push({ ...finishing, failed: [{ shareId: null, code: error.code }] });
+      continue;
+    }
+    for (const share of shares) {
       if (writesUnderCurrent(ctx, keys, share)) continue;
       try {
         finishing.rotations.push(
@@ -134,7 +142,7 @@ export async function applyWithTicks(
           shareId,
           tick,
           leaveOut,
-          demote: confirmed.plan.demoted.filter((id) => !ticked.has(id)),
+          demote: confirmed.plan.demoted,
         });
   const people = (p: PlannedRotation) =>
     JSON.stringify([
@@ -144,13 +152,14 @@ export async function applyWithTicks(
         .map(({ identity }) => `${identity.id} ${keyHash(identity)}`)
         .sort(),
       [...p.plan.removed].sort(),
-      p.plan.demoted.filter((id) => !ticked.has(id)).sort(),
     ]);
   // Each ticked member at the key the person saw them offered at.
   const offeredAt = (id: string) =>
     confirmed.plan.offers.find((o) => o.identityId === id)?.identity;
+  // Every demotion confirmed stays; a tick as a reader may add its own.
   const changed =
     people(planned) !== people(confirmed) ||
+    confirmed.plan.demoted.some((id) => !planned.plan.demoted.includes(id)) ||
     tick.some((t) => {
       const shown = offeredAt(t.identityId);
       const now = planned.plan.remaining.find(({ identity }) => identity.id === t.identityId);

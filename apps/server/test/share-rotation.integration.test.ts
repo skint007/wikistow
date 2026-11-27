@@ -520,6 +520,34 @@ async function coOwned() {
 }
 
 describe('a rotated co-owner', () => {
+  it('keeps what a co-owner sealed to a reader when she raises them before anyone adds her again', async () => {
+    const { alice, olive, lib } = await coOwned();
+    const { person: carol } = await personWithLibrary();
+    const share = await shareOf(olive.ctx, lib.spaceId);
+    await sharing.addMember(olive.ctx, {
+      spaceId: lib.spaceId,
+      shareId: share.shareId,
+      person: await find(olive, carol),
+      role: 'reader',
+    });
+    const { ctx } = await rotate(alice);
+    const [finishing] = await rotated.planFinishing(ctx);
+    for (const planned of finishing?.rotations ?? []) await rotated.applyWithTicks(ctx, planned);
+    const [entry] = await lookupPeople(ctx, [carol.vault.identity.public.id]);
+    if (!entry) throw new Error('expected Carol in the directory');
+    await sharing.addMember(ctx, {
+      spaceId: lib.spaceId,
+      shareId: share.shareId,
+      person: { ...entry, foundBy: null },
+      role: 'editor',
+    });
+    const { envelopes } = await olive.ctx.api.call(sharingRoutes.versionEnvelopes, {
+      params: { shareId: share.shareId, keyVersion: 1 },
+    });
+    const hers = envelopes.filter((e) => e.recipientId === carol.vault.identity.public.id);
+    expect(hers.map((e) => e.sealerId)).toEqual([olive.vault.identity.public.id]);
+  });
+
   it('can be removed by a co-owner before anyone adds them again', async () => {
     const { alice, olive, lib } = await coOwned();
     const { person: carol } = await personWithLibrary();

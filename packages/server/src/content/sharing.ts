@@ -500,10 +500,8 @@ export async function giveKeys(
         ),
       );
     const wanted = new Map(envelopes.map((e) => [envelopeKey(e), e.draftKey !== null]));
-    // Given now by the same owner at a key nobody has named them at in an
-    // owner statement: the member's app may accept only the key that sealed
-    // what they hold (section 4.6, as where that owner owns the space
-    // alone), so that stays even where it gives less than is given.
+    // Whether another owner has named the giver at their current key in an
+    // owner statement, which the member's app accepts them through.
     const vouched = new Set(
       (
         await tx
@@ -519,34 +517,21 @@ export async function giveKeys(
       ).map((row) => row.keyVersion),
     );
     const unvouched = !vouched.has(sealer.keyVersion);
-    const sealers = new Map(
-      (
-        await lookupIdentities(
-          tx,
-          [...new Set(held.map((h) => (h.envelope as { sealerId: string }).sealerId))],
-          { hold: false },
-        )
-      ).map((identity) => [identity.id as string, identity.keyVersion]),
-    );
+    // A giver who replaced their keys, at a key no other owner has named
+    // yet, may be one the member's app doesn't accept: what the member
+    // holds stays, whoever sealed it, even where it gives less.
+    const keepAll = sealer.keyVersion > 1 && unvouched;
     const keyOf = (id: string) =>
       people.find(({ identity }) => identity.id === id)?.identity.keyVersion ?? 0;
     const replaced = held.filter((h) => {
       const key = `${h.recipientIdentityId}@${h.recipientKeyVersion}#${h.keyVersion}`;
       const drafts = wanted.get(key);
-      const { sealerId, sealerKeyVersion } = h.envelope as {
-        sealerId: string;
-        sealerKeyVersion: number;
-      };
       // At a key the member replaced: it opens what they had, and nothing
       // given at their current key takes its place.
       if (h.recipientKeyVersion < keyOf(h.recipientIdentityId)) {
         return false;
       }
-      const sealedEarlier =
-        sealerId === sealer.id &&
-        unvouched &&
-        (sealers.get(sealerId) ?? sealerKeyVersion) > sealerKeyVersion;
-      if (drafts !== undefined && (h.drafts || !drafts || sealedEarlier)) {
+      if (drafts !== undefined && (h.drafts || !drafts || keepAll)) {
         kept.add(key);
         return false;
       }
