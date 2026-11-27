@@ -2,7 +2,8 @@ import { useEffect, useId, useMemo, useState, type ComponentProps, type ReactNod
 import { cn } from '@/lib/utils';
 import { Input } from './input';
 
-export type ComboboxOption = { value: string; label: string | null };
+/** `marks` show after the label, such as pills; typing doesn't match them. */
+export type ComboboxOption = { value: string; label: string | null; marks?: ReactNode };
 
 /** The most options drawn at once; typing narrows the rest. */
 const SHOWN = 100;
@@ -155,6 +156,7 @@ export function Combobox({
                       {option.label}
                     </span>
                   )}
+                  {option.marks}
                 </li>
               ))}
             </ul>
