@@ -243,7 +243,12 @@ export async function declinedOwnerSpaces(
         return null;
       });
     const naming = (statements ?? []).filter(
-      (s) => s.owner.id === id && removed.has(s.owner.keyHash) && owners.has(s.signerId),
+      (s) =>
+        s.installationId === ctx.installationId &&
+        s.spaceId === entry.spaceId &&
+        s.owner.id === id &&
+        removed.has(s.owner.keyHash) &&
+        owners.has(s.signerId),
     );
     if (!accepted && naming.length === 0) continue;
     const served = await ctx.api
