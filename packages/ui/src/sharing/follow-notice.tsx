@@ -23,6 +23,7 @@ import { useSpaceNames } from '../agents/pick-form';
 import { refreshAccess } from '../data/queries';
 import { PLAIN } from '../vault/store';
 import { describePerson } from './people';
+import { SettingRow } from '../settings/rows';
 import { ErrorLine, useAction } from './use-action';
 
 // The follow someone asked to see again, from where that person appears.
@@ -45,12 +46,6 @@ export const followsQuery = (ctx: ClientContext) => ({
   // What lookups follow lands in the session's record as it goes.
   refetchInterval: 3_000,
 });
-
-/** Whether the person's record holds a follow of `id`, for a mark where they appear. */
-export function useFollowOf(ctx: ClientContext, id: string): FollowedEntry | null {
-  const { data } = useQuery(followsQuery(ctx));
-  return data?.find((entry) => entry.from.identity.id === id) ?? null;
-}
 
 /**
  * The one-time notice that a contact replaced their keys (protocol section
@@ -187,9 +182,10 @@ function FollowDialog({
               </DialogTitle>
               <DialogDescription>
                 If <Name>{name}</Name> didn’t replace their keys, someone else holds their old key
-                and made the new one. Declining goes back to the key you had, and nothing is shared
-                with either key until you confirm one with <Name>{name}</Name>. No device of yours
-                follows this change again.
+                and made the new one. Declining goes back to the key you had, and from then on this
+                app shares nothing new with either key until you confirm one with{' '}
+                <Name>{name}</Name>. What they could already open, they still can, until an owner
+                gives those folders new keys. No device of yours follows this change again.
               </DialogDescription>
             </DialogHeader>
             <ErrorLine error={error} />
@@ -231,7 +227,7 @@ function DeclinedWarnings({
       <DialogHeader>
         <DialogTitle>You declined {name}’s new key</DialogTitle>
         <DialogDescription>
-          Nothing is shared with either of their keys now.
+          This app shares nothing new with either of their keys now.
           {spaces.length > 0 &&
             ' But in the spaces below an owner accepted the key you declined, so it may read what anyone saves there, until an owner removes that person.'}
         </DialogDescription>
@@ -244,7 +240,9 @@ function DeclinedWarnings({
                 <Name>{spaceName(space.spaceId)}</Name>
               </p>
               <p>
-                {space.addedBy.length > 0 ? (
+                {!space.known ? (
+                  'The server didn’t say which owner accepted it; try again later to see.'
+                ) : space.addedBy.length > 0 ? (
                   <>
                     Accepted by{' '}
                     {space.addedBy.map((by, i) => (
@@ -258,18 +256,20 @@ function DeclinedWarnings({
                 ) : (
                   'This app took that key as the space’s owner when it first saw the space.'
                 )}{' '}
-                {space.owner
+                {space.owner === true
                   ? `As an owner, you can remove ${name} as an owner there, then leave the space if you want to.`
-                  : `Ask one of its owners to remove ${name}.`}
+                  : space.owner === false
+                    ? `Ask one of its owners to remove ${name}.`
+                    : `If you’re an owner there, you can remove ${name} as an owner; if not, ask one of its owners to.`}
               </p>
-              {space.owner && (
+              {space.owner !== false && (
                 <Link
-                  to="/s/$spaceId"
+                  to="/s/$spaceId/members"
                   params={{ spaceId: space.spaceId }}
                   className="text-primary underline"
                   onClick={onDone}
                 >
-                  Open the space
+                  Open the space’s people
                 </Link>
               )}
             </li>
@@ -280,5 +280,35 @@ function DeclinedWarnings({
         <Button onClick={onDone}>Done</Button>
       </DialogFooter>
     </>
+  );
+}
+
+/**
+ * Settings → Security: the people this app followed to a new key that
+ * nobody has confirmed or declined yet, each with their details again (both
+ * keys, and **Not them?**). The contact's details, wherever they share.
+ */
+export function ReplacedKeysRow({ ctx }: { ctx: ClientContext }) {
+  const { data: follows } = useQuery(followsQuery(ctx));
+  if (!follows || follows.length === 0) return null;
+  return (
+    <SettingRow
+      name="People who replaced their keys"
+      state="This app followed them to their new keys. Check a new fingerprint with them, or say it wasn’t them."
+    >
+      <ul className="grid gap-2" aria-label="People who replaced their keys">
+        {follows.map((entry) => {
+          const id = entry.from.identity.id;
+          return (
+            <li key={id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <Name>{describePerson(ctx, id, null).name}</Name>
+              <Button size="xs" variant="outline" onClick={() => showFollow(id)}>
+                Details
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    </SettingRow>
   );
 }

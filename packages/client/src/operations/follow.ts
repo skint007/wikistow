@@ -201,50 +201,66 @@ export async function declineFollow(
 
 /**
  * A space where the person's record accepted, as an owner, a key of `id`
- * they declined (section 8.4, **An owner's key the person declined**): the
- * owners whose statements named it (`addedBy`), or none where the app took
- * it by first sight. The app warns, names them, and says what the person
- * can do; it closes nothing.
+ * they declined, or where an owner it accepts named such a key in a
+ * statement (section 8.4, **An owner's key the person declined**): the
+ * owners whose statements named it (`addedBy`), none where the app took it
+ * by first sight, and `known` false when the server couldn't say. The app
+ * warns, names them, and says what the person can do; it closes nothing.
  */
 export type DeclinedOwnerSpace = {
   spaceId: SpaceId;
   addedBy: IdentityId[];
-  /** Whether the server lists this person as an owner there, who can remove them, then leave. */
-  owner: boolean;
+  /** Whether the server's statements could be read, so `addedBy` is the whole list. */
+  known: boolean;
+  /** Whether the server lists this person as an owner there, who can remove them, then leave; null when it couldn't say. */
+  owner: boolean | null;
 };
 
-/** The spaces where the record accepts a key of `id` it removed as an owner. */
+/**
+ * The spaces where the record accepts a key of `id` it removed as an
+ * owner, or where an owner it accepts there names one in a statement the
+ * server serves, as a co-owner's add after this device last looked.
+ */
 export async function declinedOwnerSpaces(
   ctx: ClientContext,
   id: IdentityId,
 ): Promise<DeclinedOwnerSpace[]> {
   const { shared } = ctx.contacts.book.payloads;
   const removed = new Set(shared.removed.filter((r) => r.id === id).map((r) => r.keyHash));
+  if (removed.size === 0) return [];
   const out: DeclinedOwnerSpace[] = [];
   for (const entry of shared.spaceOwners) {
-    const declined = entry.owners.filter((o) => o.id === id && removed.has(o.keyHash));
-    if (declined.length === 0) continue;
-    const hashes = new Set(declined.map((o) => o.keyHash));
-    // Who named a declined key in a statement, by the statements served.
-    let addedBy: IdentityId[] = [];
-    let owner = false;
-    try {
-      const [{ statements }, { owners }] = await Promise.all([
-        ctx.api.call(ownerRoutes.statements, { params: { spaceId: entry.spaceId } }),
-        ctx.api.call(ownerRoutes.owners, { params: { spaceId: entry.spaceId } }),
-      ]);
-      owner = owners.some((listed) => listed.identity.id === ctx.identity.public.id);
-      addedBy = [
-        ...new Set(
-          statements
-            .filter((s) => s.owner.id === id && hashes.has(s.owner.keyHash))
-            .map((s) => s.signerId),
-        ),
-      ];
-    } catch (error) {
-      if (!notFollowed(error)) throw error;
-    }
-    out.push({ spaceId: entry.spaceId, addedBy, owner });
+    const accepted = entry.owners.some((o) => o.id === id && removed.has(o.keyHash));
+    // Signers the record accepts there, and hasn't removed.
+    const owners = new Set<string>(
+      entry.owners.filter((o) => !entry.removedOwners.includes(o.id)).map((o) => o.id),
+    );
+    const statements = await ctx.api
+      .call(ownerRoutes.statements, { params: { spaceId: entry.spaceId } })
+      .then((answer) => answer.statements)
+      .catch((error: unknown) => {
+        if (!notFollowed(error)) throw error;
+        return null;
+      });
+    const naming = (statements ?? []).filter(
+      (s) => s.owner.id === id && removed.has(s.owner.keyHash) && owners.has(s.signerId),
+    );
+    if (!accepted && naming.length === 0) continue;
+    const listed = await ctx.api
+      .call(ownerRoutes.owners, { params: { spaceId: entry.spaceId } })
+      .then(({ owners: served }) =>
+        served.some((owner) => owner.identity.id === ctx.identity.public.id),
+      )
+      .catch((error: unknown) => {
+        if (!notFollowed(error)) throw error;
+        return null;
+      });
+    out.push({
+      spaceId: entry.spaceId,
+      addedBy: [...new Set(naming.map((s) => s.signerId))],
+      known: statements !== null,
+      owner: listed,
+    });
   }
   return out;
 }

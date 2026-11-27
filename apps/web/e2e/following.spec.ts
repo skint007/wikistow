@@ -108,4 +108,19 @@ test('a contact follows replaced keys with a notice, and the person still opens 
     await reader.waitForTimeout(4_000);
     await expect(notice).toBeHidden();
   });
+
+  await test.step('Settings shows both keys again, and declining goes back to the key it had', async () => {
+    await reader.goto('/settings#security');
+    const people = reader.getByRole('list', { name: 'People who replaced their keys' });
+    await people.getByRole('button', { name: 'Details' }).click();
+    const notice = reader.getByRole('dialog', { name: 'Olive Owner replaced their keys' });
+    await expect(notice.getByTestId('earlier-fingerprint')).toBeVisible();
+    await notice.getByRole('button', { name: 'Not them?' }).click();
+    await reader.getByRole('button', { name: 'Decline new key' }).click();
+    const declined = reader.getByRole('dialog', { name: 'You declined Olive Owner’s new key' });
+    await expect(declined).toBeVisible({ timeout: 30_000 });
+    await shot(reader, 'declined');
+    await declined.getByRole('button', { name: 'Done' }).click();
+    await expect(people).toBeHidden();
+  });
 });

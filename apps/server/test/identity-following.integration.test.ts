@@ -324,7 +324,12 @@ describe('a contact', () => {
     if (!notice) throw new Error('expected a notice');
     const spaces = await follow.declineFollow(bob.ctx, notice);
     expect(spaces).toEqual([
-      { spaceId: lib.spaceId, addedBy: [carol.vault.identity.public.id], owner: false },
+      {
+        spaceId: lib.spaceId,
+        addedBy: [carol.vault.identity.public.id],
+        known: true,
+        owner: false,
+      },
     ]);
     expect(aliceNow.identity.public).toEqual(next);
   });
