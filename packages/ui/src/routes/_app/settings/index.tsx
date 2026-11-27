@@ -34,6 +34,7 @@ import { useMeaningStatus } from '../../../meaning/background';
 import { meaningSettingState, searchByMeaning, useMeaningOffer } from '../../../meaning/setting';
 import { PluginsSummary } from '../../../plugins/plugin-settings';
 import { BrowserClipping } from '../../../settings/browser-clipping';
+import { ReplacedKeysRow } from '../../../sharing/follow-notice';
 import { ReplaceKeys } from '../../../settings/replace-keys';
 import { FormRow, OneOpen, SettingRow, SettingsGroup, THIS_DEVICE } from '../../../settings/rows';
 import { ThemePicker } from '../../../theme/theme-picker';
@@ -55,6 +56,12 @@ const GROUPS: Heading[] = [
   { id: 'plugins', text: 'Plugins', level: 2 },
   { id: 'ai', text: 'AI assistant', level: 2 },
 ];
+
+/** People this app followed to new keys, while the vault is unlocked. */
+function ReplacedKeys() {
+  const vault = useVault();
+  return vault.status === 'unlocked' ? <ReplacedKeysRow ctx={vault.ctx} /> : null;
+}
 
 /**
  * One page of grouped rows, each with its state and one action. Forms open
@@ -92,6 +99,7 @@ function Settings() {
               <TwoFactor />
               <Passkeys />
               <ReplaceKeys />
+              <ReplacedKeys />
               <IdleLock />
               {!desktop && <RememberUnlock />}
               <DesktopApps />

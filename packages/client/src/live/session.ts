@@ -499,6 +499,12 @@ function openGrantedKey({
   }
   return openAnyEnvelope(envelopes, (raw) => {
     const envelope = parseWith(MetadataEnvelopeV2, raw, 'Session envelope');
+    // A live session is joined only at the current key: one sealed to a key
+    // the person replaced was ended by the rotation, and whoever holds that
+    // key could read what is typed in it (section 4.6).
+    if (envelope.recipientKeyVersion !== reader.public.keyVersion) {
+      throw new CryptoError('wrong-recipient', 'Session envelope is for a replaced key');
+    }
     const key = checkEnvelopeV2({
       reader,
       trust,

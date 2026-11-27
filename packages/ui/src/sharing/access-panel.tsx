@@ -1,14 +1,14 @@
 import {
   groupOperations,
+  IdentityId,
   sharingOperations,
-  type IdentityId,
   type ShareId,
   type SpaceId,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
 import type { GroupId } from '@wikistow/contracts';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, MoreHorizontal, ShieldAlert, Users } from 'lucide-react';
+import { Bot, KeyRound, MoreHorizontal, ShieldAlert, Users } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
 import { Avatar } from '@/components/avatar';
 import { Name, plainText } from '@/components/name';
@@ -30,6 +30,7 @@ import {
 import { groupsQuery, refreshAccess, treeQuery } from '../data/queries';
 import { useOwnerRequirements } from './owner-standing';
 import { useClient } from '../vault/store';
+import { followsQuery, showFollow } from './follow-notice';
 import { needsKeyReview, type KeyOutcome } from './key-change';
 import { AgentName } from '../agents/agent-name';
 import {
@@ -124,6 +125,9 @@ export function AccessPanel({
   const queryClient = useQueryClient();
   const { data: tree } = useQuery(treeQuery(ctx, spaceId));
   const groups = useQuery(groupsQuery(ctx, spaceId));
+  // People this app followed to a new key: their details show both keys.
+  const { data: follows } = useQuery(followsQuery(ctx));
+  const followed = new Set((follows ?? []).map((entry) => entry.from.identity.id));
   const state = groups.data;
   const { shareId } = share;
   // Null until the groups list holds this share, as just after it is made.
@@ -661,6 +665,15 @@ export function AccessPanel({
                       onClick={() => void reviewKey(who)}
                     >
                       <ShieldAlert strokeWidth={1.75} /> Key changed
+                    </Button>
+                  )}
+                  {followed.has(p.identityId) && !keyChanged && (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => showFollow(IdentityId.parse(p.identityId))}
+                    >
+                      <KeyRound strokeWidth={1.75} /> Replaced their keys
                     </Button>
                   )}
                   {p.waiting && !keyChanged && (
