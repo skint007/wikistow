@@ -66,7 +66,9 @@ function Unlock() {
   const { data: keys, isPending: checking } = useQuery({
     queryKey: ['kept-keys-check', accountId],
     queryFn: async () => {
-      const check = await checkKeptKeys().catch(() => null);
+      // However the answer stalls, the form shows within moments.
+      const stalled = new Promise<null>((resolve) => setTimeout(resolve, 8_000, null));
+      const check = await Promise.race([checkKeptKeys().catch(() => null), stalled]);
       return check ?? { kind: 'unknown' as const };
     },
     enabled: accountId !== undefined,

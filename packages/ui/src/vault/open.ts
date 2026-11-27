@@ -211,7 +211,17 @@ export async function keptAnchor() {
 /** Move the anchor to keys this device unlocked with or replaced its keys with. */
 export async function keepAnchor(identity: UnlockedVault['identity']['public']) {
   const content = await keptContent();
-  if (content) await keptUnlock(content).keepAnchor({ anchor: identity, successor: null });
+  if (!content) return;
+  // A successor recorded meanwhile, as by another tab's check, stays until
+  // the anchor reaches it.
+  const kept = await keptUnlock(content).anchor();
+  const successor =
+    kept?.successor &&
+    kept.successor.id === identity.id &&
+    identity.keyVersion < kept.successor.keyVersion
+      ? kept.successor
+      : null;
+  await keptUnlock(content).keepAnchor({ anchor: identity, successor });
 }
 
 /**

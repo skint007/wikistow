@@ -241,7 +241,12 @@ function Choose({
         setError(
           'Something changed on another device, such as an agent enrolled. Check the list, and try again.',
         );
-      } else if (caught instanceof Error && 'code' in caught && caught.code === 'malformed') {
+      } else if (
+        caught instanceof Error &&
+        'code' in caught &&
+        caught.code === 'malformed' &&
+        caught.message.includes('agent')
+      ) {
         void refresh();
         setError('An agent you ticked was revoked meanwhile. Check the list, and try again.');
       } else {
@@ -476,6 +481,8 @@ async function sendAndFinish(
     // Only now, so a panel opened again meanwhile waited for this send.
     if (pending === held) pending = null;
   } catch {
+    // The browser's other tabs hold the old keys whatever failed here.
+    tellKeysReplaced();
     // The old keys open nothing the server takes now: this tab locks too.
     if (vaultStore.epoch() === epoch) vaultStore.lock({ forget: false });
     finished = { kind: 'not-opened', epoch: vaultStore.epoch() };
