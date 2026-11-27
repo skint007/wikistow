@@ -136,6 +136,12 @@ export async function appendContacts(
   if (!contactsPayloadsMatch(input.record)) {
     throw new ContentError('contacts-invalid', 'Its payloads aren’t the ones it signs');
   }
+  // Nor one its owner holds no key to.
+  const toOwner = input.record.keys.some(
+    (key) =>
+      key.recipientId === input.owner.id && key.recipientKeyVersion === input.owner.keyVersion,
+  );
+  if (!toOwner) throw new ContentError('contacts-invalid', 'Its key isn’t sealed to you');
   const previous = current ? SignedContactsRecord.loose().safeParse(current.sealed) : null;
   const prevHash = previous?.success ? contactsHash(previous.data.record) : null;
   if (current && next.prevHash !== prevHash) {

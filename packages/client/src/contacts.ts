@@ -362,13 +362,6 @@ export type OpenedContacts = {
 };
 
 /**
- * Open a contacts record as its owner or one of the owner's agents. Checks the
- * owner's signature, the payload hashes, and each key against its signed
- * commitment before decrypting. `owner` is the vault identity for a human, or
- * the human pinned at enrollment for an agent. The caller checks the result
- * against its contacts mark (`compareContactsMark`).
- */
-/**
  * Whether both sealed payloads are the ones the record signs, by hash: what
  * the server can check of a version it can't open.
  */
@@ -379,6 +372,13 @@ export function contactsPayloadsMatch(sealed: SealedContacts): boolean {
   );
 }
 
+/**
+ * Open a contacts record as its owner or one of the owner's agents. Checks the
+ * owner's signature, the payload hashes, and each key against its signed
+ * commitment before decrypting. `owner` is the vault identity for a human, or
+ * the human pinned at enrollment for an agent. The caller checks the result
+ * against its contacts mark (`compareContactsMark`).
+ */
 export function openContacts({
   reader,
   owner,

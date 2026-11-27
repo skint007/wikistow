@@ -10,7 +10,7 @@ import type { RouteDef } from '../route.ts';
 // Replacing a person's identity keys (protocol section 4.6, #327).
 
 /** More agents than any account keeps live at once. */
-const MAX_AGENTS = 1000;
+const MAX_AGENTS = 10_000;
 
 /**
  * Replace the caller's identity keys with the ones `rotation` names, one key

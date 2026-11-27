@@ -91,6 +91,10 @@ export async function rotateIdentity(
     await lockKeysForRotation(tx, input.accountId);
     const writer = await queueWriter(tx, input.accountId);
     const { rotation } = input;
+    // As Postgres stores key versions, in an `integer`.
+    if (rotation.to.keyVersion > 2_147_483_647) {
+      throw new ContentError('invalid-request', 'That key version is out of range');
+    }
     const again = await sentBefore(tx, input);
     if (again) return again;
 
@@ -470,16 +474,24 @@ async function revokeAgents(tx: Database, accountId: string, agentIds: readonly 
  * lands before this or finds the session ended. Answers how many it ended.
  */
 async function endLiveSessions(tx: Database, identityId: string): Promise<number> {
-  const ended = await tx.execute<{ id: string }>(sql`
-    update ${liveSessions} s set ended_at = clock_timestamp(), ended_reason = 'access',
-        ended_position = s.last_position,
-        ended_draft_head = (select h.draft_head from ${pageHeads} h where h.page_id = s.page_id)
+  // Held in ID order first, so two of these, or one and another change
+  // ending many sessions, don't each wait on a row the other holds.
+  const open = await tx.execute<{ id: string }>(sql`
+    select s.id from ${liveSessions} s
       where s.ended_at is null and s.space_id in (
         select o.space_id from ${spaceOwners} o
           where o.identity_id = ${identityId} and o.removed_at is null
         union
         select sh.space_id from ${shareMembers} m join ${shares} sh on sh.id = m.share_id
           where m.identity_id = ${identityId})
+      order by s.id for update`);
+  if (open.length === 0) return 0;
+  const ids = open.map((row) => row.id);
+  const ended = await tx.execute<{ id: string }>(sql`
+    update ${liveSessions} s set ended_at = clock_timestamp(), ended_reason = 'access',
+        ended_position = s.last_position,
+        ended_draft_head = (select h.draft_head from ${pageHeads} h where h.page_id = s.page_id)
+      where s.ended_at is null and s.id = any(${sql.param(ids)}::text[])
       returning s.id`);
   return ended.length;
 }

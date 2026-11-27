@@ -2,6 +2,7 @@
 // the rotate route's checks and its one transaction, the statements and
 // earlier keys it serves, and the setting that keeps it off.
 import {
+  agentOperations,
   changeVaultPassphrase,
   createApiClient,
   generateIdentity,
@@ -37,7 +38,7 @@ import {
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { PASSWORD } from './support/accounts.ts';
-import { asAgent, enrolledAgent } from './support/agents.ts';
+import { asAgent, cliRequest, enrolledAgent } from './support/agents.ts';
 import { personWithVault, rejection } from './support/content.ts';
 import { Browser, createTestApp, type TestApp } from './support/harness.ts';
 import { startSession } from './support/live.ts';
@@ -331,6 +332,33 @@ describe('replacing keys', () => {
   });
 });
 
+describe('the edges', () => {
+  it('rotates a person with no contacts record yet, to its version 1', async () => {
+    const alice = await personWithVault(t);
+    const prepared = await prepare(alice);
+    expect(prepared.request.rotation.contacts).toBeNull();
+    expect(prepared.request.contacts.record.version).toBe(1);
+    const answer = await rotate(alice, prepared.request);
+    expect(answer).toEqual({ vaultVersion: 2, contactsVersion: 1 });
+    // Sent again, it is the same rotation.
+    expect(await rotate(alice, prepared.request)).toEqual(answer);
+    const after = await openSession(alice.api, prepared.vault);
+    expect(after.contacts.book.record).toMatchObject({ version: 1, ownerKeyVersion: 2 });
+  });
+
+  it('cancels an enrollment claimed at the old key', async () => {
+    const alice = await personWithRecord();
+    const cli = await cliRequest(t);
+    await agentOperations.claimEnrollment(alice.ctx, cli.pending.requested.lookupCode);
+    await rotate(alice, (await prepare(alice)).request);
+    const [row] = await t.db
+      .select({ state: schema.agentEnrollments.state })
+      .from(schema.agentEnrollments)
+      .where(eq(schema.agentEnrollments.id, cli.pending.requested.enrollmentId));
+    expect(row?.state).toBe('cancelled');
+  });
+});
+
 describe('the checks', () => {
   it('takes the first statement for a key version, answers the same one sent again, and refuses another', async () => {
     const alice = await personWithRecord();
@@ -472,6 +500,15 @@ describe('the checks', () => {
       'rotation-exists',
     );
     expect(await rotate(alice, first.request)).toMatchObject({ vaultVersion: 2 });
+  });
+
+  it('refuses a contacts version whose key isn’t sealed to the new key', async () => {
+    const alice = await personWithRecord();
+    const { request } = await prepare(alice);
+    const unsealed = { ...request.contacts, keys: [] };
+    expect(await rejection(rotate(alice, { ...request, contacts: unsealed }))).toBe(
+      'contacts-invalid',
+    );
   });
 
   it('refuses a contacts version whose payloads aren’t the ones it signs', async () => {
