@@ -214,6 +214,8 @@ export type DeclinedOwnerSpace = {
   known: boolean;
   /** Whether the server lists this person as an owner there, who can remove them, then leave; null when it couldn't say. */
   owner: boolean | null;
+  /** Whether the server still lists the declined person as an owner there; null when it couldn't say. */
+  stillOwner: boolean | null;
 };
 
 /**
@@ -231,10 +233,8 @@ export async function declinedOwnerSpaces(
   const out: DeclinedOwnerSpace[] = [];
   for (const entry of shared.spaceOwners) {
     const accepted = entry.owners.some((o) => o.id === id && removed.has(o.keyHash));
-    // Signers the record accepts there, and hasn't removed.
-    const owners = new Set<string>(
-      entry.owners.filter((o) => !entry.removedOwners.includes(o.id)).map((o) => o.id),
-    );
+    // Signers the record accepted there, even ones this person removed since.
+    const owners = new Set<string>(entry.owners.map((o) => o.id));
     const statements = await ctx.api
       .call(ownerRoutes.statements, { params: { spaceId: entry.spaceId } })
       .then((answer) => answer.statements)
@@ -246,11 +246,9 @@ export async function declinedOwnerSpaces(
       (s) => s.owner.id === id && removed.has(s.owner.keyHash) && owners.has(s.signerId),
     );
     if (!accepted && naming.length === 0) continue;
-    const listed = await ctx.api
+    const served = await ctx.api
       .call(ownerRoutes.owners, { params: { spaceId: entry.spaceId } })
-      .then(({ owners: served }) =>
-        served.some((owner) => owner.identity.id === ctx.identity.public.id),
-      )
+      .then((answer) => answer.owners.map((owner) => owner.identity.id as string))
       .catch((error: unknown) => {
         if (!notFollowed(error)) throw error;
         return null;
@@ -259,7 +257,8 @@ export async function declinedOwnerSpaces(
       spaceId: entry.spaceId,
       addedBy: [...new Set(naming.map((s) => s.signerId))],
       known: statements !== null,
-      owner: listed,
+      owner: served && served.includes(ctx.identity.public.id),
+      stillOwner: served && served.includes(id),
     });
   }
   return out;

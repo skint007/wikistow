@@ -329,6 +329,7 @@ describe('a contact', () => {
         addedBy: [carol.vault.identity.public.id],
         known: true,
         owner: false,
+        stillOwner: true,
       },
     ]);
     expect(aliceNow.identity.public).toEqual(next);

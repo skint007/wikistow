@@ -229,7 +229,7 @@ function DeclinedWarnings({
         <DialogDescription>
           This app shares nothing new with either of their keys now.
           {spaces.length > 0 &&
-            ' But in the spaces below an owner accepted the key you declined, so it may read what anyone saves there, until an owner removes that person.'}
+            ' But in the spaces below an owner accepted the key you declined, so it may read what anyone saves there, until an owner removes that person. People and owners it brought in, whom other owners accepted, may stay.'}
         </DialogDescription>
       </DialogHeader>
       {spaces.length > 0 && (
@@ -256,13 +256,15 @@ function DeclinedWarnings({
                 ) : (
                   'This app took that key as the space’s owner when it first saw the space.'
                 )}{' '}
-                {space.owner === true
-                  ? `As an owner, you can remove ${name} as an owner there, then leave the space if you want to.`
-                  : space.owner === false
-                    ? `Ask one of its owners to remove ${name}.`
-                    : `If you’re an owner there, you can remove ${name} as an owner; if not, ask one of its owners to.`}
+                {space.stillOwner === false
+                  ? `${name} was an owner there when this app accepted the key; the server no longer lists them as one.`
+                  : space.owner === true
+                    ? `As an owner, you can remove ${name} as an owner there, and then leave the space if another owner stays.`
+                    : space.owner === false
+                      ? `Ask one of its owners to remove ${name}.`
+                      : `If you’re an owner there, you can remove ${name} as an owner; if not, ask one of its owners to.`}
               </p>
-              {space.owner !== false && (
+              {space.owner !== false && space.stillOwner !== false && (
                 <Link
                   to="/s/$spaceId/members"
                   params={{ spaceId: space.spaceId }}
