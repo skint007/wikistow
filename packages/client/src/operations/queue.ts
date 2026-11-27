@@ -395,12 +395,15 @@ export async function sealQueueAgain(
   const moving: Moving[] = [];
   // Each file's old name, with what it opened to, read once however many changes name it.
   const files = new Map<string, { opened: Uint8Array; renamed: string }>();
+  // A change that can't be read may be one under `from`.
+  let unread: unknown = null;
   for (const name of names.filter((n) => n.startsWith(ENTRY))) {
-    // A read that fails stops the run, and the session keeps nothing there
-    // (`sealKeptAgain`), so nothing kept under either key is hidden. An item
-    // listed that reads as missing failed too, as the desktop app's files
-    // read every failure as nothing.
-    const sealed = await readListed(store.queue, name);
+    // An item listed that reads as missing failed too, as the desktop app's
+    // files read every failure as nothing.
+    const sealed = await readListed(store.queue, name).catch((error: unknown) => {
+      unread = error;
+      return null;
+    });
     const plaintext = sealed && from.open(name, sealed);
     if (!plaintext) continue;
     let json: unknown;
@@ -426,6 +429,11 @@ export async function sealQueueAgain(
     }
     moving.push({ name, plaintext, renamed: entryNameOf(to, kind, id), files: named });
   }
+  // With changes to move and one that couldn't be read, the run stops, and
+  // the session keeps nothing there (`sealKeptAgain`), so no change moves
+  // without one it goes with, and none is hidden. With nothing to move, an
+  // unreadable change is skipped, as the queue skips it.
+  if (unread !== null && moving.length > 0) throw unread;
   const moved = new Set<string>();
   for (const { name, plaintext, renamed, files: named } of moving) {
     if (listed.has(renamed)) {

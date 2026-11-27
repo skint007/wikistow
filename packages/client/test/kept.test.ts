@@ -506,6 +506,16 @@ describe('after replacing keys (section 4.6)', () => {
     expect(await kinds(after)).toEqual(['page', 'publish']);
     expect(await after.queue.held([ref])).toEqual([ref]);
     expect(await before.queue.entries()).toEqual([]);
+    // Once everything is sealed again, a change that can't be read stops nothing.
+    store.queue.read = async (name) => {
+      if (name.startsWith('e')) throw new Error('A read failed');
+      return read(name);
+    };
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
   });
 
   it('seals what was kept under an earlier key again under the new one, queued changes included', async () => {
