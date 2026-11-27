@@ -549,7 +549,11 @@ export async function giveKeys(
         sealerKeyVersion: number;
       };
       const givers = sealerId === sealer.id && sealerKeyVersion === sealer.keyVersion;
-      const replacedSince = (sealers.get(sealerId) ?? sealerKeyVersion) > sealerKeyVersion;
+      // Only at the current version, where writing needs it: what an earlier
+      // version holds stays, as the member's app may open it through that key.
+      const replacedSince =
+        h.keyVersion === share.currentKeyVersion &&
+        (sealers.get(sealerId) ?? sealerKeyVersion) > sealerKeyVersion;
       const covers = h.drafts || !drafts;
       if (drafts !== undefined && ((covers && !replacedSince) || (keepAll && !givers))) {
         kept.add(key);

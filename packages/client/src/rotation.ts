@@ -56,7 +56,10 @@ export type RotationOffer = {
   reason: 'old-key' | 'replaced-keys';
   identity: PublicIdentity;
   role: 'reader' | 'editor';
-  /** Whether an envelope of the current version from an owner that counts backs it: ticked by default only then. */
+  /**
+   * False when only an earlier key's envelope holds them, so they are
+   * ticked as a reader unless raised (section 4.6).
+   */
   vouched: boolean;
 };
 
@@ -291,7 +294,8 @@ export function planRotation({
           reason: 'replaced-keys',
           identity,
           role: most === 'editor' ? (held ?? 'editor') : 'reader',
-          vouched: counted !== undefined,
+          // Only an earlier key's envelope makes them a reader by default.
+          vouched: counted !== undefined || earlier === undefined,
         }
       : counted
         ? null

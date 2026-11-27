@@ -128,8 +128,9 @@ describe('a member who replaced their keys', () => {
     const plans = await rotated.planRekey(bob.ctx, { spaceId: lib.spaceId, person: hers.person });
     expect(plans.map((p) => p.plan.rekeyed)).toEqual([[id]]);
     await rotated.applyRekey(bob.ctx, plans);
+    // An editor still: no earlier key vouched for her, only Bob.
     expect((await shareOf(bob.ctx, lib.spaceId)).members).toMatchObject([
-      { identityId: id, keyVersion: 2 },
+      { identityId: id, keyVersion: 2, role: 'editor' },
     ]);
     // And they can't be made a co-owner before that: shown on a fresh share below.
   });

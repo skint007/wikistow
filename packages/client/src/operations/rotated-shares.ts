@@ -164,7 +164,7 @@ export async function applyWithTicks(
     tick.some((t) => {
       const shown = offeredAt(t.identityId);
       const now = planned.plan.remaining.find(({ identity }) => identity.id === t.identityId);
-      return !shown || !now || keyHash(now.identity) !== keyHash(shown);
+      return !shown || !now || keyHash(now.identity) !== keyHash(shown) || now.role !== t.role;
     });
   if (changed) throw new ApiError(409, 'stale-head', 'Who keeps the share changed; look again');
   return applyShareRotation(ctx, planned);
