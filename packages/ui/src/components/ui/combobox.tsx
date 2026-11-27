@@ -1,8 +1,10 @@
 import { useEffect, useId, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
+import { composing } from '@/lib/composing';
 import { cn } from '@/lib/utils';
 import { Input } from './input';
 
-export type ComboboxOption = { value: string; label: string | null };
+/** `marks` show after the label, such as pills; typing doesn't match them. */
+export type ComboboxOption = { value: string; label: string | null; marks?: ReactNode };
 
 /** The most options drawn at once; typing narrows the rest. */
 const SHOWN = 100;
@@ -65,10 +67,16 @@ export function Combobox({
   const listed = open && shown.length > 0;
   useEffect(() => setActive(-1), [matches]);
   const optionId = (i: number) => `${ids}-${i}`;
+  // The option the arrows reach scrolls into the list's view, and only
+  // the list scrolls: moving the page could take the field under a bar.
   useEffect(() => {
-    if (listed && active >= 0) {
-      document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
-    }
+    const list = document.getElementById(`${ids}-list`);
+    const item = listed && active >= 0 ? document.getElementById(optionId(active)) : null;
+    if (!list || !item) return;
+    const box = list.getBoundingClientRect();
+    const at = item.getBoundingClientRect();
+    if (at.top < box.top) list.scrollTop -= box.top - at.top;
+    else if (at.bottom > box.bottom) list.scrollTop += at.bottom - box.bottom;
   });
 
   function pick(option: ComboboxOption) {
@@ -98,6 +106,7 @@ export function Combobox({
         onClick={() => setOpen(true)}
         onBlur={(event) => {
           setOpen(false);
+          setActive(-1);
           field?.onBlur?.(event);
         }}
         onChange={(event) => {
@@ -106,6 +115,8 @@ export function Combobox({
           setOpen(true);
         }}
         onKeyDown={(event) => {
+          // Keys that compose text, such as Enter taking a Japanese word, aren't the list's.
+          if (composing(event)) return field?.onKeyDown?.(event);
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
             if (!open) return setOpen(true);
@@ -120,12 +131,21 @@ export function Combobox({
           } else if (event.key === 'Escape' && open && options) {
             event.preventDefault();
             setOpen(false);
+            // Opened again, it starts with none, so Enter keeps what was typed.
+            setActive(-1);
           }
           if (!event.defaultPrevented) field?.onKeyDown?.(event);
         }}
       />
       {open && options && (
-        <div className="absolute top-10 right-0 left-0 z-20 grid gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+        <div
+          // Keeps focus in the field, so the list stays open until a click
+          // on an option lands, and its scrollbar can be dragged.
+          onMouseDown={(event) => event.preventDefault()}
+          // Over the page, but under its sticky bars (z-10), such as the
+          // phone's top bar, so a list scrolled under one doesn't take its taps.
+          className="absolute top-10 right-0 left-0 z-5 grid gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        >
           <p role="status" className="px-2 pt-1 text-xs text-muted-foreground">
             {filter.trim()
               ? `${matches.length.toLocaleString()} of ${options.length.toLocaleString()} ${noun}`
@@ -133,19 +153,25 @@ export function Combobox({
             {matches.length > SHOWN && `, showing the first ${SHOWN}. Type to narrow them.`}
           </p>
           {shown.length > 0 && (
-            <ul id={`${ids}-list`} role="listbox" className="max-h-64 overflow-y-auto">
+            // Not a tab stop, as Chromium makes a scrolling box: leaving
+            // the field closes it, which would drop the focus.
+            <ul
+              id={`${ids}-list`}
+              role="listbox"
+              tabIndex={-1}
+              className="max-h-64 overflow-y-auto"
+            >
               {shown.map((option, i) => (
                 <li
                   key={option.value}
                   id={optionId(i)}
                   role="option"
                   aria-selected={i === active}
-                  // Keeps focus in the field, so the list stays open until the click lands.
-                  onMouseDown={(event) => event.preventDefault()}
                   onClick={() => pick(option)}
                   onMouseMove={() => setActive(i)}
                   className={cn(
-                    'flex cursor-pointer items-baseline gap-2 rounded-row px-2 py-1.5 text-sm',
+                    // Its parts wrap on a narrow window, rather than each losing its end.
+                    'flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-1 rounded-row px-2 py-1.5 text-sm',
                     i === active && 'bg-primary-soft text-primary-ink',
                   )}
                 >
@@ -155,6 +181,7 @@ export function Combobox({
                       {option.label}
                     </span>
                   )}
+                  {option.marks}
                 </li>
               ))}
             </ul>

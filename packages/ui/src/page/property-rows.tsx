@@ -1,3 +1,4 @@
+import { composing } from '@/lib/composing';
 import {
   formatPropertyDate,
   type Property,
@@ -5,7 +6,7 @@ import {
   type PropertyValue,
 } from '@wikistow/client';
 import { MoreHorizontal, X } from 'lucide-react';
-import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -513,10 +514,3 @@ function OneLine({
     />
   );
 }
-
-/**
- * Whether a key ends an IME's composition, and so is the IME's: Safari
- * sends the Enter that does with `isComposing` false, and key code 229.
- */
-export const composing = (event: KeyboardEvent<HTMLElement>) =>
-  event.nativeEvent.isComposing || event.keyCode === 229;
