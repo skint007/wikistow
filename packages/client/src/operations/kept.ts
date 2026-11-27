@@ -187,6 +187,37 @@ const KeptVersionJson = z.strictObject({
 const RECENT_BYTES = 32 * 1024 * 1024;
 
 const INDEX = 'index';
+
+/**
+ * Whether what this device kept for offline use is sealed under one of the
+ * person's earlier keys and not the current one, as after they replaced
+ * their keys (section 4.6). Then the session keeps nothing there, and
+ * collects nothing, so it stays for sealing again under the new key, which
+ * is not built yet (#327).
+ */
+export async function keptUnderEarlierKeys(
+  store: KeptStore,
+  {
+    identity,
+    installationId,
+    retired,
+  }: {
+    identity: PrivateIdentity;
+    installationId: InstallationId;
+    retired: readonly PrivateIdentity[];
+  },
+): Promise<boolean> {
+  if (retired.length === 0) return false;
+  const readable = async (key: PrivateIdentity) => {
+    const sealer = keptSealer({ identity: key, installationId });
+    const name = sealer.name(INDEX);
+    const sealed = await store.items.read(name).catch(() => null);
+    return sealed !== null && sealer.open(name, sealed) !== null;
+  };
+  if (await readable(identity)) return false;
+  for (const key of retired) if (await readable(key)) return true;
+  return false;
+}
 const spaceItem = (spaceId: SpaceId) => `space ${spaceId}`;
 const versionItem = (revisionId: RevisionId) => `version ${revisionId}`;
 const blobItem = (blobHash: string) => `blob ${blobHash}`;

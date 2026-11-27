@@ -16,7 +16,13 @@ import { desktop } from '../../../desktop';
 import { tabSafeMode } from '../../../plugins/safe-mode';
 import { isApple } from '../../../shell/search-model';
 import { vaultMessage } from '../../../vault/messages';
-import { checkKeptKeys, noLongerOpens, rememberOpenVault, unlockWith } from '../../../vault/open';
+import {
+  checkKeptKeys,
+  KeysRefused,
+  noLongerOpens,
+  rememberOpenVault,
+  unlockWith,
+} from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
 import { forgetInBrowser } from '../../../vault/tab-unlock';
 
@@ -55,12 +61,18 @@ function Unlock() {
   const clips = useWaitingClips();
   // Before a passphrase is asked for, or a remembered unlock tried: were the
   // keys this device last unlocked with replaced elsewhere (section 4.6)?
+  // A check that failed shows the form, and is tried again, so a replacement
+  // the directory shows once it answers still asks.
   const { data: keys, isPending: checking } = useQuery({
     queryKey: ['kept-keys-check', accountId],
-    queryFn: async () => (await checkKeptKeys().catch(() => null)) ?? { kind: 'same' as const },
+    queryFn: async () => {
+      const check = await checkKeptKeys().catch(() => null);
+      return check ?? { kind: 'unknown' as const };
+    },
     enabled: accountId !== undefined,
     staleTime: Infinity,
     gcTime: 0,
+    refetchInterval: (query) => (query.state.data?.kind === 'unknown' ? 15_000 : false),
   });
   const [answer, setAnswer] = useState<'did' | 'didnt' | null>(null);
   const replaced = keys?.kind === 'replaced' && answer !== 'did';
@@ -87,7 +99,8 @@ function Unlock() {
         // A key that no longer opens this vault is no use to keep. Anything
         // else, such as the server being away, leaves it for next time; a
         // vault this version can't unlock says so before anyone types.
-        if (noLongerOpens(caught)) await desktop.forgetVault().catch(() => {});
+        if (caught instanceof KeysRefused) setError(vaultMessage(caught));
+        else if (noLongerOpens(caught)) await desktop.forgetVault().catch(() => {});
         else if (caught instanceof CryptoError) setError(vaultMessage(caught));
       } finally {
         vaultKey?.fill(0);

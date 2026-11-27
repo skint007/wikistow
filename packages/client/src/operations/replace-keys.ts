@@ -345,10 +345,7 @@ export function judgeUnlock(
  * unclear answer, or a refusal of a resend, which may follow a first send
  * that landed. Its signatures are deterministic, so a match is this one.
  */
-export async function rotationLanded(
-  api: ApiClient,
-  prepared: PreparedRotation,
-): Promise<boolean> {
+export async function rotationLanded(api: ApiClient, prepared: PreparedRotation): Promise<boolean> {
   const { rotation } = prepared.request;
   const { rotations } = await api.call(identityRoutes.rotations, {
     params: { identityId: rotation.id },

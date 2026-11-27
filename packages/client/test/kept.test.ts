@@ -412,3 +412,23 @@ describe('keeping pages for offline', () => {
     expect(asked).toEqual([]);
   });
 });
+
+describe('after replacing keys (section 4.6)', () => {
+  it('says what is kept under an earlier key only, so nothing collects it', async () => {
+    const store = memoryKeptStore();
+    const id = IdentityId.parse('kept-person');
+    const first = generateIdentity({ kind: 'human', id });
+    const second = generateIdentity({ kind: 'human', id, keyVersion: 2 });
+    const installationId = InstallationId.parse('kept-installation');
+    const before = await keptOperations.KeptContent.open(store, {
+      identity: first,
+      installationId,
+    });
+    await before.keepList({ spaces: [], order: [], shared: [] } as never);
+    const under = (identity: typeof first, retired: (typeof first)[]) =>
+      keptOperations.keptUnderEarlierKeys(store, { identity, installationId, retired });
+    expect(await under(second, [first])).toBe(true);
+    expect(await under(first, [])).toBe(false);
+    expect(await under(second, [])).toBe(false);
+  });
+});

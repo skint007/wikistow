@@ -31,7 +31,7 @@ import {
   writeContacts,
   type ContactsBook,
 } from './contacts.ts';
-import { KeptContent } from './kept.ts';
+import { KeptContent, keptUnderEarlierKeys } from './kept.ts';
 import type { SpaceKeys } from './keys.ts';
 import { keepWrapper } from './vault.ts';
 
@@ -136,7 +136,13 @@ export async function openSession(
   { kept: file, content }: { kept?: KeptFile; content?: KeptStore } = {},
 ): Promise<ClientContext> {
   const { installationId, restore } = await api.call(systemRoutes.installation);
-  const kept = file && (await KeptMarks.open(file, { identity: vault.identity, installationId }));
+  const kept =
+    file &&
+    (await KeptMarks.open(file, {
+      identity: vault.identity,
+      installationId,
+      retired: vault.retired,
+    }));
   try {
     return await sessionFrom(api, vault, { installationId, restore, kept, content });
   } catch (error) {
@@ -169,8 +175,10 @@ async function sessionFrom(
   const book = await readContacts(owner, kept?.contactsMark ?? null);
   kept?.keepContacts(book);
   trust.load(book.payloads);
-  const keptContent =
-    content && (await KeptContent.open(content, { identity: vault.identity, installationId }));
+  const who = { identity: vault.identity, installationId };
+  const keepsContent =
+    content && !(await keptUnderEarlierKeys(content, { ...who, retired: vault.retired }));
+  const keptContent = keepsContent ? await KeptContent.open(content, who) : undefined;
   // For a session opened offline later (`openKeptSession`).
   if (content)
     await keptUnlock(content)
@@ -213,7 +221,10 @@ export async function openKeptSession(
 ): Promise<ClientContext | null> {
   const installationId = await keptUnlock(content).installationId();
   if (!installationId) return null;
-  const kept = await KeptMarks.open(file, { identity: vault.identity, installationId });
+  // Kept under earlier keys only: nothing opens offline until it is sealed again.
+  const who = { identity: vault.identity, installationId };
+  if (await keptUnderEarlierKeys(content, { ...who, retired: vault.retired })) return null;
+  const kept = await KeptMarks.open(file, { ...who, retired: vault.retired });
   const owner = { installationId, identity: vault.identity };
   let book: ReturnType<typeof openKeptContacts>;
   try {

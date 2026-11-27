@@ -470,3 +470,34 @@ describe('pending changes across tabs', () => {
     expect(changePending(two, spaceId, shareId)).toBe(false);
   });
 });
+
+describe('after replacing keys (section 4.6)', () => {
+  const next = generateIdentity({ id: IdentityId.parse('alice'), kind: 'human', keyVersion: 2 });
+
+  it('reads marks sealed under an earlier key, and seals them under the new one', async () => {
+    const b = browser();
+    const before = await KeptMarks.open(b.tab(), who);
+    before.raise(spaceId, shareId, 7);
+    await expect
+      .poll(async () => (await KeptMarks.open(b.tab(), who)).get(spaceId, shareId))
+      .toBe(7);
+    // The new key alone reads nothing; with the earlier one retired, the mark stands.
+    expect(
+      (await KeptMarks.open(b.tab(), { identity: next, installationId })).get(spaceId, shareId),
+    ).toBe(0);
+    const after = await KeptMarks.open(b.tab(), {
+      identity: next,
+      installationId,
+      retired: [identity],
+    });
+    expect(after.get(spaceId, shareId)).toBe(7);
+    expect(after.contactsMark).toBeNull();
+    // Its next write seals them under the new key, so they outlast the earlier one.
+    after.raise(spaceId, other, 3);
+    await expect
+      .poll(async () =>
+        (await KeptMarks.open(b.tab(), { identity: next, installationId })).get(spaceId, shareId),
+      )
+      .toBe(7);
+  });
+});

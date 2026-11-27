@@ -119,7 +119,10 @@ export async function unlockWith(
   if (lockedSince()) throw refused();
   // Never down from the keys this device last unlocked with, nor below keys
   // the directory showed replaced them (section 4.6).
-  const judged = await judgeOpened(vault, { online: !opened.keptAt });
+  const judged = await judgeOpened(vault, { online: !opened.keptAt }).catch((error: unknown) => {
+    vaultStore.dropStaged();
+    throw error;
+  });
   if (judged !== 'ok') {
     vaultStore.dropStaged();
     throw new KeysRefused(judged);
