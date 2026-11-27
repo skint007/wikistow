@@ -6,6 +6,7 @@
 import {
   agentOperations,
   closeSession,
+  contactsOperations,
   replaceKeysOperations as replaceKeys,
   type ClientContext,
   type UnlockedVault,
@@ -75,6 +76,9 @@ vaultStore.subscribe(() => {
  * row says, so it says it after a lock too.
  */
 let landedFor: string | null = null;
+
+/** Counts preparations, so only the latest is kept. */
+let preparing = 0;
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
 
@@ -146,7 +150,12 @@ function Choose({
   const agents = useQuery({
     queryKey: [PLAIN, 'rotation-agents', vault.identity.public.keyVersion],
     queryFn: async () => {
-      const keepable = await replaceKeys.keepableAgents(ctx);
+      // From the record as the server has it now, as preparing reads it.
+      const book = await contactsOperations.readContacts(
+        { api: ctx.api, installationId: ctx.installationId, identity: ctx.identity },
+        ctx.contacts.book.mark,
+      );
+      const keepable = await replaceKeys.keepableAgents(ctx, book.payloads);
       const ids = new Set<string>(keepable.map((agent) => agent.agentId));
       // Every other live agent is revoked: listed too, as the server names it.
       const others = (await agentOperations.listAgents(ctx)).filter(
@@ -191,15 +200,19 @@ function Choose({
         );
       if (reused) return setError('Choose a passphrase you haven’t used for your vault.');
       const epoch = vaultStore.epoch();
-      const shown = [...(agents.data?.keepable ?? []), ...(agents.data?.others ?? [])];
+      const keepable = (agents.data?.keepable ?? []).map((agent) => agent.agentId);
+      const others = (agents.data?.others ?? []).map((agent) => agent.agentId);
+      const mine = ++preparing;
       const prepared = await replaceKeys.prepareRotation(ctx, {
         vault,
         crypto: workerVaultCrypto,
         passphrase: passphrase.value,
         keep: [...kept],
-        shown: shown.map((agent) => agent.agentId),
+        shown: { live: [...keepable, ...others], keepable },
       });
-      if (vaultStore.epoch() !== epoch) {
+      // Locked meanwhile, or another preparation started since, as in a
+      // panel closed and opened again: this one goes.
+      if (vaultStore.epoch() !== epoch || mine !== preparing) {
         zeroVault(prepared.vault);
         return;
       }
@@ -415,8 +428,6 @@ async function sendAndFinish(
   // account is signed in here, even if the vault locked meanwhile.
   if (pending === held) pending = null;
   landedFor = prepared.vault.accountId;
-  // The browser's other tabs hold the old keys: they lock.
-  tellKeysReplaced();
   try {
     const me = queryClient.getQueryData(meQuery.queryKey);
     if (me?.account.id === prepared.vault.accountId) {
@@ -430,6 +441,8 @@ async function sendAndFinish(
         await keepChangedWrapper(served);
       }
     }
+    // The browser's other tabs hold the old keys: they lock, now the anchor moved.
+    tellKeysReplaced();
     if (vaultStore.epoch() !== epoch) throw new LockedMeanwhile();
     const ctx = await startSession(prepared.vault);
     // Locked while it opened: nothing opens.

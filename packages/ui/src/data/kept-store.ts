@@ -425,7 +425,11 @@ export async function forgetKept(): Promise<void> {
 
 const KEYS_REPLACED = 'keys-replaced';
 // This tab, so it doesn't take its own message: every channel object hears it, here too.
-const THIS_TAB = typeof crypto === 'undefined' ? String(Math.random()) : crypto.randomUUID();
+// `getRandomValues`, not `randomUUID`, which plain-HTTP origins lack.
+const THIS_TAB =
+  typeof crypto === 'undefined'
+    ? String(Math.random())
+    : Array.from(crypto.getRandomValues(new Uint32Array(4)), (n) => n.toString(36)).join('');
 
 /**
  * After this tab replaced the person's keys (section 4.6): tell the

@@ -111,10 +111,12 @@ export async function prepareRotation(
     kdf?: KdfParams;
     keep: readonly string[];
     /**
-     * Every live agent the dialog showed: one enrolled since, which the
-     * rotation would revoke unseen, makes it refuse (`stale-head`).
+     * What the dialog showed: every live agent, and those of them it
+     * offered to keep. An agent enrolled since, which the rotation would
+     * revoke unseen, or one it could keep that wasn't offered, makes it
+     * refuse (`stale-head`).
      */
-    shown?: readonly string[];
+    shown?: { live: readonly string[]; keepable: readonly string[] };
     now?: () => Date;
   },
 ): Promise<PreparedRotation> {
@@ -138,8 +140,12 @@ export async function prepareRotation(
     throw new CryptoError('malformed', 'Only a live agent this person enrolled can be kept');
   }
   const live = (await listAgents(ctx)).filter((a) => a.revokedAt === null).map((a) => a.agentId);
-  if (shown && live.some((id) => !shown.includes(id))) {
-    throw new ApiError(409, 'stale-head', 'An agent was enrolled since the list was shown');
+  if (
+    shown &&
+    (live.some((id) => !shown.live.includes(id)) ||
+      [...keepable].some((id) => !shown.keepable.includes(id)))
+  ) {
+    throw new ApiError(409, 'stale-head', 'The agents changed since the list was shown');
   }
   const { version: expectedVaultVersion } = await ctx.api.call(vaultRoutes.getVault);
 

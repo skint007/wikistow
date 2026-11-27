@@ -343,16 +343,26 @@ describe('the app’s side', () => {
       passphrase: NEW_PASSPHRASE,
       kdf: FAST_KDF,
       keep: [],
-      shown: [],
+      shown: { live: [], keepable: [] },
     });
     expect(await rejection(refused)).toBe('stale-head');
+    // Shown, but not offered to keep though it could be.
+    const unoffered = replaceKeys.prepareRotation(alice.ctx, {
+      vault: alice.vault,
+      crypto: inlineVaultCrypto,
+      passphrase: NEW_PASSPHRASE,
+      kdf: FAST_KDF,
+      keep: [],
+      shown: { live: [agent.agentId], keepable: [] },
+    });
+    expect(await rejection(unoffered)).toBe('stale-head');
     const shown = await replaceKeys.prepareRotation(alice.ctx, {
       vault: alice.vault,
       crypto: inlineVaultCrypto,
       passphrase: NEW_PASSPHRASE,
       kdf: FAST_KDF,
       keep: [],
-      shown: [agent.agentId],
+      shown: { live: [agent.agentId], keepable: [agent.agentId] },
     });
     expect(shown.request.revokedAgents).toEqual([agent.agentId]);
   });

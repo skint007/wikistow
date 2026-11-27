@@ -143,7 +143,7 @@ function Unlock() {
   if (!checkedRemembered || checking) return null;
   if (replaced) {
     return answer === 'didnt' ? (
-      <NotThem />
+      <NotThem onDid={() => setAnswer('did')} />
     ) : (
       <DidYouReplace onDid={() => setAnswer('did')} onDidnt={() => setAnswer('didnt')} />
     );
@@ -238,7 +238,7 @@ function DidYouReplace({ onDid, onDidnt }: { onDid: () => void; onDidnt: () => v
  * and the remembered unlock, and opens nothing with the replaced keys:
  * nothing more is signed or sealed with them here.
  */
-function NotThem() {
+function NotThem({ onDid }: { onDid: () => void }) {
   return (
     <AuthCard
       title="Someone else holds your keys"
@@ -256,6 +256,9 @@ function NotThem() {
         <Link to="/settings" hash="password" className="quiet-link">
           Change your password
         </Link>
+        <Button variant="outline" onClick={onDid}>
+          It was me after all
+        </Button>
       </div>
     </AuthCard>
   );
