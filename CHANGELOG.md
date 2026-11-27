@@ -6,6 +6,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- What's new goes to a release from one field, in place of a pill for each: it lists every release with its date and Prerelease and This version marks, narrows as a version or a date is typed, and opens the one chosen by mouse, by the arrows or by Enter. The app's comboboxes, Add property among them, keep the list open for a press on its scrollbar, leave keys an input method composes alone, stay under the sticky bars and scroll only their list. (#760)
+
 #### Server
 
 - A setting, `IDENTITY_ROTATION`, off unless set to `on`, for the route that replaces a person's identity keys. Leave it off: until replacing keys is fully built, someone who replaced theirs couldn't open what was shared with their earlier keys. (#755)
