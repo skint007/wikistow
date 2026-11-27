@@ -896,8 +896,12 @@ describe('identity key rotation test vectors (section 4.6)', () => {
         rotation.keys.slice(0, 2).map((key) => key.signSecretKey),
       );
     }
-    expect(() => unlockVault({ wrapper, secret: { kind: 'passphrase', passphrase } })).toThrow(
-      code('unsupported-format'),
-    );
+    // As this version unlocks it by default, and 0.31.0, which unlocked format 1 alone, didn't.
+    expect(
+      unlockVault({ wrapper, secret: { kind: 'passphrase', passphrase } }).retired,
+    ).toHaveLength(2);
+    expect(() =>
+      unlockVault({ wrapper, secret: { kind: 'passphrase', passphrase }, formats: [1] }),
+    ).toThrow(code('unsupported-format'));
   });
 });

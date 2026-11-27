@@ -145,16 +145,22 @@ describe('format 2 vaults (section 4.6)', () => {
   });
 
   // This version can't open what earlier keys hold yet, so it asks to update.
-  it('asks to update by default, before any secret is tried', () => {
-    expect(UNLOCKED_FORMATS).toEqual([1]);
+  it('opens format 2 by default, and asks to update for a later one before any secret is tried', () => {
+    expect(UNLOCKED_FORMATS).toEqual([1, 2]);
+    expect(
+      unlockVault({ wrapper: made.wrapper, secret: { kind: 'passphrase', passphrase } }).retired,
+    ).toHaveLength(2);
     expect(() =>
-      unlockVault({ wrapper: made.wrapper, secret: { kind: 'passphrase', passphrase: 'wrong' } }),
+      unlockVault({
+        wrapper: made.wrapper,
+        secret: { kind: 'passphrase', passphrase },
+        formats: [1],
+      }),
     ).toThrow(code('unsupported-format'));
     expect(() =>
       unlockVault({
         wrapper: { format: 3, accountId, anything: true },
-        secret: { kind: 'passphrase', passphrase },
-        formats: both,
+        secret: { kind: 'passphrase', passphrase: 'wrong' },
       }),
     ).toThrow(code('unsupported-format'));
     expect(() =>
@@ -297,9 +303,8 @@ describe('format 2 vaults (section 4.6)', () => {
   });
 
   // Before, the server's answer failed to parse, and the app said to try again.
-  it('is read from the server, and asks to update rather than to try again', async () => {
-    const answers = [made.wrapper, { format: 3, accountId, later: {} }];
-    for (const wrapper of answers) {
+  it('is read from the server, and a later format asks to update rather than to try again', async () => {
+    for (const wrapper of [{ format: 3, accountId, later: {} }]) {
       const api = createApiClient({
         fetch: async () =>
           new Response(JSON.stringify({ wrapper, version: 2 }), {
@@ -313,13 +318,15 @@ describe('format 2 vaults (section 4.6)', () => {
     }
   });
 
-  // Kept, it would only ask to update offline, in place of the wrapper that opens.
-  it('isn’t kept to unlock offline by a version that doesn’t unlock it', async () => {
+  // Kept, a later format would only ask to update offline, in place of the wrapper that opens.
+  it('is kept to unlock offline, and a later format isn’t', async () => {
     const store = memoryKeptStore();
     const v1 = createVault({ accountId, identity: first, passphrase, kdf: FAST_KDF });
     await keepWrapper(store, { wrapper: v1.wrapper, version: 1 });
     await keepWrapper(store, { wrapper: made.wrapper, version: 2 });
-    expect(await keptUnlock(store).vault()).toMatchObject({ wrapper: v1.wrapper, version: 1 });
+    expect(await keptUnlock(store).vault()).toMatchObject({ wrapper: made.wrapper, version: 2 });
+    await keepWrapper(store, { wrapper: { format: 3, accountId }, version: 3 });
+    expect(await keptUnlock(store).vault()).toMatchObject({ wrapper: made.wrapper, version: 2 });
   });
 
   it('is never made with keys that break those rules', () => {

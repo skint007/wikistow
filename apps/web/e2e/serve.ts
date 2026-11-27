@@ -86,6 +86,8 @@ const { app, treeChanges, commentChanges } = createApp({
     smtp: smtpConfig,
     trustProxy: false,
     rateLimit: false,
+    // Off in releases until replacing keys is fully built (#327); tests turn it on.
+    identityRotation: true,
     blobDir,
     // The browser derives vault keys at the real default cost, so the real floor applies.
     minKdf: MIN_VAULT_KDF,

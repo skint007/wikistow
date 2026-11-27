@@ -1,6 +1,7 @@
 import { confirmSession, CryptoError, type ClientContext } from '@wikistow/client';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { PROBE_MS, useConnection } from '../data/connection';
+import { checkKeptKeys } from './open';
 import { useVault, vaultStore } from './store';
 
 // Sessions being confirmed, so each runs once at a time.
@@ -33,7 +34,15 @@ export function useConfirmSession() {
       .then(async (outcome) => {
         // As an idle lock: nobody is asked, and an edit that can't be saved keeps it open.
         if (outcome !== 'confirmed') {
-          await vaultStore.requestLock(() => false, { forget: outcome !== 'update-app' });
+          // Keys replaced elsewhere keep a remembered unlock: the unlock page
+          // asks whether the person did it (section 4.6).
+          // A failed check keeps the behaviour from before: lock and forget.
+          const check =
+            outcome === 'passphrase-changed' ? await checkKeptKeys().catch(() => null) : null;
+          const replaced = check !== null && check.kind !== 'same';
+          await vaultStore.requestLock(() => false, {
+            forget: outcome !== 'update-app' && !replaced,
+          });
         }
       })
       .catch((error: unknown) => {

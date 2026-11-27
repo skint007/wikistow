@@ -80,12 +80,12 @@ const KEYRING_V2_INTEGERS = [
 ] as const;
 
 /**
- * The wrapper formats this version unlocks. Format 2 is built (section
- * 4.6), but this version can't yet open what a person's earlier keys hold or
- * check the chain to their new key, so it asks to update, as for any newer
- * format, until it can (#327).
+ * The wrapper formats this version unlocks: format 1, and format 2, which
+ * only a rotation makes (section 4.6), so only where the server took one
+ * (`IDENTITY_ROTATION`, #327). It unlocks to the new key, with the earlier
+ * keys retired; opening what was sealed to those comes later (#327).
  */
-export const UNLOCKED_FORMATS: readonly number[] = [1];
+export const UNLOCKED_FORMATS: readonly number[] = [1, 2];
 
 /** Whether this version unlocks `wrapper`, and so whether a device should keep it to unlock offline. */
 export const unlocks = (wrapper: { format: number }): boolean =>

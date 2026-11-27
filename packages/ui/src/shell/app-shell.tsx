@@ -99,7 +99,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   // (ADR 0016): from what the word index holds, so offline too.
   useMeaningIndex(ctx);
   // Another tab signing out deletes what's kept: this one stops keeping first.
-  useEffect(() => onSignedOutElsewhere(() => vaultStore.lock()), []);
+  // Another tab replacing the keys locks this one, which holds the old keys,
+  // as an idle lock does: what can be saved first is, and typing that can't
+  // be keeps the tab open rather than go.
+  useEffect(
+    () =>
+      onSignedOutElsewhere(
+        () => vaultStore.lock(),
+        () => void vaultStore.requestLock(() => false, { forget: false }),
+      ),
+    [],
+  );
   const { signOut, signOutHere, failed: signOutFailed } = useSignOut();
   // What plugins draw with the app's reader, inside the app's own providers.
   const plugins = useAppPlugins();

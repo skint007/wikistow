@@ -4,13 +4,14 @@
 // in one request, so the server takes all of it or none.
 import {
   identityRoutes,
+  systemRoutes,
   vaultRoutes,
   type AgentEnrollment,
   type IdentityId,
   type PublicIdentity,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
-import type { ApiClient } from '../api/client.ts';
+import { ApiError, type ApiClient } from '../api/client.ts';
 import { APP_AGENTS_NAMESPACE, appAgentSecrets } from '../app-agents.ts';
 import { contactsHash, sealContacts, type ContactsPayloads } from '../contacts.ts';
 import { CryptoError } from '../errors.ts';
@@ -18,9 +19,15 @@ import {
   enrollmentFingerprint,
   generateIdentity,
   keyHash,
+  sameKeys,
   type PrivateIdentity,
 } from '../identity.ts';
-import { signIdentityRotation } from '../identity-rotation.ts';
+import {
+  parseIdentityRotation,
+  signIdentityRotation,
+  verifyRotationChain,
+} from '../identity-rotation.ts';
+import type { KeptAnchor } from '../kept-unlock.ts';
 import { enrollAgent } from '../trust.ts';
 import type { KdfParams, UnlockedVault } from '../vault.ts';
 import { listAgents } from './agents.ts';
@@ -95,6 +102,7 @@ export async function prepareRotation(
     passphrase,
     kdf,
     keep,
+    shown,
     now = () => new Date(),
   }: {
     vault: UnlockedVault;
@@ -102,6 +110,13 @@ export async function prepareRotation(
     passphrase: string;
     kdf?: KdfParams;
     keep: readonly string[];
+    /**
+     * What the dialog showed: every live agent, and those of them it
+     * offered to keep. An agent enrolled since, which the rotation would
+     * revoke unseen, or one it could keep that wasn't offered, makes it
+     * refuse (`stale-head`).
+     */
+    shown?: { live: readonly string[]; keepable: readonly string[] };
     now?: () => Date;
   },
 ): Promise<PreparedRotation> {
@@ -125,6 +140,13 @@ export async function prepareRotation(
     throw new CryptoError('malformed', 'Only a live agent this person enrolled can be kept');
   }
   const live = (await listAgents(ctx)).filter((a) => a.revokedAt === null).map((a) => a.agentId);
+  if (
+    shown &&
+    (live.some((id) => !shown.live.includes(id)) ||
+      [...keepable].some((id) => !shown.keepable.includes(id)))
+  ) {
+    throw new ApiError(409, 'stale-head', 'The agents changed since the list was shown');
+  }
   const { version: expectedVaultVersion } = await ctx.api.call(vaultRoutes.getVault);
 
   const from = ctx.identity;
@@ -257,4 +279,89 @@ function afterRotation(
  */
 export function sendRotation(api: ApiClient, prepared: PreparedRotation) {
   return api.call(identityRoutes.rotate, { body: prepared.request });
+}
+
+/**
+ * What the directory says of the key this device last unlocked with, its
+ * anchor (section 4.6, **When someone else rotated**): still current; or
+ * `replaced`, by a valid chain of statements from it to `current`, which
+ * only the person or someone holding their old key could sign; or
+ * `substituted`, a key the anchor has no valid chain to, reported as a
+ * possible attack. Public routes only, so it runs while locked.
+ */
+export type KeysCheck =
+  | { kind: 'same' }
+  | { kind: 'replaced'; current: PublicIdentity }
+  | { kind: 'substituted' };
+
+export async function checkKeys(api: ApiClient, anchor: PublicIdentity): Promise<KeysCheck> {
+  const { installationId } = await api.call(systemRoutes.installation);
+  const { current, rotations } = await api.call(identityRoutes.rotations, {
+    params: { identityId: anchor.id },
+    query: { from: anchor.keyVersion },
+  });
+  if (current && sameKeys(current, anchor)) return { kind: 'same' };
+  if (!current || current.keyVersion <= anchor.keyVersion) return { kind: 'substituted' };
+  try {
+    verifyRotationChain({
+      installationId,
+      start: anchor,
+      end: current,
+      statements: rotations.map(parseIdentityRotation),
+    });
+    return { kind: 'replaced', current };
+  } catch {
+    return { kind: 'substituted' };
+  }
+}
+
+/**
+ * Whether this device may open a vault that unlocked to `vault`, judged
+ * against what it kept: `ok` at its anchor, or at a later key whose keyring
+ * holds the anchor among its retired keys; `replaced-elsewhere` while a
+ * successor is recorded and the keyring is older than it, so the device
+ * signs and seals nothing with the old keys; and `rollback` for any other
+ * keyring: older than the anchor or not holding it, or past the successor
+ * without holding it. With nothing kept, the
+ * device takes the server's word (A15).
+ */
+export function judgeUnlock(
+  kept: KeptAnchor | null,
+  vault: Pick<UnlockedVault, 'identity' | 'retired'>,
+): 'ok' | 'replaced-elsewhere' | 'rollback' {
+  const at = vault.identity.public;
+  // Another person's anchor, as one written for another account in this
+  // browser, says nothing of these keys.
+  if (!kept || kept.anchor.id !== at.id) return 'ok';
+  const { anchor, successor } = kept;
+  const fromAnchor =
+    sameKeys(at, anchor) ||
+    (at.keyVersion > anchor.keyVersion &&
+      vault.retired.some((key) => sameKeys(key.public, anchor)));
+  if (!fromAnchor) return 'rollback';
+  if (successor && !sameKeys(at, successor)) {
+    if (at.keyVersion < successor.keyVersion) return 'replaced-elsewhere';
+    // Past the successor only through it: a keyring holding it retired.
+    const through = vault.retired.some((key) => sameKeys(key.public, successor));
+    if (at.keyVersion === successor.keyVersion || !through) return 'rollback';
+  }
+  return 'ok';
+}
+
+/**
+ * Whether the server holds `prepared`'s own statement, exactly: after an
+ * unclear answer, or a refusal of a resend, which may follow a first send
+ * that landed. Its signatures are deterministic, so a match is this one.
+ */
+export async function rotationLanded(api: ApiClient, prepared: PreparedRotation): Promise<boolean> {
+  const { rotation } = prepared.request;
+  const { rotations } = await api.call(identityRoutes.rotations, {
+    params: { identityId: rotation.id },
+    query: { from: rotation.from.keyVersion },
+  });
+  return rotations.some(
+    (stored) =>
+      stored['fromSignature'] === rotation.fromSignature &&
+      stored['toSignature'] === rotation.toSignature,
+  );
 }

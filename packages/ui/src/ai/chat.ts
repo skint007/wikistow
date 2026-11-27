@@ -472,8 +472,16 @@ const setShared = (changes: Partial<Shared>) => {
   for (const listener of listeners) listener();
 };
 
+// A chat ends with the session it was started in: at a lock, or when another
+// session takes its place, as after replacing keys, which revokes the
+// agents the app runs (section 4.6).
+let chatSession: unknown = null;
 vaultStore.subscribe(() => {
-  if (vaultStore.get().status !== 'locked' || !shared.chat) return;
+  const now = vaultStore.get();
+  const session = now.status === 'unlocked' ? now.ctx : null;
+  const changed = session !== chatSession;
+  chatSession = session;
+  if (!changed || !shared.chat) return;
   shared.chat.close();
   setShared({ chat: null });
 });

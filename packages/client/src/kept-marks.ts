@@ -134,7 +134,21 @@ export class KeptMarks implements KeyVersionMarks {
    */
   static async open(
     file: KeptFile,
-    { identity, installationId }: { identity: PrivateIdentity; installationId: InstallationId },
+    {
+      identity,
+      installationId,
+      retired = [],
+    }: {
+      identity: PrivateIdentity;
+      installationId: InstallationId;
+      /**
+       * The person's earlier keys (section 4.6): marks sealed under one,
+       * before they replaced their keys, are read, and sealed under the
+       * current key at the next write. Their contacts mark isn't: checking
+       * the record's chain across a rotation is not built yet (#327).
+       */
+      retired?: readonly PrivateIdentity[];
+    },
   ): Promise<KeptMarks> {
     const ad = marksAd(installationId, identity);
     const open = (sealed: Uint8Array | null): Contents | null => {
@@ -153,7 +167,26 @@ export class KeptMarks implements KeyVersionMarks {
       }
     };
     const seal = (kept: Contents) => sealOnDevice(identity, KEY, ad, utf8(JSON.stringify(kept)));
-    const contents = open(await file.read().catch(() => null)) ?? NONE;
+    const bytes = await file.read().catch(() => null);
+    const earlier = (): Contents | null => {
+      for (const key of [...retired].reverse()) {
+        const plain = bytes && openOnDevice(key, KEY, marksAd(installationId, key), bytes);
+        if (!plain) continue;
+        try {
+          const found = parseJson(Contents, plain, 'Kept marks', {
+            integers: [
+              ['contactsMark', 'version'],
+              ['marks', '*'],
+            ],
+          });
+          return { ...NONE, marks: found.marks, restoredAt: found.restoredAt };
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    };
+    const contents = open(bytes) ?? earlier() ?? NONE;
     const who = `${installationId} ${identity.public.id}`;
     const marks = new KeptMarks(file, { seal, open }, contents, file.channel ?? null, who);
     // Answers a closed session of this person heard after it closed. A

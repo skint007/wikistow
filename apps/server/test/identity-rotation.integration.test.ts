@@ -332,6 +332,52 @@ describe('replacing keys', () => {
   });
 });
 
+describe('the app’s side', () => {
+  it('refuses to prepare past an agent the dialog didn’t show', async () => {
+    const alice = await personWithRecord();
+    const agent = await enrolledAgent(t, alice);
+    await saveContacts(alice.ctx);
+    const refused = replaceKeys.prepareRotation(alice.ctx, {
+      vault: alice.vault,
+      crypto: inlineVaultCrypto,
+      passphrase: NEW_PASSPHRASE,
+      kdf: FAST_KDF,
+      keep: [],
+      shown: { live: [], keepable: [] },
+    });
+    expect(await rejection(refused)).toBe('stale-head');
+    // Shown, but not offered to keep though it could be.
+    const unoffered = replaceKeys.prepareRotation(alice.ctx, {
+      vault: alice.vault,
+      crypto: inlineVaultCrypto,
+      passphrase: NEW_PASSPHRASE,
+      kdf: FAST_KDF,
+      keep: [],
+      shown: { live: [agent.agentId], keepable: [] },
+    });
+    expect(await rejection(unoffered)).toBe('stale-head');
+    const shown = await replaceKeys.prepareRotation(alice.ctx, {
+      vault: alice.vault,
+      crypto: inlineVaultCrypto,
+      passphrase: NEW_PASSPHRASE,
+      kdf: FAST_KDF,
+      keep: [],
+      shown: { live: [agent.agentId], keepable: [agent.agentId] },
+    });
+    expect(shown.request.revokedAgents).toEqual([agent.agentId]);
+  });
+
+  it('tells whether its own statement landed', async () => {
+    const alice = await personWithRecord();
+    const prepared = await prepare(alice);
+    const other = await prepare(alice);
+    expect(await replaceKeys.rotationLanded(alice.api, prepared)).toBe(false);
+    await rotate(alice, prepared.request);
+    expect(await replaceKeys.rotationLanded(alice.api, prepared)).toBe(true);
+    expect(await replaceKeys.rotationLanded(alice.api, other)).toBe(false);
+  });
+});
+
 describe('the edges', () => {
   it('rotates a person with no contacts record yet, to its version 1', async () => {
     const alice = await personWithVault(t);

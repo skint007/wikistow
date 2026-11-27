@@ -16,7 +16,13 @@ import { desktop } from '../../../desktop';
 import { tabSafeMode } from '../../../plugins/safe-mode';
 import { isApple } from '../../../shell/search-model';
 import { vaultMessage } from '../../../vault/messages';
-import { noLongerOpens, rememberOpenVault, unlockWith } from '../../../vault/open';
+import {
+  checkKeptKeys,
+  KeysRefused,
+  noLongerOpens,
+  rememberOpenVault,
+  unlockWith,
+} from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
 import { forgetInBrowser } from '../../../vault/tab-unlock';
 
@@ -53,9 +59,35 @@ function Unlock() {
   const tried = useRef(false);
   // Clips from the browser save once it's unlocked (ADR 0017, decision 7).
   const clips = useWaitingClips();
+  // Before a passphrase is asked for, or a remembered unlock tried: were the
+  // keys this device last unlocked with replaced elsewhere (section 4.6)?
+  // A check that failed shows the form, and is tried again, so a replacement
+  // the directory shows once it answers still asks.
+  const { data: keys, isPending: checking } = useQuery({
+    queryKey: ['kept-keys-check', accountId],
+    queryFn: async () => {
+      // However the answer stalls, the form shows within moments.
+      const stalled = new Promise<null>((resolve) => setTimeout(resolve, 8_000, null));
+      const check = await Promise.race([checkKeptKeys().catch(() => null), stalled]);
+      return check ?? { kind: 'unknown' as const };
+    },
+    enabled: accountId !== undefined,
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchInterval: (query) => (query.state.data?.kind === 'unknown' ? 15_000 : false),
+  });
+  const [answer, setAnswer] = useState<'did' | 'didnt' | null>(null);
+  const replaced = keys?.kind === 'replaced' && answer !== 'did';
 
   // At launch, a remembered unlock opens the vault without asking.
   useEffect(() => {
+    // Once keys were replaced, or the directory shows keys that don't follow,
+    // a remembered unlock is neither tried nor forgotten (section 4.6).
+    const held = keys?.kind === 'replaced' || keys?.kind === 'substituted';
+    if (checking || held) {
+      if (held) setCheckedRemembered(true);
+      return;
+    }
     if (!desktop || !accountId || tried.current) return;
     tried.current = true;
     void (async () => {
@@ -71,14 +103,15 @@ function Unlock() {
         // A key that no longer opens this vault is no use to keep. Anything
         // else, such as the server being away, leaves it for next time; a
         // vault this version can't unlock says so before anyone types.
-        if (noLongerOpens(caught)) await desktop.forgetVault().catch(() => {});
+        if (caught instanceof KeysRefused) setError(vaultMessage(caught));
+        else if (noLongerOpens(caught)) await desktop.forgetVault().catch(() => {});
         else if (caught instanceof CryptoError) setError(vaultMessage(caught));
       } finally {
         vaultKey?.fill(0);
       }
       setCheckedRemembered(true);
     })();
-  }, [accountId, navigate, redirect]);
+  }, [accountId, navigate, redirect, checking, keys]);
 
   async function submit(form: FormData) {
     const passphrase = form.get('passphrase');
@@ -109,13 +142,27 @@ function Unlock() {
     }
   }
 
-  if (!checkedRemembered) return null;
+  if (!checkedRemembered || checking) return null;
+  if (replaced) {
+    return answer === 'didnt' ? (
+      <NotThem onDid={() => setAnswer('did')} />
+    ) : (
+      <DidYouReplace onDid={() => setAnswer('did')} onDidnt={() => setAnswer('didnt')} />
+    );
+  }
   return (
     <AuthCard
       title="Unlock your vault"
       description="Your pages are encrypted with keys only your passphrase opens."
     >
       <form onSubmit={submitData(submit)} className="grid gap-4">
+        {keys?.kind === 'substituted' && (
+          <FormMessage>
+            The server shows keys for you that don’t follow from the ones this device last unlocked
+            with. That may be an attack. Tell whoever runs your server, and compare your key’s
+            fingerprint with the people you share with before you share anything new.
+          </FormMessage>
+        )}
         <Field
           id="passphrase"
           name="passphrase"
@@ -158,6 +205,63 @@ function Unlock() {
           Use your recovery key instead
         </Link>
       </form>
+    </AuthCard>
+  );
+}
+
+/**
+ * The directory shows the keys this device last unlocked with replaced, by
+ * a chain only someone holding them could sign: the person, on another
+ * device, or someone who has their old key (section 4.6, A15). Only the
+ * person knows which.
+ */
+function DidYouReplace({ onDid, onDidnt }: { onDid: () => void; onDidnt: () => void }) {
+  return (
+    <AuthCard
+      title="Did you replace your keys?"
+      description="Your account’s keys were replaced since this device last unlocked. Only you can know whether that was you, on another device."
+    >
+      <div className="grid gap-3">
+        <Button onClick={onDid}>I did this</Button>
+        <Button variant="outline" onClick={onDidnt}>
+          I didn’t
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          If you did, unlock with the passphrase you chose then. This device keeps what it had until
+          you do.
+        </p>
+      </div>
+    </AuthCard>
+  );
+}
+
+/**
+ * Someone else holds the person's keys. This device keeps the vault it had,
+ * and the remembered unlock, and opens nothing with the replaced keys:
+ * nothing more is signed or sealed with them here.
+ */
+function NotThem({ onDid }: { onDid: () => void }) {
+  return (
+    <AuthCard
+      title="Someone else holds your keys"
+      description="Whoever replaced your keys had your earlier ones. People you share with now see their keys as yours."
+    >
+      <div className="grid gap-3 text-sm">
+        <p>
+          Warn the people you share with in person, not through WikiStow, so they stop sharing with
+          those keys. Your agents follow the new keys too.
+        </p>
+        <p>
+          Change your account password, which signs everyone out and ends every agent’s access, and
+          tell whoever runs your server. This device signs and seals nothing more with your keys.
+        </p>
+        <Link to="/settings" hash="password" className="quiet-link">
+          Change your password
+        </Link>
+        <Button variant="outline" onClick={onDid}>
+          It was me after all
+        </Button>
+      </div>
     </AuthCard>
   );
 }

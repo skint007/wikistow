@@ -6,6 +6,8 @@ import {
   keptUnlock,
   openKeptSession,
   openSession,
+  replaceKeysOperations,
+  sameKeys,
   vaultWrapper,
   unlocks,
   type ClientContext,
@@ -15,8 +17,8 @@ import {
 } from '@wikistow/client';
 import { noAnswer } from '@wikistow/client/api';
 import { vaultRoutes } from '@wikistow/contracts';
-import { api } from '../api';
-import { browserTrustMarks, keptStore } from '../data/kept-store';
+import { api, quietApi } from '../api';
+import { browserTrustMarks, keptStore, tellKeysReplaced } from '../data/kept-store';
 import { desktop } from '../desktop';
 import { forgetKeptUnlock, vaultStore } from './store';
 import { forgetInBrowser, rememberedInTab, rememberInBrowser } from './tab-unlock';
@@ -100,7 +102,17 @@ export async function unlockWith(
     vaultStore.dropStaged();
     return new Error('The vault was locked while it opened');
   };
-  const opened = await vaultWrapper(api, await keptContent());
+  const content = await keptContent();
+  // A wrapper of the same keyring, as after a passphrase change elsewhere,
+  // is kept at once, as before; a new keyring only once it opened to keys
+  // this device takes (section 4.6).
+  const opened = await vaultWrapper(api, content, { keep: false });
+  if (content && !opened.keptAt) {
+    const kept = await keptUnlock(content).vault();
+    if (!kept || sameKeyring(kept.wrapper, opened.wrapper)) {
+      await keepWrapper(content, opened);
+    }
+  }
   const unlocked = await crypto
     .unlock({ wrapper: opened.wrapper, secret })
     .catch((error: unknown) => {
@@ -113,6 +125,17 @@ export async function unlockWith(
     });
   const vault = vaultStore.stage(unlocked);
   if (lockedSince()) throw refused();
+  // Never down from the keys this device last unlocked with, nor below keys
+  // the directory showed replaced them (section 4.6).
+  const judged = await judgeOpened(vault, { online: !opened.keptAt }).catch((error: unknown) => {
+    vaultStore.dropStaged();
+    throw error;
+  });
+  if (judged !== 'ok') {
+    vaultStore.dropStaged();
+    throw new KeysRefused(judged);
+  }
+  if (content && !opened.keptAt) await keepWrapper(content, opened);
   const vaultVersion = version ?? opened.version;
   const ctx = await startSession(vault, { vaultVersion });
   // The server answered the session but not the wrapper: what that skipped is checked now.
@@ -122,6 +145,7 @@ export async function unlockWith(
     throw refused();
   }
   vaultStore.unlock(ctx, vault);
+  await keepAnchor(vault.identity.public).catch(() => {});
   return vault;
 }
 
@@ -132,6 +156,108 @@ export async function unlockWith(
 export async function keepChangedWrapper(changed: Parameters<typeof keepWrapper>[1]) {
   const content = await keptContent();
   if (content) await keepWrapper(content, changed);
+}
+
+/**
+ * A vault that unlocked to keys this device won't open (section 4.6, **When
+ * someone else rotated**): older than keys the directory showed replaced
+ * them (`replaced-elsewhere`), so unlock with the new passphrase; or keys
+ * that don't follow from the ones it last unlocked with (`rollback`), which
+ * may be an attack.
+ */
+export class KeysRefused extends Error {
+  readonly code: 'keys-replaced-elsewhere' | 'keys-rollback';
+  constructor(kind: 'replaced-elsewhere' | 'rollback') {
+    super(
+      kind === 'rollback' ? 'These keys are older than this device’s' : 'Your keys were replaced',
+    );
+    this.code = kind === 'rollback' ? 'keys-rollback' : 'keys-replaced-elsewhere';
+    this.name = 'KeysRefused';
+  }
+}
+
+/**
+ * `judgeUnlock` against what this device kept, and for keys newer than its
+ * anchor, opened online, the directory's chain too: the anchor moves only
+ * to keys a valid chain from it reaches (section 4.6). Offline, the wrapper
+ * is the one this device kept, which never moved past keys it took.
+ */
+export async function judgeOpened(
+  vault: UnlockedVault,
+  { online }: { online: boolean },
+): Promise<'ok' | 'replaced-elsewhere' | 'rollback'> {
+  const kept = await keptAnchor();
+  const judged = replaceKeysOperations.judgeUnlock(kept, vault);
+  const at = vault.identity.public;
+  if (
+    judged !== 'ok' ||
+    !kept ||
+    kept.anchor.id !== at.id ||
+    !online ||
+    at.keyVersion <= kept.anchor.keyVersion
+  ) {
+    return judged;
+  }
+  const check = await replaceKeysOperations.checkKeys(quietApi, kept.anchor);
+  return check.kind === 'replaced' && sameKeys(check.current, at) ? 'ok' : 'rollback';
+}
+
+/** The anchor this device kept, or null where it keeps nothing, which takes the server's word (A15). */
+export async function keptAnchor() {
+  const content = await keptContent();
+  return content ? keptUnlock(content).anchor() : null;
+}
+
+/** Move the anchor to keys this device unlocked with or replaced its keys with. */
+export async function keepAnchor(identity: UnlockedVault['identity']['public']) {
+  const content = await keptContent();
+  if (!content) return;
+  // A successor recorded meanwhile, as by another tab's check, stays until
+  // the anchor reaches it.
+  const kept = await keptUnlock(content).anchor();
+  const successor =
+    kept?.successor &&
+    kept.successor.id === identity.id &&
+    identity.keyVersion < kept.successor.keyVersion
+      ? kept.successor
+      : null;
+  await keptUnlock(content).keepAnchor({ anchor: identity, successor });
+}
+
+/**
+ * Before anything kept is replaced or forgotten because the vault changed,
+ * or a passphrase is asked for: what the directory says of the key this
+ * device last unlocked with (`checkKeys`). A valid chain to keys it doesn't
+ * hold is recorded beside the anchor, so the device opens nothing older
+ * until it unlocks at those keys. With no answer, a successor recorded
+ * before; null where nothing is kept or recorded.
+ */
+export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck | null> {
+  const content = await keptContent();
+  const kept = content && (await keptUnlock(content).anchor());
+  if (!content || !kept) return null;
+  // Only this account's person: identity IDs stay through rotations.
+  const me = await keptUnlock(content).me();
+  if (me?.identity && me.identity.id !== kept.anchor.id) return null;
+  try {
+    const check = await replaceKeysOperations.checkKeys(quietApi, kept.anchor);
+    // Recorded only over the anchor it checked: another tab's rotation may
+    // have moved it meanwhile.
+    const now = await keptUnlock(content).anchor();
+    if (check.kind === 'replaced' && now && sameKeys(now.anchor, kept.anchor)) {
+      const recorded = now.successor !== null && sameKeys(now.successor, check.current);
+      await keptUnlock(content).keepAnchor({ ...now, successor: check.current });
+      // The browser's other tabs hold the replaced keys: they lock, as after
+      // a rotation in this browser, so none signs or seals with them.
+      if (!recorded) tellKeysReplaced();
+    }
+    return check;
+  } catch (error) {
+    // Without a clear answer, what the device recorded before stands.
+    if (kept.successor) return { kind: 'replaced', current: kept.successor };
+    if (noAnswer(error)) return null;
+    throw error;
+  }
 }
 
 let restoring: Promise<void> | null = null;
@@ -180,6 +306,10 @@ async function restore(accountId: string) {
     const served = version === undefined ? null : await servedVault();
     if (served && !unlocks(served.wrapper)) return;
     if (served !== null && served.version !== version) {
+      // Keys replaced elsewhere keep what's remembered: the unlock page asks
+      // whether the person did it (section 4.6).
+      const check = await checkKeptKeys().catch(() => null);
+      if (check && check.kind !== 'same') return;
       await forgetInBrowser();
       return;
     }
@@ -211,4 +341,14 @@ async function servedVault() {
     if (noAnswer(error)) return null;
     throw error;
   }
+}
+
+// Whether two wrappers seal the same keyring: a passphrase change leaves it as it was.
+function sameKeyring(a: { format: number }, b: { format: number }): boolean {
+  const keyring = (w: { format: number }) =>
+    'keyring' in w && typeof w.keyring === 'object' && w.keyring !== null
+      ? (w.keyring as { nonce?: unknown; ciphertext?: unknown })
+      : null;
+  const [x, y] = [keyring(a), keyring(b)];
+  return x !== null && y !== null && x.nonce === y.nonce && x.ciphertext === y.ciphertext;
 }
