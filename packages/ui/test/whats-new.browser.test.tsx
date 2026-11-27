@@ -1,6 +1,6 @@
 import { act, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test';
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vite-plus/test';
 import { userEvent } from 'vite-plus/test/browser/context';
 import changelog from '../../../CHANGELOG.md?raw';
 import { parseChangelog } from '../src/whats-new/changelog.ts';
@@ -59,6 +59,11 @@ it('lists each release with its date and marks, and opens the one clicked', asyn
   // The combobox draws the first 100 until something is typed.
   expect(options()).toHaveLength(Math.min(releases.length, 100));
   expect(option(older.version).textContent).toContain('This version');
+  const date = new Date(`${older.date}T00:00:00Z`).toLocaleDateString(undefined, {
+    dateStyle: 'long',
+    timeZone: 'UTC',
+  });
+  expect(option(older.version).textContent).toContain(date);
   const beta = releases.find((item) => item.prerelease);
   if (beta) expect(option(beta.version).textContent).toContain('Prerelease');
   await act(() => userEvent.click(option(older.version)));
@@ -134,4 +139,27 @@ it('leaves Enter that ends composing text to the text', async () => {
     expect(field().value).toBe(typed);
     expect(document.activeElement).toBe(field());
   }
+});
+
+it('scrolls only the list to the option the arrows reach, not the page', async () => {
+  // The field near the bottom of a short window, its list running past it.
+  const top = field().getBoundingClientRect().top;
+  document.body.style.paddingTop = `${Math.max(0, window.innerHeight - 60 - top)}px`;
+  onTestFinished(() => void (document.body.style.paddingTop = ''));
+  await act(() => userEvent.click(field()));
+  // As the app's styles make it: a list shorter than its options.
+  const list = document.querySelector<HTMLElement>('[role=listbox]')!;
+  Object.assign(list.style, { maxHeight: '100px', overflowY: 'auto' });
+  const page = document.scrollingElement!;
+  const before = page.scrollTop;
+  await act(() => userEvent.keyboard('{ArrowDown}'.repeat(10)));
+  expect(list.scrollTop).toBeGreaterThan(0);
+  const at = options()[9]!.getBoundingClientRect();
+  const box = list.getBoundingClientRect();
+  expect(at.top).toBeGreaterThanOrEqual(box.top - 1);
+  expect(at.bottom).toBeLessThanOrEqual(box.bottom + 1);
+  expect(page.scrollTop).toBe(before);
+  // And back up to the first.
+  await act(() => userEvent.keyboard('{ArrowUp}'.repeat(9)));
+  expect(list.scrollTop).toBe(0);
 });

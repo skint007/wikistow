@@ -67,10 +67,16 @@ export function Combobox({
   const listed = open && shown.length > 0;
   useEffect(() => setActive(-1), [matches]);
   const optionId = (i: number) => `${ids}-${i}`;
+  // The option the arrows reach scrolls into the list's view, and only
+  // the list scrolls: moving the page could take the field under a bar.
   useEffect(() => {
-    if (listed && active >= 0) {
-      document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
-    }
+    const list = document.getElementById(`${ids}-list`);
+    const item = listed && active >= 0 ? document.getElementById(optionId(active)) : null;
+    if (!list || !item) return;
+    const box = list.getBoundingClientRect();
+    const at = item.getBoundingClientRect();
+    if (at.top < box.top) list.scrollTop -= box.top - at.top;
+    else if (at.bottom > box.bottom) list.scrollTop += at.bottom - box.bottom;
   });
 
   function pick(option: ComboboxOption) {
