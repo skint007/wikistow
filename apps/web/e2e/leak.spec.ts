@@ -142,9 +142,11 @@ async function expectNothingStored(
   expect(stored.kept?.items.length).toBeGreaterThanOrEqual(4);
   expect(stored.kept?.items.every(([name]) => /^[\w-]{22}$/.test(name ?? ''))).toBe(true);
   expect(stored.kept?.queue).toEqual([]);
+  // `unlock anchor` holds public keys only: the key this device last unlocked with (section 4.6).
   expect(stored.kept?.meta.map(([key]) => key).sort()).toEqual([
     'account',
     'trust-marks',
+    'unlock anchor',
     'unlock installation',
     'unlock me',
     'unlock vault',
