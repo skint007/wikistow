@@ -431,3 +431,133 @@ describe('merging a pending change into a newer record (section 8.6)', () => {
     ).toBe(removed);
   });
 });
+
+describe('across a rotation of the owner (sections 8.5 and 4.6)', () => {
+  const next = generateIdentity({ id: owner.public.id, kind: 'human', keyVersion: 2 });
+  const mark = { version: 1, contactsHash: contactsHash(v1.record) };
+  const v2 = sealContacts({ owner, installationId, previous: v1.record, ...payloads });
+  const v3 = sealContacts({ owner: next, installationId, previous: v2.record, ...payloads });
+
+  it('checks each version under the key it was signed with', () => {
+    const chain = [signedOnly(v2), signedOnly(v3)];
+    expect(
+      requireContactsChain({ owner: next.public, earlier: [owner.public], installationId, mark, chain }),
+    ).toEqual(v3.record);
+    // Without the earlier key, the version it signed doesn't verify.
+    expect(() =>
+      requireContactsChain({ owner: next.public, installationId, mark, chain }),
+    ).toThrow();
+  });
+
+  it('refuses a version signed with the replaced key after one signed with the new key', () => {
+    const v4 = sealContacts({ owner, installationId, previous: v3.record, ...payloads });
+    const chain = [signedOnly(v2), signedOnly(v3), signedOnly(v4)];
+    expect(() =>
+      requireContactsChain({ owner: next.public, earlier: [owner.public], installationId, mark, chain }),
+    ).toThrow(code('contacts-fork'));
+  });
+});
+
+describe('following and declining (sections 8.4 and 8.6)', () => {
+  const later = generateIdentity({ id: friend.public.id, kind: 'human', keyVersion: 2 });
+  const latest = generateIdentity({ id: friend.public.id, kind: 'human', keyVersion: 3 });
+  const followedAt = '2026-11-27T09:00:00.000Z';
+  const to = (key: typeof later): Pin => ({
+    identity: asHuman(key.public),
+    verifiedAt: followedAt,
+    method: 'first-seen',
+  });
+  const hashes = (...keys: (typeof later)[]) => keys.map((key) => keyHash(key.public));
+  const follow = (key = later, chain = hashes(friend, later)) =>
+    ({ kind: 'follow-key', from: pin, to: to(key), chain }) as const;
+  const pinOf = (p: ContactsPayloads) => p.shared.contacts.find((c) => c.identity.id === friend.public.id);
+
+  it('moves the pin and its label, unchecked, and keeps the notice with the key it came from', () => {
+    const followed = applyContactsChange(payloads, follow());
+    expect(pinOf(followed)).toEqual(to(later));
+    expect(followed.private.labels).toEqual([{ ...friendLabel, keyHash: keyHash(later.public) }]);
+    expect(followed.private.extensions['wikistow.followed']).toEqual({
+      entries: [
+        { from: pin, to: { id: friend.public.id, keyHash: keyHash(later.public), keyVersion: 2 } },
+      ],
+    });
+    // A later follow keeps the earliest key, for a decline to go back to.
+    const again = applyContactsChange(followed, {
+      kind: 'follow-key',
+      from: to(later),
+      to: to(latest),
+      chain: hashes(later, latest),
+    });
+    expect(again.private.extensions['wikistow.followed']).toMatchObject({
+      entries: [{ from: pin, to: { keyVersion: 3 } }],
+    });
+    // Seen: the notice goes.
+    const seen = applyContactsChange(again, {
+      kind: 'seen-follow',
+      id: friend.public.id,
+      keyHash: keyHash(latest.public),
+    });
+    expect(seen.private.extensions['wikistow.followed']).toBeUndefined();
+  });
+
+  it('is a no-op over a follow already made, and asks over another key', () => {
+    const followed = applyContactsChange(payloads, follow());
+    expect(applyContactsChange(followed, follow())).toBe(followed);
+    const elsewhere = generateIdentity({ id: friend.public.id, kind: 'human', keyVersion: 2 });
+    const confirmed = applyContactsChange(payloads, {
+      kind: 'confirm-key',
+      pin: { identity: asHuman(elsewhere.public), verifiedAt, method: 'confirmed' },
+      replaced: keyHash(friend.public),
+    });
+    expect(() => applyContactsChange(confirmed, follow())).toThrow(code('contacts-conflict'));
+    // Nor through a removed key.
+    const removed = applyContactsChange(payloads, {
+      kind: 'decline-key',
+      id: friend.public.id,
+      keyHash: keyHash(later.public),
+      removedAt: verifiedAt,
+    });
+    expect(pinOf(applyContactsChange(removed, follow()))).toEqual(pin);
+  });
+
+  it('declines: the pin goes back, every key above it is removed, and nothing is followed again', () => {
+    const followed = applyContactsChange(payloads, follow());
+    const declined = applyContactsChange(followed, {
+      kind: 'decline-follow',
+      from: pin,
+      chain: hashes(later),
+      removedAt: followedAt,
+    });
+    expect(pinOf(declined)).toEqual(pin);
+    expect(declined.private.labels).toEqual([friendLabel]);
+    expect(declined.shared.removed.map((r) => r.keyHash)).toEqual(hashes(later));
+    expect(declined.shared.extensions['wikistow.declined']).toEqual({
+      format: 1,
+      entries: [{ id: friend.public.id, keyHash: keyHash(friend.public) }],
+    });
+    expect(declined.private.extensions['wikistow.followed']).toBeUndefined();
+    // A follow from the restored pin, even on another branch, does nothing.
+    const sibling = generateIdentity({ id: friend.public.id, kind: 'human', keyVersion: 2 });
+    expect(applyContactsChange(declined, follow(sibling, hashes(friend, sibling)))).toBe(declined);
+    // Confirming a key takes the decline out.
+    const reconfirmed = applyContactsChange(declined, {
+      kind: 'confirm-key',
+      pin: { ...pin, method: 'confirmed' },
+      replaced: keyHash(friend.public),
+    });
+    expect(reconfirmed.shared.extensions['wikistow.declined']).toBeUndefined();
+    // Every device reads it.
+    const sealed = sealContacts({ owner, installationId, previous: null, ...declined });
+    expect(open(agent, sealed).shared.extensions['wikistow.declined']).toEqual(
+      declined.shared.extensions['wikistow.declined'],
+    );
+  });
+
+  it('fails closed on declines it can’t read', () => {
+    const unreadable = {
+      ...payloads.shared,
+      extensions: { 'wikistow.declined': { format: 2, entries: [] } },
+    };
+    expect(() => parseSharedContacts(utf8(JSON.stringify(unreadable)))).toThrow(code('malformed'));
+  });
+});

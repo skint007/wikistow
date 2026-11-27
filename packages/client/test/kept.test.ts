@@ -13,6 +13,7 @@ import {
   memoryKeptStore,
   MemoryKeyVersionMarks,
   newContactsPayloads,
+  newFolderMetadata,
   newId,
   newPayload,
   pageOperations,
@@ -430,5 +431,54 @@ describe('after replacing keys (section 4.6)', () => {
     expect(await under(second, [first])).toBe(true);
     expect(await under(first, [])).toBe(false);
     expect(await under(second, [])).toBe(false);
+  });
+  it('seals what was kept under an earlier key again under the new one, queued changes included', async () => {
+    const store = memoryKeptStore();
+    const id = IdentityId.parse('kept-person');
+    const first = generateIdentity({ kind: 'human', id });
+    const second = generateIdentity({ kind: 'human', id, keyVersion: 2 });
+    const installationId = InstallationId.parse('kept-installation');
+    const before = await keptOperations.KeptContent.open(store, {
+      identity: first,
+      installationId,
+    });
+    const list = { spaces: [], order: { homeId: null, spaceIds: [] }, shared: [] };
+    await before.keepList(list);
+    const folder = await before.queue.newFolder({
+      spaceId: newId(SpaceId),
+      parentId: null,
+      metadata: newFolderMetadata('Typed offline'),
+    });
+    const items = async () => [
+      ...(await store.items.list()).map((item) => item.name),
+      ...(await store.queue.list()).map((item) => item.name),
+    ];
+    const old = await items();
+
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+    // Opened at the new key alone, with nothing left under the old one.
+    const after = await keptOperations.KeptContent.open(store, {
+      identity: second,
+      installationId,
+    });
+    expect(after.spaceList()).toEqual(list);
+    expect(await after.queue.entry(folder.id)).toMatchObject({ kind: 'folder', id: folder.id });
+    const now = await items();
+    expect(now).toHaveLength(old.length);
+    expect(now.filter((name) => old.includes(name))).toEqual([]);
+    expect(
+      await keptOperations.keptUnderEarlierKeys(store, {
+        identity: second,
+        installationId,
+        retired: [first],
+      }),
+    ).toBe(false);
+    // Running again changes nothing.
+    await keptOperations.sealKeptAgain(store, { identity: second, installationId, retired: [first] });
+    expect(await items()).toEqual(now);
   });
 });

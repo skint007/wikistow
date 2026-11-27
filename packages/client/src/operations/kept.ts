@@ -264,10 +264,11 @@ export async function sealKeptAgain(
         }
       };
       const index = await read(INDEX);
+      if (!index.plaintext) continue;
+      // An index this app can't read is sealed again as it is, with nothing it names.
       const kept = json(index.plaintext, KeptIndexJson);
-      if (!index.plaintext || !kept) continue;
       const items: string[] = [];
-      for (const spaceId of kept.spaces) {
+      for (const spaceId of kept?.spaces ?? []) {
         const space = json((await read(spaceItem(spaceId))).plaintext, KeptSpaceJson);
         items.push(spaceItem(spaceId));
         for (const page of space?.pages ?? []) {
