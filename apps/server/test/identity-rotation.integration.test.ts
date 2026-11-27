@@ -4,6 +4,7 @@
 import {
   changeVaultPassphrase,
   createApiClient,
+  generateIdentity,
   inlineVaultCrypto,
   keyHash,
   newId,
@@ -26,7 +27,13 @@ import {
   systemRoutes,
   vaultRoutes,
 } from '@wikistow/contracts';
-import { currentIdentity, lookupIdentities, schema, type Database } from '@wikistow/server';
+import {
+  currentIdentity,
+  desktopApprovalStands,
+  lookupIdentities,
+  schema,
+  type Database,
+} from '@wikistow/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { PASSWORD } from './support/accounts.ts';
@@ -348,15 +355,97 @@ describe('the checks', () => {
     expect(changed.wrapper.format).toBe(2);
   });
 
-  it('refuses a desktop sign-in approved before it', async () => {
+  it('refuses a desktop sign-in approved before it, by the clock as it lands', async () => {
     const alice = await personWithRecord();
-    const before = new Date(Date.now() - 1000);
-    await rotate(alice, (await prepare(alice)).request);
-    const [row] = await t.db
-      .select({ endedAt: schema.users.sessionsEndedAt })
-      .from(schema.users)
-      .where(eq(schema.users.id, alice.id));
-    expect(row?.endedAt?.getTime()).toBeGreaterThan(before.getTime());
+    const [own] = await t.db
+      .select({ id: schema.sessions.id })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.userId, alice.id));
+    if (!own) throw new Error('expected a session');
+    const prepared = await prepare(alice);
+    // Approved by the session that stays, while the rotation waits on a lock.
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let holding = () => {};
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    const write = t.db.transaction(async (tx) => {
+      await currentIdentity(tx, alice.id);
+      holding();
+      await released;
+    });
+    await held;
+    const rotation = rotate(alice, prepared.request);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const [{ approvedAt } = { approvedAt: new Date() }] = await t.db.execute<{
+      approvedAt: Date;
+    }>(sql`select now() as "approvedAt"`);
+    release();
+    await write;
+    await rotation;
+    const approval = { userId: alice.id, sessionId: own.id, approvedAt: new Date(approvedAt) };
+    expect(await desktopApprovalStands(t.db, approval)).toBe(false);
+    // One approved after it stands.
+    const later = { ...approval, approvedAt: new Date(Date.now() + 1000) };
+    expect(await desktopApprovalStands(t.db, later)).toBe(true);
+  });
+
+  it('refuses a resend with another contacts version, and a new one that doesn’t verify', async () => {
+    const alice = await personWithRecord();
+    const first = await prepare(alice);
+    const second = await prepare(alice);
+    // Signed by someone else: refused once everything else was written in the transaction.
+    const forged = { ...first.request.contacts, signature: second.request.contacts.signature };
+    expect(await rejection(rotate(alice, { ...first.request, contacts: forged }))).toBe(
+      'contacts-invalid',
+    );
+    expect((await rowsOf(alice.vault.identity.public.id)).map((r) => r.keyVersion)).toEqual([1]);
+    expect((await alice.api.call(vaultRoutes.getVault)).version).toBe(1);
+    const stored = await t.db
+      .select()
+      .from(schema.identityRotations)
+      .where(eq(schema.identityRotations.identityId, alice.vault.identity.public.id));
+    expect(stored).toEqual([]);
+
+    await rotate(alice, first.request);
+    const other = { ...first.request, contacts: second.request.contacts };
+    expect(await rejection(rotate(alice, other))).toBe('rotation-exists');
+  });
+
+  it('refuses a write sealing to someone whose rotation it waited on', async () => {
+    const alice = await personWithRecord();
+    const next = generateIdentity({
+      kind: 'human',
+      id: alice.vault.identity.public.id,
+      keyVersion: 2,
+    }).public;
+    let release = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let holding = () => {};
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    // A rotation's row changes, held open.
+    const rotation = t.db.transaction(async (tx) => {
+      await tx
+        .update(schema.identities)
+        .set({ revokedAt: sql`now()` })
+        .where(eq(schema.identities.id, next.id));
+      await tx.insert(schema.identities).values({
+        id: next.id,
+        keyVersion: 2,
+        accountId: alice.id,
+        kind: 'human',
+        boxPublicKey: next.boxPublicKey,
+        signPublicKey: next.signPublicKey,
+      });
+      holding();
+      await released;
+    });
+    await held;
+    const sealing = t.db.transaction((tx) => lookupIdentities(tx, [next.id]));
+    const refused = rejection(sealing);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    release();
+    await rotation;
+    expect(await refused).toBe('stale-head');
   });
 
   it('stores nothing when a check fails', async () => {

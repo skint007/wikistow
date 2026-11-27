@@ -65,7 +65,7 @@ export async function currentIdentity(
  * rows are held (`FOR SHARE`) to the end of its transaction, and a rotation
  * of one of them, which updates its row, waits for it: a key it seals to
  * stays current until it commits (protocol section 4.6). One that waited on
- * a rotation reads that person as gone, and is refused. The directory route
+ * a rotation is refused as `stale-head`. The directory route
  * alone reads them without holding them (`hold: false`).
  */
 export async function lookupIdentities(
@@ -80,6 +80,21 @@ export async function lookupIdentities(
     .where(and(inArray(identities.id, [...ids]), isNull(identities.revokedAt)))
     .orderBy(identities.id, desc(identities.keyVersion));
   const rows = hold ? await query.for('share') : await query;
+  // A row that waited on a rotation of it reads as gone, its new row being
+  // newer than this statement: read again, and refuse rather than leave the
+  // person out of what is sealed.
+  if (hold) {
+    const found = new Set(rows.map((row) => row.id));
+    const missing = ids.filter((id) => !found.has(id));
+    if (missing.length > 0) {
+      const [now] = await db
+        .select({ id: identities.id })
+        .from(identities)
+        .where(and(inArray(identities.id, missing), isNull(identities.revokedAt)))
+        .limit(1);
+      if (now) throw new ContentError('stale-head', 'A person’s keys changed; try again');
+    }
+  }
   const latest = new Map<IdentityId | string, IdentityRow>();
   for (const row of rows) if (!latest.has(row.id)) latest.set(row.id, row);
   return [...latest.values()].map(toPublic);

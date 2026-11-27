@@ -313,19 +313,25 @@ export function mountContentRoutes(
   // their contacts' apps take the new key as a plain key change.
   routes.account(
     identityRoutes.rotate,
-    async ({ body }, { principal }) => {
-      if (!identityRotation) {
-        throw new ApiError('rotation-off', 'Replacing keys isn’t turned on on this server');
-      }
-      return rotateIdentity(db, {
+    async ({ body }, { principal }) =>
+      rotateIdentity(db, {
         accountId: principal.accountId,
         sessionId: principal.sessionId,
         minKdf,
         storageBytes: limits.storageBytes,
         ...body,
-      }).catch(toApiError);
+      }).catch(toApiError),
+    {
+      recentAuth: true,
+      rateLimit: WRITE_LIMIT,
+      bodyLimit: IDENTITY_ROTATION_BODY,
+      // Refused before the body is read.
+      beforeBody: async () => {
+        if (!identityRotation) {
+          throw new ApiError('rotation-off', 'Replacing keys isn’t turned on on this server');
+        }
+      },
     },
-    { recentAuth: true, rateLimit: WRITE_LIMIT, bodyLimit: IDENTITY_ROTATION_BODY },
   );
 
   // Public, as the directory is: anyone signed in, and agents, which follow their person.

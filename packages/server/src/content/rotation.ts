@@ -24,6 +24,7 @@ import {
   agentCredentials,
   agentGrants,
   agentProfiles,
+  contactsRecords,
   identities,
   identityRotations,
   liveSessions,
@@ -182,10 +183,11 @@ export async function rotateIdentity(
 
     // The account's other sessions end, and a desktop sign-in approved
     // before now is refused (`desktopApprovalStands`): one waiting on the
-    // account's row finds it marked.
+    // account's row finds it marked. The clock now, not at the start of this
+    // transaction, which may have waited on locks while one was approved.
     await tx
       .update(users)
-      .set({ sessionsEndedAt: sql`now()` })
+      .set({ sessionsEndedAt: sql`clock_timestamp()` })
       .where(eq(users.id, input.accountId));
     const signedOut = await tx
       .delete(sessions)
@@ -254,12 +256,24 @@ async function sentBefore(tx: Database, input: RotateIdentity & { accountId: str
     .where(eq(vaultWrappers.accountId, input.accountId));
   const kept = vault ? VaultWrapper.safeParse(vault.wrapper) : null;
   const head = await contactsHead(tx, input.accountId);
+  // The contacts version it stored, which names the agents it kept.
+  const [written] = await tx
+    .select({ sealed: contactsRecords.sealed })
+    .from(contactsRecords)
+    .where(
+      and(
+        eq(contactsRecords.accountId, input.accountId),
+        eq(contactsRecords.version, input.contacts.record.version),
+      ),
+    );
+  const storedSignature = (written?.sealed as { signature?: unknown } | undefined)?.signature;
   if (
     !vault ||
     !kept?.success ||
     !sameSealed(kept.data.keyring, input.wrapper.keyring) ||
     !sameSealed(kept.data.recovery, input.wrapper.recovery) ||
-    !head
+    !head ||
+    storedSignature !== input.contacts.signature
   ) {
     throw new ContentError('rotation-exists', 'These keys were already replaced');
   }
