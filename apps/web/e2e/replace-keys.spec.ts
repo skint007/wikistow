@@ -131,6 +131,7 @@ test('A page load in the middle of Replace my keys asks only for the new passphr
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Did you replace your keys?' })).toBeHidden();
+  await shot(page, 'reload-mid-send');
   await page.getByLabel('Vault passphrase').fill(NEW_PASSPHRASE);
   await page.getByRole('button', { name: 'Unlock' }).click();
   await expect(page.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
