@@ -56,7 +56,8 @@ it('shows one field in place of a pill for each release', () => {
 
 it('lists each release with its date and marks, and opens the one clicked', async () => {
   await act(() => userEvent.click(field()));
-  expect(options()).toHaveLength(releases.length);
+  // The combobox draws the first 100 until something is typed.
+  expect(options()).toHaveLength(Math.min(releases.length, 100));
   expect(option(older.version).textContent).toContain('This version');
   const beta = releases.find((item) => item.prerelease);
   if (beta) expect(option(beta.version).textContent).toContain('Prerelease');
@@ -82,4 +83,29 @@ it('opens the first release listed on Enter, with none reached by the arrows', a
   await act(() => userEvent.click(field()));
   await act(() => userEvent.keyboard('no such release{Enter}'));
   expect(field().value).toBe('no such release');
+});
+
+it('starts again from every release after the field is left, with none chosen', async () => {
+  // A release with its beta listed after it.
+  const stable = releases.find(
+    (item) =>
+      !item.prerelease && releases.some((other) => other.version.startsWith(`${item.version}-`)),
+  )!;
+  await act(() => userEvent.click(field()));
+  await act(() => userEvent.keyboard(`${stable.version}{ArrowDown}{ArrowDown}{Escape}`));
+  // Opened again, Enter goes by what's typed, not the beta the arrows reached.
+  await act(() => userEvent.keyboard('{ArrowDown}'));
+  expect(options().length).toBeGreaterThan(1);
+  expect(field().getAttribute('aria-activedescendant')).toBeNull();
+  await act(() => userEvent.keyboard('{Enter}'));
+  expectOpenedAt(stable.version);
+
+  await act(() => userEvent.click(field()));
+  await act(() => userEvent.keyboard(older.version));
+  // Tab goes past the list, which closes, to the next thing on the page.
+  await act(() => userEvent.keyboard('{Tab}'));
+  expect(document.activeElement).toBe(document.querySelector('summary'));
+  expect(field().value).toBe('');
+  await act(() => userEvent.click(field()));
+  expect(options()).toHaveLength(Math.min(releases.length, 100));
 });

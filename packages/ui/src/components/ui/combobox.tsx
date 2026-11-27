@@ -99,6 +99,7 @@ export function Combobox({
         onClick={() => setOpen(true)}
         onBlur={(event) => {
           setOpen(false);
+          setActive(-1);
           field?.onBlur?.(event);
         }}
         onChange={(event) => {
@@ -121,6 +122,8 @@ export function Combobox({
           } else if (event.key === 'Escape' && open && options) {
             event.preventDefault();
             setOpen(false);
+            // Opened again, it starts with none, so Enter keeps what was typed.
+            setActive(-1);
           }
           if (!event.defaultPrevented) field?.onKeyDown?.(event);
         }}
@@ -134,7 +137,14 @@ export function Combobox({
             {matches.length > SHOWN && `, showing the first ${SHOWN}. Type to narrow them.`}
           </p>
           {shown.length > 0 && (
-            <ul id={`${ids}-list`} role="listbox" className="max-h-64 overflow-y-auto">
+            // Not a tab stop, as Chromium makes a scrolling box: leaving
+            // the field closes it, which would drop the focus.
+            <ul
+              id={`${ids}-list`}
+              role="listbox"
+              tabIndex={-1}
+              className="max-h-64 overflow-y-auto"
+            >
               {shown.map((option, i) => (
                 <li
                   key={option.value}
@@ -146,7 +156,8 @@ export function Combobox({
                   onClick={() => pick(option)}
                   onMouseMove={() => setActive(i)}
                   className={cn(
-                    'flex cursor-pointer items-baseline gap-2 rounded-row px-2 py-1.5 text-sm',
+                    // Its parts wrap on a narrow window, rather than each losing its end.
+                    'flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-1 rounded-row px-2 py-1.5 text-sm',
                     i === active && 'bg-primary-soft text-primary-ink',
                   )}
                 >

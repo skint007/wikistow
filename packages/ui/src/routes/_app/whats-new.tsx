@@ -91,7 +91,7 @@ function WhatsNew() {
  * One field to go to any release, however many there are: typing a version
  * or a date narrows the list. Choosing one, or Enter for the version typed
  * or else the first listed, calls `onPick` with its version, and the field
- * empties again.
+ * empties again, as it does when left.
  */
 function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
   const [text, setText] = useState('');
@@ -117,6 +117,8 @@ function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
         onPick={pick}
         field={{
           autoComplete: 'off',
+          // A search, not a choice: coming back, it lists every release again.
+          onBlur: () => setText(''),
           onKeyDown: (event) => {
             // Not an option reached by the arrows, which the list takes.
             if (event.key !== 'Enter') return;
