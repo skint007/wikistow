@@ -11,6 +11,7 @@ import { nodes, shares } from '../db/schema/index.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
 import { accessTo, canEdit, lockSpace } from './access.ts';
 import { ContentError } from './errors.ts';
+import { requireHoldsCurrent } from './key-material.ts';
 import { requireCaller, type Actor } from './identities.ts';
 
 /** The children of `parentId` in `spaceId`, or the top of the space for null. */
@@ -174,6 +175,7 @@ async function requireArranger(
   const access = await accessTo(tx, caller, { spaceId, nodeId: parentId });
   if (!access) throw new ContentError('not-found');
   if (!canEdit(access)) throw new ContentError('forbidden');
+  await requireHoldsCurrent(tx, caller, access.share);
   return caller;
 }
 

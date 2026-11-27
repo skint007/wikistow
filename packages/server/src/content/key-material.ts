@@ -66,7 +66,9 @@ export async function checkKeyMaterial<E extends Envelope>(
  * An agent writes in a share only where its person's app does (protocol
  * section 4.6): not while every envelope of the current version its person
  * holds was sealed by a key its sealer has since replaced, as when an owner
- * replaced their keys and hasn't yet rotated the share. Its person's app
+ * replaced their keys and hasn't yet rotated the share, or is addressed to
+ * a key the person replaced, as an agent session opened before they did
+ * may still hold. Its person's app
  * then counts that version for opening only; so does the server for the
  * agent, until an owner rotates it. A person with no envelope there, as an
  * owner whose app sealed none to itself, is left to the usual checks.
@@ -78,7 +80,10 @@ async function requirePersonWrites(tx: Database, agentId: string, share: ShareRo
     .where(eq(agentProfiles.agentId, agentId));
   if (!agent) return;
   const held = await tx
-    .select({ envelope: folderKeyEnvelopes.envelope })
+    .select({
+      envelope: folderKeyEnvelopes.envelope,
+      recipientKeyVersion: folderKeyEnvelopes.recipientKeyVersion,
+    })
     .from(folderKeyEnvelopes)
     .where(
       and(
@@ -88,18 +93,25 @@ async function requirePersonWrites(tx: Database, agentId: string, share: ShareRo
       ),
     );
   if (held.length === 0) return;
-  for (const { envelope } of held) {
+  const currentOf = async (id: string) =>
+    (
+      await tx
+        .select({ keyVersion: identities.keyVersion })
+        .from(identities)
+        .where(and(eq(identities.id, id), isNull(identities.revokedAt)))
+        .orderBy(desc(identities.keyVersion))
+        .limit(1)
+    )[0]?.keyVersion;
+  const person = await currentOf(agent.personId);
+  for (const { envelope, recipientKeyVersion } of held) {
+    // Addressed to a key the person replaced, it opens only, for them.
+    if (person !== undefined && recipientKeyVersion < person) continue;
     const { sealerId, sealerKeyVersion } = envelope as {
       sealerId: string;
       sealerKeyVersion: number;
     };
-    const [current] = await tx
-      .select({ keyVersion: identities.keyVersion })
-      .from(identities)
-      .where(and(eq(identities.id, sealerId), isNull(identities.revokedAt)))
-      .orderBy(desc(identities.keyVersion))
-      .limit(1);
-    if (!current || current.keyVersion <= sealerKeyVersion) return;
+    const sealer = await currentOf(sealerId);
+    if (sealer === undefined || sealer <= sealerKeyVersion) return;
   }
   throw new ContentError(
     'forbidden',

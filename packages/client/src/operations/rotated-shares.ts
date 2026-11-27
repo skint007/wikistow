@@ -9,7 +9,7 @@ import { keyHash } from '../identity.ts';
 import { countsForWriting } from '../key-versions.ts';
 import type { DirectoryEntry } from '../trust.ts';
 import { loadWaiting, type Waiting } from './groups.ts';
-import { spaceKeys, type SpaceKeys } from './keys.ts';
+import { ownersEntry, spaceKeys, type SpaceKeys } from './keys.ts';
 import type { ClientContext } from './session.ts';
 import {
   applyShareRotation,
@@ -195,12 +195,15 @@ export function ownersToAddAgain(ctx: ClientContext, keys: SpaceKeys): Directory
     if (identity.id === self) return false;
     const check = ctx.trust.check(identity);
     if (check.kind !== 'pinned' || keyHash(check.identity) !== keyHash(identity)) return false;
-    if (!ctx.trust.earlierKeys(identity.id).some((key) => keys.owners.earlier(key))) return false;
+    // Accepted here at another key of theirs, by this person's own record.
+    const entry = ownersEntry(ctx, keys.spaceId);
+    const hash = keyHash(identity);
+    if (entry?.removedOwners.includes(identity.id)) return false;
+    if (!entry?.owners.some((o) => o.id === identity.id && o.keyHash !== hash)) return false;
     // Accepted at the new key already, as after a re-add whose contacts
     // write landed: done only once a statement naming that key is served,
     // so one whose upload failed is offered again.
     if (!keys.owners.writes(identity)) return true;
-    const hash = keyHash(identity);
     return !keys.statements.some(
       (s) => s.owner.id === identity.id && s.owner.keyHash === hash && s.signerId !== identity.id,
     );

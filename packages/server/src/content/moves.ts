@@ -39,6 +39,7 @@ import {
   type ShareRow,
 } from './access.ts';
 import { ContentError } from './errors.ts';
+import { requireHoldsCurrent } from './key-material.ts';
 import { loseLiveKeys } from './live.ts';
 import { placeAtEnd } from './order.ts';
 import {
@@ -172,6 +173,8 @@ export async function moveNode(
       if (!canEdit(access) || !canEdit(atOldParent) || !canEdit(atDestination)) {
         throw new ContentError('forbidden');
       }
+      // A member a rotation keeps waiting moves nothing until given access.
+      await requireHoldsCurrent(tx, caller, access?.share ?? null);
     }
     // Where it is now, told only to someone who may move it from there.
     if (node.parentId !== input.expectedParentId) {

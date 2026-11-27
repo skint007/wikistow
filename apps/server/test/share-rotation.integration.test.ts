@@ -5,6 +5,8 @@
 // verifying only; and a rotated co-owner is added again.
 import {
   groupOperations,
+  moveOperations as moves,
+  spaceOperations,
   inlineVaultCrypto,
   lookupPeople,
   openAgentSession,
@@ -221,6 +223,10 @@ describe('an agent of a member who replaced their keys', () => {
     });
     await pages.editDraft(before, lib.page, { markdown: 'the agent, before' });
     const { ctx, old } = await rotate(alice, [agent.agentId]);
+    // A session opened before she replaced her keys holds them still; the server refuses it.
+    expect(
+      await rejection(pages.editDraft(before, lib.page, { markdown: 'the old session' })),
+    ).toBe('forbidden');
     const session = await openAgentSession(agent.api, {
       identity: agent.identity,
       person: old,
@@ -331,6 +337,11 @@ describe('the person’s own shares', () => {
       people: [{ person: await find(alice, dave), role: 'editor', canPublish: true }],
     });
     await draftOf(dave.ctx, lib.page);
+    const inside = await spaceOperations.createFolder(alice.ctx, {
+      spaceId: lib.spaceId,
+      parentId: lib.shared,
+      name: 'inside',
+    });
     const { ctx } = await rotate(alice);
     const [finishing] = await rotated.planFinishing(ctx);
     const [planned] = finishing?.rotations ?? [];
@@ -341,6 +352,13 @@ describe('the person’s own shares', () => {
     if (!heads.publishedHead) throw new Error('expected the page published');
     const seen = { publishedHead: heads.publishedHead, permissionVersion };
     expect(await rejection(pages.unpublishPage(later, lib.page, seen))).toBe('forbidden');
+    // Nor move anything, which carries no keys either.
+    const preview = await moves.previewMove(later, {
+      spaceId: lib.spaceId,
+      nodeId: lib.page.pageId,
+      parentId: inside,
+    });
+    expect(await rejection(moves.moveNode(later, { preview }))).toBe('forbidden');
   });
 
   it('left unticked, keep the member waiting, listed for Give access', async () => {
@@ -403,6 +421,14 @@ async function coOwned() {
 describe('a rotated co-owner', () => {
   it('can be removed by a co-owner before anyone adds them again', async () => {
     const { alice, olive, lib } = await coOwned();
+    const { person: carol } = await personWithLibrary();
+    const share = await shareOf(alice.ctx, lib.spaceId);
+    await sharing.addMember(alice.ctx, {
+      spaceId: lib.spaceId,
+      shareId: share.shareId,
+      person: await find(alice, carol),
+      role: 'editor',
+    });
     await rotate(alice);
     const id = alice.vault.identity.public.id;
     await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
@@ -410,6 +436,12 @@ describe('a rotated co-owner', () => {
       spaceId: lib.spaceId,
       ownerId: id,
     });
+    // Carol got access only through Alice's earlier key: she waits, for Olive to confirm.
+    const carolId = carol.vault.identity.public.id;
+    expect(removal.rotations[0]?.plan.waiting).toEqual([carolId]);
+    expect(removal.rotations[0]?.plan.offers).toMatchObject([
+      { identityId: carolId, reason: 'old-key' },
+    ]);
     await ownerOperations.applyOwnerRemoval(olive.ctx, removal);
     const keys = await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
     expect(keys.listed.map((o) => o.identity.id)).not.toContain(id);
@@ -423,8 +455,11 @@ describe('a rotated co-owner', () => {
       shareId: (await shareOf(olive.ctx, lib.spaceId)).shareId,
     });
     await rotate(alice);
-    const keys = await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
-    const [toAdd] = rotated.ownersToAddAgain(olive.ctx, keys);
+    await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    // At the next unlock too, once the follow is in the record.
+    const unlocked = await openSession(olive.api, olive.vault);
+    const keys = await spaceKeys(unlocked, lib.spaceId, { refresh: true });
+    const [toAdd] = rotated.ownersToAddAgain(unlocked, keys);
     if (!toAdd) throw new Error('expected Alice to add again');
     // The contacts write lands; the upload is refused.
     const broken = tampering(olive.ctx, ownerRoutes.addOwner, (body) => ({

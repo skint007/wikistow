@@ -212,7 +212,12 @@ export function planRotation({
       continue;
     }
     const bytes = folderKeyEnvelopeBytes(installationId, envelope);
-    const into = counts(sealer) ? holders : owners.earlier(sealer) ? throughEarlier : null;
+    // An earlier key vouches for nobody, the owner a removal removes
+    // included, whether or not this app has put them on its removed list.
+    const fromEarlier =
+      owners.earlier(sealer) ||
+      (removedKey !== undefined && keyHash(sealer) === removedKey && trust.isEarlier(sealer));
+    const into = fromEarlier ? throughEarlier : counts(sealer) ? holders : null;
     if (!into || !verifySignature(sealer, bytes, envelope.signature)) continue;
     const holder = `${envelope.recipientId} ${envelope.recipientKeyVersion}`;
     // An editor's envelope wins over a reader's for the same key.
