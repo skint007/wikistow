@@ -4,6 +4,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Server
+
+- A setting, `IDENTITY_ROTATION`, off unless set to `on`, for the route that replaces a person's identity keys. Leave it off: until replacing keys is fully built, someone who replaced theirs couldn't open what was shared with their earlier keys. (#755)
+
+#### Development
+
+- The server's route for replacing a person's identity keys (#327), behind `IDENTITY_ROTATION`: it takes the statement both keys sign, the new vault, the first contacts version at the new key and the agents kept or revoked in one transaction, signs out the person's other devices and ends live sessions in their spaces, and from then on refuses anything signed with the old key. Two routes serve a person's statements and earlier keys, and the client builds the request (`prepareRotation`). Nothing in the app reaches it yet. (#755)
+
 ## 0.31.0 - 2026-11-27
 
 ### Highlights

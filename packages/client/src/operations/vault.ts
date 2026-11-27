@@ -2,15 +2,18 @@ import {
   vaultRoutes,
   type AccountId,
   type ServedVaultWrapper,
+  type VaultWrapper,
   type VaultWrapperV1,
+  type VaultWrapperV2,
 } from '@wikistow/contracts';
-import { noAnswer, type ApiClient } from '../api/client.ts';
+import { ApiError, noAnswer, type ApiClient } from '../api/client.ts';
 import type { KeptStore } from '../kept-store.ts';
 import { keptUnlock } from '../kept-unlock.ts';
-import { generateIdentity, type PrivateIdentity } from '../identity.ts';
+import { generateIdentity, sameKeys, type PrivateIdentity } from '../identity.ts';
 import { IdentityId, newId } from '../ids.ts';
 import {
   changePassphrase,
+  createRotatedVault,
   createVault,
   unlockVault,
   unlocks,
@@ -36,7 +39,18 @@ export type VaultCrypto = {
     wrapper: ServedVaultWrapper;
     passphrase: string;
     kdf?: KdfParams;
-  }): Promise<VaultWrapperV1>;
+  }): Promise<VaultWrapper>;
+  /**
+   * A new vault for keys a person is replacing theirs with (section 4.6):
+   * a new vault key, passphrase and recovery key, keeping `retired`.
+   */
+  rotate(input: {
+    accountId: AccountId;
+    identity: PrivateIdentity;
+    retired: readonly PrivateIdentity[];
+    passphrase: string;
+    kdf?: KdfParams;
+  }): Promise<{ wrapper: VaultWrapperV2; recoveryKey: string; vault: UnlockedVault }>;
 };
 
 export const inlineVaultCrypto: VaultCrypto = {
@@ -52,6 +66,9 @@ export const inlineVaultCrypto: VaultCrypto = {
   },
   async changePassphrase({ vault, wrapper, passphrase, kdf }) {
     return changePassphrase({ vault, wrapper, passphrase, ...(kdf ? { kdf } : {}) });
+  },
+  async rotate({ kdf, ...input }) {
+    return createRotatedVault({ ...input, ...(kdf ? { kdf } : {}) });
   },
 };
 
@@ -161,8 +178,14 @@ export async function changeVaultPassphrase({
   vault: UnlockedVault;
   passphrase: string;
   kdf?: KdfParams;
-}): Promise<{ wrapper: VaultWrapperV1; version: number }> {
+}): Promise<{ wrapper: VaultWrapper; version: number }> {
   const { wrapper, version } = await api.call(vaultRoutes.getVault);
+  // Only over the vault this one is: after keys were replaced meanwhile, a
+  // passphrase wrap of this vault's key beside the new keyring would open
+  // nothing (section 4.6). The vault key opens it at once, with no Argon2id.
+  if (!sameVault(wrapper, vault)) {
+    throw new ApiError(409, 'stale-vault-version', 'Your vault changed on another device');
+  }
   const next = await crypto.changePassphrase({
     vault,
     wrapper,
@@ -173,4 +196,19 @@ export async function changeVaultPassphrase({
     body: { wrapper: next, expectedVersion: version },
   });
   return { wrapper: next, version: replaced.version };
+}
+
+// Whether `wrapper` holds the same vault as `vault`: its keyring opens under
+// that vault key, to the same keys.
+function sameVault(wrapper: ServedVaultWrapper, vault: UnlockedVault): boolean {
+  try {
+    const opened = unlockVault({
+      wrapper,
+      secret: { kind: 'vault-key', vaultKey: vault.vaultKey },
+      formats: [1, 2],
+    });
+    return sameKeys(opened.identity.public, vault.identity.public);
+  } catch {
+    return false;
+  }
 }

@@ -160,12 +160,30 @@ describe('format 2 vaults (section 4.6)', () => {
     expect(() =>
       changePassphrase({
         vault: made.vault,
-        wrapper: made.wrapper,
+        wrapper: { format: 3, accountId },
         passphrase: 'new passphrase',
         kdf: FAST_KDF,
       }),
     ).toThrow(code('unsupported-format'));
     expect(ServedVaultWrapper.parse({ format: 3, accountId })).toEqual({ format: 3, accountId });
+  });
+
+  it('keeps format 2 through a passphrase change', () => {
+    const changed = changePassphrase({
+      vault: made.vault,
+      wrapper: made.wrapper,
+      passphrase: 'a new passphrase for it',
+      kdf: FAST_KDF,
+    });
+    expect(changed).toMatchObject({ format: 2, keyring: made.wrapper.keyring });
+    const opened = unlockVault({
+      wrapper: changed,
+      secret: { kind: 'passphrase', passphrase: 'a new passphrase for it' },
+      formats: both,
+    });
+    expect(opened.retired.map((key) => key.public)).toEqual(
+      made.vault.retired.map((key) => key.public),
+    );
   });
 
   it('never opens as the other format', () => {

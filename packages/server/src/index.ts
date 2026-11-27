@@ -33,6 +33,7 @@ export * from './content/pages.ts';
 export * from './content/imports.ts';
 export * from './content/trash.ts';
 export * from './content/contacts.ts';
+export * from './content/rotation.ts';
 export * from './content/quota.ts';
 export * from './content/limits.ts';
 export * from './content/drafts.ts';

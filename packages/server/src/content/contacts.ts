@@ -1,14 +1,24 @@
 // Each person's contacts record (protocol section 8): stored as signed, one
 // row per version, and replaced only by compare-and-swap.
-import { InstallationId, SealedContacts, SignedContactsRecord } from '@wikistow/contracts';
-import { contactsHash, CryptoError, verifyContactsRecord } from '@wikistow/client';
+import {
+  InstallationId,
+  SealedContacts,
+  SignedContactsRecord,
+  type PublicIdentity,
+} from '@wikistow/contracts';
+import {
+  contactsHash,
+  contactsPayloadsMatch,
+  CryptoError,
+  verifyContactsRecord,
+} from '@wikistow/client';
 import { and, desc, eq, gt, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { contactsRecords } from '../db/schema/index.ts';
 import { readSettings } from '../settings.ts';
 import { ContentError } from './errors.ts';
 import { currentIdentity } from './identities.ts';
-import { charge, queueWriter } from './quota.ts';
+import { charge, queueWriter, type Writer } from './quota.ts';
 import { readStored, type ReportUnreadable } from './stored.ts';
 
 /**
@@ -78,56 +88,105 @@ export async function writeContacts(
     const identity = await currentIdentity(tx, input.accountId);
     if (!identity) throw new ContentError('vault-missing', 'Set up your vault first');
     const writer = await queueWriter(tx, input.accountId);
-    await lockContacts(tx, input.accountId);
-    const [current] = await tx
-      .select()
-      .from(contactsRecords)
-      .where(eq(contactsRecords.accountId, input.accountId))
-      .orderBy(desc(contactsRecords.version))
-      .limit(1);
-    const version = current?.version ?? 0;
-    const next = input.record.record;
-    if (version !== input.expectedVersion || next.version !== version + 1) {
-      throw new ContentError('stale-head', 'Your contacts changed on another device');
-    }
-    const { installationId } = await readSettings(tx);
-    try {
-      verifyContactsRecord({
-        owner: identity,
-        installationId: InstallationId.parse(installationId),
-        signed: { record: input.record.record, signature: input.record.signature },
-      });
-    } catch (error) {
-      if (error instanceof CryptoError) throw new ContentError('contacts-invalid', error.message);
-      throw error;
-    }
-    const previous = current ? SignedContactsRecord.loose().safeParse(current.sealed) : null;
-    const prevHash = previous?.success ? contactsHash(previous.data.record) : null;
-    if (current && next.prevHash !== prevHash) {
-      throw new ContentError('contacts-invalid', 'It does not follow your current record');
-    }
-    if (current) {
-      const signed = sql`jsonb_build_object(
-        'record', ${contactsRecords.sealed} -> 'record',
-        'signature', ${contactsRecords.sealed} -> 'signature')`;
-      await tx
-        .update(contactsRecords)
-        .set({ sealed: signed, size: sql`length(${signed}::text)` })
-        .where(
-          and(
-            eq(contactsRecords.accountId, input.accountId),
-            eq(contactsRecords.version, current.version),
-          ),
-        );
-    }
-    const size = JSON.stringify(input.record).length;
-    await charge(tx, writer, size, input.storageBytes);
-    await tx.insert(contactsRecords).values({
-      accountId: input.accountId,
-      version: next.version,
-      sealed: input.record,
-      size,
-    });
-    return { version: next.version };
+    return appendContacts(tx, writer, { ...input, owner: identity });
   });
+}
+
+/**
+ * `writeContacts` inside a transaction that queued the writer and read
+ * `owner`, the key the new version must be signed with: a rotation's
+ * new key, or the caller's current one.
+ */
+export async function appendContacts(
+  tx: Database,
+  writer: Writer,
+  input: {
+    accountId: string;
+    owner: PublicIdentity;
+    expectedVersion: number;
+    record: SealedContacts;
+    storageBytes: number;
+  },
+): Promise<{ version: number }> {
+  await lockContacts(tx, input.accountId);
+  const [current] = await tx
+    .select()
+    .from(contactsRecords)
+    .where(eq(contactsRecords.accountId, input.accountId))
+    .orderBy(desc(contactsRecords.version))
+    .limit(1);
+  const version = current?.version ?? 0;
+  const next = input.record.record;
+  if (version !== input.expectedVersion || next.version !== version + 1) {
+    throw new ContentError('stale-head', 'Your contacts changed on another device');
+  }
+  const { installationId } = await readSettings(tx);
+  try {
+    verifyContactsRecord({
+      owner: input.owner,
+      installationId: InstallationId.parse(installationId),
+      signed: { record: input.record.record, signature: input.record.signature },
+    });
+  } catch (error) {
+    if (error instanceof CryptoError) throw new ContentError('contacts-invalid', error.message);
+    throw error;
+  }
+  // Payloads that aren't the signed ones would leave the record unreadable,
+  // the version before stripped of its own.
+  if (!contactsPayloadsMatch(input.record)) {
+    throw new ContentError('contacts-invalid', 'Its payloads aren’t the ones it signs');
+  }
+  // Nor one its owner holds no key to.
+  const toOwner = input.record.keys.some(
+    (key) =>
+      key.recipientId === input.owner.id && key.recipientKeyVersion === input.owner.keyVersion,
+  );
+  if (!toOwner) throw new ContentError('contacts-invalid', 'Its key isn’t sealed to you');
+  const previous = current ? SignedContactsRecord.loose().safeParse(current.sealed) : null;
+  const prevHash = previous?.success ? contactsHash(previous.data.record) : null;
+  if (current && next.prevHash !== prevHash) {
+    throw new ContentError('contacts-invalid', 'It does not follow your current record');
+  }
+  if (current) {
+    const signed = sql`jsonb_build_object(
+      'record', ${contactsRecords.sealed} -> 'record',
+      'signature', ${contactsRecords.sealed} -> 'signature')`;
+    await tx
+      .update(contactsRecords)
+      .set({ sealed: signed, size: sql`length(${signed}::text)` })
+      .where(
+        and(
+          eq(contactsRecords.accountId, input.accountId),
+          eq(contactsRecords.version, current.version),
+        ),
+      );
+  }
+  const size = JSON.stringify(input.record).length;
+  await charge(tx, writer, size, input.storageBytes);
+  await tx.insert(contactsRecords).values({
+    accountId: input.accountId,
+    version: next.version,
+    sealed: input.record,
+    size,
+  });
+  return { version: next.version };
+}
+
+/**
+ * The newest version's signed record, or null before the first write: what
+ * a rotation statement names as the last version at the old key.
+ */
+export async function contactsHead(tx: Database, accountId: string) {
+  const [current] = await tx
+    .select({ version: contactsRecords.version, sealed: contactsRecords.sealed })
+    .from(contactsRecords)
+    .where(eq(contactsRecords.accountId, accountId))
+    .orderBy(desc(contactsRecords.version))
+    .limit(1);
+  if (!current) return null;
+  const signed = SignedContactsRecord.loose().safeParse(current.sealed);
+  return {
+    version: current.version,
+    contactsHash: signed.success ? contactsHash(signed.data.record) : null,
+  };
 }

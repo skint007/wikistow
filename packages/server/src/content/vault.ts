@@ -16,7 +16,8 @@ export type { KdfParams };
  */
 export const MIN_VAULT_KDF: KdfParams = DEFAULT_KDF;
 
-function checkKdf(kdf: unknown, minKdf: KdfParams): void {
+/** Refuse KDF settings that don't parse, or are cheaper than `minKdf`. */
+export function checkKdf(kdf: unknown, minKdf: KdfParams): void {
   const parsed = KdfParams.safeParse(kdf);
   if (!parsed.success) throw new ContentError('invalid-vault', 'Unsupported KDF settings');
   if (parsed.data.opsLimit < minKdf.opsLimit || parsed.data.memLimit < minKdf.memLimit)

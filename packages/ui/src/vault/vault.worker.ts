@@ -11,6 +11,8 @@ async function run(request: VaultRequest) {
       return inlineVaultCrypto.unlock(request.input);
     case 'changePassphrase':
       return inlineVaultCrypto.changePassphrase(request.input);
+    case 'rotate':
+      return inlineVaultCrypto.rotate(request.input);
     default:
       throw new Error(`Unknown vault operation: ${JSON.stringify(request satisfies never)}`);
   }

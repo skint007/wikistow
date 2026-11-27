@@ -4,7 +4,11 @@ import type { Routes } from '../http/mount.ts';
 
 export function mountSystemRoutes(
   routes: Routes,
-  { db, publicOrigin }: { db: Database; publicOrigin: string },
+  {
+    db,
+    publicOrigin,
+    identityRotation,
+  }: { db: Database; publicOrigin: string; identityRotation: boolean },
 ): void {
   routes.public(systemRoutes.health, () => ({ status: 'ok' as const }));
 
@@ -22,6 +26,7 @@ export function mountSystemRoutes(
       origin: publicOrigin,
       restore,
       importBatches: true,
+      identityRotation,
     };
   });
 }

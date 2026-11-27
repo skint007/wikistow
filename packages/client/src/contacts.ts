@@ -362,6 +362,17 @@ export type OpenedContacts = {
 };
 
 /**
+ * Whether both sealed payloads are the ones the record signs, by hash: what
+ * the server can check of a version it can't open.
+ */
+export function contactsPayloadsMatch(sealed: SealedContacts): boolean {
+  return (
+    hash(sealedBytes(sealed.payload)) === sealed.record.payloadHash &&
+    hash(sealedBytes(sealed.private)) === sealed.record.privatePayloadHash
+  );
+}
+
+/**
  * Open a contacts record as its owner or one of the owner's agents. Checks the
  * owner's signature, the payload hashes, and each key against its signed
  * commitment before decrypting. `owner` is the vault identity for a human, or

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { PublicIdentity } from '../records/identity.ts';
 import { IdentityId } from '../records/ids.ts';
-import { ServedVaultWrapper, VaultWrapperV1 } from '../records/vault.ts';
+import { ServedVaultWrapper, VaultWrapper, VaultWrapperV1 } from '../records/vault.ts';
 import type { RouteDef } from '../route.ts';
 
 /**
@@ -28,12 +28,12 @@ export const getVault = {
 
 /**
  * Replace the passphrase wrapper after a passphrase change or recovery. Needs
- * a recent sign-in; the keyring and recovery wrapper can't change.
+ * a recent sign-in; the format, keyring and recovery wrapper can't change.
  */
 export const replaceVault = {
   method: 'PUT',
   path: '/api/vault',
-  body: z.object({ wrapper: VaultWrapperV1, expectedVersion: z.number().int().positive() }),
+  body: z.object({ wrapper: VaultWrapper, expectedVersion: z.number().int().positive() }),
   response: z.strictObject({ version: z.number().int() }),
 } as const satisfies RouteDef;
 

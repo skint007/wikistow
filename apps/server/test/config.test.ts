@@ -17,4 +17,10 @@ describe('loadConfig', () => {
     // Vault passphrase wrappers must cost at least what the client uses by default.
     expect(loadConfig(valid).minKdf).toEqual(DEFAULT_KDF);
   });
+
+  it('keeps replacing identity keys off unless it is turned on', () => {
+    expect(loadConfig(valid).identityRotation).toBe(false);
+    expect(loadConfig({ ...valid, IDENTITY_ROTATION: 'on' }).identityRotation).toBe(true);
+    expect(() => loadConfig({ ...valid, IDENTITY_ROTATION: 'yes' })).toThrow(/IDENTITY_ROTATION/);
+  });
 });

@@ -63,6 +63,7 @@ export {
 } from './operations/session.ts';
 export * as agentOperations from './operations/agents.ts';
 export * as agentEnrollment from './operations/agent-enrollment.ts';
+export * as replaceKeysOperations from './operations/replace-keys.ts';
 export * as appAgentOperations from './operations/app-agents.ts';
 export * as contactsOperations from './operations/contacts.ts';
 export * as pluginOperations from './operations/plugins.ts';

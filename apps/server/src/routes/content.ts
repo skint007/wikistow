@@ -3,6 +3,7 @@ import {
   contactsRoutes,
   copyRoutes,
   groupRoutes,
+  identityRoutes,
   importRoutes,
   ownerRoutes,
   PageId,
@@ -100,6 +101,9 @@ import {
   listStatements,
   myEnvelopes,
   readContacts,
+  readIdentityVersion,
+  readRotations,
+  rotateIdentity,
   writeContacts,
   loadTree,
   lookupIdentities,
@@ -125,6 +129,7 @@ const CONTENT_ERRORS = {
   'vault-exists': 'vault-exists',
   'vault-immutable-field': 'vault-immutable-field',
   'stale-vault-version': 'stale-vault-version',
+  'rotation-exists': 'rotation-exists',
   'invalid-vault': 'invalid-request',
   'binding-mismatch': 'binding-mismatch',
   'bad-signature': 'bad-signature',
@@ -191,6 +196,9 @@ const BULK_LARGE = { bytes: BULK_BODY / 2, ms: 30_000 };
 // A rotation carries one envelope for each member and owner; an owner's
 // removal, one rotation for each share in the space.
 const ROTATION_BODY = 4 * 1024 * 1024;
+// Replacing a person's keys carries a whole contacts version, which may be
+// near the 1 MiB a contacts write takes, beside the vault and the agents.
+const IDENTITY_ROTATION_BODY = 4 * 1024 * 1024;
 // A move that changes no keys: the destination and a few versions.
 const MOVE_BODY = 16 * 1024;
 const OWNER_REMOVAL_BODY = 16 * 1024 * 1024;
@@ -206,6 +214,7 @@ export function mountContentRoutes(
     contentLimits = DEFAULT_CONTENT_LIMITS,
     minKdf,
     bulkLarge = BULK_LARGE,
+    identityRotation = false,
     log,
   }: {
     db: Database;
@@ -214,6 +223,7 @@ export function mountContentRoutes(
     contentLimits: Config['contentLimits'];
     minKdf: Config['minKdf'];
     bulkLarge?: Config['bulkLarge'];
+    identityRotation?: Config['identityRotation'];
     log: Log;
   },
 ): void {
@@ -295,7 +305,42 @@ export function mountContentRoutes(
   );
 
   routes.account(vaultRoutes.lookupIdentities, async ({ query }) => ({
-    identities: await lookupIdentities(db, query.ids),
+    identities: await lookupIdentities(db, query.ids, { hold: false }),
+  }));
+
+  // Replacing keys stays off until it is fully built (#327): until then a
+  // rotated person can't open what was sealed to their earlier keys, and
+  // their contacts' apps take the new key as a plain key change.
+  routes.account(
+    identityRoutes.rotate,
+    async ({ body }, { principal }) =>
+      rotateIdentity(db, {
+        accountId: principal.accountId,
+        sessionId: principal.sessionId,
+        minKdf,
+        storageBytes: limits.storageBytes,
+        ...body,
+      }).catch(toApiError),
+    {
+      recentAuth: true,
+      rateLimit: WRITE_LIMIT,
+      bodyLimit: IDENTITY_ROTATION_BODY,
+      // Refused before the body is read.
+      beforeBody: async () => {
+        if (!identityRotation) {
+          throw new ApiError('rotation-off', 'Replacing keys isn’t turned on on this server');
+        }
+      },
+    },
+  );
+
+  // For people, as the directory is. An agent may look up fewer people
+  // (section 9.6); it follows its person once following is built (#327).
+  routes.account(identityRoutes.rotations, async ({ params, query }) =>
+    readRotations(db, { identityId: params.identityId, from: query.from }),
+  );
+  routes.account(identityRoutes.version, async ({ params }) => ({
+    identity: await readIdentityVersion(db, params).catch(toApiError),
   }));
 
   routes.content(structureRoutes.listSpaces, async (_input, { actor }) => ({
