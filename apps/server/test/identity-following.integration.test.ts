@@ -126,6 +126,27 @@ describe('agents and the history routes', () => {
       expect((await asAgent(t, agent.token, path)).status).toBe(404);
     }
   });
+
+  it('lets an agent read the chain of a person whose agent wrote what it reads', async () => {
+    // Carol shares a folder with Alice and with Bob; only Alice's agent writes there.
+    const { person: carol, lib } = await personWithLibrary();
+    const { person: alice } = await personWithLibrary();
+    const { person: bob } = await personWithLibrary();
+    await shareFolder(carol.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [
+        { person: await find(carol, alice), role: 'editor', canPublish: false },
+        { person: await find(carol, bob), role: 'reader', canPublish: false },
+      ],
+    });
+    const pick = { spaceId: lib.spaceId, folderId: lib.shared, canPublish: false };
+    const writer = await enrolledAgent(t, alice, { picks: [{ ...pick, role: 'editor' }] });
+    await pages.editDraft(writer.ctx, lib.page, { markdown: 'by Alice’s agent' });
+    const reader = await enrolledAgent(t, bob, { picks: [{ ...pick, role: 'reader' }] });
+    const id = alice.vault.identity.public.id;
+    expect((await asAgent(t, reader.token, `/api/identities/${id}/versions/1`)).status).toBe(200);
+  });
 });
 
 describe('a contact', () => {
@@ -203,6 +224,21 @@ describe('a contact', () => {
     expect(
       await rejection(pages.editDraft(bob.ctx, lib.page, { markdown: 'Bob, declined' })),
     ).toMatch(/missing-key|key-version/);
+  });
+
+  it('declines when the server stops serving the chain it followed', async () => {
+    const { bob, old, next } = await rotatedContact();
+    await lookupPeople(bob.ctx, [old.id]);
+    const [notice] = follow.unseenFollows(bob.ctx);
+    if (!notice) throw new Error('expected a notice');
+    const withheld = answering(bob.ctx, identityRoutes.rotations, () => {
+      throw new ApiError(404, 'not-found', 'Not found');
+    });
+    await follow.declineFollow(withheld, notice);
+    expect(bob.ctx.trust.check(next).kind).toBe('removed');
+    expect(
+      bob.ctx.contacts.book.payloads.shared.contacts.find((c) => c.identity.id === old.id),
+    ).toMatchObject({ identity: old });
   });
 
   it('takes a chain that doesn’t check out, or a fork, as a key change', async () => {

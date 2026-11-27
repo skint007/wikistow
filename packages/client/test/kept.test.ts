@@ -454,6 +454,8 @@ describe('after replacing keys (section 4.6)', () => {
       ...(await store.queue.list()).map((item) => item.name),
     ];
     const old = await items();
+    const [queued] = await store.queue.list();
+    const oldCopy = queued && (await store.queue.read(queued.name));
 
     await keptOperations.sealKeptAgain(store, {
       identity: second,
@@ -478,6 +480,15 @@ describe('after replacing keys (section 4.6)', () => {
       }),
     ).toBe(false);
     // Running again changes nothing.
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+    expect(await items()).toEqual(now);
+    // A copy left under the old key by a run that stopped goes, and is never sent twice.
+    if (!queued || !oldCopy) throw new Error('expected a queued change');
+    await store.queue.write(queued.name, oldCopy);
     await keptOperations.sealKeptAgain(store, {
       identity: second,
       installationId,

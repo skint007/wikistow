@@ -528,6 +528,7 @@ export async function fetchRevisions(
     await pinAuthors(
       ctx,
       answered.map(({ revision }) => revision.record),
+      answered.flatMap(({ envelopes }) => envelopes),
     );
     const keys = await keysFor(
       ctx,

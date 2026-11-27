@@ -151,6 +151,7 @@ async function keysForServed(
   await pinAuthors(
     ctx,
     sealed.map(({ comment }) => comment.record),
+    sealed.flatMap(({ envelopes }) => envelopes),
   );
   return keysFor(
     ctx,

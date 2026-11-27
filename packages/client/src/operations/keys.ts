@@ -274,12 +274,14 @@ export async function lookupDirectory(
 export async function pinAuthors(
   ctx: ClientContext,
   authors: readonly { authorId: IdentityId; authorKeyVersion: number }[],
+  envelopes: readonly { granterId: IdentityId; granterKeyVersion: number }[] = [],
 ): Promise<void> {
-  // Authors who wrote with a key they have since replaced.
-  await takeEarlierKeys(
-    ctx,
-    authors.map((author) => ({ id: author.authorId, keyVersion: author.authorKeyVersion })),
-  );
+  // Authors who wrote, and granters who sealed, with a key they have since
+  // replaced.
+  await takeEarlierKeys(ctx, [
+    ...authors.map((author) => ({ id: author.authorId, keyVersion: author.authorKeyVersion })),
+    ...envelopes.map((e) => ({ id: e.granterId, keyVersion: e.granterKeyVersion })),
+  ]);
   const unpinned = authors.filter(({ authorId, authorKeyVersion }) => {
     try {
       ctx.trust.requireForOpening(authorId, authorKeyVersion);

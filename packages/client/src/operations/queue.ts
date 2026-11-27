@@ -388,7 +388,6 @@ export async function sealQueueAgain(
 ): Promise<void> {
   const names = (await store.queue.list()).map((item) => item.name);
   const listed = new Set(names);
-  const done: string[] = [];
   for (const name of names.filter((n) => n.startsWith(ENTRY))) {
     const sealed = await store.queue.read(name).catch(() => null);
     const plaintext = sealed && from.open(name, sealed);
@@ -418,19 +417,28 @@ export async function sealQueueAgain(
       }
       files.push({ old, opened, renamed: blobNameOf(to, blobHash) });
     }
-    // A change queued under the current key meanwhile is newer: it stays,
-    // and so does this one, under the old key, as it was.
-    if (unread || listed.has(entryNameOf(to, kind, id))) continue;
-    for (const { old, opened, renamed } of files) {
-      await store.queue.write(renamed, to.seal(renamed, opened));
-      done.push(old);
-    }
+    if (unread) continue;
     const renamed = entryNameOf(to, kind, id);
+    if (listed.has(renamed)) {
+      // The same change, copied by a run that stopped before removing it:
+      // the old copy goes. A different one, queued under the current key
+      // meanwhile, is newer: it stays, and so does this one, as it was.
+      const current = await store.queue.read(renamed).catch(() => null);
+      const opened = current && to.open(renamed, current);
+      if (opened && sameBytes(opened, plaintext)) await store.queue.remove([name]);
+      continue;
+    }
+    for (const file of files)
+      await store.queue.write(file.renamed, to.seal(file.renamed, file.opened));
     await store.queue.write(renamed, to.seal(renamed, plaintext));
-    done.push(name);
+    // Each change goes from the old key as soon as it is copied, so a run
+    // that stops leaves at most this one under both.
+    await store.queue.remove([name, ...files.map((file) => file.old)]);
   }
-  if (done.length > 0) await store.queue.remove(done);
 }
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 // Whether a page made offline needs two steps: uploads need the page.
 const hasFiles = (payload: PagePayload) => payload.attachments.length > 0;

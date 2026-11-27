@@ -332,8 +332,11 @@ describe('following a rotation (section 8.4)', () => {
     });
     trust.load(declined);
     expect(() => trust.followChange(chain)).toThrow(changed);
-    // The restored pin counts for opening only: nothing is sealed to it.
+    // The restored pin counts for opening only: nothing is sealed to it,
+    // and neither it nor the declined key counts for writing.
     expect(trust.check(k1.public).kind).toBe('removed');
+    expect(trust.opensOnly(k1.public)).toBe(true);
+    expect(trust.opensOnly(k2.public)).toBe(true);
     expect(() => trust.require(id, 1)).toThrow();
     expect(trust.requireForOpening(id, 1)).toEqual({ identity: k1.public, earlier: true });
   });

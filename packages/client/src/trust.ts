@@ -367,11 +367,12 @@ export class TrustStore {
   }
 
   /**
-   * Whether `identity` counts for opening only: an earlier key of its
-   * person, or a pin a decline restored (sections 4.6 and 8.4).
+   * Whether `identity` counts for no writing: an earlier key of its person,
+   * a pin a decline restored, or a key the person declined or unpinned
+   * (sections 4.6, 8.2 and 8.4).
    */
   opensOnly(identity: PublicIdentity): boolean {
-    if (this.isEarlier(identity)) return true;
+    if (this.isEarlier(identity) || this.#removed.has(keyHash(identity))) return true;
     const pinned = this.#pins.get(identity.id);
     return pinned !== undefined && sameKeys(pinned, identity) && this.isDeclined(pinned);
   }

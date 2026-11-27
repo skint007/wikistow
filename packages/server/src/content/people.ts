@@ -3,9 +3,9 @@
 // email only to label a key they see for the first time.
 import { AgentEnrollment, PublicIdentity } from '@wikistow/contracts';
 import { normalizeEmail } from '@wikistow/client';
-import { inArray, sql, type SQL } from 'drizzle-orm';
+import { eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
-import { shares } from '../db/schema/index.ts';
+import { agentProfiles, shares } from '../db/schema/index.ts';
 import { agentGrantsOf, personAccess, subtreeOf } from './access.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { requireIdentity } from './structure.ts';
@@ -224,7 +224,13 @@ export async function mayReadKeyHistory(
   identityId: string,
 ): Promise<boolean> {
   if (actor.agentId === null) return true;
-  const { people } = await directory(db, actor, [identityId]);
+  // Asked with the person's agents, as the directory lists a person beside
+  // an agent of theirs whose writing the caller reads.
+  const theirs = await db
+    .select({ id: agentProfiles.agentId })
+    .from(agentProfiles)
+    .where(eq(agentProfiles.ownerIdentityId, identityId));
+  const { people } = await directory(db, actor, [identityId, ...theirs.map((agent) => agent.id)]);
   return people.some((person) => person.identity.id === identityId);
 }
 

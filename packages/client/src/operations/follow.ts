@@ -136,10 +136,22 @@ export async function declineFollow(
   const { from } = follow;
   const pin = ctx.trust.pinOf(from.identity.id);
   if (!pin) throw new CryptoError('unknown-identity', `${from.identity.id} isn’t pinned`);
-  // Every key from the restored pin up to the pin now, by a valid chain.
-  const chain = await chainFrom(ctx.api, ctx.installationId, from.identity, pin.identity);
+  // Every key from the restored pin up to the pin now: by a valid chain, and
+  // at least the keys this app knows, the pin itself included, so a server
+  // that stops serving the chain can't stop the decline.
+  const chain = await chainFrom(ctx.api, ctx.installationId, from.identity, pin.identity).catch(
+    (error: unknown) => {
+      if (!notFollowed(error)) throw error;
+      return null;
+    },
+  );
+  const known = ctx.trust
+    .earlierKeys(from.identity.id)
+    .filter((key) => key.keyVersion > from.identity.keyVersion);
   const hashes = [
     ...(chain ? chain.keys.map((key) => keyHash(key)) : []),
+    ...known.map((key) => keyHash(key)),
+    keyHash(pin.identity),
     follow.to.keyHash,
   ].filter((hashed, i, all) => hashed !== keyHash(from.identity) && all.indexOf(hashed) === i);
   const change: ContactsChange = {
