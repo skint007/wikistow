@@ -5,6 +5,7 @@ import {
   type AppHost,
   type PageAccess,
   type PageHandle,
+  type SettingField,
 } from '@wikistow/plugin-sdk';
 import { Manifest } from '@wikistow/plugin-sdk/manifest';
 import type { HostMessage, WorkerMessage } from '@wikistow/plugin-sdk/protocol';
@@ -41,6 +42,8 @@ export type TestPlugin = {
   ownParts?: string[];
   /** The most page access its manifest asks for. */
   access?: PageAccess;
+  /** The settings its manifest declares. */
+  settings?: SettingField[];
 };
 
 /** A vault session a test opens and locks. */
@@ -108,7 +111,18 @@ export async function testRuntime(
   };
   const store = memoryStore({
     plugins: plugins.map(
-      ({ id, activate, script, blocks = [], inline, replaces, fences, ownParts, access }) =>
+      ({
+        id,
+        activate,
+        script,
+        blocks = [],
+        inline,
+        replaces,
+        fences,
+        ownParts,
+        access,
+        settings,
+      }) =>
         installedPlugin({
           manifest: Manifest.parse({
             id,
@@ -122,6 +136,7 @@ export async function testRuntime(
             replaces,
             fences,
             access,
+            settings,
           }),
           key: 'one',
           development: null,

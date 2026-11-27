@@ -2,6 +2,8 @@ import { createFileRoute } from '@tanstack/react-router';
 import { ChevronRight, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import { flushSync } from 'react-dom';
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
+import { composing } from '@/lib/composing';
 import changelog from '../../../../../CHANGELOG.md?raw';
 import { linkHint } from '../../desktop';
 import { parseChangelog, REPOSITORY, type Release } from '../../whats-new/changelog';
@@ -21,6 +23,13 @@ const day = (date: string) =>
     dateStyle: 'long',
     timeZone: 'UTC',
   });
+
+// Each release with its date and marks, found by its version or its date.
+const choices: readonly ComboboxOption[] = releases.map((release) => ({
+  value: release.version,
+  label: day(release.date),
+  marks: <ReleaseMarks release={release} />,
+}));
 
 /**
  * Every release's highlights from CHANGELOG.md, newest first: the newest
@@ -60,23 +69,8 @@ function WhatsNew() {
             What each release of WikiStow changed, newest first. This is version {__APP_VERSION__}.
           </p>
         </header>
-        <nav aria-label="Releases" className="grid gap-2">
-          <p className="text-xs font-bold tracking-wide text-muted-foreground uppercase">
-            Go to a release
-          </p>
-          <ul className="flex flex-wrap gap-1.5">
-            {releases.map(({ version }) => (
-              <li key={version}>
-                <button
-                  type="button"
-                  onClick={() => jump(version)}
-                  className="rounded-full border border-border px-2.5 py-[3px] text-[12.5px] font-bold text-subtle-foreground hover:tint hover:text-foreground active:tint-strong"
-                >
-                  {version}
-                </button>
-              </li>
-            ))}
-          </ul>
+        <nav aria-label="Releases">
+          <ReleaseFinder onPick={jump} />
         </nav>
         <ol className="grid gap-3">
           {releases.map((release) => (
@@ -94,8 +88,83 @@ function WhatsNew() {
   );
 }
 
+/**
+ * One field to go to any release, however many there are: typing a version
+ * or a date narrows the list. Choosing one, or Enter for the version typed
+ * or else the first listed, calls `onPick` with its version, and the field
+ * empties again, as it does when left.
+ */
+function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
+  const [text, setText] = useState('');
+  const pick = (version: string) => {
+    setText('');
+    onPick(version);
+  };
+  return (
+    <div className="grid gap-2">
+      <label
+        htmlFor="release-finder"
+        className="text-xs font-bold tracking-wide text-muted-foreground uppercase"
+      >
+        Go to a release
+      </label>
+      <Combobox
+        id="release-finder"
+        value={text}
+        onChange={setText}
+        options={choices}
+        noun="releases"
+        placeholder="Type a version or a date"
+        onPick={pick}
+        field={{
+          autoComplete: 'off',
+          // A search, not a choice: coming back, it lists every release again.
+          onBlur: () => setText(''),
+          onKeyDown: (event) => {
+            // Not an option reached by the arrows, which the list takes, nor
+            // Enter taking text being composed.
+            if (event.key !== 'Enter' || composing(event)) return;
+            const query = text.trim().toLowerCase();
+            if (!query) return;
+            // The version typed in full, else the first listed, as the list matches.
+            const first =
+              choices.find((choice) => choice.value.toLowerCase() === query) ??
+              choices.find(
+                (choice) =>
+                  choice.value.toLowerCase().includes(query) ||
+                  choice.label?.toLowerCase().includes(query),
+              );
+            if (!first) return;
+            event.preventDefault();
+            pick(first.value);
+          },
+        }}
+      />
+    </div>
+  );
+}
+
+/** A release's Prerelease and This version pills, as its heading and the finder show them. */
+function ReleaseMarks({ release: { version, prerelease } }: { release: Release }) {
+  if (!prerelease && version !== installed) return null;
+  return (
+    <span className="flex flex-wrap gap-1.5 text-[12.5px] font-bold">
+      {prerelease && (
+        <span className="rounded-full bg-status-draft px-2.5 py-[3px] text-status-draft-foreground">
+          Prerelease
+        </span>
+      )}
+      {version === installed && (
+        <span className="rounded-full bg-status-published px-2.5 py-[3px] text-status-published-foreground ring-[1.5px] ring-current ring-inset">
+          ✓ This version
+        </span>
+      )}
+    </span>
+  );
+}
+
 function ReleaseNotes({
-  release: { version, date, prerelease, highlights },
+  release,
   open,
   onToggle,
 }: {
@@ -103,6 +172,7 @@ function ReleaseNotes({
   open: boolean;
   onToggle: (open: boolean) => void;
 }) {
+  const { version, date, highlights } = release;
   const changes = `${REPOSITORY}/releases/tag/v${version}`;
   return (
     <details
@@ -111,7 +181,8 @@ function ReleaseNotes({
       onToggle={(event) => onToggle(event.currentTarget.open)}
       className="group rounded-control border border-border"
     >
-      <summary className="flex scroll-mt-4 cursor-pointer list-none flex-wrap items-center gap-x-2.5 gap-y-1 rounded-control px-4 py-3 hover:tint active:tint-strong [&::-webkit-details-marker]:hidden">
+      {/* Clear of the phone's top bar, which stays over the page. */}
+      <summary className="flex scroll-mt-4 cursor-pointer max-[899px]:scroll-mt-16 list-none flex-wrap items-center gap-x-2.5 gap-y-1 rounded-control px-4 py-3 hover:tint active:tint-strong [&::-webkit-details-marker]:hidden">
         <ChevronRight
           aria-hidden
           className="size-4 shrink-0 transition-transform group-open:rotate-90"
@@ -121,18 +192,7 @@ function ReleaseNotes({
         <time dateTime={date} className="text-sm text-muted-foreground">
           {day(date)}
         </time>
-        <span className="flex flex-wrap gap-1.5 text-[12.5px] font-bold">
-          {prerelease && (
-            <span className="rounded-full bg-status-draft px-2.5 py-[3px] text-status-draft-foreground">
-              Prerelease
-            </span>
-          )}
-          {version === installed && (
-            <span className="rounded-full bg-status-published px-2.5 py-[3px] text-status-published-foreground ring-[1.5px] ring-current ring-inset">
-              ✓ This version
-            </span>
-          )}
-        </span>
+        <ReleaseMarks release={release} />
       </summary>
       <div className="grid gap-4 px-4 pt-1 pb-4 pl-[42px] max-[899px]:pl-4">
         {highlights.map(({ category, items }) => (

@@ -33,7 +33,7 @@ import { useVault } from '../vault/store';
 import { LIBRARY_KEY, readUpload, uploadAndInstall, type PluginUpload } from './library';
 import { ChooseFolder } from './choose-folder';
 import { CommandShortcuts } from './command-shortcuts';
-import { DeclaredSettings } from './declared-settings';
+import { DeclaredSettings, type SaveFailures } from './declared-settings';
 import { ApprovalDevices } from './devices';
 import { pickFolder } from './development';
 import { ConfirmUpload, Library } from './library-settings';
@@ -740,9 +740,10 @@ function Replaces({ candidate }: { candidate: ApprovalRequest }) {
  * where it came from and on/off (for a library plugin, for the account and,
  * while that is on, on this device), its description and any problem, Remove
  * beside `actions`, then its commands' shortcuts and its page access. Settings opens its settings
- * under it: those its manifest declares, drawn by the app, then its own
- * sections (`settings.section`). The page's `plugin` search, which a
- * plugin's `navigate({ kind: 'settings' })` sets, opens them at once.
+ * in a dialog: those its manifest declares, drawn by the app, then its own
+ * sections (`settings.section`), each saved as it changes. The page's
+ * `plugin` search, which a plugin's `navigate({ kind: 'settings' })` sets,
+ * opens it at once.
  */
 export function PluginRow({
   status: { plugin, problem },
@@ -767,6 +768,9 @@ export function PluginRow({
   const { manifest, level, development, enabled } = plugin;
   const { regions } = usePlugins();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Why saves from its settings failed, kept here, as the dialog may have closed meanwhile.
+  const failed = useState<SaveFailures>({});
+  const opener = useRef<HTMLButtonElement>(null);
   const sections = here
     ? regions['settings.section'].filter(({ pluginId }) => pluginId === manifest.id)
     : [];
@@ -774,10 +778,16 @@ export function PluginRow({
   const hasSettings = declared || sections.length > 0;
   // Asked for by the plugin: its sections come once it runs, so this may turn true later.
   const asked = useSearch({ strict: false }).plugin === manifest.id && hasSettings;
+  // Closed for good when it has none left, as when the plugin stops, not only hidden.
+  useEffect(() => {
+    if (!hasSettings) setSettingsOpen(false);
+  }, [hasSettings]);
   const row = useRef<HTMLLIElement>(null);
   const navigate = useNavigate();
   useEffect(() => {
     if (!asked) return;
+    // Where closing it goes back to, as when Settings opened it.
+    opener.current?.focus({ preventScroll: true });
     setSettingsOpen(true);
     row.current?.scrollIntoView({ block: 'start' });
     // Done with, so the Installed tab shows as current, and asking again opens them again.
@@ -829,13 +839,20 @@ export function PluginRow({
           {problem}
         </p>
       )}
+      {!settingsOpen &&
+        Object.entries(failed[0]).map(([key, error]) => (
+          <p key={key} role="alert" className="text-sm text-destructive">
+            A setting wasn’t saved: {error}
+          </p>
+        ))}
       <div className="flex flex-wrap gap-2">
         {hasSettings && (
           <Button
+            ref={opener}
             size="sm"
             variant="outline"
-            aria-expanded={settingsOpen}
-            onClick={() => setSettingsOpen(!settingsOpen)}
+            aria-haspopup="dialog"
+            onClick={() => setSettingsOpen(true)}
           >
             Settings
           </Button>
@@ -850,8 +867,16 @@ export function PluginRow({
           Remove
         </Button>
       </div>
-      {settingsOpen && declared && <DeclaredSettings plugin={plugin} />}
-      {settingsOpen && <RegionPlace name="settings.section" pluginId={manifest.id} />}
+      <Dialog open={settingsOpen && hasSettings} onOpenChange={setSettingsOpen}>
+        <DialogContent className="grid gap-4" dialogClassName="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{manifest.name} settings</DialogTitle>
+            <DialogDescription>Each change is saved as you make it.</DialogDescription>
+          </DialogHeader>
+          {declared && <DeclaredSettings plugin={plugin} failed={failed} />}
+          <RegionPlace name="settings.section" pluginId={manifest.id} />
+        </DialogContent>
+      </Dialog>
       {here && <CommandShortcuts pluginId={manifest.id} />}
       {here && manifest.access !== 'none' && (
         <PageAccessEditor plugin={refOf(plugin)} most={manifest.access} />

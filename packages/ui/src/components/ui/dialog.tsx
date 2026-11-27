@@ -80,7 +80,9 @@ function DialogContent({
     else onOpenChange(false);
   };
 
-  React.useEffect(() => {
+  // Before its children's effects, so what they draw, such as a plugin's
+  // view, measures the box shown rather than a hidden one.
+  React.useLayoutEffect(() => {
     if (!dialog) return;
     if (open && !dialog.open) dialog.showModal();
     if (!open && dialog.open) dialog.close();
@@ -135,7 +137,8 @@ function DialogContent({
       )}
     >
       {/* Padding lives here, so only a click outside this box closes the dialog. */}
-      {open && (
+      {/* Only once there is a box to show, which the effect above shows first. */}
+      {open && dialog && (
         <PortalContainer value={dialog}>
           <div
             className={cn(

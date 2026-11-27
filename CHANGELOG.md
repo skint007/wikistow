@@ -6,6 +6,11 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- What's new goes to a release from one field, in place of a pill for each: it lists every release with its date and Prerelease and This version marks, narrows as a version or a date is typed, and opens the one chosen by mouse, by the arrows or by Enter. The app's comboboxes, Add property among them, keep the list open for a press on its scrollbar, leave keys an input method composes alone, stay under the sticky bars and scroll only their list. (#760)
+- A plugin's **Settings** on the Plugins page opens a dialog, titled with its name, in place of opening its settings under its row: the fields its manifest declares, then its own sections, scrolling on their own. A field still being typed in when the dialog closes is saved, and a save that fails after it closed is said in the row. `?plugin=` opens the dialog. Dialogs now show themselves before what they hold is drawn, so a plugin's section measures the dialog it is in. (#762)
+
 #### Server
 
 - A setting, `IDENTITY_ROTATION`, off unless set to `on`, for the route that replaces a person's identity keys. Leave it off: until replacing keys is fully built, someone who replaced theirs can't write in what was shared with their earlier keys, their own shares included. (#755)
