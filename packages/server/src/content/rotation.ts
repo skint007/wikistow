@@ -88,6 +88,20 @@ export async function rotateIdentity(
     if (rotation.id !== current.id || rotation.from.keyVersion !== current.keyVersion) {
       throw new ContentError('binding-mismatch', 'The rotation names another key');
     }
+    // Row locks in this order: the person's current row, which a write
+    // sealing to them holds (`lookupIdentities`), then the account's, then
+    // its agents' rows, as `wikistow_revoke_agents` takes the account's
+    // before its agents'.
+    await tx
+      .select({ id: identities.id })
+      .from(identities)
+      .where(and(eq(identities.id, current.id), eq(identities.keyVersion, current.keyVersion)))
+      .for('update');
+    await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, input.accountId))
+      .for('update');
     const { installationId } = await readSettings(tx);
     const next = asCrypto(() =>
       verifyIdentityRotation({
@@ -129,7 +143,6 @@ export async function rotateIdentity(
 
     const kept = await checkAgents(tx, input, next, installationId);
 
-    // The old row first: a write sealing to this person holds it (`lookupIdentities`).
     await tx
       .update(identities)
       .set({ revokedAt: sql`now()` })
@@ -167,13 +180,13 @@ export async function rotateIdentity(
     }
     await revokeAgents(tx, input.accountId, input.revokedAgents);
 
-    // As `revokeCredentials` does, after the agents: a session being saved
-    // for the account (a desktop sign-in) waits on its row and is refused.
+    // The account's other sessions end, and a desktop sign-in approved
+    // before now is refused (`desktopApprovalStands`): one waiting on the
+    // account's row finds it marked.
     await tx
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.id, input.accountId))
-      .for('update');
+      .update(users)
+      .set({ sessionsEndedAt: sql`now()` })
+      .where(eq(users.id, input.accountId));
     const signedOut = await tx
       .delete(sessions)
       .where(and(eq(sessions.userId, input.accountId), ne(sessions.id, input.sessionId)))
@@ -258,11 +271,19 @@ const sameSealed = (
   b: { nonce: string; ciphertext: string },
 ) => a.nonce === b.nonce && a.ciphertext === b.ciphertext;
 
+// The same statement, signatures included: Ed25519 signs deterministically,
+// so a request sent again carries exactly the stored ones.
 function sameBytes(stored: unknown, sent: IdentityRotation): boolean {
   try {
-    const bytes = identityRotationBytes(parseIdentityRotation(stored));
+    const kept = parseIdentityRotation(stored);
+    const bytes = identityRotationBytes(kept);
     const sentBytes = identityRotationBytes(sent);
-    return bytes.length === sentBytes.length && bytes.every((byte, i) => byte === sentBytes[i]);
+    return (
+      kept.fromSignature === sent.fromSignature &&
+      kept.toSignature === sent.toSignature &&
+      bytes.length === sentBytes.length &&
+      bytes.every((byte, i) => byte === sentBytes[i])
+    );
   } catch {
     return false;
   }

@@ -18,6 +18,7 @@ import { signIdentityRotation } from '../identity-rotation.ts';
 import { enrollAgent } from '../trust.ts';
 import type { KdfParams, UnlockedVault } from '../vault.ts';
 import { listAgents } from './agents.ts';
+import { readContacts } from './contacts.ts';
 import { saveContacts, type ClientContext } from './session.ts';
 import type { VaultCrypto } from './vault.ts';
 
@@ -36,11 +37,14 @@ export type KeepableAgent = {
  * runs itself (section 9.8), whose secret keys were sealed to the old key.
  * Every other live agent is revoked. None is kept until the person ticks it.
  */
-export async function keepableAgents(ctx: ClientContext): Promise<KeepableAgent[]> {
+export async function keepableAgents(
+  ctx: ClientContext,
+  payloads: ContactsPayloads = ctx.contacts.book.payloads,
+): Promise<KeepableAgent[]> {
   const live = new Set(
     (await listAgents(ctx)).filter((a) => a.revokedAt === null).map((a) => a.agentId),
   );
-  const { shared, private: own } = ctx.contacts.book.payloads;
+  const { shared, private: own } = payloads;
   const revoked = new Set(shared.revokedAgents.map((entry) => entry.agentId));
   const appRun = new Set(appAgentSecrets(own).map((secret) => secret.agentId));
   return shared.agents.flatMap(({ enrollment, label }) => {
@@ -99,9 +103,17 @@ export async function prepareRotation(
   if (vault.identity.public.id !== ctx.identity.public.id) {
     throw new CryptoError('binding-mismatch', 'The vault is another person’s');
   }
-  // The statement names the version this writes, so nothing waits after it.
+  // The statement names the version this writes, so nothing waits after
+  // it, read again from the server, so a version another device wrote since
+  // is the one named.
   await saveContacts(ctx);
-  const keepable = new Set<string>((await keepableAgents(ctx)).map((agent) => agent.agentId));
+  const book = await readContacts(
+    { api: ctx.api, installationId: ctx.installationId, identity: ctx.identity },
+    ctx.contacts.book.mark,
+  );
+  const keepable = new Set<string>(
+    (await keepableAgents(ctx, book.payloads)).map((agent) => agent.agentId),
+  );
   const kept = new Set(keep);
   if (![...kept].every((id) => keepable.has(id))) {
     throw new CryptoError('malformed', 'Only a live agent this person enrolled can be kept');
@@ -115,7 +127,7 @@ export async function prepareRotation(
     id: from.public.id,
     keyVersion: from.public.keyVersion + 1,
   });
-  const head = ctx.contacts.book.record;
+  const head = book.record;
   const rotation = signIdentityRotation({
     installationId: ctx.installationId,
     from,
@@ -130,7 +142,7 @@ export async function prepareRotation(
     ...(kdf ? { kdf } : {}),
   });
 
-  const payloads = ctx.contacts.book.payloads;
+  const { payloads } = book;
   const enrollments = payloads.shared.agents
     .filter(({ enrollment }) => kept.has(enrollment.agent.id))
     .map(({ enrollment }) => enrollAgain(ctx, next, enrollment));

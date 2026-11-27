@@ -196,6 +196,9 @@ const BULK_LARGE = { bytes: BULK_BODY / 2, ms: 30_000 };
 // A rotation carries one envelope for each member and owner; an owner's
 // removal, one rotation for each share in the space.
 const ROTATION_BODY = 4 * 1024 * 1024;
+// Replacing a person's keys carries a whole contacts version, which may be
+// near the 1 MiB a contacts write takes, beside the vault and the agents.
+const IDENTITY_ROTATION_BODY = 4 * 1024 * 1024;
 // A move that changes no keys: the destination and a few versions.
 const MOVE_BODY = 16 * 1024;
 const OWNER_REMOVAL_BODY = 16 * 1024 * 1024;
@@ -322,7 +325,7 @@ export function mountContentRoutes(
         ...body,
       }).catch(toApiError);
     },
-    { recentAuth: true, rateLimit: WRITE_LIMIT },
+    { recentAuth: true, rateLimit: WRITE_LIMIT, bodyLimit: IDENTITY_ROTATION_BODY },
   );
 
   // Public, as the directory is: anyone signed in, and agents, which follow their person.

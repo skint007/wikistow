@@ -2,6 +2,7 @@
 // the rotate route's checks and its one transaction, the statements and
 // earlier keys it serves, and the setting that keeps it off.
 import {
+  changeVaultPassphrase,
   createApiClient,
   inlineVaultCrypto,
   keyHash,
@@ -155,7 +156,7 @@ describe('replacing keys', () => {
         formats: [1, 2],
       }),
     );
-    expect(await rejection(withOldRecovery)).not.toBe('no error');
+    expect(await rejection(withOldRecovery)).toBe('decrypt-failed');
 
     // A session at the new key reads the contacts version it wrote.
     const after = await openSession(alice.api, prepared.vault);
@@ -244,10 +245,11 @@ describe('replacing keys', () => {
         }),
       ),
     ).toBe('contacts-invalid');
-    // A space named under the old key: the session still holds it.
+    // A space named under the old key, which the session still holds: its
+    // name record names the old key version, not the caller's current one.
     expect(
       await rejection(spaceOperations.createSpace(alice.ctx, { name: 'Under the old key' })),
-    ).not.toBe('no error');
+    ).toBe('forbidden');
     // At the new key, a new space goes through.
     const after = await openSession(alice.api, prepared.vault);
     await spaceOperations.createSpace(after, { name: 'Under the new key' });
@@ -285,7 +287,76 @@ describe('the checks', () => {
     const answer = await rotate(alice, first.request);
     expect(await rotate(alice, first.request)).toEqual(answer);
     expect(await rejection(rotate(alice, second.request))).toBe('rotation-exists');
+    // The same signed bytes under other signatures aren't the same statement.
+    const { rotation } = first.request;
+    const swapped = {
+      ...rotation,
+      fromSignature: second.request.rotation.fromSignature,
+    };
+    expect(await rejection(rotate(alice, { ...first.request, rotation: swapped }))).toBe(
+      'rotation-exists',
+    );
     expect((await rowsOf(alice.vault.identity.public.id)).length).toBe(2);
+  });
+
+  it('names the contacts version another device wrote meanwhile', async () => {
+    const alice = await personWithRecord();
+    const phone = await openSession(alice.api, alice.vault);
+    await saveContacts(phone, [
+      {
+        kind: 'accept-owner',
+        spaceId: newId(SpaceId),
+        owner: {
+          id: alice.vault.identity.public.id,
+          keyHash: keyHash(alice.vault.identity.public),
+        },
+      },
+    ]);
+    // This session still holds the version before, with nothing waiting.
+    const prepared = await prepare(alice);
+    expect(prepared.request.rotation.contacts?.version).toBe(
+      phone.contacts.book.record?.version ?? 0,
+    );
+    expect((await rotate(alice, prepared.request)).vaultVersion).toBe(2);
+  });
+
+  it('refuses a passphrase change over the vault it replaced', async () => {
+    const alice = await personWithRecord();
+    const prepared = await prepare(alice);
+    await rotate(alice, prepared.request);
+    // Another tab of the same sign-in, still holding the old vault.
+    expect(
+      await rejection(
+        changeVaultPassphrase({
+          api: alice.api,
+          crypto: inlineVaultCrypto,
+          vault: alice.vault,
+          passphrase: 'a passphrase for the old vault',
+          kdf: FAST_KDF,
+        }),
+      ),
+    ).toBe('stale-vault-version');
+    expect((await alice.api.call(vaultRoutes.getVault)).version).toBe(2);
+    // Over the new vault it goes through, and keeps format 2.
+    const changed = await changeVaultPassphrase({
+      api: alice.api,
+      crypto: inlineVaultCrypto,
+      vault: prepared.vault,
+      passphrase: 'another new vault passphrase',
+      kdf: FAST_KDF,
+    });
+    expect(changed.wrapper.format).toBe(2);
+  });
+
+  it('refuses a desktop sign-in approved before it', async () => {
+    const alice = await personWithRecord();
+    const before = new Date(Date.now() - 1000);
+    await rotate(alice, (await prepare(alice)).request);
+    const [row] = await t.db
+      .select({ endedAt: schema.users.sessionsEndedAt })
+      .from(schema.users)
+      .where(eq(schema.users.id, alice.id));
+    expect(row?.endedAt?.getTime()).toBeGreaterThan(before.getTime());
   });
 
   it('stores nothing when a check fails', async () => {
