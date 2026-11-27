@@ -33,6 +33,14 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
     await page.goto('/settings#security');
     await page.getByRole('button', { name: 'Start replace my keys' }).click();
     await expect(page.getByText('You have no agents to keep.')).toBeVisible();
+    // The old passphrase would open the new vault to whoever knows it.
+    await choosePassphrase(page, PASSPHRASE);
+    await page.getByRole('button', { name: 'Make new keys' }).click();
+    await expect(
+      page.getByText('Choose a passphrase you haven’t used for your vault.'),
+    ).toBeVisible({
+      timeout: 30_000,
+    });
     await choosePassphrase(page, NEW_PASSPHRASE);
     await shot(page, 'replace-my-keys');
     await page.getByRole('button', { name: 'Make new keys' }).click();

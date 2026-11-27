@@ -20,7 +20,7 @@ export function vaultMessage(error: unknown): string {
       // As after someone replaced their keys with a newer app (section 4.6).
       return 'Your vault was saved by a newer version of WikiStow. Update the app to unlock it.';
     case 'keys-replaced-elsewhere':
-      return 'Your keys were replaced since this device last unlocked. Unlock with the new passphrase.';
+      return 'Your keys were replaced since this device last unlocked. Unlock with the new passphrase, online.';
     case 'keys-rollback':
       // Neither the keys this device last unlocked with, nor keys that follow from them.
       return 'This vault holds older keys than the ones this device last unlocked with, or keys that don’t follow from them. That may be an attack: don’t unlock here, and tell whoever runs your server.';

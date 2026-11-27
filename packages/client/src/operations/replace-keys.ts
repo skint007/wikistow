@@ -11,7 +11,7 @@ import {
   type PublicIdentity,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
-import type { ApiClient } from '../api/client.ts';
+import { ApiError, type ApiClient } from '../api/client.ts';
 import { APP_AGENTS_NAMESPACE, appAgentSecrets } from '../app-agents.ts';
 import { contactsHash, sealContacts, type ContactsPayloads } from '../contacts.ts';
 import { CryptoError } from '../errors.ts';
@@ -102,6 +102,7 @@ export async function prepareRotation(
     passphrase,
     kdf,
     keep,
+    shown,
     now = () => new Date(),
   }: {
     vault: UnlockedVault;
@@ -109,6 +110,11 @@ export async function prepareRotation(
     passphrase: string;
     kdf?: KdfParams;
     keep: readonly string[];
+    /**
+     * Every live agent the dialog showed: one enrolled since, which the
+     * rotation would revoke unseen, makes it refuse (`stale-head`).
+     */
+    shown?: readonly string[];
     now?: () => Date;
   },
 ): Promise<PreparedRotation> {
@@ -132,6 +138,9 @@ export async function prepareRotation(
     throw new CryptoError('malformed', 'Only a live agent this person enrolled can be kept');
   }
   const live = (await listAgents(ctx)).filter((a) => a.revokedAt === null).map((a) => a.agentId);
+  if (shown && live.some((id) => !shown.includes(id))) {
+    throw new ApiError(409, 'stale-head', 'An agent was enrolled since the list was shown');
+  }
   const { version: expectedVaultVersion } = await ctx.api.call(vaultRoutes.getVault);
 
   const from = ctx.identity;
@@ -329,4 +338,25 @@ export function judgeUnlock(
     if (at.keyVersion === successor.keyVersion || !through) return 'rollback';
   }
   return 'ok';
+}
+
+/**
+ * Whether the server holds `prepared`'s own statement, exactly: after an
+ * unclear answer, or a refusal of a resend, which may follow a first send
+ * that landed. Its signatures are deterministic, so a match is this one.
+ */
+export async function rotationLanded(
+  api: ApiClient,
+  prepared: PreparedRotation,
+): Promise<boolean> {
+  const { rotation } = prepared.request;
+  const { rotations } = await api.call(identityRoutes.rotations, {
+    params: { identityId: rotation.id },
+    query: { from: rotation.from.keyVersion },
+  });
+  return rotations.some(
+    (stored) =>
+      stored['fromSignature'] === rotation.fromSignature &&
+      stored['toSignature'] === rotation.toSignature,
+  );
 }

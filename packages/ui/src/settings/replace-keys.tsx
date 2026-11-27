@@ -5,11 +5,13 @@
 // until replacing keys is fully built.
 import {
   agentOperations,
+  closeSession,
   replaceKeysOperations as replaceKeys,
   type ClientContext,
   type UnlockedVault,
 } from '@wikistow/client';
 import { ApiError, noAnswer } from '@wikistow/client/api';
+import { vaultRoutes } from '@wikistow/contracts';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Field } from '@/components/form/field';
@@ -22,7 +24,7 @@ import { errorMessage } from '../errors';
 import { PassphraseFields, readPassphrase } from '../routes/_app/vault/setup';
 import { vaultMessage } from '../vault/messages';
 import { keepAnchor, keepChangedWrapper, startSession } from '../vault/open';
-import { forgetKeptUnlock, PLAIN, useVault, vaultStore } from '../vault/store';
+import { forgetKeptUnlock, PLAIN, useVault, vaultStore, zeroVault } from '../vault/store';
 import { workerVaultCrypto } from '../vault/worker-crypto';
 import { FormRow, useOpenedRow } from './rows';
 
@@ -37,6 +39,11 @@ const current = () => {
   if (pending && pending.epoch !== vaultStore.epoch()) pending = null;
   return pending;
 };
+
+// A lock drops a rotation waiting to be sent, and its recovery key, at once.
+vaultStore.subscribe(() => {
+  current();
+});
 
 /**
  * Once a rotation landed but this tab couldn't open the new vault, what the
@@ -129,19 +136,40 @@ function Choose({
     try {
       const passphrase = await readPassphrase(form);
       if ('error' in passphrase) return setError(passphrase.error);
+      // A new vault under the old passphrase would open to whoever knows it.
+      const { wrapper } = await api.call(vaultRoutes.getVault);
+      const reused = await workerVaultCrypto
+        .unlock({ wrapper, secret: { kind: 'passphrase', passphrase: passphrase.value } })
+        .then(
+          (opened) => {
+            zeroVault(opened);
+            return true;
+          },
+          () => false,
+        );
+      if (reused) return setError('Choose a passphrase you haven’t used for your vault.');
       const epoch = vaultStore.epoch();
+      const shown = [...(agents.data?.keepable ?? []), ...(agents.data?.others ?? [])];
       const prepared = await replaceKeys.prepareRotation(ctx, {
         vault,
         crypto: workerVaultCrypto,
         passphrase: passphrase.value,
         keep: [...kept],
+        shown: shown.map((agent) => agent.agentId),
       });
       if (vaultStore.epoch() !== epoch) return;
       vaultStore.stage(prepared.vault);
       pending = { prepared, epoch, password };
       onPrepared();
     } catch (caught) {
-      setError(vaultMessage(caught));
+      if (caught instanceof ApiError && caught.code === 'stale-head') {
+        void agents.refetch();
+        setError(
+          'Something changed on another device, such as an agent enrolled. Check the list, and try again.',
+        );
+      } else {
+        setError(vaultMessage(caught));
+      }
     } finally {
       setBusy(false);
     }
@@ -311,7 +339,7 @@ function SaveAndSend({
     }
     setBusy(true);
     setError(null);
-    let answer: { vaultVersion: number; contactsVersion: number };
+    let answer: { vaultVersion: number } | null = null;
     try {
       answer = await withReauth(() => {
         // Locked meanwhile, as while signing in again: nothing is sent.
@@ -319,44 +347,58 @@ function SaveAndSend({
         return replaceKeys.sendRotation(api, prepared);
       });
     } catch (caught) {
-      setBusy(false);
       if (caught instanceof LockedMeanwhile) {
+        setBusy(false);
         return setError('Your vault locked, so nothing was sent. Unlock it and start again.');
       }
-      if (definitelyRefused(caught)) {
-        // Nothing was stored, and these keys are of no use now.
-        pending = null;
-        setDropped(true);
-        vaultStore.dropStaged();
+      // A first send whose answer was lost may have landed: a refusal now,
+      // or no clear answer, says nothing of it until the server is asked.
+      const landedBefore = await replaceKeys.rotationLanded(api, prepared).catch(() => null);
+      if (landedBefore !== true) {
+        setBusy(false);
+        if (landedBefore === false && definitelyRefused(caught)) {
+          // Nothing was stored, and these keys are of no use now.
+          pending = null;
+          setDropped(true);
+          vaultStore.dropStaged();
+          return setError(
+            caught.code === 'rotation-exists'
+              ? 'Your keys were replaced already, maybe on another device. Lock your vault and unlock again.'
+              : `${errorMessage(caught)} Nothing changed, and the recovery key above won’t work: start again, and save the new one.`,
+          );
+        }
         return setError(
-          caught.code === 'rotation-exists'
-            ? 'Your keys were replaced already, maybe on another device. Lock your vault and unlock again.'
-            : `${errorMessage(caught)} Nothing changed, and the recovery key above won’t work: start again, and save the new one.`,
+          caught instanceof ApiError && caught.code === 'reauth-required'
+            ? vaultMessage(caught)
+            : 'There was no clear answer. Try again: the same keys are sent.',
         );
       }
-      // No answer, or none it could read: it may have landed, so the same one goes again.
-      return setError(
-        noAnswer(caught) || (caught instanceof ApiError && caught.code !== 'reauth-required')
-          ? 'There was no clear answer. Try again: the same keys are sent.'
-          : vaultMessage(caught),
-      );
     }
-    // It landed: whatever happens next, the device keeps what follows from it.
+    // It landed: the device keeps what follows from it, while the same
+    // account is signed in here, even if the vault locked meanwhile.
     pending = null;
     landed = true;
     setDropped(true);
     try {
-      await forgetKeptUnlock();
-      await keepAnchor(prepared.vault.identity.public);
-      // Kept only as the version it was stored at, not a later one a resend answers with.
-      if (answer.vaultVersion === prepared.request.expectedVaultVersion + 1) {
-        await keepChangedWrapper({
-          wrapper: prepared.request.wrapper,
-          version: answer.vaultVersion,
-        });
+      const me = queryClient.getQueryData(meQuery.queryKey);
+      if (me?.account.id === prepared.vault.accountId) {
+        await forgetKeptUnlock();
+        await keepAnchor(prepared.vault.identity.public);
+        // Kept only as the version it was stored at, never a later one.
+        if (answer?.vaultVersion === prepared.request.expectedVaultVersion + 1) {
+          await keepChangedWrapper({
+            wrapper: prepared.request.wrapper,
+            version: answer.vaultVersion,
+          });
+        }
       }
       if (vaultStore.epoch() !== epoch) throw new LockedMeanwhile();
       const ctx = await startSession(prepared.vault);
+      // Locked while it opened: nothing opens.
+      if (vaultStore.epoch() !== epoch) {
+        closeSession(ctx);
+        throw new LockedMeanwhile();
+      }
       vaultStore.unlock(ctx, prepared.vault);
       landed = false;
       await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
