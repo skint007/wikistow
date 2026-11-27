@@ -6,6 +6,10 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ### Changes
 
+#### App
+
+- A plugin's **Settings** on the Plugins page opens a dialog, titled with its name, in place of opening its settings under its row: the fields its manifest declares, then its own sections, scrolling on their own. A field still being typed in when the dialog closes is saved, and a save that fails after it closed is said in the row. `?plugin=` opens the dialog. Dialogs now show themselves before what they hold is drawn, so a plugin's section measures the dialog it is in. (#762)
+
 #### Server
 
 - A setting, `IDENTITY_ROTATION`, off unless set to `on`, for the route that replaces a person's identity keys. Leave it off: until replacing keys is fully built, someone who replaced theirs couldn't open what was shared with their earlier keys. (#755)
