@@ -56,6 +56,9 @@ describe('judgeUnlock', () => {
     expect(judgeUnlock(kept, vault(k3, [k1, k2]))).toBe('ok');
     // Another keyring at the successor's version isn't the successor.
     expect(judgeUnlock(kept, vault(keyAt(3), [k1, k2]))).toBe('rollback');
+    // Past it, only through it.
+    expect(judgeUnlock(kept, vault(keyAt(4), [k1, k2, k3]))).toBe('ok');
+    expect(judgeUnlock(kept, vault(keyAt(4), [k1, k2, keyAt(3)]))).toBe('rollback');
   });
 });
 

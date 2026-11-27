@@ -306,7 +306,8 @@ export async function checkKeys(api: ApiClient, anchor: PublicIdentity): Promise
  * holds the anchor among its retired keys; `replaced-elsewhere` while a
  * successor is recorded and the keyring is older than it, so the device
  * signs and seals nothing with the old keys; and `rollback` for any other
- * keyring, older than the anchor or not holding it. With nothing kept, the
+ * keyring: older than the anchor or not holding it, or past the successor
+ * without holding it. With nothing kept, the
  * device takes the server's word (A15).
  */
 export function judgeUnlock(
@@ -321,8 +322,11 @@ export function judgeUnlock(
     (at.keyVersion > anchor.keyVersion &&
       vault.retired.some((key) => sameKeys(key.public, anchor)));
   if (!fromAnchor) return 'rollback';
-  if (successor && !sameKeys(at, successor) && at.keyVersion <= successor.keyVersion) {
-    return at.keyVersion === successor.keyVersion ? 'rollback' : 'replaced-elsewhere';
+  if (successor && !sameKeys(at, successor)) {
+    if (at.keyVersion < successor.keyVersion) return 'replaced-elsewhere';
+    // Past the successor only through it: a keyring holding it retired.
+    const through = vault.retired.some((key) => sameKeys(key.public, successor));
+    if (at.keyVersion === successor.keyVersion || !through) return 'rollback';
   }
   return 'ok';
 }

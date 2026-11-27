@@ -12,7 +12,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Development
 
-- **Replace my keys** in Settings → Security (#327), shown only where the server's `IDENTITY_ROTATION` is on: new keys, a new passphrase and recovery key, and the agents you tick kept. The app now unlocks a format 2 vault, and a device whose keys were replaced elsewhere asks **Did you replace your keys?** before it asks for a passphrase or forgets a remembered unlock. (#PR2)
+- **Replace my keys** in Settings → Security (#327), shown only where the server's `IDENTITY_ROTATION` is on: new keys, a new passphrase and recovery key, and the agents you tick kept. The app now unlocks a format 2 vault, and a device whose keys were replaced elsewhere asks **Did you replace your keys?** before it asks for a passphrase. (#PR2)
 - The server's route for replacing a person's identity keys (#327), behind `IDENTITY_ROTATION`: it takes the statement both keys sign, the new vault, the first contacts version at the new key and the agents kept or revoked in one transaction, signs out the person's other devices and ends live sessions in their spaces, and from then on refuses anything signed with the old key. Two routes serve a person's statements and earlier keys, and the client builds the request (`prepareRotation`). Nothing in the app reaches it yet. (#755)
 
 ## 0.31.0 - 2026-11-27

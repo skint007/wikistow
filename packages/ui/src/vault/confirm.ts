@@ -36,7 +36,9 @@ export function useConfirmSession() {
         if (outcome !== 'confirmed') {
           // Keys replaced elsewhere keep a remembered unlock: the unlock page
           // asks whether the person did it (section 4.6).
-          const check = outcome === 'passphrase-changed' ? await checkKeptKeys() : null;
+          // A failed check keeps the behaviour from before: lock and forget.
+          const check =
+            outcome === 'passphrase-changed' ? await checkKeptKeys().catch(() => null) : null;
           const replaced = check !== null && check.kind !== 'same';
           await vaultStore.requestLock(() => false, {
             forget: outcome !== 'update-app' && !replaced,

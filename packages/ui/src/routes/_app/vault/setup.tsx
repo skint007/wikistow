@@ -16,7 +16,7 @@ import { AuthCard, FormMessage } from '@/components/layout/auth-card';
 import { Button } from '@/components/ui/button';
 import { api, meQuery } from '../../../api';
 import { vaultMessage } from '../../../vault/messages';
-import { keepChangedWrapper, startSession } from '../../../vault/open';
+import { keepAnchor, keepChangedWrapper, startSession } from '../../../vault/open';
 import { confirmPassphrase } from '../../../vault/passphrase';
 import { vaultStore } from '../../../vault/store';
 import { workerVaultCrypto } from '../../../vault/worker-crypto';
@@ -168,6 +168,8 @@ function SaveRecoveryKey({ prepared }: { prepared: PreparedVault }) {
       const ctx = await startSession(prepared.vault);
       await spaceOperations.createSpace(ctx, { name: 'Personal', emoji: '🏠' });
       vaultStore.unlock(ctx, prepared.vault);
+      // The keys this device last unlocked with (section 4.6).
+      await keepAnchor(prepared.vault.identity.public).catch(() => {});
       await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
       await navigate({ to: '/' });
     } catch (caught) {

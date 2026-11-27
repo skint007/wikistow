@@ -9,7 +9,13 @@ import { api } from '../../../api';
 import { useReauth } from '../../../auth/reauth';
 import { desktop } from '../../../desktop';
 import { vaultMessage } from '../../../vault/messages';
-import { keepChangedWrapper, startSession } from '../../../vault/open';
+import {
+  judgeOpened,
+  keepAnchor,
+  keepChangedWrapper,
+  KeysRefused,
+  startSession,
+} from '../../../vault/open';
 import { vaultStore } from '../../../vault/store';
 import { forgetInBrowser } from '../../../vault/tab-unlock';
 import { workerVaultCrypto } from '../../../vault/worker-crypto';
@@ -36,15 +42,21 @@ function RecoveryKey({ onOpened }: { onOpened: (vault: UnlockedVault) => void })
     setBusy(true);
     setError(null);
     try {
-      onOpened(
-        vaultStore.stage(
-          await openVault({
-            api,
-            crypto: workerVaultCrypto,
-            secret: { kind: 'recovery-key', recoveryKey: recoveryKey.trim() },
-          }),
-        ),
+      const vault = vaultStore.stage(
+        await openVault({
+          api,
+          crypto: workerVaultCrypto,
+          secret: { kind: 'recovery-key', recoveryKey: recoveryKey.trim() },
+        }),
       );
+      // As an unlock is judged: never below the keys this device last
+      // unlocked with, nor past them but by their chain (section 4.6).
+      const judged = await judgeOpened(vault, { online: true });
+      if (judged !== 'ok') {
+        vaultStore.dropStaged();
+        throw new KeysRefused(judged);
+      }
+      onOpened(vault);
     } catch (caught) {
       setError(vaultMessage(caught));
     } finally {
@@ -98,6 +110,7 @@ function NewPassphrase({ vault }: { vault: UnlockedVault }) {
       // A browser remembering the unlock asks for the new passphrase next visit.
       if (!desktop) await forgetInBrowser();
       vaultStore.unlock(await startSession(vault), vault);
+      await keepAnchor(vault.identity.public).catch(() => {});
       await navigate({ to: '/' });
     } catch (caught) {
       setError(vaultMessage(caught));

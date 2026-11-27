@@ -7,6 +7,7 @@ import {
   openKeptSession,
   openSession,
   replaceKeysOperations,
+  sameKeys,
   vaultWrapper,
   unlocks,
   type ClientContext,
@@ -118,7 +119,7 @@ export async function unlockWith(
   if (lockedSince()) throw refused();
   // Never down from the keys this device last unlocked with, nor below keys
   // the directory showed replaced them (section 4.6).
-  const judged = replaceKeysOperations.judgeUnlock(await keptAnchor(), vault);
+  const judged = await judgeOpened(vault, { online: !opened.keptAt });
   if (judged !== 'ok') {
     vaultStore.dropStaged();
     throw new KeysRefused(judged);
@@ -164,6 +165,26 @@ export class KeysRefused extends Error {
   }
 }
 
+/**
+ * `judgeUnlock` against what this device kept, and for keys newer than its
+ * anchor, opened online, the directory's chain too: the anchor moves only
+ * to keys a valid chain from it reaches (section 4.6). Offline, the wrapper
+ * is the one this device kept, which never moved past keys it took.
+ */
+export async function judgeOpened(
+  vault: UnlockedVault,
+  { online }: { online: boolean },
+): Promise<'ok' | 'replaced-elsewhere' | 'rollback'> {
+  const kept = await keptAnchor();
+  const judged = replaceKeysOperations.judgeUnlock(kept, vault);
+  const at = vault.identity.public;
+  if (judged !== 'ok' || !kept || !online || at.keyVersion <= kept.anchor.keyVersion) {
+    return judged;
+  }
+  const check = await replaceKeysOperations.checkKeys(api, kept.anchor);
+  return check.kind === 'replaced' && sameKeys(check.current, at) ? 'ok' : 'rollback';
+}
+
 /** The anchor this device kept, or null where it keeps nothing, which takes the server's word (A15). */
 export async function keptAnchor() {
   const content = await keptContent();
@@ -181,8 +202,8 @@ export async function keepAnchor(identity: UnlockedVault['identity']['public']) 
  * or a passphrase is asked for: what the directory says of the key this
  * device last unlocked with (`checkKeys`). A valid chain to keys it doesn't
  * hold is recorded beside the anchor, so the device opens nothing older
- * until it unlocks at those keys. Null where nothing is kept, or with no
- * answer.
+ * until it unlocks at those keys. With no answer, a successor recorded
+ * before; null where nothing is kept or recorded.
  */
 export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck | null> {
   const content = await keptContent();
@@ -195,8 +216,9 @@ export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck |
     }
     return check;
   } catch (error) {
-    if (noAnswer(error)) return null;
-    throw error;
+    // With no answer, what the device recorded before stands.
+    if (!noAnswer(error)) throw error;
+    return kept.successor ? { kind: 'replaced', current: kept.successor } : null;
   }
 }
 

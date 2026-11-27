@@ -4,6 +4,7 @@
 // only where the server takes it (`IDENTITY_ROTATION`), which stays off
 // until replacing keys is fully built.
 import {
+  agentOperations,
   replaceKeysOperations as replaceKeys,
   type ClientContext,
   type UnlockedVault,
@@ -21,7 +22,7 @@ import { errorMessage } from '../errors';
 import { PassphraseFields, readPassphrase } from '../routes/_app/vault/setup';
 import { vaultMessage } from '../vault/messages';
 import { keepAnchor, keepChangedWrapper, startSession } from '../vault/open';
-import { forgetKeptUnlock, useVault, vaultStore } from '../vault/store';
+import { forgetKeptUnlock, PLAIN, useVault, vaultStore } from '../vault/store';
 import { workerVaultCrypto } from '../vault/worker-crypto';
 import { FormRow, useOpenedRow } from './rows';
 
@@ -32,7 +33,16 @@ import { FormRow, useOpenedRow } from './rows';
  */
 let pending: { prepared: replaceKeys.PreparedRotation; epoch: number; password: boolean } | null =
   null;
-const current = () => (pending && pending.epoch === vaultStore.epoch() ? pending : null);
+const current = () => {
+  if (pending && pending.epoch !== vaultStore.epoch()) pending = null;
+  return pending;
+};
+
+/**
+ * Once a rotation landed but this tab couldn't open the new vault, what the
+ * row says, so it says it after a lock too.
+ */
+let landed = false;
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
 
@@ -48,9 +58,11 @@ export function ReplaceKeys() {
       label="Start"
       close="Close"
       state={
-        retired
-          ? 'You replaced your keys. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
-          : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
+        landed && !retired
+          ? 'Your keys are replaced. Lock your vault, and unlock it with your new passphrase.'
+          : retired
+            ? 'You replaced your keys. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
+            : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
       }
     >
       {vault.status === 'unlocked' ? (
@@ -93,9 +105,18 @@ function Choose({
   vault: UnlockedVault;
   onPrepared: () => void;
 }) {
+  // Names from the contacts record: under PLAIN, so a lock drops them.
   const agents = useQuery({
-    queryKey: ['keepable-agents', vault.identity.public.keyVersion],
-    queryFn: () => replaceKeys.keepableAgents(ctx),
+    queryKey: [PLAIN, 'rotation-agents', vault.identity.public.keyVersion],
+    queryFn: async () => {
+      const keepable = await replaceKeys.keepableAgents(ctx);
+      const ids = new Set<string>(keepable.map((agent) => agent.agentId));
+      // Every other live agent is revoked: listed too, as the server names it.
+      const others = (await agentOperations.listAgents(ctx)).filter(
+        (agent) => agent.revokedAt === null && !ids.has(agent.agentId),
+      );
+      return { keepable, others };
+    },
   });
   const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
   const [password, setPassword] = useState(false);
@@ -147,16 +168,19 @@ function Choose({
           <p className="text-muted-foreground">Loading your agents…</p>
         ) : agents.error ? (
           <FormMessage>{errorMessage(agents.error)}</FormMessage>
-        ) : agents.data.length === 0 ? (
-          <p className="text-muted-foreground">You have no agents to keep.</p>
         ) : (
           <>
-            <p className="text-muted-foreground">
-              Every agent you don’t tick is revoked. Before you tick one, run{' '}
-              <code>wikistow whoami</code> on its computer and check it prints the same ID: someone
-              holding your earlier keys could have named their own agent after one of yours.
-            </p>
-            {agents.data.map((agent) => (
+            {agents.data.keepable.length === 0 ? (
+              <p className="text-muted-foreground">You have no agents to keep.</p>
+            ) : (
+              <p className="text-muted-foreground">
+                Every agent you don’t tick is revoked. Before you tick one, run{' '}
+                <code>wikistow whoami</code> on its computer and check it prints the same ID:
+                someone holding your earlier keys could have named their own agent after one of
+                yours.
+              </p>
+            )}
+            {agents.data.keepable.map((agent) => (
               <label key={agent.agentId} className="flex items-start gap-2">
                 <input
                   type="checkbox"
@@ -171,6 +195,21 @@ function Choose({
                 </span>
               </label>
             ))}
+            {agents.data.others.length > 0 && (
+              <div className="grid gap-1">
+                <p className="text-muted-foreground">
+                  These are revoked: WikiStow runs them, or your contacts don’t list them.
+                </p>
+                {agents.data.others.map((agent) => (
+                  <p key={agent.agentId}>
+                    <span className="font-bold">{agent.name}</span>, enrolled{' '}
+                    {day(agent.enrolledAt)}
+                    <br />
+                    <code className="break-all text-muted-foreground">{agent.agentId}</code>
+                  </p>
+                ))}
+              </div>
+            )}
           </>
         )}
         <p className="text-muted-foreground">
@@ -203,6 +242,30 @@ function Choose({
   );
 }
 
+/** The vault locked while a rotation waited to be sent. */
+class LockedMeanwhile extends Error {}
+
+/**
+ * A refusal that stored nothing, so these keys are of no use: the server
+ * answered with one of the rotation's own refusals. A cancelled sign-in, a
+ * busy or failing server, or an answer that couldn't be read may come before
+ * or after it landed, so the same request is sent again.
+ */
+function definitelyRefused(error: unknown): error is ApiError {
+  return (
+    error instanceof ApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    ![
+      'reauth-required',
+      'rate-limited',
+      'account-rate-limited',
+      'unreadable-response',
+      'network',
+    ].includes(error.code)
+  );
+}
+
 /** Two groups of the key, chosen at random, to type back as proof it was saved. */
 function pickGroups(count: number): [number, number] {
   const first = Math.floor(Math.random() * count);
@@ -224,6 +287,8 @@ function SaveAndSend({
   const [asked] = useState(() => pickGroups(groups.length));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Sent and landed, or definitely refused: never sent again.
+  const [dropped, setDropped] = useState(false);
   if (!held) {
     return (
       <div className="grid gap-3 text-sm">
@@ -234,7 +299,7 @@ function SaveAndSend({
       </div>
     );
   }
-  const { prepared } = held;
+  const { prepared, epoch, password } = held;
 
   async function submit(form: FormData) {
     const typed = asked.map((index) => {
@@ -246,32 +311,60 @@ function SaveAndSend({
     }
     setBusy(true);
     setError(null);
+    let answer: { vaultVersion: number; contactsVersion: number };
     try {
-      const answer = await withReauth(() => replaceKeys.sendRotation(api, prepared));
-      pending = null;
-      // The old vault key no longer opens anything served: a remembered unlock is no use.
-      await forgetKeptUnlock();
-      await keepChangedWrapper({ wrapper: prepared.request.wrapper, version: answer.vaultVersion });
-      const ctx = await startSession(prepared.vault);
-      vaultStore.unlock(ctx, prepared.vault);
-      await keepAnchor(prepared.vault.identity.public).catch(() => {});
-      await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
-      onSent(held?.password ?? false);
+      answer = await withReauth(() => {
+        // Locked meanwhile, as while signing in again: nothing is sent.
+        if (current() !== held) throw new LockedMeanwhile();
+        return replaceKeys.sendRotation(api, prepared);
+      });
     } catch (caught) {
-      if (noAnswer(caught)) {
-        setError('The server didn’t answer. Try again: the same keys are sent.');
-      } else if (caught instanceof ApiError) {
-        // A definite refusal: nothing was stored, and these keys are of no use.
+      setBusy(false);
+      if (caught instanceof LockedMeanwhile) {
+        return setError('Your vault locked, so nothing was sent. Unlock it and start again.');
+      }
+      if (definitelyRefused(caught)) {
+        // Nothing was stored, and these keys are of no use now.
         pending = null;
+        setDropped(true);
         vaultStore.dropStaged();
-        setError(
+        return setError(
           caught.code === 'rotation-exists'
             ? 'Your keys were replaced already, maybe on another device. Lock your vault and unlock again.'
             : `${errorMessage(caught)} Nothing changed, and the recovery key above won’t work: start again, and save the new one.`,
         );
-      } else {
-        setError(vaultMessage(caught));
       }
+      // No answer, or none it could read: it may have landed, so the same one goes again.
+      return setError(
+        noAnswer(caught) || (caught instanceof ApiError && caught.code !== 'reauth-required')
+          ? 'There was no clear answer. Try again: the same keys are sent.'
+          : vaultMessage(caught),
+      );
+    }
+    // It landed: whatever happens next, the device keeps what follows from it.
+    pending = null;
+    landed = true;
+    setDropped(true);
+    try {
+      await forgetKeptUnlock();
+      await keepAnchor(prepared.vault.identity.public);
+      // Kept only as the version it was stored at, not a later one a resend answers with.
+      if (answer.vaultVersion === prepared.request.expectedVaultVersion + 1) {
+        await keepChangedWrapper({
+          wrapper: prepared.request.wrapper,
+          version: answer.vaultVersion,
+        });
+      }
+      if (vaultStore.epoch() !== epoch) throw new LockedMeanwhile();
+      const ctx = await startSession(prepared.vault);
+      vaultStore.unlock(ctx, prepared.vault);
+      landed = false;
+      await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
+      onSent(password);
+    } catch {
+      setError(
+        'Your keys are replaced, and your new recovery key works, but this tab couldn’t open the new vault. Lock your vault, and unlock it with your new passphrase.',
+      );
     } finally {
       setBusy(false);
     }
@@ -305,10 +398,10 @@ function SaveAndSend({
       </div>
       {error && <FormMessage>{error}</FormMessage>}
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" disabled={busy}>
+        <Button type="submit" disabled={busy || dropped}>
           {busy ? 'Replacing…' : 'Replace my keys'}
         </Button>
-        {!pending && error && (
+        {dropped && !landed && error && (
           <Button type="button" variant="outline" onClick={onRestart}>
             Start again
           </Button>
