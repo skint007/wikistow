@@ -13,6 +13,11 @@ import type { DirectoryEntry } from '../trust.ts';
 import { chainFrom } from './chains.ts';
 import { saveContacts, type ClientContext } from './session.ts';
 
+// Take a confirmed change that didn't hold out of what waits to be written.
+const drop = (ctx: ClientContext, change: ContactsChange) => {
+  ctx.contacts.pending = ctx.contacts.pending.filter((pending) => pending !== change);
+};
+
 // Whether a failure means only that the chain doesn't check out (or can't
 // be fetched), which leaves the key a key change.
 const notFollowed = (error: unknown) => error instanceof CryptoError || error instanceof ApiError;
@@ -46,7 +51,12 @@ export async function followRotations(
       if (!chain || !sameKeys(chain.last, identity)) continue;
       const change = ctx.trust.followChange(chain);
       if (!change) continue;
-      await saveContacts(ctx, [change], { confirm: true });
+      await saveContacts(ctx, [change], { confirm: true }).catch((error: unknown) => {
+        // Not held, as when another device declined meanwhile: the key stays a
+        // key change, and the follow isn't left to fail every later write.
+        drop(ctx, change);
+        throw error;
+      });
       // The record now holds the follow, and the pin moved with it (`load`).
       ctx.trust.addEarlierKeys(chain);
       followed.push(chain.last);
@@ -131,7 +141,10 @@ export async function declineFollow(
     chain: hashes,
     removedAt: new Date().toISOString(),
   };
-  await saveContacts(ctx, [change], { confirm: true });
+  await saveContacts(ctx, [change], { confirm: true }).catch((error: unknown) => {
+    drop(ctx, change);
+    throw error;
+  });
   ctx.spaces.clear();
   return declinedOwnerSpaces(ctx, from.identity.id);
 }

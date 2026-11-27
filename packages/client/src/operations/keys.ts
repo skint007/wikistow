@@ -157,7 +157,11 @@ async function loadAgentSpaceKeys(
   const { envelopes } = await ctx.api.call(sharingRoutes.myEnvelopes, { params: { spaceId } });
   const owners = agentOwners({ entry: ownersEntry(ctx, spaceId), person });
   const sealedBy = keyHash(person);
-  const byPerson = opensFor((sealer) => sealer.id === person.id && keyHash(sealer) === sealedBy);
+  // What its person sealed before replacing their keys opens too, and only opens.
+  const byPerson = opensFor(
+    (sealer) =>
+      sealer.id === person.id && (keyHash(sealer) === sealedBy || ctx.trust.isEarlier(sealer)),
+  );
   return {
     spaceId,
     owners,
@@ -297,6 +301,15 @@ export async function pinAuthors(
     }
   };
   for (const entry of people) tryTo(() => ctx.trust.use({ ...entry, foundBy: null }));
+  // Now that they are pinned: what authors, and agents' persons, signed with
+  // keys they have since replaced.
+  await takeEarlierKeys(ctx, [
+    ...authors.map((author) => ({ id: author.authorId, keyVersion: author.authorKeyVersion })),
+    ...agents.map(({ enrollment }) => ({
+      id: enrollment.ownerId,
+      keyVersion: enrollment.ownerKeyVersion,
+    })),
+  ]);
   for (const { enrollment } of agents) tryTo(() => ctx.trust.pinEnrolledAgent(enrollment));
   await saveContacts(ctx, [], { confirm: true });
 }

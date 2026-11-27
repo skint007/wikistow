@@ -284,7 +284,10 @@ export class TrustStore {
 
   /**
    * Pin an agent from an enrollment signed by its already-pinned human owner,
-   * for this installation. `raw` comes from the server.
+   * or by an earlier key of theirs, for this installation: an agent pinned
+   * so only has what it signed checked (section 4.6, **Using an earlier
+   * key**); other people's agents are never sealed to. `raw` comes from the
+   * server.
    */
   pinEnrolledAgent(raw: unknown): void {
     const parsed = AgentEnrollment.safeParse(raw);
@@ -293,7 +296,10 @@ export class TrustStore {
         cause: parsed.error,
       });
     const enrollment = parsed.data;
-    const owner = this.require(enrollment.ownerId, enrollment.ownerKeyVersion);
+    const { identity: owner } = this.requireForOpening(
+      enrollment.ownerId,
+      enrollment.ownerKeyVersion,
+    );
     verifyEnrollment({ installationId: this.installationId, owner, enrollment });
     this.#pin(enrollment.agent);
   }
@@ -323,7 +329,8 @@ export class TrustStore {
    */
   require(id: IdentityId, keyVersion: number): PublicIdentity {
     const pinned = this.#pins.get(id);
-    if (!pinned || pinned.keyVersion !== keyVersion) {
+    // A pin a decline restored counts for opening only (section 8.4).
+    if (!pinned || pinned.keyVersion !== keyVersion || this.isDeclined(pinned)) {
       throw new CryptoError('unknown-identity', `No pinned key for ${id} version ${keyVersion}`);
     }
     return pinned;
@@ -344,7 +351,7 @@ export class TrustStore {
     const pinned = this.#pins.get(id);
     const found =
       pinned?.keyVersion === keyVersion
-        ? { identity: pinned, earlier: false }
+        ? { identity: pinned, earlier: this.isDeclined(pinned) }
         : { identity: this.#earlier.get(id)?.get(keyVersion), earlier: true };
     const { identity, earlier } = found;
     if (!identity || this.#removed.has(keyHash(identity))) {

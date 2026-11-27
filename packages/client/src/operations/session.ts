@@ -1,4 +1,5 @@
 import {
+  identityRoutes,
   systemRoutes,
   vaultRoutes,
   type InstallationId,
@@ -371,7 +372,23 @@ export async function openAgentSession(
   const { installationId } = await api.call(systemRoutes.installation);
   const chain = await chainFrom(api, installationId, pinned);
   const person = chain?.last ?? pinned;
-  const earlier = chain?.keys.slice(0, -1) ?? [];
+  // Every earlier key of the person, from key version 1, as what they sealed
+  // to this agent before still opens: after this session too, when the key
+  // file holds the new key and there is nothing more to follow.
+  const history =
+    person.keyVersion > 1
+      ? await chainFrom(
+          api,
+          installationId,
+          (
+            await api.call(identityRoutes.version, {
+              params: { identityId: person.id, keyVersion: 1 },
+            })
+          ).identity,
+          person,
+        )
+      : null;
+  const earlier = history?.keys.slice(0, -1) ?? [];
   const book = await readPersonContacts(
     { api, installationId, agent: identity, person, earlier },
     mark,
@@ -385,7 +402,7 @@ export async function openAgentSession(
   const trust = new TrustStore(installationId);
   trust.pinOwnPerson(person, entry.enrollment, identity);
   // What the person signed and sealed before, for opening only.
-  if (chain) trust.addEarlierKeys(chain);
+  if (history) trust.addEarlierKeys(history);
   let trusted = book.payloads;
   for (const change of await pins.load()) {
     try {

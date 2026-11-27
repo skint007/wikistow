@@ -334,7 +334,8 @@ describe('following a rotation (section 8.4)', () => {
     expect(() => trust.followChange(chain)).toThrow(changed);
     // The restored pin counts for opening only: nothing is sealed to it.
     expect(trust.check(k1.public).kind).toBe('removed');
-    expect(trust.require(id, 1)).toEqual(k1.public);
+    expect(() => trust.require(id, 1)).toThrow();
+    expect(trust.requireForOpening(id, 1)).toEqual({ identity: k1.public, earlier: true });
   });
 
   it('opens with its own retired keys', () => {

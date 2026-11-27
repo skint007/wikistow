@@ -32,8 +32,11 @@ export async function chainFrom(
   if (!current) throw new CryptoError('identity-key-changed', `${from.id} has no current key`);
   const last = end ?? current;
   if (sameKeys(last, from)) return null;
-  const statements = rotations
-    .map(parseIdentityRotation)
-    .filter((statement) => statement.from.keyVersion < last.keyVersion);
+  // Statements past the current key make it no chain; past a chosen end,
+  // they are later keys, left for later.
+  const parsed = rotations.map(parseIdentityRotation);
+  const statements = end
+    ? parsed.filter((statement) => statement.from.keyVersion < end.keyVersion)
+    : parsed;
   return verifyRotationChain({ installationId, start: from, end: last, statements });
 }

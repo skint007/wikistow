@@ -387,6 +387,7 @@ export async function sealQueueAgain(
   { from, to }: { from: KeptSealer; to: KeptSealer },
 ): Promise<void> {
   const names = (await store.queue.list()).map((item) => item.name);
+  const listed = new Set(names);
   const done: string[] = [];
   for (const name of names.filter((n) => n.startsWith(ENTRY))) {
     const sealed = await store.queue.read(name).catch(() => null);
@@ -402,12 +403,23 @@ export async function sealQueueAgain(
     const id = typeof json === 'object' && json !== null ? Reflect.get(json, 'id') : null;
     if (typeof kind !== 'string' || typeof id !== 'string') continue;
     const parsed = QueueEntryJson.safeParse(json);
+    // A file kept under the old key that doesn't read now keeps its change
+    // where it is, for the next session to try again.
+    const files: { old: string; opened: Uint8Array; renamed: string }[] = [];
+    let unread = false;
     for (const blobHash of parsed.success ? filesOf(parsed.data) : []) {
       const old = blobNameOf(from, blobHash);
+      if (!listed.has(old)) continue;
       const blob = await store.queue.read(old).catch(() => null);
       const opened = blob && from.open(old, blob);
-      if (!opened) continue;
-      const renamed = blobNameOf(to, blobHash);
+      if (!opened) {
+        unread = true;
+        break;
+      }
+      files.push({ old, opened, renamed: blobNameOf(to, blobHash) });
+    }
+    if (unread) continue;
+    for (const { old, opened, renamed } of files) {
       await store.queue.write(renamed, to.seal(renamed, opened));
       done.push(old);
     }

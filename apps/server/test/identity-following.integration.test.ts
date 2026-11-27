@@ -174,6 +174,27 @@ describe('a contact', () => {
     expect(alice.vault.identity.public).toEqual(old);
   });
 
+  it('writes nothing more under a version the old key sealed, even one opened before it followed', async () => {
+    const { person: alice, lib } = await personWithLibrary();
+    const { person: bob } = await personWithLibrary();
+    await shareFolder(alice.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [{ person: await find(alice, bob), role: 'editor', canPublish: false }],
+    });
+    // Bob writes under Alice's version 1 while she is at her old key.
+    await pages.editDraft(bob.ctx, lib.page, { markdown: 'Bob, before' });
+    const { old } = await rotate(alice);
+    await lookupPeople(bob.ctx, [old.id]);
+    expect(await rejection(pages.editDraft(bob.ctx, lib.page, { markdown: 'Bob, after' }))).toMatch(
+      /missing-key|key-version/,
+    );
+    // Reading goes on.
+    expect(await draftOf(bob.ctx, lib.page)).toMatchObject({
+      payload: { markdown: 'Bob, before' },
+    });
+  });
+
   it('takes a chain that doesn’t check out, or a fork, as a key change', async () => {
     const { alice, bob, old, next } = await rotatedContact();
     // The server withholds the statement.
@@ -261,7 +282,21 @@ describe('a contact', () => {
 describe('an agent', () => {
   it('follows its person’s chain from the key it pinned, and reads their record across it', async () => {
     const { person: alice } = await personWithLibrary();
-    const agent = await enrolledAgent(t, alice);
+    // Carol shares a folder with Alice, and Alice's agent picks it.
+    const { person: carol, lib } = await personWithLibrary();
+    await shareFolder(carol.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [{ person: await find(carol, alice), role: 'editor', canPublish: false }],
+    });
+    const agent = await enrolledAgent(t, alice, {
+      picks: [{ spaceId: lib.spaceId, folderId: lib.shared, role: 'editor', canPublish: false }],
+    });
+    // An agent Alice doesn't keep, which wrote there before.
+    const dropped = await enrolledAgent(t, alice, {
+      picks: [{ spaceId: lib.spaceId, folderId: lib.shared, role: 'editor', canPublish: false }],
+    });
+    await pages.editDraft(dropped.ctx, lib.page, { markdown: 'by the dropped agent' });
     await saveContacts(alice.ctx);
     // The agent's last session, before the rotation.
     const before = await openAgentSession(agent.api, {
@@ -281,6 +316,16 @@ describe('an agent', () => {
     expect(ctx.agent?.followedFrom).toEqual(old);
     expect(ctx.contacts.book.record?.ownerKeyVersion).toBe(2);
     expect(ctx.trust.earlierKeys(old.id)).toEqual([old]);
+    // What Alice sealed to it before, and what her dropped agent wrote, open.
+    expect(await draftOf(ctx, lib.page)).toMatchObject({
+      payload: { markdown: 'by the dropped agent' },
+    });
+    // So does it for Carol, once she follows Alice.
+    await lookupPeople(carol.ctx, [old.id]);
+    const fresh = await openSession(carol.api, carol.vault);
+    expect(await draftOf(fresh, lib.page)).toMatchObject({
+      payload: { markdown: 'by the dropped agent' },
+    });
 
     // Once it holds the new key, there's nothing more to follow.
     const again = await openAgentSession(agent.api, {
