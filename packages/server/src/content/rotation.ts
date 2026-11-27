@@ -4,6 +4,7 @@
 import {
   InstallationId,
   PublicIdentity,
+  SignedContactsRecord,
   type AgentEnrollment,
   type IdentityRotation,
   type SealedContacts,
@@ -11,6 +12,7 @@ import {
   type VaultWrapperV2,
 } from '@wikistow/contracts';
 import {
+  contactsHash,
   CryptoError,
   identityRotationBytes,
   parseIdentityRotation,
@@ -22,6 +24,7 @@ import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
 import {
   agentCredentials,
+  agentEnrollments,
   agentGrants,
   agentProfiles,
   contactsRecords,
@@ -42,6 +45,13 @@ import { ContentError } from './errors.ts';
 import { currentIdentity, lockKeysForRotation } from './identities.ts';
 import { queueWriter } from './quota.ts';
 import { checkKdf, type KdfParams } from './vault.ts';
+
+/**
+ * The body a contacts write may carry (`JSON_BODY_LIMIT`, apps/server):
+ * the first version at the new key must fit it, or every later write of
+ * the record would fail, though the rotate route takes a larger body.
+ */
+const CONTACTS_BODY = 1024 * 1024;
 
 export type RotateIdentity = {
   rotation: IdentityRotation;
@@ -128,6 +138,14 @@ export async function rotateIdentity(
       throw new ContentError('stale-head', 'Your contacts changed on another device');
     }
 
+    // What later contacts writes carry must still fit their body.
+    const later = Buffer.byteLength(
+      JSON.stringify({ expectedVersion: input.contacts.record.version, record: input.contacts }),
+    );
+    if (later > CONTACTS_BODY) {
+      throw new ContentError('too-large', 'Your contacts record is too large to replace your keys');
+    }
+
     if (input.wrapper.accountId !== input.accountId) {
       throw new ContentError('binding-mismatch', 'Vault belongs to another account');
     }
@@ -180,6 +198,16 @@ export async function rotateIdentity(
         .where(eq(agentProfiles.agentId, enrollment.agent.id));
     }
     await revokeAgents(tx, input.accountId, input.revokedAgents);
+    // Codes claimed at the old key would only fail at approval.
+    await tx
+      .update(agentEnrollments)
+      .set({ state: 'cancelled' })
+      .where(
+        and(
+          eq(agentEnrollments.ownerAccountId, input.accountId),
+          inArray(agentEnrollments.state, ['claimed', 'cli-confirmed']),
+        ),
+      );
 
     // The account's other sessions end, and a desktop sign-in approved
     // before now is refused (`desktopApprovalStands`): one waiting on the
@@ -266,7 +294,11 @@ async function sentBefore(tx: Database, input: RotateIdentity & { accountId: str
         eq(contactsRecords.version, input.contacts.record.version),
       ),
     );
-  const storedSignature = (written?.sealed as { signature?: unknown } | undefined)?.signature;
+  const storedSigned = written ? SignedContactsRecord.loose().safeParse(written.sealed) : null;
+  const sameRecord =
+    storedSigned?.success === true &&
+    storedSigned.data.signature === input.contacts.signature &&
+    contactsHash(storedSigned.data.record) === contactsHash(input.contacts.record);
   // The version the rotation appended: the one its statement named, plus one.
   const appended = (rotation.contacts?.version ?? 0) + 1;
   if (
@@ -276,7 +308,7 @@ async function sentBefore(tx: Database, input: RotateIdentity & { accountId: str
     !sameSealed(kept.data.keyring, input.wrapper.keyring) ||
     !sameSealed(kept.data.recovery, input.wrapper.recovery) ||
     !head ||
-    storedSignature !== input.contacts.signature
+    !sameRecord
   ) {
     throw new ContentError('rotation-exists', 'These keys were already replaced');
   }

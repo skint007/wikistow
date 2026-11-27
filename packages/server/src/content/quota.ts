@@ -38,7 +38,9 @@ export type Writer = { readonly accountId: string; readonly [queued]: true };
  * them holds anything at a time, and the rest wait holding nothing.
  *
  * Taken first in its transaction, before any row lock or any advisory lock
- * that waits, so it never waits in a ring: a transaction that holds it
+ * that waits, but for the caller's keys (`holdKeys`), which every caller
+ * takes as it reads them, just before, so it never waits in a ring: a
+ * transaction that holds it
  * waits only on what transactions without it hold. A charge and a count
  * of items take the `Writer` this answers, so neither goes unqueued. Taken
  * again in one transaction, it holds as before.

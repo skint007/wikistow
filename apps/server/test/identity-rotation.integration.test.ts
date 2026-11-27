@@ -124,6 +124,15 @@ describe('the setting', () => {
     expect(rows.map((row) => row.keyVersion)).toEqual([1]);
   });
 
+  it('is refused before the body is read', async () => {
+    const alice = await personWithRecord(off);
+    const res = await alice.browser.request('/api/me/identity/rotate', {
+      method: 'POST',
+      json: { padding: 'x'.repeat(5 * 1024 * 1024) },
+    });
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('rotation-off');
+  });
+
   it('says when it is on', async () => {
     const alice = await personWithVault(t);
     expect((await alice.api.call(systemRoutes.installation)).identityRotation).toBe(true);
@@ -233,8 +242,12 @@ describe('replacing keys', () => {
       ).rotations,
     ).toEqual([]);
     // Not to agents, which may look up fewer people.
-    const path = `/api/identities/${old.id}/rotations`;
-    expect((await asAgent(t, kept.token, path)).status).toBe(401);
+    for (const path of [
+      `/api/identities/${old.id}/rotations`,
+      `/api/identities/${old.id}/versions/1`,
+    ]) {
+      expect((await asAgent(t, kept.token, path)).status).toBe(401);
+    }
     // As are the earlier keys, to anyone signed in.
     const bob = await personWithVault(t);
     expect(
@@ -436,6 +449,37 @@ describe('the checks', () => {
     await rotate(alice, first.request);
     const other = { ...first.request, contacts: second.request.contacts };
     expect(await rejection(rotate(alice, other))).toBe('rotation-exists');
+    // A later version, written at the new key since, isn't the one it appended.
+    const after = await openSession(alice.api, first.vault);
+    await saveContacts(after, [
+      {
+        kind: 'accept-owner',
+        spaceId: newId(SpaceId),
+        owner: {
+          id: alice.vault.identity.public.id,
+          keyHash: keyHash(first.vault.identity.public),
+        },
+      },
+    ]);
+    const later = after.contacts.book.sealed;
+    if (!later) throw new Error('expected a record');
+    expect(await rejection(rotate(alice, { ...first.request, contacts: later }))).toBe(
+      'rotation-exists',
+    );
+    expect(await rotate(alice, first.request)).toMatchObject({ vaultVersion: 2 });
+  });
+
+  it('refuses a contacts version that later writes couldn’t carry', async () => {
+    const alice = await personWithRecord();
+    const { request } = await prepare(alice);
+    const huge = {
+      ...request.contacts,
+      payload: { ...request.contacts.payload, ciphertext: 'A'.repeat(1024 * 1024) },
+    };
+    expect(await rejection(rotate(alice, { ...request, contacts: huge }))).toBe(
+      'payload-too-large',
+    );
+    expect((await rowsOf(alice.vault.identity.public.id)).length).toBe(1);
   });
 
   it('refuses a write sealing to someone whose rotation it waited on', async () => {

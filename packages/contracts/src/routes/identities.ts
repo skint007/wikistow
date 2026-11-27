@@ -40,6 +40,8 @@ export const rotate = {
 } as const satisfies RouteDef;
 
 const IdentityParams = z.object({ identityId: HumanId });
+// Key versions as Postgres stores them, in an `integer`.
+const KeyVersion = z.coerce.number().int().positive().max(2_147_483_647);
 
 /**
  * The rotation statements of a person whose `from.keyVersion` is `from` or
@@ -52,7 +54,7 @@ export const rotations = {
   method: 'GET',
   path: '/api/identities/:identityId/rotations',
   params: IdentityParams,
-  query: z.object({ from: z.coerce.number().int().positive().default(1) }),
+  query: z.object({ from: KeyVersion.default(1) }),
   response: z.strictObject({
     current: PublicIdentity.nullable(),
     rotations: z.array(z.record(z.string(), z.unknown())),
@@ -63,6 +65,6 @@ export const rotations = {
 export const version = {
   method: 'GET',
   path: '/api/identities/:identityId/versions/:keyVersion',
-  params: IdentityParams.extend({ keyVersion: z.coerce.number().int().positive() }),
+  params: IdentityParams.extend({ keyVersion: KeyVersion }),
   response: z.strictObject({ identity: PublicIdentity }),
 } as const satisfies RouteDef;
