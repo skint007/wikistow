@@ -43,6 +43,11 @@ export function keptFile(path: string) {
   };
 }
 
+const missingAsNull = (error: unknown) => {
+  if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return null;
+  throw error;
+};
+
 /**
  * A folder of items the pages keep for offline use (ADR 0009), each sealed
  * as `keptFile` is and named as the pages name it. The names are checked by
@@ -59,7 +64,9 @@ export function keptFolder(path: string) {
   };
   const item = (name: string) => join(path, name);
   return {
-    read: (name: string) => queue.then(() => readFile(item(name)).catch(() => null)),
+    // Nothing for an item that isn't there; any other failure is thrown, so
+    // a caller can tell a file it couldn't read from one that is gone.
+    read: (name: string) => queue.then(() => readFile(item(name)).catch(missingAsNull)),
     write: (name: string, sealed: Uint8Array) =>
       run(async () => {
         await mkdir(path, { recursive: true, mode: 0o700 });
