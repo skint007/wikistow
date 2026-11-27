@@ -20,8 +20,8 @@ const MAX_AGENTS = 1000;
  * or revoked. The account's other sessions, and the live sessions in its
  * spaces, end. Needs a recent sign-in, and the server's `IDENTITY_ROTATION`
  * setting (`rotation-off` otherwise). A second statement for the same key
- * version is `rotation-exists`; the same one sent again is answered as the
- * first was.
+ * version is `rotation-exists`; the same one sent again is answered as
+ * accepted, with the vault and contacts versions current now.
  */
 export const rotate = {
   method: 'POST',

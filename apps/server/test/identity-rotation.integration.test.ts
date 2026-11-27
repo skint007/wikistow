@@ -315,6 +315,10 @@ describe('replacing keys', () => {
     const mine = await startSession(alice, own.page);
     const bobs = await startSession(bob, theirs.page);
     const elsewhere = await startSession(bob, theirs.beside);
+    // Someone else's space, where Alice is nobody.
+    const carol = await personWithRecord();
+    const hers = await library(carol);
+    const unrelated = await startSession(carol, hers.page);
 
     await rotate(alice, (await prepare(alice)).request);
     const row = async (id: string) =>
@@ -323,6 +327,7 @@ describe('replacing keys', () => {
     expect(await row(bobs.sessionId)).toMatchObject({ endedReason: 'access' });
     // Bob's private page is in the same space, which Alice is a member of: it ends too.
     expect(await row(elsewhere.sessionId)).toMatchObject({ endedReason: 'access' });
+    expect(await row(unrelated.sessionId)).toMatchObject({ endedAt: null });
   });
 });
 
@@ -467,6 +472,17 @@ describe('the checks', () => {
       'rotation-exists',
     );
     expect(await rotate(alice, first.request)).toMatchObject({ vaultVersion: 2 });
+  });
+
+  it('refuses a contacts version whose payloads aren’t the ones it signs', async () => {
+    const alice = await personWithRecord();
+    const { request } = await prepare(alice);
+    const other = await prepare(alice);
+    const swapped = { ...request.contacts, payload: other.request.contacts.payload };
+    expect(await rejection(rotate(alice, { ...request, contacts: swapped }))).toBe(
+      'contacts-invalid',
+    );
+    expect((await rowsOf(alice.vault.identity.public.id)).length).toBe(1);
   });
 
   it('refuses a contacts version that later writes couldn’t carry', async () => {

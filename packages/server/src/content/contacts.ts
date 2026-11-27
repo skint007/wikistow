@@ -6,7 +6,12 @@ import {
   SignedContactsRecord,
   type PublicIdentity,
 } from '@wikistow/contracts';
-import { contactsHash, CryptoError, verifyContactsRecord } from '@wikistow/client';
+import {
+  contactsHash,
+  contactsPayloadsMatch,
+  CryptoError,
+  verifyContactsRecord,
+} from '@wikistow/client';
 import { and, desc, eq, gt, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { contactsRecords } from '../db/schema/index.ts';
@@ -125,6 +130,11 @@ export async function appendContacts(
   } catch (error) {
     if (error instanceof CryptoError) throw new ContentError('contacts-invalid', error.message);
     throw error;
+  }
+  // Payloads that aren't the signed ones would leave the record unreadable,
+  // the version before stripped of its own.
+  if (!contactsPayloadsMatch(input.record)) {
+    throw new ContentError('contacts-invalid', 'Its payloads aren’t the ones it signs');
   }
   const previous = current ? SignedContactsRecord.loose().safeParse(current.sealed) : null;
   const prevHash = previous?.success ? contactsHash(previous.data.record) : null;

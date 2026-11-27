@@ -368,6 +368,17 @@ export type OpenedContacts = {
  * the human pinned at enrollment for an agent. The caller checks the result
  * against its contacts mark (`compareContactsMark`).
  */
+/**
+ * Whether both sealed payloads are the ones the record signs, by hash: what
+ * the server can check of a version it can't open.
+ */
+export function contactsPayloadsMatch(sealed: SealedContacts): boolean {
+  return (
+    hash(sealedBytes(sealed.payload)) === sealed.record.payloadHash &&
+    hash(sealedBytes(sealed.private)) === sealed.record.privatePayloadHash
+  );
+}
+
 export function openContacts({
   reader,
   owner,
