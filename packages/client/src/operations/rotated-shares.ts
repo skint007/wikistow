@@ -160,6 +160,7 @@ export async function applyWithTicks(
   const changed =
     people(planned) !== people(confirmed) ||
     confirmed.plan.demoted.some((id) => !planned.plan.demoted.includes(id)) ||
+    planned.plan.demoted.some((id) => !ticked.has(id) && !confirmed.plan.demoted.includes(id)) ||
     tick.some((t) => {
       const shown = offeredAt(t.identityId);
       const now = planned.plan.remaining.find(({ identity }) => identity.id === t.identityId);

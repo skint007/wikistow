@@ -418,6 +418,32 @@ describe('the person’s own shares', () => {
     expect((await links.list(ctx, lib.spaceId)).map((l) => l.pageId)).toContain(lib.page.pageId);
   });
 
+  it('in a space made after the rotation, raising a reader gives them the draft keys', async () => {
+    const { person: alice } = await personWithLibrary();
+    const { person: carol } = await personWithLibrary();
+    const { ctx } = await rotate(alice);
+    const fresh = await library({ ...alice, ctx });
+    await shareFolder(ctx, {
+      spaceId: fresh.spaceId,
+      rootId: fresh.shared,
+      people: [{ person: await find({ ...alice, ctx }, carol), role: 'reader', canPublish: false }],
+    });
+    const share = await shareOf(ctx, fresh.spaceId);
+    const [entry] = await lookupPeople(ctx, [carol.vault.identity.public.id]);
+    if (!entry) throw new Error('expected Carol in the directory');
+    await sharing.addMember(ctx, {
+      spaceId: fresh.spaceId,
+      shareId: share.shareId,
+      person: { ...entry, foundBy: null },
+      role: 'editor',
+    });
+    const { envelopes } = await ctx.api.call(sharingRoutes.versionEnvelopes, {
+      params: { shareId: share.shareId, keyVersion: 1 },
+    });
+    const hers = envelopes.find((e) => e.recipientId === carol.vault.identity.public.id);
+    expect(hers?.draftKey).not.toBeNull();
+  });
+
   it('left unticked, keep a reader’s history when an owner raises them later', async () => {
     const { person: alice, lib } = await personWithLibrary();
     const { person: dave } = await personWithLibrary();

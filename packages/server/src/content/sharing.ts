@@ -531,7 +531,13 @@ export async function giveKeys(
       if (h.recipientKeyVersion < keyOf(h.recipientIdentityId)) {
         return false;
       }
-      if (drafts !== undefined && (h.drafts || !drafts || keepAll)) {
+      // One the giver sealed at their current key gives way as ever.
+      const { sealerId, sealerKeyVersion } = h.envelope as {
+        sealerId: string;
+        sealerKeyVersion: number;
+      };
+      const givers = sealerId === sealer.id && sealerKeyVersion === sealer.keyVersion;
+      if (drafts !== undefined && (h.drafts || !drafts || (keepAll && !givers))) {
         kept.add(key);
         return false;
       }
