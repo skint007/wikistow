@@ -3,6 +3,7 @@ import { ChevronRight, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
+import { composing } from '@/lib/composing';
 import changelog from '../../../../../CHANGELOG.md?raw';
 import { linkHint } from '../../desktop';
 import { parseChangelog, REPOSITORY, type Release } from '../../whats-new/changelog';
@@ -122,7 +123,7 @@ function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
           onKeyDown: (event) => {
             // Not an option reached by the arrows, which the list takes, nor
             // Enter taking text being composed.
-            if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+            if (event.key !== 'Enter' || composing(event)) return;
             const query = text.trim().toLowerCase();
             if (!query) return;
             // The version typed in full, else the first listed, as the list matches.
@@ -180,7 +181,8 @@ function ReleaseNotes({
       onToggle={(event) => onToggle(event.currentTarget.open)}
       className="group rounded-control border border-border"
     >
-      <summary className="flex scroll-mt-4 cursor-pointer list-none flex-wrap items-center gap-x-2.5 gap-y-1 rounded-control px-4 py-3 hover:tint active:tint-strong [&::-webkit-details-marker]:hidden">
+      {/* Clear of the phone's top bar, which stays over the page. */}
+      <summary className="flex scroll-mt-4 cursor-pointer max-[899px]:scroll-mt-16 list-none flex-wrap items-center gap-x-2.5 gap-y-1 rounded-control px-4 py-3 hover:tint active:tint-strong [&::-webkit-details-marker]:hidden">
         <ChevronRight
           aria-hidden
           className="size-4 shrink-0 transition-transform group-open:rotate-90"

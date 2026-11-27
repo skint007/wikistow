@@ -120,13 +120,18 @@ it('keeps the list open for a press in it off the options, as on its scrollbar',
 
 it('leaves Enter that ends composing text to the text', async () => {
   await act(() => userEvent.click(field()));
-  await act(() => userEvent.keyboard(releases[0]!.date.slice(0, 4)));
-  // As an input method sends it, taking the word composed.
-  act(() => {
-    field().dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }),
-    );
-  });
-  expect(field().value).toBe(releases[0]!.date.slice(0, 4));
-  expect(document.activeElement).toBe(field());
+  const typed = releases[0]!.date.slice(0, 4);
+  await act(() => userEvent.keyboard(typed));
+  // As an input method sends it, taking the word composed: Safari's with
+  // key code 229 and `isComposing` false. With an option the arrows reached too.
+  for (const composed of [{ isComposing: true }, { keyCode: 229 }]) {
+    await act(() => userEvent.keyboard('{ArrowDown}'));
+    act(() => {
+      field().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, ...composed }),
+      );
+    });
+    expect(field().value).toBe(typed);
+    expect(document.activeElement).toBe(field());
+  }
 });

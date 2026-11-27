@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
+import { composing } from '@/lib/composing';
 import { cn } from '@/lib/utils';
 import { Input } from './input';
 
@@ -109,7 +110,7 @@ export function Combobox({
         }}
         onKeyDown={(event) => {
           // Keys that compose text, such as Enter taking a Japanese word, aren't the list's.
-          if (event.nativeEvent.isComposing) return field?.onKeyDown?.(event);
+          if (composing(event)) return field?.onKeyDown?.(event);
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
             if (!open) return setOpen(true);
