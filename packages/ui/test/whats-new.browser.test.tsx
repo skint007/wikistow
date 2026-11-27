@@ -109,3 +109,24 @@ it('starts again from every release after the field is left, with none chosen', 
   await act(() => userEvent.click(field()));
   expect(options()).toHaveLength(Math.min(releases.length, 100));
 });
+
+it('keeps the list open for a press in it off the options, as on its scrollbar', async () => {
+  await act(() => userEvent.click(field()));
+  const status = document.querySelector<HTMLElement>('[role=status]')!;
+  await act(() => userEvent.click(status));
+  expect(document.activeElement).toBe(field());
+  expect(options().length).toBeGreaterThan(0);
+});
+
+it('leaves Enter that ends composing text to the text', async () => {
+  await act(() => userEvent.click(field()));
+  await act(() => userEvent.keyboard(releases[0]!.date.slice(0, 4)));
+  // As an input method sends it, taking the word composed.
+  act(() => {
+    field().dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }),
+    );
+  });
+  expect(field().value).toBe(releases[0]!.date.slice(0, 4));
+  expect(document.activeElement).toBe(field());
+});

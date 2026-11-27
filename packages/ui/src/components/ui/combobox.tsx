@@ -108,6 +108,8 @@ export function Combobox({
           setOpen(true);
         }}
         onKeyDown={(event) => {
+          // Keys that compose text, such as Enter taking a Japanese word, aren't the list's.
+          if (event.nativeEvent.isComposing) return field?.onKeyDown?.(event);
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
             if (!open) return setOpen(true);
@@ -129,7 +131,12 @@ export function Combobox({
         }}
       />
       {open && options && (
-        <div className="absolute top-10 right-0 left-0 z-20 grid gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+        <div
+          // Keeps focus in the field, so the list stays open until a click
+          // on an option lands, and its scrollbar can be dragged.
+          onMouseDown={(event) => event.preventDefault()}
+          className="absolute top-10 right-0 left-0 z-20 grid gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+        >
           <p role="status" className="px-2 pt-1 text-xs text-muted-foreground">
             {filter.trim()
               ? `${matches.length.toLocaleString()} of ${options.length.toLocaleString()} ${noun}`
@@ -151,8 +158,6 @@ export function Combobox({
                   id={optionId(i)}
                   role="option"
                   aria-selected={i === active}
-                  // Keeps focus in the field, so the list stays open until the click lands.
-                  onMouseDown={(event) => event.preventDefault()}
                   onClick={() => pick(option)}
                   onMouseMove={() => setActive(i)}
                   className={cn(

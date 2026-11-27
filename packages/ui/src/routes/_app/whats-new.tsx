@@ -120,8 +120,9 @@ function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
           // A search, not a choice: coming back, it lists every release again.
           onBlur: () => setText(''),
           onKeyDown: (event) => {
-            // Not an option reached by the arrows, which the list takes.
-            if (event.key !== 'Enter') return;
+            // Not an option reached by the arrows, which the list takes, nor
+            // Enter taking text being composed.
+            if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
             const query = text.trim().toLowerCase();
             if (!query) return;
             // The version typed in full, else the first listed, as the list matches.
