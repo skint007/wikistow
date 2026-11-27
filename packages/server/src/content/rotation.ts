@@ -268,6 +268,11 @@ async function sentBefore(tx: Database, input: RotateIdentity & { accountId: str
       ),
     );
   if (!stored) return null;
+  // The version the rotation appended: the one its statement named, plus one.
+  const appended = (rotation.contacts?.version ?? 0) + 1;
+  if (input.contacts.record.version !== appended) {
+    throw new ContentError('rotation-exists', 'These keys were already replaced');
+  }
   const same =
     stored.accountId === input.accountId &&
     sameBytes(stored.statement, rotation) &&
@@ -303,10 +308,7 @@ async function sentBefore(tx: Database, input: RotateIdentity & { accountId: str
     storedSigned?.success === true &&
     storedSigned.data.signature === input.contacts.signature &&
     contactsHash(storedSigned.data.record) === contactsHash(input.contacts.record);
-  // The version the rotation appended: the one its statement named, plus one.
-  const appended = (rotation.contacts?.version ?? 0) + 1;
   if (
-    input.contacts.record.version !== appended ||
     !vault ||
     !kept?.success ||
     !sameSealed(kept.data.keyring, input.wrapper.keyring) ||
@@ -474,8 +476,9 @@ async function revokeAgents(tx: Database, accountId: string, agentIds: readonly 
  * lands before this or finds the session ended. Answers how many it ended.
  */
 async function endLiveSessions(tx: Database, identityId: string): Promise<number> {
-  // Held in ID order first, so two of these, or one and another change
-  // ending many sessions, don't each wait on a row the other holds.
+  // Held in ID order first, so two of these don't each wait on a row the
+  // other holds. A change of access ends sessions page by page instead
+  // (`wikistow_live_end`); against one of those, Postgres may still abort one.
   const open = await tx.execute<{ id: string }>(sql`
     select s.id from ${liveSessions} s
       where s.ended_at is null and s.space_id in (
