@@ -146,6 +146,15 @@ describe('planning a rotation (section 7.5)', () => {
     expect(result.waiting).toEqual([id(erin), id(mallory)]);
   });
 
+  it('keeps a demotion the change asks for of a member who waits', () => {
+    const result = plan({
+      members: members.map((m) => ({ ...m, role: 'editor' as const })),
+      demote: [id(erin)],
+    });
+    expect(result.waiting).toContain(id(erin));
+    expect(result.demoted).toContain(id(erin));
+  });
+
   it('leave out the person removed, and demote by the dialog, not the envelope', () => {
     const removing = plan({ leaveOut: [id(carol)] });
     expect(roles(removing).carol).toBeUndefined();

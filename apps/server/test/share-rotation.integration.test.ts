@@ -119,6 +119,31 @@ describe('a member who replaced their keys', () => {
     expect(hers && rotated.replacedKeys(hers)).toBe(true);
     expect(hers?.keyChanged).toBe(false);
     expect(hers?.person.identity).toEqual(next);
+    // Rotate keys and give access still works, though she holds nothing of this version.
+    if (!hers) throw new Error('expected Alice waiting');
+    const plans = await rotated.planRekey(bob.ctx, { spaceId: lib.spaceId, person: hers.person });
+    expect(plans.map((p) => p.plan.rekeyed)).toEqual([[id]]);
+    await rotated.applyRekey(bob.ctx, plans);
+    expect((await shareOf(bob.ctx, lib.spaceId)).members).toMatchObject([
+      { identityId: id, keyVersion: 2 },
+    ]);
+    // And they can't be made a co-owner before that: shown on a fresh share below.
+  });
+
+  it('can’t be made a co-owner until a rotation gives them the shares they wait in', async () => {
+    const { alice, bob, lib } = await aliceInBobsShare();
+    const id = alice.vault.identity.public.id;
+    await rotate(alice);
+    const [entry] = await lookupPeople(bob.ctx, [id]);
+    if (!entry) throw new Error('expected Alice in the directory');
+    expect(
+      await rejection(
+        ownerOperations.addCoOwner(bob.ctx, {
+          spaceId: lib.spaceId,
+          person: { ...entry, foundBy: null },
+        }),
+      ),
+    ).toBe('recipients-mismatch');
   });
 
   it('gets the share at her new key with Rotate keys and give access, and nothing else', async () => {
@@ -216,6 +241,48 @@ describe('an agent of a member who replaced their keys', () => {
   });
 });
 
+describe('an agent of a member, after the owner replaced their keys', () => {
+  it('writes nothing under the version the owner’s old key sealed, as its person’s app', async () => {
+    const { person: bob, lib } = await personWithLibrary();
+    const { person: carol } = await personWithLibrary();
+    await shareFolder(bob.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [{ person: await find(bob, carol), role: 'editor', canPublish: false }],
+    });
+    const agent = await enrolledAgent(t, carol, {
+      picks: [{ spaceId: lib.spaceId, folderId: lib.shared, role: 'editor', canPublish: false }],
+    });
+    await saveContacts(carol.ctx);
+    const session = await openAgentSession(agent.api, {
+      identity: agent.identity,
+      person: carol.vault.identity.public,
+      ...agent.kept,
+    });
+    await pages.editDraft(session, lib.page, { markdown: 'the agent, before' });
+    await rotate(bob);
+    // Carol's app follows Bob, and stops writing under what his old key sealed.
+    const fresh = await openSession(carol.api, carol.vault);
+    await lookupPeople(fresh, [bob.vault.identity.public.id]);
+    expect(await rejection(pages.editDraft(fresh, lib.page, { markdown: 'Carol, after' }))).toMatch(
+      /missing-key|key-version/,
+    );
+    // So does her agent, which can't tell who sealed her keys: the server says.
+    const later = await openAgentSession(agent.api, {
+      identity: agent.identity,
+      person: carol.vault.identity.public,
+      mark: session.contacts.book.mark,
+      ...agent.kept,
+    });
+    expect(
+      await rejection(pages.editDraft(later, lib.page, { markdown: 'the agent, after' })),
+    ).toBe('forbidden');
+    expect(await draftOf(later, lib.page)).toMatchObject({
+      payload: { markdown: 'the agent, before' },
+    });
+  });
+});
+
 describe('the person’s own shares', () => {
   it('rotate from a version their earlier key sealed, which counts for verifying only', async () => {
     const { person: alice, lib } = await personWithLibrary();
@@ -239,7 +306,7 @@ describe('the person’s own shares', () => {
     if (!planned) throw new Error('expected a rotation to finish');
     // Dave got access only through her old key: offered unticked, and waits if left so.
     expect(planned.plan.offers).toMatchObject([
-      { identityId: daveId, reason: 'old-key', role: 'reader' },
+      { identityId: daveId, reason: 'old-key', role: 'editor' },
     ]);
     expect(planned.plan.waiting).toEqual([daveId]);
     expect(planned.plan.remaining.map((r) => r.identity.id)).toEqual([ctx.identity.public.id]);
@@ -283,10 +350,61 @@ describe('the person’s own shares', () => {
       payload: { markdown: 'draft words' },
     });
     expect(await rotated.ownedSpaces(ctx)).toContainEqual({ spaceId: lib.spaceId, alone: true });
+    // Give access seals to him again, at his current key.
+    const [entry] = await lookupPeople(ctx, [daveId]);
+    if (!entry) throw new Error('expected Dave in the directory');
+    const change = await groupOperations.planGiveAccess(ctx, {
+      spaceId: lib.spaceId,
+      person: entry,
+    });
+    expect(change.seals).toMatchObject([{ shares: [{ shareId: share.shareId }] }]);
+    await groupOperations.applyGroupChange(ctx, change);
+    expect(await groupOperations.loadWaiting(ctx)).toEqual([]);
   });
 });
 
+/** Alice's space with a share, and Olive a co-owner who confirmed her. */
+async function coOwned() {
+  const { person: alice, lib } = await personWithLibrary();
+  const { person: olive } = await personWithLibrary();
+  await shareFolder(alice.ctx, { spaceId: lib.spaceId, rootId: lib.shared, people: [] });
+  await ownerOperations.addCoOwner(alice.ctx, {
+    spaceId: lib.spaceId,
+    person: await find(alice, olive),
+  });
+  const adder = await ownerOperations.ownerToConfirm(olive.ctx, lib.spaceId);
+  if (!adder) throw new Error('expected Olive to confirm Alice');
+  await ownerOperations.confirmOwner(olive.ctx, { spaceId: lib.spaceId, adder });
+  return { alice, olive, lib };
+}
+
 describe('a rotated co-owner', () => {
+  it('still finishes a share a co-owner sealed again to her new key', async () => {
+    const { alice, olive, lib } = await coOwned();
+    // Olive's app sealed the share's current version, which Alice's old key opens.
+    await sharing.rotateKeys(olive.ctx, {
+      spaceId: lib.spaceId,
+      shareId: (await shareOf(olive.ctx, lib.spaceId)).shareId,
+    });
+    const { vault } = await rotate(alice);
+    // Olive adds her again first: the current version, which Alice's old key
+    // opens, is sealed again to her new key.
+    const keys = await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    const [toAdd] = rotated.ownersToAddAgain(olive.ctx, keys);
+    if (!toAdd) throw new Error('expected Alice to add again');
+    await ownerOperations.addCoOwner(olive.ctx, {
+      spaceId: lib.spaceId,
+      person: { ...toAdd, foundBy: null },
+    });
+    const fresh = await openSession(alice.api, vault);
+    // She names Olive back first, as her app asks before any owner action.
+    const again = await ownerOperations.ownerToConfirm(fresh, lib.spaceId);
+    if (!again) throw new Error('expected Alice to confirm Olive');
+    await ownerOperations.confirmOwner(fresh, { spaceId: lib.spaceId, adder: again });
+    const [finishing] = await rotated.planFinishing(fresh);
+    expect(finishing?.rotations).toHaveLength(1);
+  });
+
   it('is named to the other owner, who adds them again, after which both write', async () => {
     const { person: alice, lib } = await personWithLibrary();
     const { person: olive } = await personWithLibrary();

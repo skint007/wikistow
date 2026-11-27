@@ -251,8 +251,17 @@ export function planRotation({
     const listed = directory.find(({ identity }) => identity.id === member.identityId);
     const replaced = !!listed && listed.identity.keyVersion > member.keyVersion;
     const held: 'reader' | 'editor' | undefined = counted ?? earlier;
-    if (!held) {
-      leftOut.push({ identityId: member.identityId, reason: 'no-envelope' });
+    // The most the server lets this rotation seal them: their row's role.
+    const most = member.role ?? held ?? 'reader';
+    // A member who waits keeps a demotion the change asks for.
+    const waits = (reason: LeftOutReason) => {
+      leftOut.push({ identityId: member.identityId, reason });
+      if (demoting.has(member.identityId) && most === 'editor') demoted.push(member.identityId);
+    };
+    // One who replaced their keys may be ticked even with no envelope of
+    // `v`, as after waiting through a rotation: the owner's tick vouches.
+    if (!held && !replaced) {
+      waits('no-envelope');
       continue;
     }
     // The key to seal to: their row's, or after they replaced their keys,
@@ -264,10 +273,8 @@ export function planRotation({
         })
       : usableKey(trust, directory, member);
     if (typeof identity === 'string') {
-      leftOut.push({
-        identityId: member.identityId,
-        reason: replaced ? 'replaced-keys' : identity,
-      });
+      if (replaced) waits('replaced-keys');
+      else leftOut.push({ identityId: member.identityId, reason: identity });
       continue;
     }
     // Earlier-key envelopes and replaced keys are the owner's call, by name.
@@ -276,24 +283,25 @@ export function planRotation({
           identityId: member.identityId,
           reason: 'replaced-keys',
           identity,
-          role: counted ?? 'reader',
+          role: counted && most === 'editor' ? counted : held ? 'reader' : most,
         }
       : counted
         ? null
-        : { identityId: member.identityId, reason: 'old-key', identity, role: held };
+        : { identityId: member.identityId, reason: 'old-key', identity, role: held ?? 'reader' };
     let role: 'reader' | 'editor' = counted ?? 'reader';
     if (offered) {
       const choice = ticked.get(member.identityId);
       if (!choice) {
         offers.push(offered);
-        leftOut.push({ identityId: member.identityId, reason: offered.reason });
+        waits(offered.reason);
         continue;
       }
-      // Raised only as far as the row's role allows: the server seals by it.
-      role = choice === 'editor' && (member.role ?? held) === 'editor' ? 'editor' : 'reader';
+      // Raised only as far as the offer and the row allow: the server seals by the row.
+      role =
+        choice === 'editor' && offered.role === 'editor' && most === 'editor' ? 'editor' : 'reader';
       if (replaced) rekeyed.push(member.identityId);
     }
-    const demotes = demoting.has(member.identityId) || (role === 'reader' && held === 'editor');
+    const demotes = demoting.has(member.identityId) || (role === 'reader' && most === 'editor');
     if (demotes) demoted.push(member.identityId);
     remaining.push({ identity, role: demotes ? 'reader' : role });
   }

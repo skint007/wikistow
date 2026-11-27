@@ -33,13 +33,24 @@ export const writesUnderCurrent = (
   ctx: ClientContext,
   keys: SpaceKeys,
   share: { shareId: ShareId; currentKeyVersion: number },
-) =>
-  ctx.keyring
+) => {
+  const writes = ctx.keyring
     .versions(keys.spaceId, share.shareId)
     .some(
-      (held) =>
-        held.keyVersion === share.currentKeyVersion && countsForWriting(held, keys.owners.writes),
+      (h) => h.keyVersion === share.currentKeyVersion && countsForWriting(h, keys.owners.writes),
     );
+  // Served to a retired key of this person's too, as when a co-owner sealed
+  // the same version again to the new key, it is one the old key opens.
+  const self = ctx.identity.public;
+  const throughRetired = keys.envelopes.some(
+    (e) =>
+      e.shareId === share.shareId &&
+      e.keyVersion === share.currentKeyVersion &&
+      e.recipientId === self.id &&
+      e.recipientKeyVersion < self.keyVersion,
+  );
+  return writes && !throughRetired;
+};
 
 /** One space's part of finishing: a rotation of each share left, for the person to confirm. */
 export type Finishing = {
@@ -111,9 +122,16 @@ export async function applyWithTicks(
         .sort(),
       [...p.plan.removed].sort(),
     ]);
+  // Each ticked member at the key the person saw them offered at.
+  const offeredAt = (id: string) =>
+    confirmed.plan.offers.find((o) => o.identityId === id)?.identity;
   const changed =
     people(planned) !== people(confirmed) ||
-    tick.some((t) => !planned.plan.remaining.some(({ identity }) => identity.id === t.identityId));
+    tick.some((t) => {
+      const shown = offeredAt(t.identityId);
+      const now = planned.plan.remaining.find(({ identity }) => identity.id === t.identityId);
+      return !shown || !now || keyHash(now.identity) !== keyHash(shown);
+    });
   if (changed) throw new ApiError(409, 'stale-head', 'Who keeps the share changed; look again');
   return applyShareRotation(ctx, planned);
 }
