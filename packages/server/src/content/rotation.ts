@@ -267,7 +267,10 @@ async function sentBefore(tx: Database, input: RotateIdentity & { accountId: str
       ),
     );
   const storedSignature = (written?.sealed as { signature?: unknown } | undefined)?.signature;
+  // The version the rotation appended: the one its statement named, plus one.
+  const appended = (rotation.contacts?.version ?? 0) + 1;
   if (
+    input.contacts.record.version !== appended ||
     !vault ||
     !kept?.success ||
     !sameSealed(kept.data.keyring, input.wrapper.keyring) ||

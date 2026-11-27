@@ -36,8 +36,10 @@ export const lockKeysForRotation = (tx: Database, accountId: string) =>
 
 /**
  * An account's live human identity, or null before its vault exists. It
- * holds the keys first (`holdKeys`), in a statement of its own, so the row
- * is read after any rotation it waited for has committed.
+ * holds the keys first (`holdKeys`), in a statement of its own, so at read
+ * committed, as every write runs, the row is read after any rotation it
+ * waited for has committed. In a repeatable-read snapshot (`readSnapshot`),
+ * which only reads, the snapshot is the lock statement's.
  */
 export async function currentIdentity(
   db: Database,

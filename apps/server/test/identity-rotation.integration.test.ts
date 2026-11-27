@@ -89,6 +89,21 @@ async function secondDevice(app: TestApp, person: Person) {
   return createApiClient({ fetch: browser.fetch });
 }
 
+/** Until a request of this test's database waits on a lock, as Postgres shows it. */
+async function waitingOnLock() {
+  await expect
+    .poll(
+      async () => {
+        const [row] = await t.db.execute<{ waiting: number }>(sql`
+          select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`);
+        return row?.waiting ?? 0;
+      },
+      { timeout: 10_000 },
+    )
+    .toBeGreaterThan(0);
+}
+
 const rowsOf = (identityId: string) =>
   t.db
     .select()
@@ -173,6 +188,15 @@ describe('replacing keys', () => {
       [[kept.agentId, 2]],
     );
     expect(shared.revokedAgents.map((r) => r.agentId)).toContain(dropped.agentId);
+    // Beside her own owner entry at the old key, one at the new key.
+    const own = shared.spaceOwners.flatMap((entry) =>
+      entry.owners.filter((owner) => owner.id === old.id).map((owner) => owner.keyHash),
+    );
+    expect(own).toContain(keyHash(old));
+    expect(own).toContain(keyHash(next));
+    expect(own.filter((hash) => hash === keyHash(next)).length).toBe(
+      own.filter((hash) => hash === keyHash(old)).length,
+    );
 
     // The kept agent works on; the other is revoked, and its token fails.
     const profile = await t.db
@@ -208,6 +232,9 @@ describe('replacing keys', () => {
         })
       ).rotations,
     ).toEqual([]);
+    // Not to agents, which may look up fewer people.
+    const path = `/api/identities/${old.id}/rotations`;
+    expect((await asAgent(t, kept.token, path)).status).toBe(401);
     // As are the earlier keys, to anyone signed in.
     const bob = await personWithVault(t);
     expect(
@@ -375,7 +402,7 @@ describe('the checks', () => {
     });
     await held;
     const rotation = rotate(alice, prepared.request);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await waitingOnLock();
     const [{ approvedAt } = { approvedAt: new Date() }] = await t.db.execute<{
       approvedAt: Date;
     }>(sql`select now() as "approvedAt"`);
@@ -442,7 +469,7 @@ describe('the checks', () => {
     await held;
     const sealing = t.db.transaction((tx) => lookupIdentities(tx, [next.id]));
     const refused = rejection(sealing);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await waitingOnLock();
     release();
     await rotation;
     expect(await refused).toBe('stale-head');
@@ -546,7 +573,7 @@ describe('the checks', () => {
         done = true;
         return answer;
       });
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await waitingOnLock();
       expect(done).toBe(false);
       release();
       await write;

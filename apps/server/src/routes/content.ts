@@ -334,11 +334,12 @@ export function mountContentRoutes(
     },
   );
 
-  // Public, as the directory is: anyone signed in, and agents, which follow their person.
-  routes.content(identityRoutes.rotations, async ({ params, query }) =>
+  // For people, as the directory is. An agent may look up fewer people
+  // (section 9.6); it follows its person once following is built (#327).
+  routes.account(identityRoutes.rotations, async ({ params, query }) =>
     readRotations(db, { identityId: params.identityId, from: query.from }),
   );
-  routes.content(identityRoutes.version, async ({ params }) => ({
+  routes.account(identityRoutes.version, async ({ params }) => ({
     identity: await readIdentityVersion(db, params).catch(toApiError),
   }));
 

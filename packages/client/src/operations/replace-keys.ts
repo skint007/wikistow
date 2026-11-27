@@ -7,13 +7,19 @@ import {
   vaultRoutes,
   type AgentEnrollment,
   type IdentityId,
+  type PublicIdentity,
 } from '@wikistow/contracts';
 import type { z } from 'zod';
 import type { ApiClient } from '../api/client.ts';
 import { APP_AGENTS_NAMESPACE, appAgentSecrets } from '../app-agents.ts';
 import { contactsHash, sealContacts, type ContactsPayloads } from '../contacts.ts';
 import { CryptoError } from '../errors.ts';
-import { enrollmentFingerprint, generateIdentity, type PrivateIdentity } from '../identity.ts';
+import {
+  enrollmentFingerprint,
+  generateIdentity,
+  keyHash,
+  type PrivateIdentity,
+} from '../identity.ts';
 import { signIdentityRotation } from '../identity-rotation.ts';
 import { enrollAgent } from '../trust.ts';
 import type { KdfParams, UnlockedVault } from '../vault.ts';
@@ -150,7 +156,12 @@ export async function prepareRotation(
     owner: next,
     installationId: ctx.installationId,
     previous: head,
-    ...afterRotation(payloads, enrollments, now().toISOString()),
+    ...afterRotation(payloads, {
+      enrollments,
+      revokedAt: now().toISOString(),
+      earlier: [...vault.retired, vault.identity].map((key) => key.public),
+      next: next.public,
+    }),
   });
   return {
     request: {
@@ -189,12 +200,23 @@ function enrollAgain(
  * the kept agents, with their new enrollments, so the contacts key goes to
  * them alone; every other agent the version lists is added to
  * `revokedAgents`; and the secrets of the agents the app ran go, as they
- * are revoked too.
+ * are revoked too. Beside each `owners` entry for the person's own ID at an
+ * earlier key, which stays for opening, it adds one at the new key, and
+ * leaves `removedOwners` as it is (section 4.6, **The person's own app**).
  */
 function afterRotation(
-  { shared, private: own }: ContactsPayloads,
-  enrollments: readonly AgentEnrollment[],
-  revokedAt: string,
+  { shared, private: ownPrivate }: ContactsPayloads,
+  {
+    enrollments,
+    revokedAt,
+    earlier,
+    next,
+  }: {
+    enrollments: readonly AgentEnrollment[];
+    revokedAt: string;
+    earlier: readonly PublicIdentity[];
+    next: PublicIdentity;
+  },
 ): ContactsPayloads {
   const renewed = new Map(enrollments.map((e) => [e.agent.id, e]));
   const revoked = new Set(shared.revokedAgents.map((entry) => entry.agentId));
@@ -206,10 +228,24 @@ function afterRotation(
     .map((agent) => agent.enrollment.agent.id)
     .filter((id) => !renewed.has(id) && !revoked.has(id))
     .map((agentId) => ({ agentId, revokedAt }));
-  const { [APP_AGENTS_NAMESPACE]: _appAgents, ...extensions } = own.extensions;
+  const earlierHashes = new Set(earlier.map((key) => keyHash(key)));
+  const nextHash = keyHash(next);
+  const own = (owner: { id: string; keyHash: string }) => owner.id === next.id;
+  const spaceOwners = shared.spaceOwners.map((entry) =>
+    entry.owners.some((owner) => own(owner) && earlierHashes.has(owner.keyHash)) &&
+    !entry.owners.some((owner) => own(owner) && owner.keyHash === nextHash)
+      ? { ...entry, owners: [...entry.owners, { id: next.id, keyHash: nextHash }] }
+      : entry,
+  );
+  const { [APP_AGENTS_NAMESPACE]: _appAgents, ...extensions } = ownPrivate.extensions;
   return {
-    shared: { ...shared, agents, revokedAgents: [...shared.revokedAgents, ...dropped] },
-    private: { ...own, extensions },
+    shared: {
+      ...shared,
+      agents,
+      revokedAgents: [...shared.revokedAgents, ...dropped],
+      spaceOwners,
+    },
+    private: { ...ownPrivate, extensions },
   };
 }
 
