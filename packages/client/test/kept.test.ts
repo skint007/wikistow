@@ -442,6 +442,7 @@ describe('after replacing keys (section 4.6)', () => {
       identity: first,
       installationId,
     });
+    await before.keepList({ spaces: [], order: { homeId: null, spaceIds: [] }, shared: [] });
     const page = { spaceId: newId(SpaceId), pageId: newId(PageId) };
     const basedOn = newId(RevisionId);
     const ref = await before.queue.attach(page, {
@@ -473,12 +474,18 @@ describe('after replacing keys (section 4.6)', () => {
       if (fail && name.startsWith('e') && ++entries === 2) throw new Error('A read failed');
       return read(name);
     };
-    await keptOperations.sealKeptAgain(store, {
-      identity: second,
-      installationId,
-      retired: [first],
-    });
+    await expect(
+      keptOperations.sealKeptAgain(store, { identity: second, installationId, retired: [first] }),
+    ).rejects.toThrow('A read failed');
     expect(await kinds(before)).toEqual(['page', 'publish']);
+    // Nor the pages kept, so the session keeps nothing there until it can.
+    expect(
+      await keptOperations.keptUnderEarlierKeys(store, {
+        identity: second,
+        installationId,
+        retired: [first],
+      }),
+    ).toBe(true);
     fail = false;
     await keptOperations.sealKeptAgain(store, {
       identity: second,

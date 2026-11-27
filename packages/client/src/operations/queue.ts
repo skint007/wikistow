@@ -380,8 +380,8 @@ const blobNameOf = (sealer: KeptSealer, blobHash: string) =>
  * keys, again under `to`, their current key, with the files they name, and
  * remove the old items (section 4.6, **Opening with earlier keys**), so a
  * rotation drops nothing typed offline. Only from within `queueExclusive`.
- * Everything is read first: a read that fails moves nothing, for the next
- * session to try again, so no change moves without one it goes with (a
+ * Everything is read first: a read that fails throws and moves nothing, for
+ * the next session to try again, so no change moves without one it goes with (a
  * Publish without its draft). An item that doesn't open under `from` is
  * left as it is.
  */
@@ -396,8 +396,9 @@ export async function sealQueueAgain(
   // Each file's old name, with what it opened to, read once however many changes name it.
   const files = new Map<string, { opened: Uint8Array; renamed: string }>();
   for (const name of names.filter((n) => n.startsWith(ENTRY))) {
-    const sealed = await store.queue.read(name).catch(() => undefined);
-    if (sealed === undefined) return;
+    // A read that fails stops the run, and the session keeps nothing there
+    // (`sealKeptAgain`), so nothing kept under either key is hidden.
+    const sealed = await store.queue.read(name);
     const plaintext = sealed && from.open(name, sealed);
     if (!plaintext) continue;
     let json: unknown;
@@ -416,8 +417,7 @@ export async function sealQueueAgain(
       if (!listed.has(old)) continue;
       named.push(old);
       if (files.has(old)) continue;
-      const blob = await store.queue.read(old).catch(() => undefined);
-      if (blob === undefined) return;
+      const blob = await store.queue.read(old);
       // One that doesn't open is damaged: the change moves without it.
       const opened = blob && from.open(old, blob);
       if (opened) files.set(old, { opened, renamed: blobNameOf(to, blobHash) });
