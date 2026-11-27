@@ -16,7 +16,8 @@ import { Combobox } from '@/components/ui/combobox';
 import { cn } from '@/lib/utils';
 import { propertiesText, withProperties } from './properties';
 import { propertyLabel, referable } from './property-model';
-import { composing, PropertyRow, type RowFocus } from './property-rows';
+import { composing } from '@/lib/composing';
+import { PropertyRow, type RowFocus } from './property-rows';
 import { usePropertiesShown } from './properties-shown';
 import { PropertyKey, PropertyValueView, ROW, type LinkScope } from './property-value';
 
