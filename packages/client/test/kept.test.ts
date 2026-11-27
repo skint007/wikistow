@@ -432,6 +432,52 @@ describe('after replacing keys (section 4.6)', () => {
     expect(await under(first, [])).toBe(false);
     expect(await under(second, [])).toBe(false);
   });
+  it('moves a file two queued changes name once, with both changes', async () => {
+    const store = memoryKeptStore();
+    const id = IdentityId.parse('kept-person');
+    const first = generateIdentity({ kind: 'human', id });
+    const second = generateIdentity({ kind: 'human', id, keyVersion: 2 });
+    const installationId = InstallationId.parse('kept-installation');
+    const before = await keptOperations.KeptContent.open(store, {
+      identity: first,
+      installationId,
+    });
+    const page = { spaceId: newId(SpaceId), pageId: newId(PageId) };
+    const basedOn = newId(RevisionId);
+    const ref = await before.queue.attach(page, {
+      name: 'photo.png',
+      mediaType: 'image/png',
+      bytes: utf8('an image'),
+    });
+    const version = await before.queue.saveDraft({
+      page,
+      basedOn,
+      region: null,
+      payload: {
+        ...newPayload({ title: 'With a photo', markdown: 'A photo' }),
+        attachments: [ref],
+      },
+      seen: null,
+    });
+    await before.queue.publish({ page, title: 'With a photo', draftHead: basedOn, version });
+    const kinds = async (content: keptOperations.KeptContent) =>
+      (await content.queue.entries()).map((entry) => entry.kind).sort();
+    expect(await kinds(before)).toEqual(['page', 'publish']);
+
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+    const after = await keptOperations.KeptContent.open(store, {
+      identity: second,
+      installationId,
+    });
+    expect(await kinds(after)).toEqual(['page', 'publish']);
+    expect(await after.queue.held([ref])).toEqual([ref]);
+    expect(await before.queue.entries()).toEqual([]);
+  });
+
   it('seals what was kept under an earlier key again under the new one, queued changes included', async () => {
     const store = memoryKeptStore();
     const id = IdentityId.parse('kept-person');

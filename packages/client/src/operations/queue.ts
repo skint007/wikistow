@@ -388,6 +388,8 @@ export async function sealQueueAgain(
 ): Promise<void> {
   const names = (await store.queue.list()).map((item) => item.name);
   const listed = new Set(names);
+  // Files several changes name move once, and their old copies go last.
+  const moved = new Set<string>();
   for (const name of names.filter((n) => n.startsWith(ENTRY))) {
     const sealed = await store.queue.read(name).catch(() => null);
     const plaintext = sealed && from.open(name, sealed);
@@ -408,7 +410,7 @@ export async function sealQueueAgain(
     let unread = false;
     for (const blobHash of parsed.success ? filesOf(parsed.data) : []) {
       const old = blobNameOf(from, blobHash);
-      if (!listed.has(old)) continue;
+      if (!listed.has(old) || moved.has(old)) continue;
       const blob = await store.queue.read(old).catch(() => null);
       const opened = blob && from.open(old, blob);
       if (!opened) {
@@ -425,16 +427,22 @@ export async function sealQueueAgain(
       // meanwhile, is newer: it stays, and so does this one, as it was.
       const current = await store.queue.read(renamed).catch(() => null);
       const opened = current && to.open(renamed, current);
-      if (opened && sameBytes(opened, plaintext)) await store.queue.remove([name]);
+      if (opened && sameBytes(opened, plaintext)) {
+        await store.queue.remove([name]);
+        for (const file of files) moved.add(file.old);
+      }
       continue;
     }
-    for (const file of files)
+    for (const file of files) {
       await store.queue.write(file.renamed, to.seal(file.renamed, file.opened));
+      moved.add(file.old);
+    }
     await store.queue.write(renamed, to.seal(renamed, plaintext));
     // Each change goes from the old key as soon as it is copied, so a run
     // that stops leaves at most this one under both.
-    await store.queue.remove([name, ...files.map((file) => file.old)]);
+    await store.queue.remove([name]);
   }
+  if (moved.size > 0) await store.queue.remove([...moved]);
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) =>
