@@ -100,6 +100,8 @@ export async function planFinishing(ctx: ClientContext): Promise<Finishing[]> {
         );
       } catch (error) {
         if (!(error instanceof CryptoError || error instanceof ApiError)) throw error;
+        // A share rooted in the trash gives nobody anything until restored.
+        if (error instanceof ApiError && error.code === 'not-found') continue;
         finishing.failed.push({ shareId: share.shareId, code: error.code });
       }
     }
@@ -119,9 +121,21 @@ export async function applyWithTicks(
   tick: readonly Tick[] = [],
 ): Promise<number> {
   const { spaceId, shareId } = confirmed.plan;
-  const planned =
-    tick.length === 0 ? confirmed : await planShareRotation(ctx, { spaceId, shareId, tick });
   const ticked = new Set<string>(tick.map((t) => t.identityId));
+  // Worked out as confirmed: the same members left out and demoted.
+  const leaveOut = confirmed.plan.leftOut
+    .filter((l) => l.reason === 'left-out')
+    .map((l) => l.identityId);
+  const planned =
+    tick.length === 0
+      ? confirmed
+      : await planShareRotation(ctx, {
+          spaceId,
+          shareId,
+          tick,
+          leaveOut,
+          demote: confirmed.plan.demoted.filter((id) => !ticked.has(id)),
+        });
   const people = (p: PlannedRotation) =>
     JSON.stringify([
       p.plan.keyVersion,
@@ -130,6 +144,7 @@ export async function applyWithTicks(
         .map(({ identity }) => `${identity.id} ${keyHash(identity)}`)
         .sort(),
       [...p.plan.removed].sort(),
+      p.plan.demoted.filter((id) => !ticked.has(id)).sort(),
     ]);
   // Each ticked member at the key the person saw them offered at.
   const offeredAt = (id: string) =>
@@ -167,12 +182,19 @@ export async function planRekey(
   for (const share of await listShares(ctx, spaceId)) {
     const row = share.members.find((m) => m.identityId === person.identity.id);
     if (!row || row.keyVersion >= person.identity.keyVersion) continue;
-    const planned = await planShareRotation(ctx, {
-      spaceId,
-      shareId: share.shareId,
-      keys,
-      tick: [{ identityId: person.identity.id, role: row.role }],
-    });
+    let planned: PlannedRotation;
+    try {
+      planned = await planShareRotation(ctx, {
+        spaceId,
+        shareId: share.shareId,
+        keys,
+        tick: [{ identityId: person.identity.id, role: row.role }],
+      });
+    } catch (error) {
+      // A share rooted in the trash gives nobody anything until restored.
+      if (error instanceof ApiError && error.code === 'not-found') continue;
+      throw error;
+    }
     if (!planned.plan.rekeyed.includes(person.identity.id)) {
       const offered = planned.plan.leftOut.find((l) => l.identityId === person.identity.id);
       throw new CryptoError(

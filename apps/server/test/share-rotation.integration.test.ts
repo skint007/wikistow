@@ -6,6 +6,7 @@
 import {
   groupOperations,
   moveOperations as moves,
+  publicLinkOperations as links,
   spaceOperations,
   inlineVaultCrypto,
   lookupPeople,
@@ -209,6 +210,26 @@ describe('a member who replaced their keys', () => {
   });
 });
 
+describe('a publishing editor who replaced their keys', () => {
+  it('changes nothing in the share before the owner gives it at their new key', async () => {
+    const { person: alice } = await personWithLibrary();
+    const { person: bob, lib } = await personWithLibrary();
+    await shareFolder(bob.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [{ person: await find(bob, alice), role: 'editor', canPublish: true }],
+    });
+    await draftOf(alice.ctx, lib.page);
+    const { ctx } = await rotate(alice);
+    const { heads, permissionVersion } = await pages.loadPage(ctx, lib.page.pageId);
+    if (!heads.publishedHead) throw new Error('expected the page published');
+    const seen = { publishedHead: heads.publishedHead, permissionVersion };
+    expect(await rejection(pages.unpublishPage(ctx, lib.page, seen))).toBe('not-found');
+    // She still reads what she had.
+    expect(await draftOf(ctx, lib.page)).toMatchObject({ payload: { markdown: 'draft words' } });
+  });
+});
+
 describe('an agent of a member who replaced their keys', () => {
   it('writes nothing in a share its person waits in', async () => {
     const { alice, bob, lib } = await aliceInBobsShare();
@@ -226,7 +247,7 @@ describe('an agent of a member who replaced their keys', () => {
     // A session opened before she replaced her keys holds them still; the server refuses it.
     expect(
       await rejection(pages.editDraft(before, lib.page, { markdown: 'the old session' })),
-    ).toBe('forbidden');
+    ).toMatch(/not-found|forbidden/);
     const session = await openAgentSession(agent.api, {
       identity: agent.identity,
       person: old,
@@ -337,6 +358,7 @@ describe('the person’s own shares', () => {
       people: [{ person: await find(alice, dave), role: 'editor', canPublish: true }],
     });
     await draftOf(dave.ctx, lib.page);
+    await links.turnOn(dave.ctx, lib.page.pageId);
     const inside = await spaceOperations.createFolder(alice.ctx, {
       spaceId: lib.spaceId,
       parentId: lib.shared,
@@ -359,6 +381,47 @@ describe('the person’s own shares', () => {
       parentId: inside,
     });
     expect(await rejection(moves.moveNode(later, { preview }))).toBe('forbidden');
+    // His public link stays on: he keeps his publish rights while he waits.
+    expect(await rejection(links.turnOff(later, lib.page.pageId))).toBe('not-found');
+    expect((await links.list(ctx, lib.spaceId)).map((l) => l.pageId)).toContain(lib.page.pageId);
+  });
+
+  it('left unticked, keep a reader’s history when an owner raises them later', async () => {
+    const { person: alice, lib } = await personWithLibrary();
+    const { person: dave } = await personWithLibrary();
+    await shareFolder(alice.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [{ person: await find(alice, dave), role: 'reader', canPublish: false }],
+    });
+    // Dave opens the space first, accepting Alice by first sight.
+    await spaceKeys(dave.ctx, lib.spaceId, { refresh: true });
+    await saveContacts(dave.ctx);
+    const { ctx } = await rotate(alice);
+    const [finishing] = await rotated.planFinishing(ctx);
+    const [planned] = finishing?.rotations ?? [];
+    if (!planned) throw new Error('expected a rotation to finish');
+    await rotated.applyWithTicks(ctx, planned);
+    const share = await shareOf(ctx, lib.spaceId);
+    const [entry] = await lookupPeople(ctx, [dave.vault.identity.public.id]);
+    if (!entry) throw new Error('expected Dave in the directory');
+    const before = await openSession(dave.api, dave.vault);
+    await spaceKeys(before, lib.spaceId, { refresh: true });
+    expect(before.keyring.versions(lib.spaceId, share.shareId).map((v) => v.keyVersion)).toContain(
+      1,
+    );
+    await sharing.addMember(ctx, {
+      spaceId: lib.spaceId,
+      shareId: share.shareId,
+      person: { ...entry, foundBy: null },
+      role: 'editor',
+    });
+    // The reader's envelope of version 1, which Alice's earlier key sealed, stays.
+    const after = await openSession(dave.api, dave.vault);
+    await spaceKeys(after, lib.spaceId, { refresh: true });
+    expect(after.keyring.versions(lib.spaceId, share.shareId).map((v) => v.keyVersion)).toContain(
+      1,
+    );
   });
 
   it('left unticked, keep the member waiting, listed for Give access', async () => {

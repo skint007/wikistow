@@ -24,6 +24,7 @@ import { transactOnce, type Once } from '../idempotency.ts';
 import { blobs, nodes, pageHeads, publications, revisions, spaces } from '../db/schema/index.ts';
 import {
   accessTo,
+  canEdit,
   canWrite,
   lockShare,
   lockSpace,
@@ -93,7 +94,8 @@ async function lockShares(tx: Database, held: readonly (ShareRow | null)[]) {
 }
 
 // Whether access lets someone publish: edit access with publish rights.
-const publishes = (access: Access | null) => canWrite(access) && access?.canPublish === true;
+// Publish rights, by which publications lapse; writes also take `canWrite`.
+const publishes = (access: Access | null) => canEdit(access) && access?.canPublish === true;
 
 /**
  * The source page, for someone who can publish it: only they publish it
@@ -221,7 +223,7 @@ export async function openPublication(
       nodeId: input.parentId,
     });
     if (!access) throw new ContentError('not-found');
-    if (!publishes(access)) throw new ContentError('forbidden');
+    if (!publishes(access) || !canWrite(access)) throw new ContentError('forbidden');
     const live = await livePublication(tx, {
       sourcePageId: source.id,
       spaceId: input.destinationSpaceId,
@@ -414,7 +416,7 @@ export async function sendPublication(
     const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
-    if (!publishes(access)) throw new ContentError('forbidden');
+    if (!publishes(access) || !canWrite(access)) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });
     const row = await requireLiveAt(tx, page.id);

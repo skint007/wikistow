@@ -489,6 +489,7 @@ export async function giveKeys(
         recipientIdentityId: folderKeyEnvelopes.recipientIdentityId,
         recipientKeyVersion: folderKeyEnvelopes.recipientKeyVersion,
         drafts: folderKeyEnvelopes.drafts,
+        envelope: folderKeyEnvelopes.envelope,
       })
       .from(folderKeyEnvelopes)
       .where(
@@ -498,10 +499,26 @@ export async function giveKeys(
         ),
       );
     const wanted = new Map(envelopes.map((e) => [envelopeKey(e), e.draftKey !== null]));
+    // Sealed by a key its sealer has since replaced: their app may accept
+    // only that key, so it stays even where it gives less than is given.
+    const sealers = new Map(
+      (
+        await lookupIdentities(
+          tx,
+          [...new Set(held.map((h) => (h.envelope as { sealerId: string }).sealerId))],
+          { hold: false },
+        )
+      ).map((identity) => [identity.id as string, identity.keyVersion]),
+    );
     const replaced = held.filter((h) => {
       const key = `${h.recipientIdentityId}@${h.recipientKeyVersion}#${h.keyVersion}`;
       const drafts = wanted.get(key);
-      if (drafts !== undefined && (h.drafts || !drafts)) {
+      const { sealerId, sealerKeyVersion } = h.envelope as {
+        sealerId: string;
+        sealerKeyVersion: number;
+      };
+      const sealedEarlier = (sealers.get(sealerId) ?? sealerKeyVersion) > sealerKeyVersion;
+      if (drafts !== undefined && (h.drafts || !drafts || sealedEarlier)) {
         kept.add(key);
         return false;
       }

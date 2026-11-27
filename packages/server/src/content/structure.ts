@@ -358,7 +358,8 @@ export async function updateMetadata(
       throw new ContentError('binding-mismatch');
     await lockSpace(tx, input.spaceId);
     const access = await requireAccess(tx, caller, { spaceId: input.spaceId, nodeId: folderId });
-    const allowed: (a: Access) => boolean = folderId === null ? (a) => a.role === 'owner' : canEdit;
+    const allowed: (a: Access) => boolean =
+      folderId === null ? (a) => a.role === 'owner' : canWrite;
     if (!allowed(access)) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
     const subject = await container(tx, input.spaceId, folderId, { lock: true });

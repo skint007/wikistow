@@ -173,8 +173,12 @@ export async function membership(db: Database, identityId: string, shareId: stri
   return member ?? null;
 }
 
+// An envelope addressed to the member's current key: one at a key they
+// replaced (section 4.6) opens what they had, and waits like none.
+const atCurrentKey = sql`${folderKeyEnvelopes.recipientKeyVersion} = (select max(${identities.keyVersion}) from ${identities} where ${identities.id} = ${folderKeyEnvelopes.recipientIdentityId} and ${identities.revokedAt} is null)`;
+
 // A member's access from their row, marked `waiting` while they hold no
-// envelope of the share's current version.
+// envelope of the share's current version at their current key.
 async function memberAccess(
   db: Database,
   member: { identityId: string; role: 'reader' | 'editor'; canPublish: boolean },
@@ -188,6 +192,7 @@ async function memberAccess(
         eq(folderKeyEnvelopes.shareId, share.id),
         eq(folderKeyEnvelopes.keyVersion, share.currentKeyVersion),
         eq(folderKeyEnvelopes.recipientIdentityId, member.identityId),
+        atCurrentKey,
       ),
     )
     .limit(1);
@@ -516,6 +521,7 @@ export async function treeView(
                   inArray(folderKeyEnvelopes.shareId, [...memberships.keys()]),
                   eq(folderKeyEnvelopes.keyVersion, shares.currentKeyVersion),
                   eq(folderKeyEnvelopes.recipientIdentityId, caller.identity.id),
+                  atCurrentKey,
                 ),
               )
           ).map((row) => row.shareId),

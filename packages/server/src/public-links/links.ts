@@ -27,6 +27,7 @@ import {
   accessTo,
   accessToPages,
   accessToPagesIn,
+  canEdit,
   canWrite,
   lockShare,
   lockSpaceOf,
@@ -46,7 +47,9 @@ import type { ListedFile } from './render.ts';
 import type { Renderer } from './renderer.ts';
 import { Outline, pageOfKey, READER_VERSION, Segment } from './segments.ts';
 
-const publishes = (access: Access | null) => canWrite(access) && access?.canPublish === true;
+// Publish rights, as links and copies lapse by them: a member a rotation
+// keeps waiting keeps theirs, and only changes nothing (`canWrite`).
+const publishes = (access: Access | null) => canEdit(access) && access?.canPublish === true;
 
 /** The most a copy's file may be, here: `MAX_FILE_BYTES`, or the upload limit if lower. */
 export const fileLimit = (uploadBytes: number) =>
