@@ -192,10 +192,18 @@ export async function applyRekey(ctx: ClientContext, plans: readonly PlannedRota
 export function ownersToAddAgain(ctx: ClientContext, keys: SpaceKeys): DirectoryEntry[] {
   const self = ctx.identity.public.id;
   return keys.listed.filter(({ identity }) => {
-    if (identity.id === self || keys.owners.writes(identity)) return false;
+    if (identity.id === self) return false;
     const check = ctx.trust.check(identity);
     if (check.kind !== 'pinned' || keyHash(check.identity) !== keyHash(identity)) return false;
-    return ctx.trust.earlierKeys(identity.id).some((key) => keys.owners.earlier(key));
+    if (!ctx.trust.earlierKeys(identity.id).some((key) => keys.owners.earlier(key))) return false;
+    // Accepted at the new key already, as after a re-add whose contacts
+    // write landed: done only once a statement naming that key is served,
+    // so one whose upload failed is offered again.
+    if (!keys.owners.writes(identity)) return true;
+    const hash = keyHash(identity);
+    return !keys.statements.some(
+      (s) => s.owner.id === identity.id && s.owner.keyHash === hash && s.signerId !== identity.id,
+    );
   });
 }
 

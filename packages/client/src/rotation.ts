@@ -283,7 +283,7 @@ export function planRotation({
           identityId: member.identityId,
           reason: 'replaced-keys',
           identity,
-          role: counted && most === 'editor' ? counted : held ? 'reader' : most,
+          role: most === 'editor' ? (held ?? 'editor') : 'reader',
         }
       : counted
         ? null

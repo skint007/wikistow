@@ -23,7 +23,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
 import { enrolledAgent } from './support/agents.ts';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
-import { find, library, shareFolder, type Person } from './support/sharing.ts';
+import { find, library, shareFolder, tampering, type Person } from './support/sharing.ts';
+import { ownerRoutes } from '@wikistow/contracts';
 
 type PageRef = pages.PageRef;
 
@@ -321,6 +322,27 @@ describe('the person’s own shares', () => {
     expect(await draftOf(ctx, lib.page)).toMatchObject({ payload: { markdown: 'Alice, after' } });
   });
 
+  it('left unticked, keep a publishing editor from unpublishing until given access', async () => {
+    const { person: alice, lib } = await personWithLibrary();
+    const { person: dave } = await personWithLibrary();
+    await shareFolder(alice.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [{ person: await find(alice, dave), role: 'editor', canPublish: true }],
+    });
+    await draftOf(dave.ctx, lib.page);
+    const { ctx } = await rotate(alice);
+    const [finishing] = await rotated.planFinishing(ctx);
+    const [planned] = finishing?.rotations ?? [];
+    if (!planned) throw new Error('expected a rotation to finish');
+    await rotated.applyWithTicks(ctx, planned);
+    const later = await openSession(dave.api, dave.vault);
+    const { heads, permissionVersion } = await pages.loadPage(later, lib.page.pageId);
+    if (!heads.publishedHead) throw new Error('expected the page published');
+    const seen = { publishedHead: heads.publishedHead, permissionVersion };
+    expect(await rejection(pages.unpublishPage(later, lib.page, seen))).toBe('forbidden');
+  });
+
   it('left unticked, keep the member waiting, listed for Give access', async () => {
     const { person: alice, lib } = await personWithLibrary();
     const { person: dave } = await personWithLibrary();
@@ -379,6 +401,57 @@ async function coOwned() {
 }
 
 describe('a rotated co-owner', () => {
+  it('can be removed by a co-owner before anyone adds them again', async () => {
+    const { alice, olive, lib } = await coOwned();
+    await rotate(alice);
+    const id = alice.vault.identity.public.id;
+    await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    const removal = await ownerOperations.planOwnerRemoval(olive.ctx, {
+      spaceId: lib.spaceId,
+      ownerId: id,
+    });
+    await ownerOperations.applyOwnerRemoval(olive.ctx, removal);
+    const keys = await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    expect(keys.listed.map((o) => o.identity.id)).not.toContain(id);
+    await pages.editDraft(olive.ctx, lib.page, { markdown: 'Olive, alone' });
+  });
+
+  it('is offered to add again while the re-add’s statement isn’t served', async () => {
+    const { alice, olive, lib } = await coOwned();
+    await sharing.rotateKeys(olive.ctx, {
+      spaceId: lib.spaceId,
+      shareId: (await shareOf(olive.ctx, lib.spaceId)).shareId,
+    });
+    await rotate(alice);
+    const keys = await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    const [toAdd] = rotated.ownersToAddAgain(olive.ctx, keys);
+    if (!toAdd) throw new Error('expected Alice to add again');
+    // The contacts write lands; the upload is refused.
+    const broken = tampering(olive.ctx, ownerRoutes.addOwner, (body) => ({
+      ...body,
+      folderKeyEnvelopes: [],
+    }));
+    expect(
+      await rejection(
+        ownerOperations.addCoOwner(broken, {
+          spaceId: lib.spaceId,
+          person: { ...toAdd, foundBy: null },
+        }),
+      ),
+    ).not.toBe('no error');
+    const after = await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    expect(rotated.ownersToAddAgain(olive.ctx, after).map((o) => o.identity.id)).toEqual([
+      toAdd.identity.id,
+    ]);
+    // Sent again, it lands, and nothing is offered.
+    await ownerOperations.addCoOwner(olive.ctx, {
+      spaceId: lib.spaceId,
+      person: { ...toAdd, foundBy: null },
+    });
+    const done = await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    expect(rotated.ownersToAddAgain(olive.ctx, done)).toEqual([]);
+  });
+
   it('still finishes a share a co-owner sealed again to her new key', async () => {
     const { alice, olive, lib } = await coOwned();
     // Olive's app sealed the share's current version, which Alice's old key opens.

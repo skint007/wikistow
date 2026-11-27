@@ -61,7 +61,7 @@ import { ContentError } from './errors.ts';
 import { placeAtEnd } from './order.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { requireCaller, type Actor } from './identities.ts';
-import { checkKeyMaterial } from './key-material.ts';
+import { checkKeyMaterial, requireHoldsCurrent } from './key-material.ts';
 import { charge, queueWriter, usedBytes, type Writer } from './quota.ts';
 import { copyUploadAccess, sweepCopies } from './copies.ts';
 import { forgetMoves } from './moved.ts';
@@ -602,6 +602,7 @@ export async function unpublish(
     // As for publishing, which it undoes.
     if (!canEdit(access)) throw new ContentError('not-found');
     if (!access.canPublish) throw new ContentError('forbidden');
+    await requireHoldsCurrent(tx, caller, access.share);
     // Publishing's locks, in its order, which turning a public link on takes too,
     // but the node as its update below needs it. Under a share lock, a save
     // or publish that took the node beside it and waits on the heads would

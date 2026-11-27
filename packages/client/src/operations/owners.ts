@@ -189,7 +189,15 @@ export async function planOwnerRemoval(
   const keys = await ownerKeys(ctx, spaceId);
   const listed = keys.listed.find((owner) => owner.identity.id === ownerId);
   if (!listed) throw new CryptoError('unaccepted-owner', `The server lists no owner ${ownerId}`);
-  const owner = listed.identity;
+  // An owner who replaced their keys and whom nobody added again is removed
+  // at the latest key this app accepted for them, whose envelopes count in
+  // this removal (section 4.6).
+  const owner = keys.owners.opens(listed.identity)
+    ? listed.identity
+    : (ctx.trust
+        .earlierKeys(listed.identity.id)
+        .filter((key) => keys.owners.opens(key))
+        .at(-1) ?? listed.identity);
   const rotations: PlannedRotation[] = [];
   for (const share of await listShares(ctx, spaceId)) {
     rotations.push(

@@ -10,6 +10,7 @@ import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
 import {
   agentProfiles,
+  folderKeyEnvelopes,
   groupMembers,
   groups,
   identities,
@@ -39,7 +40,6 @@ import {
   applyRotation,
   bumpPermissions,
   giveKeys,
-  holdingCurrent,
   lackingKeys,
   lockSpaceForUpdate,
   nodesUnder,
@@ -1045,16 +1045,27 @@ export async function listWaiting(db: Database, accountId: string) {
     shareIds.length === 0
       ? []
       : await db.select().from(shareMembers).where(inArray(shareMembers.shareId, shareIds));
+  // Who holds an envelope of each share's current version, in one read.
   const current = new Map<string, Set<string>>();
-  for (const share of held) {
-    current.set(
-      share.id,
-      await holdingCurrent(
-        db,
-        share,
-        rows.filter((r) => r.shareId === share.id).map((r) => r.identityId),
-      ),
-    );
+  if (shareIds.length > 0) {
+    const holding = await db
+      .selectDistinct({
+        shareId: folderKeyEnvelopes.shareId,
+        identityId: folderKeyEnvelopes.recipientIdentityId,
+      })
+      .from(folderKeyEnvelopes)
+      .innerJoin(shares, eq(shares.id, folderKeyEnvelopes.shareId))
+      .where(
+        and(
+          inArray(folderKeyEnvelopes.shareId, shareIds),
+          eq(folderKeyEnvelopes.keyVersion, shares.currentKeyVersion),
+        ),
+      );
+    for (const { shareId, identityId } of holding) {
+      const set = current.get(shareId) ?? new Set<string>();
+      set.add(identityId);
+      current.set(shareId, set);
+    }
   }
   const people = new Map<string, Person>(
     (await peopleById(db, [...new Set([...access.values()].flatMap((m) => [...m.keys()]))])).map(

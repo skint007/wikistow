@@ -714,10 +714,12 @@ export async function planRemovalEverywhere(
 /**
  * Give access to someone waiting in a space (section 7.9): every version
  * of each share where their access is more than the keys they hold at
- * their current key, by role. After a key change this seals everything
- * they reach, directly and through groups, to the new key, replacing
- * Share again. `person` is as the waiting list gives them; their key must
- * be confirmed first (`identity-key-changed` otherwise).
+ * their current key, by role. After a confirmed key change this seals
+ * everything they reach, directly and through groups, to the new key,
+ * replacing Share again; after they replaced their keys it seals nothing,
+ * as only a rotation gives them keys (`planRekey`, section 4.6). `person`
+ * is as the waiting list gives them; their key must be confirmed first
+ * (`identity-key-changed` otherwise).
  */
 export async function planGiveAccess(
   ctx: ClientContext,
