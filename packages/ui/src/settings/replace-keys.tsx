@@ -103,7 +103,7 @@ export function ReplaceKeys() {
         landed && !retired
           ? 'Your keys are replaced. Lock your vault, and unlock it with your new passphrase.'
           : retired
-            ? 'You replaced your keys. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
+            ? 'Your keys were replaced. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
             : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
       }
     >
@@ -182,6 +182,8 @@ function Choose({
   async function submit(form: FormData) {
     // Numbered first, so only the latest submit's preparation can be kept.
     const mine = ++preparing;
+    // Taken as it starts: a lock during the slow steps below stops it.
+    const epoch = vaultStore.epoch();
     setBusy(true);
     setError(null);
     try {
@@ -205,7 +207,7 @@ function Choose({
           },
         );
       if (reused) return setError('Choose a passphrase you haven’t used for your vault.');
-      const epoch = vaultStore.epoch();
+      if (vaultStore.epoch() !== epoch) return;
       const keepable = (agents.data?.keepable ?? []).map((agent) => agent.agentId);
       const others = (agents.data?.others ?? []).map((agent) => agent.agentId);
       const prepared = await replaceKeys.prepareRotation(ctx, {
@@ -420,7 +422,8 @@ async function sendAndFinish(
       if (landedBefore === false && definitelyRefused(caught)) {
         // Nothing was stored, and these keys are of no use now.
         if (pending === held) pending = null;
-        vaultStore.dropStaged();
+        // These keys only: another vault may be staged by now.
+        zeroVault(prepared.vault);
         return {
           kind: 'dropped',
           message:

@@ -329,8 +329,10 @@ export function judgeUnlock(
   kept: KeptAnchor | null,
   vault: Pick<UnlockedVault, 'identity' | 'retired'>,
 ): 'ok' | 'replaced-elsewhere' | 'rollback' {
-  if (!kept) return 'ok';
   const at = vault.identity.public;
+  // Another person's anchor, as one written for another account in this
+  // browser, says nothing of these keys.
+  if (!kept || kept.anchor.id !== at.id) return 'ok';
   const { anchor, successor } = kept;
   const fromAnchor =
     sameKeys(at, anchor) ||

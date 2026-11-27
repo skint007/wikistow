@@ -31,8 +31,10 @@ const vault = (identity: PrivateIdentity, retired: PrivateIdentity[] = []) => ({
 });
 
 describe('judgeUnlock', () => {
-  it('takes the server’s word with nothing kept', () => {
+  it('takes the server’s word with nothing kept, or another person’s anchor', () => {
     expect(judgeUnlock(null, vault(k1))).toBe('ok');
+    const someone = generateIdentity({ kind: 'human', id: IdentityId.parse('someone-else') });
+    expect(judgeUnlock({ anchor: someone.public, successor: null }, vault(k1))).toBe('ok');
   });
 
   it('opens at the anchor, or at a later key whose keyring holds it', () => {

@@ -61,7 +61,7 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
     }
     await page.getByRole('button', { name: 'Replace my keys' }).click();
     await expect(page.getByText('Your keys are replaced.')).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/You replaced your keys\. Moving what you share/)).toBeVisible();
+    await expect(page.getByText(/Your keys were replaced\. Moving what you share/)).toBeVisible();
     await shot(page, 'keys-replaced');
     // The other tab held the old keys: it locked.
     await expect(sameBrowser.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();

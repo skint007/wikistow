@@ -103,8 +103,16 @@ export async function unlockWith(
     return new Error('The vault was locked while it opened');
   };
   const content = await keptContent();
-  // Kept only once it opened to keys this device takes (section 4.6).
+  // A wrapper of the same keyring, as after a passphrase change elsewhere,
+  // is kept at once, as before; a new keyring only once it opened to keys
+  // this device takes (section 4.6).
   const opened = await vaultWrapper(api, content, { keep: false });
+  if (content && !opened.keptAt) {
+    const kept = await keptUnlock(content).vault();
+    if (!kept || sameKeyring(kept.wrapper, opened.wrapper)) {
+      await keepWrapper(content, opened);
+    }
+  }
   const unlocked = await crypto
     .unlock({ wrapper: opened.wrapper, secret })
     .catch((error: unknown) => {
@@ -212,6 +220,9 @@ export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck |
   const content = await keptContent();
   const kept = content && (await keptUnlock(content).anchor());
   if (!content || !kept) return null;
+  // Only this account's person: identity IDs stay through rotations.
+  const me = await keptUnlock(content).me();
+  if (me?.identity && me.identity.id !== kept.anchor.id) return null;
   try {
     const check = await replaceKeysOperations.checkKeys(api, kept.anchor);
     // Recorded only over the anchor it checked: another tab's rotation may
@@ -309,4 +320,14 @@ async function servedVault() {
     if (noAnswer(error)) return null;
     throw error;
   }
+}
+
+// Whether two wrappers seal the same keyring: a passphrase change leaves it as it was.
+function sameKeyring(a: { format: number }, b: { format: number }): boolean {
+  const keyring = (w: { format: number }) =>
+    'keyring' in w && typeof w.keyring === 'object' && w.keyring !== null
+      ? (w.keyring as { nonce?: unknown; ciphertext?: unknown })
+      : null;
+  const [x, y] = [keyring(a), keyring(b)];
+  return x !== null && y !== null && x.nonce === y.nonce && x.ciphertext === y.ciphertext;
 }
