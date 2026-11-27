@@ -17,8 +17,8 @@ import {
 } from '@wikistow/client';
 import { noAnswer } from '@wikistow/client/api';
 import { vaultRoutes } from '@wikistow/contracts';
-import { api } from '../api';
-import { browserTrustMarks, keptStore } from '../data/kept-store';
+import { api, quietApi } from '../api';
+import { browserTrustMarks, keptStore, tellKeysReplaced } from '../data/kept-store';
 import { desktop } from '../desktop';
 import { forgetKeptUnlock, vaultStore } from './store';
 import { forgetInBrowser, rememberedInTab, rememberInBrowser } from './tab-unlock';
@@ -189,10 +189,16 @@ export async function judgeOpened(
   const kept = await keptAnchor();
   const judged = replaceKeysOperations.judgeUnlock(kept, vault);
   const at = vault.identity.public;
-  if (judged !== 'ok' || !kept || !online || at.keyVersion <= kept.anchor.keyVersion) {
+  if (
+    judged !== 'ok' ||
+    !kept ||
+    kept.anchor.id !== at.id ||
+    !online ||
+    at.keyVersion <= kept.anchor.keyVersion
+  ) {
     return judged;
   }
-  const check = await replaceKeysOperations.checkKeys(api, kept.anchor);
+  const check = await replaceKeysOperations.checkKeys(quietApi, kept.anchor);
   return check.kind === 'replaced' && sameKeys(check.current, at) ? 'ok' : 'rollback';
 }
 
@@ -224,18 +230,23 @@ export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck |
   const me = await keptUnlock(content).me();
   if (me?.identity && me.identity.id !== kept.anchor.id) return null;
   try {
-    const check = await replaceKeysOperations.checkKeys(api, kept.anchor);
+    const check = await replaceKeysOperations.checkKeys(quietApi, kept.anchor);
     // Recorded only over the anchor it checked: another tab's rotation may
     // have moved it meanwhile.
     const now = await keptUnlock(content).anchor();
     if (check.kind === 'replaced' && now && sameKeys(now.anchor, kept.anchor)) {
+      const recorded = now.successor !== null && sameKeys(now.successor, check.current);
       await keptUnlock(content).keepAnchor({ ...now, successor: check.current });
+      // The browser's other tabs hold the replaced keys: they lock, as after
+      // a rotation in this browser, so none signs or seals with them.
+      if (!recorded) tellKeysReplaced();
     }
     return check;
   } catch (error) {
-    // With no answer, what the device recorded before stands.
-    if (!noAnswer(error)) throw error;
-    return kept.successor ? { kind: 'replaced', current: kept.successor } : null;
+    // Without a clear answer, what the device recorded before stands.
+    if (kept.successor) return { kind: 'replaced', current: kept.successor };
+    if (noAnswer(error)) return null;
+    throw error;
   }
 }
 

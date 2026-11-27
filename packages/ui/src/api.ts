@@ -23,6 +23,8 @@ const BEFORE_VAULT = new Set<string>([
   systemRoutes.installation.path,
   contactsRoutes.getContacts.path,
 ]);
+// The keys check before an unlock (section 4.6), by prefix: its path names the person.
+const BEFORE_VAULT_PREFIX = '/api/identities/';
 const BLOBS = pageRoutes.BLOB_DOWNLOAD_PATH.replace(':hash', '');
 // Reads sent as POST, for the many versions they ask for.
 const BATCH_READS = new Set<string>([
@@ -48,7 +50,7 @@ async function withDeadline(url: string, init: RequestInit): Promise<Response> {
   const reading = reads(path, init);
   const deadline = !reading
     ? null
-    : BEFORE_VAULT.has(path)
+    : BEFORE_VAULT.has(path) || path.startsWith(BEFORE_VAULT_PREFIX)
       ? BEFORE_VAULT_MS
       : path.startsWith(BLOBS)
         ? null
@@ -92,6 +94,13 @@ async function connected(url: string, init: RequestInit): Promise<Response> {
 
 /** The typed API client. The browser sends the session cookie itself. */
 export const api = createApiClient({ fetch: connected });
+
+/**
+ * The same, but telling `connection` nothing, for reads whose failure says
+ * nothing of the server as a whole, as the keys check before an unlock:
+ * its timing out mustn't send the unlock that follows to what's kept.
+ */
+export const quietApi = createApiClient({ fetch: withDeadline });
 
 // Offline, the app asks the installation's public facts to learn when the server is back.
 const probing = createApiClient({ fetch: withDeadline });
