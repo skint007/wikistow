@@ -142,6 +142,15 @@ const DETAILS = {
   'agent.group-confirmed': z.strictObject({ groupId: z.string(), drafts: z.boolean() }),
   'agent.group-left': z.strictObject({ groupId: z.string() }),
   'agent.revoked': z.strictObject({}),
+  // A person replaced their identity keys (protocol section 4.6): from which
+  // key version, and how many agents, sessions and live sessions it touched.
+  'identity.rotated': z.strictObject({
+    fromKeyVersion: z.number().int(),
+    keptAgents: z.number().int(),
+    revokedAgents: z.number().int(),
+    sessionsEnded: z.number().int(),
+    liveSessionsEnded: z.number().int(),
+  }),
 };
 
 export type AuditAction = keyof typeof DETAILS;

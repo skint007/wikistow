@@ -2,7 +2,9 @@ import {
   vaultRoutes,
   type AccountId,
   type ServedVaultWrapper,
+  type VaultWrapper,
   type VaultWrapperV1,
+  type VaultWrapperV2,
 } from '@wikistow/contracts';
 import { noAnswer, type ApiClient } from '../api/client.ts';
 import type { KeptStore } from '../kept-store.ts';
@@ -11,6 +13,7 @@ import { generateIdentity, type PrivateIdentity } from '../identity.ts';
 import { IdentityId, newId } from '../ids.ts';
 import {
   changePassphrase,
+  createRotatedVault,
   createVault,
   unlockVault,
   unlocks,
@@ -36,7 +39,18 @@ export type VaultCrypto = {
     wrapper: ServedVaultWrapper;
     passphrase: string;
     kdf?: KdfParams;
-  }): Promise<VaultWrapperV1>;
+  }): Promise<VaultWrapper>;
+  /**
+   * A new vault for keys a person is replacing theirs with (section 4.6):
+   * a new vault key, passphrase and recovery key, keeping `retired`.
+   */
+  rotate(input: {
+    accountId: AccountId;
+    identity: PrivateIdentity;
+    retired: readonly PrivateIdentity[];
+    passphrase: string;
+    kdf?: KdfParams;
+  }): Promise<{ wrapper: VaultWrapperV2; recoveryKey: string; vault: UnlockedVault }>;
 };
 
 export const inlineVaultCrypto: VaultCrypto = {
@@ -52,6 +66,9 @@ export const inlineVaultCrypto: VaultCrypto = {
   },
   async changePassphrase({ vault, wrapper, passphrase, kdf }) {
     return changePassphrase({ vault, wrapper, passphrase, ...(kdf ? { kdf } : {}) });
+  },
+  async rotate({ kdf, ...input }) {
+    return createRotatedVault({ ...input, ...(kdf ? { kdf } : {}) });
   },
 };
 
@@ -161,7 +178,7 @@ export async function changeVaultPassphrase({
   vault: UnlockedVault;
   passphrase: string;
   kdf?: KdfParams;
-}): Promise<{ wrapper: VaultWrapperV1; version: number }> {
+}): Promise<{ wrapper: VaultWrapper; version: number }> {
   const { wrapper, version } = await api.call(vaultRoutes.getVault);
   const next = await crypto.changePassphrase({
     vault,

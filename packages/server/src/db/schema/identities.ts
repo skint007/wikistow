@@ -1,8 +1,10 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -49,3 +51,26 @@ export const identityReservations = pgTable('identity_reservations', {
   // Deliberately no foreign key: deletion must never release an ID.
   accountId: uuid().notNull(),
 });
+
+/**
+ * A person's rotation statements (protocol section 4.6), one per key version
+ * they replaced, as the person's app signed them: the first one stored for
+ * a key version wins, and none is ever changed or removed but with the
+ * account.
+ */
+export const identityRotations = pgTable(
+  'identity_rotations',
+  {
+    identityId: text().notNull(),
+    fromKeyVersion: integer().notNull(),
+    statement: jsonb().notNull(),
+    createdAt: timestamptz().notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.identityId, table.fromKeyVersion] }),
+    foreignKey({
+      columns: [table.identityId, table.fromKeyVersion],
+      foreignColumns: [identities.id, identities.keyVersion],
+    }).onDelete('cascade'),
+  ],
+);

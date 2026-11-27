@@ -3,6 +3,7 @@ import {
   contactsRoutes,
   copyRoutes,
   groupRoutes,
+  identityRoutes,
   importRoutes,
   ownerRoutes,
   PageId,
@@ -100,6 +101,9 @@ import {
   listStatements,
   myEnvelopes,
   readContacts,
+  readIdentityVersion,
+  readRotations,
+  rotateIdentity,
   writeContacts,
   loadTree,
   lookupIdentities,
@@ -125,6 +129,7 @@ const CONTENT_ERRORS = {
   'vault-exists': 'vault-exists',
   'vault-immutable-field': 'vault-immutable-field',
   'stale-vault-version': 'stale-vault-version',
+  'rotation-exists': 'rotation-exists',
   'invalid-vault': 'invalid-request',
   'binding-mismatch': 'binding-mismatch',
   'bad-signature': 'bad-signature',
@@ -206,6 +211,7 @@ export function mountContentRoutes(
     contentLimits = DEFAULT_CONTENT_LIMITS,
     minKdf,
     bulkLarge = BULK_LARGE,
+    identityRotation = false,
     log,
   }: {
     db: Database;
@@ -214,6 +220,7 @@ export function mountContentRoutes(
     contentLimits: Config['contentLimits'];
     minKdf: Config['minKdf'];
     bulkLarge?: Config['bulkLarge'];
+    identityRotation?: Config['identityRotation'];
     log: Log;
   },
 ): void {
@@ -295,7 +302,35 @@ export function mountContentRoutes(
   );
 
   routes.account(vaultRoutes.lookupIdentities, async ({ query }) => ({
-    identities: await lookupIdentities(db, query.ids),
+    identities: await lookupIdentities(db, query.ids, { hold: false }),
+  }));
+
+  // Replacing keys stays off until it is fully built (#327): until then a
+  // rotated person can't open what was sealed to their earlier keys, and
+  // their contacts' apps take the new key as a plain key change.
+  routes.account(
+    identityRoutes.rotate,
+    async ({ body }, { principal }) => {
+      if (!identityRotation) {
+        throw new ApiError('rotation-off', 'Replacing keys isn’t turned on on this server');
+      }
+      return rotateIdentity(db, {
+        accountId: principal.accountId,
+        sessionId: principal.sessionId,
+        minKdf,
+        storageBytes: limits.storageBytes,
+        ...body,
+      }).catch(toApiError);
+    },
+    { recentAuth: true, rateLimit: WRITE_LIMIT },
+  );
+
+  // Public, as the directory is: anyone signed in, and agents, which follow their person.
+  routes.content(identityRoutes.rotations, async ({ params, query }) =>
+    readRotations(db, { identityId: params.identityId, from: query.from }),
+  );
+  routes.content(identityRoutes.version, async ({ params }) => ({
+    identity: await readIdentityVersion(db, params).catch(toApiError),
   }));
 
   routes.content(structureRoutes.listSpaces, async (_input, { actor }) => ({

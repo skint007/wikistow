@@ -40,4 +40,5 @@ export const workerVaultCrypto: VaultCrypto = {
   create: (input) => inWorker('create', input),
   unlock: (input) => inWorker('unlock', input),
   changePassphrase: (input) => inWorker('changePassphrase', input),
+  rotate: (input) => inWorker('rotate', input),
 };

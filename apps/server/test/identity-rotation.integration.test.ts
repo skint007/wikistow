@@ -1,0 +1,409 @@
+// Replacing a person's identity keys (protocol section 4.6, #327, PR 2):
+// the rotate route's checks and its one transaction, the statements and
+// earlier keys it serves, and the setting that keeps it off.
+import {
+  createApiClient,
+  inlineVaultCrypto,
+  keyHash,
+  newId,
+  openSession,
+  parseIdentityRotation,
+  replaceKeysOperations as replaceKeys,
+  saveContacts,
+  sealContacts,
+  spaceOperations,
+  unlockVault,
+  verifyRotationChain,
+} from '@wikistow/client';
+import { FAST_KDF } from '@wikistow/client/testing';
+import {
+  AccountId,
+  contactsRoutes,
+  identityRoutes,
+  InstallationId,
+  SpaceId,
+  systemRoutes,
+  vaultRoutes,
+} from '@wikistow/contracts';
+import { currentIdentity, lookupIdentities, schema, type Database } from '@wikistow/server';
+import { and, eq, sql } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test';
+import { PASSWORD } from './support/accounts.ts';
+import { asAgent, enrolledAgent } from './support/agents.ts';
+import { personWithVault, rejection } from './support/content.ts';
+import { Browser, createTestApp, type TestApp } from './support/harness.ts';
+import { startSession } from './support/live.ts';
+import { find, library, shareFolder, type Person } from './support/sharing.ts';
+
+const NEW_PASSPHRASE = 'a brand new vault passphrase';
+
+let t: TestApp;
+let off: TestApp;
+beforeAll(async () => {
+  [t, off] = await Promise.all([
+    createTestApp({ identityRotation: true }),
+    createTestApp({ identityRotation: false }),
+  ]);
+});
+afterAll(async () => {
+  await Promise.all([t.drop(), off.drop()]);
+});
+
+/** A rotation from `person`'s session, keeping the agents in `keep`. */
+const prepare = (person: Person, keep: readonly string[] = []) =>
+  replaceKeys.prepareRotation(person.ctx, {
+    vault: person.vault,
+    crypto: inlineVaultCrypto,
+    passphrase: NEW_PASSPHRASE,
+    kdf: FAST_KDF,
+    keep,
+  });
+
+const rotate = (person: Person, body: replaceKeys.RotateRequest) =>
+  person.api.call(identityRoutes.rotate, { body });
+
+/** A person with a contacts record, as every person who has made a space has. */
+async function personWithRecord(app: TestApp = t) {
+  const person = await personWithVault(app);
+  await library(person);
+  await saveContacts(person.ctx);
+  return person;
+}
+
+/** Another device of the same person: signed in on its own. */
+async function secondDevice(app: TestApp, person: Person) {
+  const browser = new Browser(app.app);
+  const signedIn = await browser.request('/api/auth/sign-in/email', {
+    method: 'POST',
+    json: { email: person.email, password: PASSWORD },
+  });
+  expect(signedIn.status).toBe(200);
+  return createApiClient({ fetch: browser.fetch });
+}
+
+const rowsOf = (identityId: string) =>
+  t.db
+    .select()
+    .from(schema.identities)
+    .where(eq(schema.identities.id, identityId))
+    .orderBy(schema.identities.keyVersion);
+
+describe('the setting', () => {
+  it('is off unless set: the route is refused and the installation says so', async () => {
+    const alice = await personWithRecord(off);
+    const prepared = await prepare(alice);
+    expect(await rejection(rotate(alice, prepared.request))).toBe('rotation-off');
+    expect((await alice.api.call(systemRoutes.installation)).identityRotation).toBe(false);
+    const rows = await off.db
+      .select()
+      .from(schema.identities)
+      .where(eq(schema.identities.id, alice.vault.identity.public.id));
+    expect(rows.map((row) => row.keyVersion)).toEqual([1]);
+  });
+
+  it('says when it is on', async () => {
+    const alice = await personWithVault(t);
+    expect((await alice.api.call(systemRoutes.installation)).identityRotation).toBe(true);
+  });
+});
+
+describe('replacing keys', () => {
+  it('replaces the key, vault and contacts in one go, keeps ticked agents and revokes the rest', async () => {
+    const alice = await personWithRecord();
+    const kept = await enrolledAgent(t, alice);
+    const dropped = await enrolledAgent(t, alice);
+    await saveContacts(alice.ctx);
+    const phone = await secondDevice(t, alice);
+    expect((await phone.call(vaultRoutes.getVault)).version).toBe(1);
+    const old = alice.vault.identity.public;
+
+    const keepable = await replaceKeys.keepableAgents(alice.ctx);
+    expect(keepable.map((a) => a.agentId).sort()).toEqual([kept.agentId, dropped.agentId].sort());
+    const prepared = await prepare(alice, [kept.agentId]);
+    expect(await rotate(alice, prepared.request)).toEqual({
+      vaultVersion: 2,
+      contactsVersion: prepared.request.contacts.record.version,
+    });
+
+    // The new key is current, the old one kept as no longer current.
+    const rows = await rowsOf(old.id);
+    expect(rows.map((r) => [r.keyVersion, r.revokedAt === null])).toEqual([
+      [1, false],
+      [2, true],
+    ]);
+    const next = prepared.request.identity;
+    const { identities } = await alice.api.call(vaultRoutes.lookupIdentities, {
+      query: { ids: old.id },
+    });
+    expect(identities).toEqual([next]);
+
+    // The vault is format 2, opened by the new passphrase to the new key with the old one retired.
+    const { wrapper, version } = await alice.api.call(vaultRoutes.getVault);
+    expect(version).toBe(2);
+    const opened = unlockVault({
+      wrapper,
+      secret: { kind: 'passphrase', passphrase: NEW_PASSPHRASE },
+      formats: [1, 2],
+    });
+    expect(opened.identity.public).toEqual(next);
+    expect(opened.retired.map((key) => key.public)).toEqual([old]);
+    // The old recovery key opens it no more.
+    const withOldRecovery = Promise.resolve().then(() =>
+      unlockVault({
+        wrapper,
+        secret: { kind: 'recovery-key', recoveryKey: alice.recoveryKey },
+        formats: [1, 2],
+      }),
+    );
+    expect(await rejection(withOldRecovery)).not.toBe('no error');
+
+    // A session at the new key reads the contacts version it wrote.
+    const after = await openSession(alice.api, prepared.vault);
+    expect(after.contacts.book.record).toMatchObject({ ownerKeyVersion: 2 });
+    const shared = after.contacts.book.payloads.shared;
+    expect(shared.agents.map((a) => [a.enrollment.agent.id, a.enrollment.ownerKeyVersion])).toEqual(
+      [[kept.agentId, 2]],
+    );
+    expect(shared.revokedAgents.map((r) => r.agentId)).toContain(dropped.agentId);
+
+    // The kept agent works on; the other is revoked, and its token fails.
+    const profile = await t.db
+      .select()
+      .from(schema.agentProfiles)
+      .where(eq(schema.agentProfiles.agentId, kept.agentId));
+    expect(profile[0]?.ownerKeyVersion).toBe(2);
+    expect((await asAgent(t, kept.token, '/api/me/contacts')).status).toBe(200);
+    expect((await asAgent(t, dropped.token, '/api/me/contacts')).status).toBe(401);
+
+    // The other device is signed out; this one isn't.
+    expect(await rejection(phone.call(vaultRoutes.getVault))).toBe('unauthenticated');
+    expect((await alice.api.call(vaultRoutes.getVault)).version).toBe(2);
+
+    // The statement is served, with the current key, and it chains.
+    const served = await alice.api.call(identityRoutes.rotations, {
+      params: { identityId: old.id },
+      query: { from: 1 },
+    });
+    expect(served.current).toEqual(next);
+    const chain = verifyRotationChain({
+      installationId: alice.ctx.installationId,
+      start: old,
+      end: next,
+      statements: served.rotations.map(parseIdentityRotation),
+    });
+    expect(chain.keys.map((key) => keyHash(key))).toEqual([keyHash(old), keyHash(next)]);
+    expect(
+      (
+        await alice.api.call(identityRoutes.rotations, {
+          params: { identityId: old.id },
+          query: { from: 2 },
+        })
+      ).rotations,
+    ).toEqual([]);
+    // As are the earlier keys, to anyone signed in.
+    const bob = await personWithVault(t);
+    expect(
+      await bob.api.call(identityRoutes.version, {
+        params: { identityId: old.id, keyVersion: 1 },
+      }),
+    ).toEqual({ identity: old });
+    expect(
+      await rejection(
+        bob.api.call(identityRoutes.version, { params: { identityId: old.id, keyVersion: 3 } }),
+      ),
+    ).toBe('not-found');
+
+    const [event] = await t.db
+      .select()
+      .from(schema.auditEvents)
+      .where(
+        and(
+          eq(schema.auditEvents.actorAccountId, alice.id),
+          eq(schema.auditEvents.action, 'identity.rotated'),
+        ),
+      );
+    expect(event?.details).toMatchObject({ fromKeyVersion: 1, keptAgents: 1, revokedAgents: 1 });
+  });
+
+  it('refuses anything signed with the old key afterwards', async () => {
+    const alice = await personWithRecord();
+    const prepared = await prepare(alice);
+    await rotate(alice, prepared.request);
+    // A contacts version signed with the old key, on top of the new head.
+    const head = prepared.request.contacts.record;
+    const oldSigned = sealContacts({
+      owner: alice.vault.identity,
+      installationId: alice.ctx.installationId,
+      previous: head,
+      ...alice.ctx.contacts.book.payloads,
+    });
+    expect(
+      await rejection(
+        alice.api.call(contactsRoutes.putContacts, {
+          body: { expectedVersion: head.version, record: oldSigned },
+        }),
+      ),
+    ).toBe('contacts-invalid');
+    // A space named under the old key: the session still holds it.
+    expect(
+      await rejection(spaceOperations.createSpace(alice.ctx, { name: 'Under the old key' })),
+    ).not.toBe('no error');
+    // At the new key, a new space goes through.
+    const after = await openSession(alice.api, prepared.vault);
+    await spaceOperations.createSpace(after, { name: 'Under the new key' });
+  });
+
+  it('ends the live sessions in spaces the person owns or is a member of', async () => {
+    const alice = await personWithRecord();
+    const bob = await personWithRecord();
+    const own = await library(alice);
+    const theirs = await library(bob);
+    await shareFolder(bob.ctx, {
+      spaceId: theirs.spaceId,
+      rootId: theirs.shared,
+      people: [{ person: await find(bob, alice), role: 'editor', canPublish: false }],
+    });
+    const mine = await startSession(alice, own.page);
+    const bobs = await startSession(bob, theirs.page);
+    const elsewhere = await startSession(bob, theirs.beside);
+
+    await rotate(alice, (await prepare(alice)).request);
+    const row = async (id: string) =>
+      (await t.db.select().from(schema.liveSessions).where(eq(schema.liveSessions.id, id)))[0];
+    expect(await row(mine.sessionId)).toMatchObject({ endedReason: 'access', keysLost: false });
+    expect(await row(bobs.sessionId)).toMatchObject({ endedReason: 'access' });
+    // Bob's private page is in the same space, which Alice is a member of: it ends too.
+    expect(await row(elsewhere.sessionId)).toMatchObject({ endedReason: 'access' });
+  });
+});
+
+describe('the checks', () => {
+  it('takes the first statement for a key version, answers the same one sent again, and refuses another', async () => {
+    const alice = await personWithRecord();
+    const first = await prepare(alice);
+    const second = await prepare(alice);
+    const answer = await rotate(alice, first.request);
+    expect(await rotate(alice, first.request)).toEqual(answer);
+    expect(await rejection(rotate(alice, second.request))).toBe('rotation-exists');
+    expect((await rowsOf(alice.vault.identity.public.id)).length).toBe(2);
+  });
+
+  it('stores nothing when a check fails', async () => {
+    const alice = await personWithRecord();
+    const agent = await enrolledAgent(t, alice);
+    await saveContacts(alice.ctx);
+    const prepared = await prepare(alice, [agent.agentId]);
+    const { request } = prepared;
+    const refused = (body: replaceKeys.RotateRequest) => rejection(rotate(alice, body));
+
+    // Every live agent named once, as kept or revoked, with one enrollment per kept one.
+    expect(await refused({ ...request, keptAgents: [] })).toBe('invalid-request');
+    expect(await refused({ ...request, revokedAgents: [agent.agentId] })).toBe('invalid-request');
+    expect(await refused({ ...request, enrollments: [] })).toBe('invalid-request');
+    // An enrollment signed with the old key.
+    const oldEnrollment = alice.ctx.contacts.book.payloads.shared.agents[0]?.enrollment;
+    expect(await refused({ ...request, enrollments: oldEnrollment ? [oldEnrollment] : [] })).toBe(
+      'binding-mismatch',
+    );
+    // The identity must be the statement's new key.
+    expect(
+      await refused({
+        ...request,
+        identity: { ...request.identity, boxPublicKey: alice.vault.identity.public.boxPublicKey },
+      }),
+    ).toBe('binding-mismatch');
+    // A vault version that moved.
+    expect(await refused({ ...request, expectedVaultVersion: 7 })).toBe('stale-vault-version');
+    // Another account's wrapper.
+    const bob = await personWithVault(t);
+    expect(
+      await refused({
+        ...request,
+        wrapper: { ...request.wrapper, accountId: AccountId.parse(bob.id) },
+      }),
+    ).toBe('binding-mismatch');
+    // A statement signed by someone else.
+    expect(
+      await refused({
+        ...request,
+        rotation: { ...request.rotation, fromSignature: request.rotation.toSignature },
+      }),
+    ).toBe('bad-signature');
+    // A contacts version written since the statement named the head.
+    await saveContacts(alice.ctx, [
+      {
+        kind: 'accept-owner',
+        spaceId: newId(SpaceId),
+        owner: { id: bob.vault.identity.public.id, keyHash: keyHash(bob.vault.identity.public) },
+      },
+    ]);
+    expect(await refused(request)).toBe('stale-head');
+
+    expect((await rowsOf(alice.vault.identity.public.id)).map((r) => r.keyVersion)).toEqual([1]);
+    expect((await alice.api.call(vaultRoutes.getVault)).version).toBe(1);
+    expect((await asAgent(t, agent.token, '/api/me/contacts')).status).toBe(200);
+    const stored = await t.db
+      .select()
+      .from(schema.identityRotations)
+      .where(eq(schema.identityRotations.identityId, alice.vault.identity.public.id));
+    expect(stored).toEqual([]);
+  });
+
+  it('needs a recent sign-in', async () => {
+    const alice = await personWithRecord();
+    const prepared = await prepare(alice);
+    await t.db
+      .update(schema.sessions)
+      .set({ authenticatedAt: sql`now() - interval '11 minutes'` })
+      .where(eq(schema.sessions.userId, alice.id));
+    expect(await rejection(rotate(alice, prepared.request))).toBe('reauth-required');
+  });
+
+  for (const [who, hold] of [
+    // A signed write of Alice's, which read her key.
+    ['her own write', (tx: Database, alice: Person) => currentIdentity(tx, alice.id)],
+    // Someone else's write sealing to her, which read her key as a recipient.
+    [
+      'a write sealing to her',
+      (tx: Database, alice: Person) => lookupIdentities(tx, [alice.vault.identity.public.id]),
+    ],
+  ] as const) {
+    it(`waits for ${who} that read the old key, so it can't land after`, async () => {
+      const alice = await personWithRecord();
+      const prepared = await prepare(alice);
+      let release = () => {};
+      const released = new Promise<void>((resolve) => (release = resolve));
+      let holding = () => {};
+      const held = new Promise<void>((resolve) => (holding = resolve));
+      const write = t.db.transaction(async (tx) => {
+        await hold(tx, alice);
+        holding();
+        await released;
+      });
+      await held;
+      let done = false;
+      const rotation = rotate(alice, prepared.request).then((answer) => {
+        done = true;
+        return answer;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(done).toBe(false);
+      release();
+      await write;
+      expect((await rotation).vaultVersion).toBe(2);
+    });
+  }
+
+  it('serves statements only as signed, for the installation they name', async () => {
+    const alice = await personWithRecord();
+    await rotate(alice, (await prepare(alice)).request);
+    const { installationId } = await alice.api.call(systemRoutes.installation);
+    const { rotations } = await alice.api.call(identityRoutes.rotations, {
+      params: { identityId: alice.vault.identity.public.id },
+      query: {},
+    });
+    expect(rotations.map((r) => parseIdentityRotation(r).installationId)).toEqual([
+      InstallationId.parse(installationId),
+    ]);
+  });
+});

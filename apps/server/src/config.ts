@@ -63,6 +63,13 @@ const Env = z.object({
     .min(1)
     .max(36500)
     .default(DEFAULT_DRAFT_RETENTION_MS / (24 * 60 * 60 * 1000)),
+  /**
+   * Whether people may replace their identity keys (protocol section 4.6).
+   * Off until it is fully built (#327): before that, someone who replaces
+   * theirs can't open what was shared with their earlier keys, and the
+   * people they share with see a plain key change.
+   */
+  IDENTITY_ROTATION: z.enum(['on', 'off']).default('off'),
   /** Rate limiting can be turned off for browser tests only. */
   RATE_LIMIT: z.enum(['on', 'off']).default('on'),
   /**
@@ -113,6 +120,8 @@ export type Config = {
   smtp: { url: string | undefined; from: string | undefined };
   trustProxy: boolean;
   rateLimit: boolean;
+  /** Whether `POST /api/me/identity/rotate` is taken; off unless set. */
+  identityRotation?: boolean;
   /** Optional for embedded callers, which use the environment default. */
   passwordGuessesPerHour?: number;
   /** The cheapest vault passphrase wrapper accepted. Lowered only in tests. */
@@ -157,6 +166,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     smtp: { url: e.SMTP_URL, from: e.SMTP_FROM },
     trustProxy: e.TRUST_PROXY === 'true',
     rateLimit: e.RATE_LIMIT === 'on',
+    identityRotation: e.IDENTITY_ROTATION === 'on',
     passwordGuessesPerHour: e.PASSWORD_GUESS_FAILURES,
     minKdf: MIN_VAULT_KDF,
     blobDir: e.BLOB_DIR,

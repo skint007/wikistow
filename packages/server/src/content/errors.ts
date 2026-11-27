@@ -8,6 +8,7 @@ export type ContentFailure =
   | 'vault-exists'
   | 'vault-immutable-field'
   | 'stale-vault-version'
+  | 'rotation-exists'
   | 'invalid-vault'
   | 'binding-mismatch'
   | 'bad-signature'

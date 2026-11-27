@@ -175,7 +175,11 @@ export function createApp({
     return result;
   });
   const routes = createRoutes({ app, auth, db, config });
-  mountSystemRoutes(routes, { db, publicOrigin: config.publicOrigin });
+  mountSystemRoutes(routes, {
+    db,
+    publicOrigin: config.publicOrigin,
+    identityRotation: config.identityRotation ?? false,
+  });
   mountAccountRoutes(routes, {
     db,
     auth,
@@ -192,6 +196,7 @@ export function createApp({
     contentLimits: config.contentLimits,
     minKdf: config.minKdf,
     bulkLarge: config.bulkLarge,
+    identityRotation: config.identityRotation ?? false,
     log,
   });
   // The database names each space whose tree changes (`listenForTreeChanges`).

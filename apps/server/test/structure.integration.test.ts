@@ -66,7 +66,7 @@ describe('the vault', () => {
     expect(await rejection(again)).toBe('vault-exists');
   });
 
-  it('takes a format 1 wrapper only, until replacing keys is built', async () => {
+  it('keeps the format it has: a format 1 vault takes no format 2 wrapper', async () => {
     const alice = await personWithVault(t);
     const served = await alice.api.call(vaultRoutes.getVault);
     const wrapper = { ...VaultWrapperV1.parse(served.wrapper), format: 2 };
@@ -76,7 +76,7 @@ describe('the vault', () => {
           body: { wrapper: wrapper as never, expectedVersion: served.version },
         }),
       ),
-    ).toBe('invalid-request');
+    ).toBe('vault-immutable-field');
     expect((await alice.api.call(vaultRoutes.getVault)).version).toBe(served.version);
   });
 

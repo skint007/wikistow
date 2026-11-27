@@ -359,8 +359,9 @@ export function unlockVault({
 
 /**
  * Replace only the passphrase wrapper, from any unlocked session (including
- * one unlocked by the recovery key). Documents are not re-encrypted. Only a
- * format this version unlocks is changed; another is `unsupported-format`.
+ * one unlocked by the recovery key), keeping the wrapper's format. Documents
+ * are not re-encrypted. A format this version doesn't know is
+ * `unsupported-format`.
  */
 export function changePassphrase({
   vault,
@@ -372,12 +373,13 @@ export function changePassphrase({
   wrapper: ServedVaultWrapper;
   passphrase: string;
   kdf?: KdfParams;
-}): VaultWrapperV1 {
-  if (wrapper.format !== 1) {
+}): VaultWrapper {
+  const known = VaultWrapper.safeParse(wrapper);
+  if (!known.success) {
     throw new CryptoError('unsupported-format', 'This vault is in a newer format. Update the app');
   }
   return {
-    ...VaultWrapperV1.parse(wrapper),
+    ...known.data,
     passphrase: wrapWithPassphrase({
       accountId: vault.accountId,
       vaultKey: vault.vaultKey,
