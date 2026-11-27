@@ -45,28 +45,59 @@ export async function followRotations(
     if (!pin || identity.kind !== 'human') continue;
     if (pin.identity.keyVersion >= identity.keyVersion) continue;
     if (ctx.trust.isDeclined(pin.identity)) continue;
-    try {
-      const chain = await chainFrom(ctx.api, ctx.installationId, pin.identity);
-      // The directory listed one key, and the chain ends at another.
-      if (!chain || !sameKeys(chain.last, identity)) continue;
-      const change = ctx.trust.followChange(chain);
-      if (!change) continue;
-      await saveContacts(ctx, [change], { confirm: true }).catch((error: unknown) => {
-        // Not held, as when another device declined meanwhile: the key stays a
-        // key change, and the follow isn't left to fail every later write.
-        drop(ctx, change);
-        throw error;
-      });
-      // The record now holds the follow, and the pin moved with it (`load`).
-      ctx.trust.addEarlierKeys(chain);
-      followed.push(chain.last);
-    } catch (error) {
-      if (!notFollowed(error)) throw error;
+    // Lookups running side by side follow one person once, in one write.
+    const running = following(ctx);
+    const key = `${identity.id} ${keyHash(identity)}`;
+    let follow = running.get(key);
+    if (!follow) {
+      follow = followOne(ctx, pin.identity, identity);
+      running.set(key, follow);
+      void follow.finally(() => running.delete(key)).catch(() => {});
     }
+    const to = await follow;
+    if (to) followed.push(to);
   }
   // What each space's owners were worked out under changed.
   if (followed.length > 0) ctx.spaces.clear();
   return followed;
+}
+
+const followingBy = new WeakMap<
+  ClientContext['contacts'],
+  Map<string, Promise<PublicIdentity | null>>
+>();
+const following = (ctx: ClientContext) => {
+  let running = followingBy.get(ctx.contacts);
+  if (!running) followingBy.set(ctx.contacts, (running = new Map()));
+  return running;
+};
+
+// Follow one person from `pinned` to `listed`, if the chain checks out: the
+// key followed to, or null when it stays a key change.
+async function followOne(
+  ctx: ClientContext,
+  pinned: PublicIdentity,
+  listed: PublicIdentity,
+): Promise<PublicIdentity | null> {
+  try {
+    const chain = await chainFrom(ctx.api, ctx.installationId, pinned);
+    // The directory listed one key, and the chain ends at another.
+    if (!chain || !sameKeys(chain.last, listed)) return null;
+    const change = ctx.trust.followChange(chain);
+    if (!change) return null;
+    await saveContacts(ctx, [change], { confirm: true }).catch((error: unknown) => {
+      // Not held, as when another device declined meanwhile: the key stays a
+      // key change, and the follow isn't left to fail every later write.
+      drop(ctx, change);
+      throw error;
+    });
+    // The record now holds the follow, and the pin moved with it (`load`).
+    ctx.trust.addEarlierKeys(chain);
+    return chain.last;
+  } catch (error) {
+    if (!notFollowed(error)) throw error;
+    return null;
+  }
 }
 
 /**

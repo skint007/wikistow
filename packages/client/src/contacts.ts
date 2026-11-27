@@ -829,7 +829,12 @@ export function applyContactsChange(
                 },
               ],
         },
-        private: { ...own, labels: own.labels.filter((label) => !matches(label)) },
+        private: {
+          ...own,
+          labels: own.labels.filter((label) => !matches(label)),
+          // Nobody to show the notice of, or to decline, any more.
+          extensions: asExtensions(withFollowed(own.extensions, change.id, null)),
+        },
       };
     }
     case 'enroll': {

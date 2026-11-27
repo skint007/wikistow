@@ -464,6 +464,22 @@ describe('after replacing keys (section 4.6)', () => {
       (await content.queue.entries()).map((entry) => entry.kind).sort();
     expect(await kinds(before)).toEqual(['page', 'publish']);
 
+    // A read that fails moves nothing, so the Publish never goes without its draft.
+    const read = store.queue.read.bind(store.queue);
+    let fail = true;
+    let entries = 0;
+    store.queue.read = async (name) => {
+      // The second change's read fails, once the first has read.
+      if (fail && name.startsWith('e') && ++entries === 2) throw new Error('A read failed');
+      return read(name);
+    };
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+    expect(await kinds(before)).toEqual(['page', 'publish']);
+    fail = false;
     await keptOperations.sealKeptAgain(store, {
       identity: second,
       installationId,

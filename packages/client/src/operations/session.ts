@@ -382,16 +382,16 @@ export async function openAgentSession(
   // file holds the new key and there is nothing more to follow.
   const history =
     person.keyVersion > 1
-      ? await chainFrom(
-          api,
-          installationId,
-          (
-            await api.call(identityRoutes.version, {
-              params: { identityId: person.id, keyVersion: 1 },
-            })
-          ).identity,
-          person,
-        )
+      ? await (async () => {
+          const { identity: first } = await api.call(identityRoutes.version, {
+            params: { identityId: person.id, keyVersion: 1 },
+          });
+          return chainFrom(api, installationId, first, person);
+        })().catch((error: unknown) => {
+          // A server that serves agents no history: earlier writing stays closed.
+          if (error instanceof ApiError) return null;
+          throw error;
+        })
       : null;
   const earlier = history?.keys.slice(0, -1) ?? [];
   const book = await readPersonContacts(

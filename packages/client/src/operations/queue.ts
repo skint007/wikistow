@@ -380,7 +380,10 @@ const blobNameOf = (sealer: KeptSealer, blobHash: string) =>
  * keys, again under `to`, their current key, with the files they name, and
  * remove the old items (section 4.6, **Opening with earlier keys**), so a
  * rotation drops nothing typed offline. Only from within `queueExclusive`.
- * An item that doesn't open under `from` is left as it is.
+ * Everything is read first: a read that fails moves nothing, for the next
+ * session to try again, so no change moves without one it goes with (a
+ * Publish without its draft). An item that doesn't open under `from` is
+ * left as it is.
  */
 export async function sealQueueAgain(
   store: KeptStore,
@@ -388,10 +391,13 @@ export async function sealQueueAgain(
 ): Promise<void> {
   const names = (await store.queue.list()).map((item) => item.name);
   const listed = new Set(names);
-  // Files several changes name move once, and their old copies go last.
-  const moved = new Set<string>();
+  type Moving = { name: string; plaintext: Uint8Array; renamed: string; files: string[] };
+  const moving: Moving[] = [];
+  // Each file's old name, with what it opened to, read once however many changes name it.
+  const files = new Map<string, { opened: Uint8Array; renamed: string }>();
   for (const name of names.filter((n) => n.startsWith(ENTRY))) {
-    const sealed = await store.queue.read(name).catch(() => null);
+    const sealed = await store.queue.read(name).catch(() => undefined);
+    if (sealed === undefined) return;
     const plaintext = sealed && from.open(name, sealed);
     if (!plaintext) continue;
     let json: unknown;
@@ -404,23 +410,22 @@ export async function sealQueueAgain(
     const id = typeof json === 'object' && json !== null ? Reflect.get(json, 'id') : null;
     if (typeof kind !== 'string' || typeof id !== 'string') continue;
     const parsed = QueueEntryJson.safeParse(json);
-    // A file kept under the old key that doesn't read now keeps its change
-    // where it is, for the next session to try again.
-    const files: { old: string; opened: Uint8Array; renamed: string }[] = [];
-    let unread = false;
+    const named: string[] = [];
     for (const blobHash of parsed.success ? filesOf(parsed.data) : []) {
       const old = blobNameOf(from, blobHash);
-      if (!listed.has(old) || moved.has(old)) continue;
-      const blob = await store.queue.read(old).catch(() => null);
+      if (!listed.has(old)) continue;
+      named.push(old);
+      if (files.has(old)) continue;
+      const blob = await store.queue.read(old).catch(() => undefined);
+      if (blob === undefined) return;
+      // One that doesn't open is damaged: the change moves without it.
       const opened = blob && from.open(old, blob);
-      if (!opened) {
-        unread = true;
-        break;
-      }
-      files.push({ old, opened, renamed: blobNameOf(to, blobHash) });
+      if (opened) files.set(old, { opened, renamed: blobNameOf(to, blobHash) });
     }
-    if (unread) continue;
-    const renamed = entryNameOf(to, kind, id);
+    moving.push({ name, plaintext, renamed: entryNameOf(to, kind, id), files: named });
+  }
+  const moved = new Set<string>();
+  for (const { name, plaintext, renamed, files: named } of moving) {
     if (listed.has(renamed)) {
       // The same change, copied by a run that stopped before removing it:
       // the old copy goes. A different one, queued under the current key
@@ -429,13 +434,16 @@ export async function sealQueueAgain(
       const opened = current && to.open(renamed, current);
       if (opened && sameBytes(opened, plaintext)) {
         await store.queue.remove([name]);
-        for (const file of files) moved.add(file.old);
+        for (const old of named) moved.add(old);
       }
       continue;
     }
-    for (const file of files) {
-      await store.queue.write(file.renamed, to.seal(file.renamed, file.opened));
-      moved.add(file.old);
+    for (const old of named) {
+      const file = files.get(old);
+      if (file && !moved.has(old)) {
+        await store.queue.write(file.renamed, to.seal(file.renamed, file.opened));
+      }
+      moved.add(old);
     }
     await store.queue.write(renamed, to.seal(renamed, plaintext));
     // Each change goes from the old key as soon as it is copied, so a run

@@ -169,7 +169,10 @@ describe('a contact', () => {
     const id = old.id;
     expect(bob.ctx.trust.check(next).kind).toBe('changed');
 
-    await lookupPeople(bob.ctx, [id]);
+    // Lookups side by side follow once, in one contacts write.
+    const version = bob.ctx.contacts.book.record?.version ?? 0;
+    await Promise.all([1, 2, 3, 4].map(() => lookupPeople(bob.ctx, [id])));
+    expect(bob.ctx.contacts.book.record?.version).toBe(version + 1);
     expect(bob.ctx.trust.check(next)).toEqual({ kind: 'pinned', identity: next });
     // Stored, unchecked, by a confirmed write.
     const pin = bob.ctx.contacts.book.payloads.shared.contacts.find((c) => c.identity.id === id);
