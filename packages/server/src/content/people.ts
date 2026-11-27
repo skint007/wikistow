@@ -3,9 +3,9 @@
 // email only to label a key they see for the first time.
 import { AgentEnrollment, PublicIdentity } from '@wikistow/contracts';
 import { normalizeEmail } from '@wikistow/client';
-import { inArray, sql, type SQL } from 'drizzle-orm';
+import { eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
-import { shares } from '../db/schema/index.ts';
+import { agentProfiles, shares } from '../db/schema/index.ts';
 import { agentGrantsOf, personAccess, subtreeOf } from './access.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { requireIdentity } from './structure.ts';
@@ -208,6 +208,30 @@ async function agentDirectory(db: Database, caller: Caller, ids: readonly string
       and i.kind = 'human' and i.revoked_at is null and u.suspended_at is null
       and (i.id = ${caller.personId} or ${authoredInPicks(sql`i.id`, picks)})`);
   return [...rows].map(toPerson);
+}
+
+/**
+ * Whether the caller may read the key history of the person `identityId`
+ * (section 4.6): their statements and earlier keys. A person may, of
+ * anyone, as the history routes always allowed; an agent only of the
+ * people its directory lists (`directory`): its own person, to follow
+ * them, the authors it needs to check, and the persons of agents whose
+ * writing it reads.
+ */
+export async function mayReadKeyHistory(
+  db: Database,
+  actor: Actor,
+  identityId: string,
+): Promise<boolean> {
+  if (actor.agentId === null) return true;
+  // Asked with the person's agents, as the directory lists a person beside
+  // an agent of theirs whose writing the caller reads.
+  const theirs = await db
+    .select({ id: agentProfiles.agentId })
+    .from(agentProfiles)
+    .where(eq(agentProfiles.ownerIdentityId, identityId));
+  const { people } = await directory(db, actor, [identityId, ...theirs.map((agent) => agent.id)]);
+  return people.some((person) => person.identity.id === identityId);
 }
 
 /**

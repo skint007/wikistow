@@ -152,7 +152,7 @@ export async function openName(
   subject: { spaceId: SpaceId; subjectKind: 'space' | 'folder'; subjectId: string },
   served: structureRoutes.ServedMetadata,
 ): Promise<LoadedMetadata> {
-  await pinAuthors(ctx, [served.metadata.record]);
+  await pinAuthors(ctx, [served.metadata.record], served.envelopes);
   const keys = await keysFor(ctx, subject.spaceId, [
     { wrap: served.wrap, audienceClass: 'metadata' },
   ]);

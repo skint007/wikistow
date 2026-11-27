@@ -1150,8 +1150,8 @@ export async function listShares(db: Database, accountId: string, spaceId: strin
 /**
  * Envelopes of one key version of a share (section 6.4): every one, to
  * people and agents at every key, for an owner of its space; to a member,
- * or an agent with a grant there its person can still use, only their own
- * at their current key. Anyone else gets `not-found`.
+ * or an agent with a grant there its person can still use, only their own,
+ * at every key version of theirs (section 4.6). Anyone else gets `not-found`.
  */
 export async function versionEnvelopes(
   db: Database,
@@ -1181,15 +1181,7 @@ export async function versionEnvelopes(
   const rows = await db
     .select()
     .from(folderKeyEnvelopes)
-    .where(
-      owner
-        ? of
-        : and(
-            of,
-            eq(folderKeyEnvelopes.recipientIdentityId, identity.id),
-            eq(folderKeyEnvelopes.recipientKeyVersion, identity.keyVersion),
-          ),
-    )
+    .where(owner ? of : and(of, eq(folderKeyEnvelopes.recipientIdentityId, identity.id)))
     .orderBy(folderKeyEnvelopes.recipientIdentityId, folderKeyEnvelopes.recipientKeyVersion);
   return readEnvelopes(rows, report);
 }
@@ -1206,8 +1198,9 @@ function readEnvelopes(
 }
 
 /**
- * Every folder key envelope addressed to the caller in a space, at their
- * current key (section 6.4): of every share there for an owner, and of the
+ * Every folder key envelope addressed to the caller in a space, at every
+ * key version of theirs, so they open what was sealed to an earlier key
+ * after replacing it (sections 4.6 and 6.4): of every share there for an owner, and of the
  * shares they are a member of for anyone else; for an agent, of the shares
  * it has a grant in that its person can still use. Someone with no place
  * in the space, a removed member included, gets `not-found`.
@@ -1223,7 +1216,6 @@ export async function myEnvelopes(
   const mine = and(
     eq(folderKeyEnvelopes.spaceId, spaceId),
     eq(folderKeyEnvelopes.recipientIdentityId, identity.id),
-    eq(folderKeyEnvelopes.recipientKeyVersion, identity.keyVersion),
   );
   const owner = caller.personId === null && (await isOwner(db, identity.id, spaceId));
   const memberOf =

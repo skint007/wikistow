@@ -28,7 +28,7 @@ const ref = (p: PublicIdentity) => ({ id: p.id, keyHash: keyHash(p) });
 const holding = (versions: [number, PublicIdentity][]) => {
   const keyring = new FolderKeyring();
   for (const [keyVersion, sealer] of versions) {
-    keyring.add({ spaceId, shareId, keyVersion, sealer, ...newFolderKeys() });
+    keyring.add({ spaceId, shareId, keyVersion, sealer, earlier: false, ...newFolderKeys() });
   }
   return keyring;
 };

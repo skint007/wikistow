@@ -20,7 +20,7 @@ import type { ChangeSummary } from '../change.ts';
 import { decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { newId } from '../ids.ts';
-import type { KeptSealer, KeptStore } from '../kept-store.ts';
+import type { KeptItems, KeptSealer, KeptStore } from '../kept-store.ts';
 import { NodeMetadata, reviseMetadata } from '../metadata.ts';
 import { parsePayload, type AttachmentRef, type PagePayload } from '../payload.ts';
 import { OWNER_REGION, RegionJson, regionInTree, type Region } from '../regions.ts';
@@ -368,6 +368,121 @@ const filesOf = (entry: QueueEntry): string[] =>
       : []
   ).map((ref) => ref.blobHash);
 
+// The name a queued change of `kind` for `id` is kept under, by `sealer`.
+const entryNameOf = (sealer: KeptSealer, kind: string, id: string) =>
+  ENTRY +
+  sealer.name(kind === 'page' || kind === 'folder' ? `queued ${id}` : `queued ${kind} ${id}`);
+const blobNameOf = (sealer: KeptSealer, blobHash: string) =>
+  BLOB + sealer.name(`queued blob ${blobHash}`);
+
+/**
+ * Seal the changes queued offline under `from`, one of the person's earlier
+ * keys, again under `to`, their current key, with the files they name, and
+ * remove the old items (section 4.6, **Opening with earlier keys**), so a
+ * rotation drops nothing typed offline. Only from within `queueExclusive`.
+ * Everything is read first: a read that fails throws and moves nothing, for
+ * the next session to try again, so no change moves without one it goes with (a
+ * Publish without its draft). An item that doesn't open under `from` is
+ * left as it is.
+ */
+export async function sealQueueAgain(
+  store: KeptStore,
+  { from, to }: { from: KeptSealer; to: KeptSealer },
+): Promise<void> {
+  const names = (await store.queue.list()).map((item) => item.name);
+  const listed = new Set(names);
+  type Moving = { name: string; plaintext: Uint8Array; renamed: string; files: string[] };
+  const moving: Moving[] = [];
+  // Each file's old name, with what it opened to, read once however many changes name it.
+  const files = new Map<string, { opened: Uint8Array; renamed: string }>();
+  // A change that can't be read may be one under `from`.
+  let unread: unknown = null;
+  for (const name of names.filter((n) => n.startsWith(ENTRY))) {
+    // An item listed that reads as missing failed too, as the desktop app's
+    // files read every failure as nothing.
+    const sealed = await readListed(store.queue, name).catch((error: unknown) => {
+      unread = error;
+      return null;
+    });
+    const plaintext = sealed && from.open(name, sealed);
+    if (!plaintext) continue;
+    let json: unknown;
+    try {
+      json = JSON.parse(decodeUtf8(plaintext, 'queued change'));
+    } catch {
+      continue;
+    }
+    const kind = typeof json === 'object' && json !== null ? Reflect.get(json, 'kind') : null;
+    const id = typeof json === 'object' && json !== null ? Reflect.get(json, 'id') : null;
+    if (typeof kind !== 'string' || typeof id !== 'string') continue;
+    const parsed = QueueEntryJson.safeParse(json);
+    const named: string[] = [];
+    for (const blobHash of parsed.success ? filesOf(parsed.data) : []) {
+      const old = blobNameOf(from, blobHash);
+      if (files.has(old)) {
+        named.push(old);
+        continue;
+      }
+      // Read even when the listing left it out, as a listing can miss a file
+      // it couldn't look at; one listed that reads as nothing failed.
+      const blob = listed.has(old)
+        ? await readListed(store.queue, old)
+        : await store.queue.read(old);
+      if (blob === null) continue;
+      named.push(old);
+      // One that doesn't open is damaged: the change moves without it.
+      const opened = blob && from.open(old, blob);
+      if (opened) files.set(old, { opened, renamed: blobNameOf(to, blobHash) });
+    }
+    moving.push({ name, plaintext, renamed: entryNameOf(to, kind, id), files: named });
+  }
+  // With changes to move and one that couldn't be read, the run stops, and
+  // the session keeps nothing there (`sealKeptAgain`), so no change moves
+  // without one it goes with, and none is hidden. With nothing to move, an
+  // unreadable change is skipped, as the queue skips it.
+  if (unread !== null && moving.length > 0) throw unread;
+  const moved = new Set<string>();
+  for (const { name, plaintext, renamed, files: named } of moving) {
+    if (listed.has(renamed)) {
+      // The same change, copied by a run that stopped before removing it:
+      // the old copy goes. A different one, queued under the current key
+      // meanwhile, is newer: it stays, and so does this one, as it was.
+      const current = await store.queue.read(renamed).catch(() => null);
+      const opened = current && to.open(renamed, current);
+      if (opened && sameBytes(opened, plaintext)) {
+        await store.queue.remove([name]);
+        for (const old of named) moved.add(old);
+      }
+      continue;
+    }
+    for (const old of named) {
+      const file = files.get(old);
+      if (file && !moved.has(old)) {
+        await store.queue.write(file.renamed, to.seal(file.renamed, file.opened));
+      }
+      moved.add(old);
+    }
+    await store.queue.write(renamed, to.seal(renamed, plaintext));
+    // Each change goes from the old key as soon as it is copied, so a run
+    // that stops leaves at most this one under both.
+    await store.queue.remove([name]);
+  }
+  if (moved.size > 0) await store.queue.remove([...moved]);
+}
+
+/** An item `list` showed: its bytes, or a throw when it can't be read. */
+export async function readListed(
+  items: Pick<KeptItems, 'read'>,
+  name: string,
+): Promise<Uint8Array> {
+  const sealed = await items.read(name);
+  if (sealed === null) throw new Error(`The kept item ${name} could not be read`);
+  return sealed;
+}
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((byte, i) => byte === b[i]);
+
 // Whether a page made offline needs two steps: uploads need the page.
 const hasFiles = (payload: PagePayload) => payload.attachments.length > 0;
 
@@ -493,12 +608,8 @@ export class OfflineQueue {
 
   // An item's own entry keeps the name it always had, so queues kept before
   // other kinds existed still open.
-  #entryName = ({ kind, id }: QueueKey) =>
-    ENTRY +
-    this.#sealer.name(
-      kind === 'page' || kind === 'folder' ? `queued ${id}` : `queued ${kind} ${id}`,
-    );
-  #blobName = (blobHash: string) => BLOB + this.#sealer.name(`queued blob ${blobHash}`);
+  #entryName = ({ kind, id }: QueueKey) => entryNameOf(this.#sealer, kind, id);
+  #blobName = (blobHash: string) => blobNameOf(this.#sealer, blobHash);
 
   // A new entry's first version: never one an entry for the page had before,
   // so a window that saw an entry that went can't take a new one for it.

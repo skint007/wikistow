@@ -30,6 +30,13 @@ import {
 } from './encoding.ts';
 import { keyCommitment, openSealedKey, requireCommittedKey, sealKeyTo } from './envelope.ts';
 import { CryptoError } from './errors.ts';
+import {
+  declinedIn,
+  followedIn,
+  withDeclined,
+  withFollowed,
+  type FollowedEntry,
+} from './followed.ts';
 import { keyHash, sameKeys, sign, verifySignature, type PrivateIdentity } from './identity.ts';
 import type { InstallationId } from './ids.ts';
 import type { JsonPathPattern } from './json.ts';
@@ -149,6 +156,12 @@ export const SharedContacts = z
     requireUnique(ctx, payload.agents, (agent) => agent.enrollment.agent.id, 'agent');
     requireUnique(ctx, payload.agents, (agent) => agent.label.name, 'agent name');
     requireUnique(ctx, payload.spaceOwners, (entry) => entry.spaceId, 'space owners entry');
+    // Declined rotations fail closed (section 8.4).
+    try {
+      declinedIn(payload.extensions);
+    } catch (error) {
+      ctx.addIssue({ code: 'custom', message: (error as Error).message });
+    }
   });
 export type SharedContacts = z.infer<typeof SharedContacts>;
 
@@ -206,8 +219,12 @@ export function normalizeSharedContacts(shared: SharedContacts): SharedContacts 
       owners: sortedSet(entry.owners, ownerKey),
       removedOwners: sortedSet(entry.removedOwners, (id) => id),
     })),
+    extensions: asExtensions(withDeclined(shared.extensions, declinedIn(shared.extensions))),
   };
 }
+
+const asExtensions = (extensions: Record<string, unknown>) =>
+  extensions as SharedContacts['extensions'];
 
 /** Shared payload fields typed as integers. */
 const SHARED_INTEGERS: readonly JsonPathPattern[] = [
@@ -515,30 +532,62 @@ export function compareContactsMark(mark: ContactsMark, record: ContactsRecord):
  * Check that `chain`, every version after the mark up to the served one,
  * links back to the mark: each signed by the owner and naming the previous
  * version's hash. A gap or a mismatch is `contacts-fork`.
+ *
+ * Across a rotation (section 8.5), a version is checked under the owner's
+ * key at its own `ownerKeyVersion`: `owner`, their current key, or one of
+ * `earlier`, their earlier keys as a valid chain gave them. Along the
+ * chain `ownerKeyVersion` never goes down, so once a version signed with a
+ * later key is accepted, nothing signed with an earlier one counts. The
+ * first version at each later key names, in `prevHash`, the last one
+ * signed before it, which its rotation statement names too.
  */
 export function requireContactsChain({
   owner,
+  earlier = [],
   installationId,
   mark,
   chain,
 }: {
   owner: PublicIdentity;
+  earlier?: readonly PublicIdentity[];
   installationId: InstallationId;
   mark: ContactsMark;
   chain: readonly unknown[];
 }): ContactsRecord {
   let previous = mark;
   let last: ContactsRecord | undefined;
+  let keyVersion = 0;
   for (const signed of chain) {
-    const record = verifyContactsRecord({ owner, installationId, signed });
+    const record = verifyContactsRecord({
+      owner: ownerKeyAt(signed, owner, earlier),
+      installationId,
+      signed,
+    });
     if (record.version !== previous.version + 1 || record.prevHash !== previous.contactsHash) {
       throw new CryptoError('contacts-fork', 'The contacts chain does not link to the mark');
     }
+    if (record.ownerKeyVersion < keyVersion) {
+      throw new CryptoError('contacts-fork', 'A version signed with a replaced key comes after');
+    }
+    keyVersion = record.ownerKeyVersion;
     previous = { version: record.version, contactsHash: contactsHash(record) };
     last = record;
   }
   if (!last) throw new CryptoError('contacts-fork', 'No versions after the mark');
   return last;
+}
+
+// The owner's key a served version names, by its `ownerKeyVersion`: their
+// current key, or one of their earlier ones. Anything else is checked
+// against the current key, and so refused.
+function ownerKeyAt(
+  signed: unknown,
+  owner: PublicIdentity,
+  earlier: readonly PublicIdentity[],
+): PublicIdentity {
+  const parsed = SignedContactsRecord.safeParse(signed);
+  const at = parsed.success ? parsed.data.record.ownerKeyVersion : owner.keyVersion;
+  return earlier.find((key) => key.id === owner.id && key.keyVersion === at) ?? owner;
 }
 
 /**
@@ -617,6 +666,21 @@ export type ContactsChange =
       set: readonly AgentGroup[];
       unset: readonly Pick<AgentGroup, 'spaceId' | 'groupId'>[];
     }
+  /**
+   * A rotation followed (section 8.4): the pin `from` moved along a valid
+   * chain to `to`, a confirmed write. `chain` is the key hashes from
+   * `from`'s to `to`'s, in order.
+   */
+  | { kind: 'follow-key'; from: Pin; to: Pin; chain: readonly string[] }
+  /**
+   * **Not them?** on a followed key: every key in `chain`, the hashes above
+   * `from`, goes into `removed`, the pin goes back to `from`, and the decline
+   * is kept in `wikistow.declined`, so no device follows that person again
+   * until the person confirms a key. A confirmed write.
+   */
+  | { kind: 'decline-follow'; from: Pin; chain: readonly string[]; removedAt: string }
+  /** The person saw the notice of a follow of `id` to `keyHash`. */
+  | { kind: 'seen-follow'; id: string; keyHash: string }
   | { kind: 'accept-owner'; spaceId: SpaceId; owner: AcceptedOwner }
   | { kind: 'remove-owner'; spaceId: SpaceId; ownerId: string }
   | { kind: 'add-co-owner'; spaceId: SpaceId; owner: AcceptedOwner }
@@ -656,17 +720,20 @@ export function applyContactsChange(
       if (own.labels.some((label) => label.email === change.label.email)) {
         throw conflict('Another contact has this email');
       }
-      return {
-        shared: {
-          ...shared,
-          contacts: [...shared.contacts, change.pin],
-          removed: shared.removed.filter((entry) => entry.keyHash !== pinHash),
+      return forgetFollows(
+        {
+          shared: {
+            ...shared,
+            contacts: [...shared.contacts, change.pin],
+            removed: shared.removed.filter((entry) => entry.keyHash !== pinHash),
+          },
+          private: {
+            ...own,
+            labels: [...own.labels, { id: identity.id, keyHash: pinHash, ...change.label }],
+          },
         },
-        private: {
-          ...own,
-          labels: [...own.labels, { id: identity.id, keyHash: pinHash, ...change.label }],
-        },
-      };
+        identity.id,
+      );
     }
     case 'confirm-key': {
       const { identity } = change.pin;
@@ -678,24 +745,44 @@ export function applyContactsChange(
       // re-applied over that can leave the key in `removed` too, which the
       // confirmation takes out.
       if (current && keyHash(current.identity) === pinHash) {
-        if (removed.length === shared.removed.length) return base;
-        return { shared: { ...shared, removed }, private: own };
+        const declined = declinedIn(shared.extensions);
+        if (
+          removed.length === shared.removed.length &&
+          !declined.some((entry) => entry.id === identity.id)
+        ) {
+          return base;
+        }
+        return forgetFollows({ shared: { ...shared, removed }, private: own }, identity.id);
       }
       if (!current || keyHash(current.identity) !== change.replaced) {
         throw conflict(`${identity.id} holds a key this device didn't confirm over`);
       }
-      return {
-        shared: {
-          ...shared,
-          contacts: shared.contacts.with(index, change.pin),
-          removed,
+      return forgetFollows(
+        {
+          shared: { ...shared, contacts: shared.contacts.with(index, change.pin), removed },
+          private: {
+            ...own,
+            labels: relabelled(own.labels, identity.id, change.replaced, pinHash),
+          },
         },
+        identity.id,
+      );
+    }
+    case 'follow-key':
+      return followKey(base, change);
+    case 'decline-follow':
+      return declineFollow(base, change);
+    case 'seen-follow': {
+      const held = followedIn(own.extensions).find((entry) => entry.from.identity.id === change.id);
+      if (!held || held.to.keyHash !== change.keyHash || held.seen) return base;
+      // Kept, seen, with the key it started from, until a key is confirmed
+      // or the follow declined (section 8.6).
+      return {
+        shared,
         private: {
           ...own,
-          labels: own.labels.map((label) =>
-            label.id === identity.id && label.keyHash === change.replaced
-              ? { ...label, keyHash: pinHash }
-              : label,
+          extensions: asExtensions(
+            withFollowed(own.extensions, change.id, { ...held, seen: true }),
           ),
         },
       };
@@ -742,7 +829,12 @@ export function applyContactsChange(
                 },
               ],
         },
-        private: { ...own, labels: own.labels.filter((label) => !matches(label)) },
+        private: {
+          ...own,
+          labels: own.labels.filter((label) => !matches(label)),
+          // Nobody to show the notice of, or to decline, any more.
+          extensions: asExtensions(withFollowed(own.extensions, change.id, null)),
+        },
       };
     }
     case 'enroll': {
@@ -849,6 +941,122 @@ export function applyContactsChange(
       return _exhaustive;
     }
   }
+}
+
+// The labels with `id`'s label moved from the key hash `from` to `to`.
+const relabelled = (labels: readonly Label[], id: string, from: string, to: string) =>
+  labels.map((label) =>
+    label.id === id && label.keyHash === from ? { ...label, keyHash: to } : label,
+  );
+
+// A write that replaces `id`'s pin otherwise (a pin, a confirmed key) drops
+// their declines and the notice of a follow (section 8.4).
+function forgetFollows(base: ContactsPayloads, id: string): ContactsPayloads {
+  const { shared, private: own } = base;
+  const declined = declinedIn(shared.extensions);
+  return {
+    shared: {
+      ...shared,
+      extensions: asExtensions(
+        withDeclined(
+          shared.extensions,
+          declined.filter((entry) => entry.id !== id),
+        ),
+      ),
+    },
+    private: { ...own, extensions: asExtensions(withFollowed(own.extensions, id, null)) },
+  };
+}
+
+// The "follow a rotation" row of section 8.6.
+function followKey(
+  base: ContactsPayloads,
+  change: Extract<ContactsChange, { kind: 'follow-key' }>,
+): ContactsPayloads {
+  const { shared, private: own } = base;
+  const { id } = change.to.identity;
+  const index = shared.contacts.findIndex((pin) => pin.identity.id === id);
+  const current = shared.contacts[index];
+  if (!current) return base;
+  const pinHash = keyHash(current.identity);
+  const removed = new Set(shared.removed.map((entry) => entry.keyHash));
+  if (declinedIn(shared.extensions).some((entry) => entry.id === id && entry.keyHash === pinHash)) {
+    return base;
+  }
+  if (change.chain.some((hashed) => removed.has(hashed))) return base;
+  const at = change.chain.indexOf(pinHash);
+  const toHash = keyHash(change.to.identity);
+  // Followed already, here or further on another device.
+  if (pinHash === toHash || current.identity.keyVersion > change.to.identity.keyVersion) {
+    return base;
+  }
+  if (at === -1) throw conflict(`${id} holds a key this follow didn’t start from`);
+  const followed = followedIn(own.extensions).find((entry) => entry.from.identity.id === id);
+  // A new key to see; the earliest key followed from stays.
+  const entry: FollowedEntry = {
+    from: followed?.from ?? current,
+    to: { id, keyHash: toHash, keyVersion: change.to.identity.keyVersion },
+  };
+  return {
+    shared: {
+      ...shared,
+      contacts: shared.contacts.with(index, change.to),
+      extensions: asExtensions(
+        withDeclined(
+          shared.extensions,
+          declinedIn(shared.extensions).filter((d) => d.id !== id),
+        ),
+      ),
+    },
+    private: {
+      ...own,
+      labels: relabelled(own.labels, id, pinHash, toHash),
+      extensions: asExtensions(withFollowed(own.extensions, id, entry)),
+    },
+  };
+}
+
+// The "decline a followed key" row of section 8.6.
+function declineFollow(
+  base: ContactsPayloads,
+  change: Extract<ContactsChange, { kind: 'decline-follow' }>,
+): ContactsPayloads {
+  const { shared, private: own } = base;
+  const { identity } = change.from;
+  const fromHash = keyHash(identity);
+  const held = new Set(shared.removed.map((entry) => entry.keyHash));
+  const added = change.chain
+    .filter((hashed) => hashed !== fromHash && !held.has(hashed))
+    .map((hashed) => ({ id: identity.id, keyHash: hashed, removedAt: change.removedAt }));
+  const removed = [...shared.removed, ...added];
+  const index = shared.contacts.findIndex((pin) => pin.identity.id === identity.id);
+  const current = shared.contacts[index];
+  const currentHash = current && keyHash(current.identity);
+  const restores =
+    current !== undefined &&
+    !held.has(fromHash) &&
+    (currentHash === fromHash || change.chain.includes(currentHash ?? ''));
+  if (!restores) {
+    return added.length === 0 ? base : { shared: { ...shared, removed }, private: own };
+  }
+  return {
+    shared: {
+      ...shared,
+      contacts: shared.contacts.with(index, change.from),
+      removed,
+      extensions: asExtensions(
+        withDeclined(shared.extensions, [
+          ...declinedIn(shared.extensions),
+          { id: identity.id, keyHash: fromHash },
+        ]),
+      ),
+    },
+    private: {
+      ...own,
+      labels: relabelled(own.labels, identity.id, currentHash ?? fromHash, fromHash),
+      extensions: asExtensions(withFollowed(own.extensions, identity.id, null)),
+    },
+  };
 }
 
 const hasOwner = (entry: SpaceOwners, owner: { id: string; keyHash: string }) =>

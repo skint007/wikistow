@@ -182,10 +182,18 @@ export class MemoryKeyVersionMarks implements KeyVersionMarks {
 }
 
 /**
- * The highest key version held for a share whose envelope was sealed by an
- * owner `writes` accepts (section 6.5, **Writing**), or `null`. For a
- * person, `writes` is their accepted owners for writing; for an agent, its
- * own person.
+ * Whether a held version counts for writing, rotating from and sealing to
+ * agents: sealed by an owner `writes` accepts (section 6.5, **Writing**),
+ * and opened through no earlier key of the reader's or the sealer's
+ * (section 4.6, **Using an earlier key**), which only opens.
+ */
+export const countsForWriting = (held: HeldKeyVersion, writes: WritesOwner): boolean =>
+  !held.earlier && writes(held.sealer);
+
+/**
+ * The highest key version held for a share that counts for writing
+ * (`countsForWriting`), or `null`. For a person, `writes` is their accepted
+ * owners for writing; for an agent, its own person.
  */
 export function highestWritable({
   keyring,
@@ -198,7 +206,7 @@ export function highestWritable({
   shareId: ShareId;
   writes: WritesOwner;
 }): HeldKeyVersion | null {
-  return keyring.versions(spaceId, shareId).find((held) => writes(held.sealer)) ?? null;
+  return keyring.versions(spaceId, shareId).find((held) => countsForWriting(held, writes)) ?? null;
 }
 
 /**

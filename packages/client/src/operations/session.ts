@@ -1,11 +1,12 @@
 import {
+  identityRoutes,
   systemRoutes,
   vaultRoutes,
   type InstallationId,
   type ServedVaultWrapper,
   type SpaceId,
 } from '@wikistow/contracts';
-import type { ApiClient } from '../api/client.ts';
+import { ApiError, type ApiClient } from '../api/client.ts';
 import {
   applyContactsChange,
   type ContactsChange,
@@ -15,7 +16,12 @@ import {
 } from '../contacts.ts';
 import { CryptoError } from '../errors.ts';
 import { FolderKeyring } from '../folder-keys.ts';
-import { keyHash, type PrivateIdentity, type PublicIdentity } from '../identity.ts';
+import {
+  keyHash,
+  openWithRetired,
+  type PrivateIdentity,
+  type PublicIdentity,
+} from '../identity.ts';
 import { KeptMarks, type KeptFile } from '../kept-marks.ts';
 import type { KeptStore } from '../kept-store.ts';
 import { keptUnlock } from '../kept-unlock.ts';
@@ -31,7 +37,8 @@ import {
   writeContacts,
   type ContactsBook,
 } from './contacts.ts';
-import { KeptContent, keptUnderEarlierKeys } from './kept.ts';
+import { chainFrom } from './chains.ts';
+import { KeptContent, keptUnderEarlierKeys, sealKeptAgain } from './kept.ts';
 import type { SpaceKeys } from './keys.ts';
 import { keepWrapper } from './vault.ts';
 
@@ -86,7 +93,17 @@ export type ClientContext = {
    * person's contacts record, and where it keeps its first-seen pins.
    * Absent for a person's own session.
    */
-  agent?: { person: PublicIdentity; entry: OwnAgent; pins: AgentPins };
+  agent?: {
+    person: PublicIdentity;
+    entry: OwnAgent;
+    pins: AgentPins;
+    /**
+     * The person's key the agent had pinned, when it followed their chain
+     * from it to `person` in this session (section 4.6, **Agents**): the
+     * CLI keeps the new key and says so once.
+     */
+    followedFrom: PublicIdentity | null;
+  };
 };
 
 /**
@@ -136,6 +153,8 @@ export async function openSession(
   { kept: file, content }: { kept?: KeptFile; content?: KeptStore } = {},
 ): Promise<ClientContext> {
   const { installationId, restore } = await api.call(systemRoutes.installation);
+  // The vault's retired keys open what was sealed to them (section 4.6).
+  openWithRetired(vault.identity, vault.retired);
   const kept =
     file &&
     (await KeptMarks.open(file, {
@@ -176,9 +195,16 @@ async function sessionFrom(
   kept?.keepContacts(book);
   trust.load(book.payloads);
   const who = { identity: vault.identity, installationId };
-  const keepsContent =
-    content && !(await keptUnderEarlierKeys(content, { ...who, retired: vault.retired }));
-  const keptContent = keepsContent ? await KeptContent.open(content, who) : undefined;
+  // What this device kept under an earlier key is sealed again under this
+  // one first (section 4.6). If that fails, the session keeps nothing there,
+  // so it stays for the next one.
+  const resealed =
+    content &&
+    (await sealKeptAgain(content, { ...who, retired: vault.retired }).then(
+      async () => !(await keptUnderEarlierKeys(content, { ...who, retired: vault.retired })),
+      () => false,
+    ));
+  const keptContent = content && resealed ? await KeptContent.open(content, who) : undefined;
   // For a session opened offline later (`openKeptSession`).
   if (content)
     await keptUnlock(content)
@@ -221,7 +247,9 @@ export async function openKeptSession(
 ): Promise<ClientContext | null> {
   const installationId = await keptUnlock(content).installationId();
   if (!installationId) return null;
-  // Kept under earlier keys only: nothing opens offline until it is sealed again.
+  openWithRetired(vault.identity, vault.retired);
+  // Kept under earlier keys only: nothing opens offline until an online
+  // session seals it again (`sealKeptAgain`).
   const who = { identity: vault.identity, installationId };
   if (await keptUnderEarlierKeys(content, { ...who, retired: vault.retired })) return null;
   const kept = await KeptMarks.open(file, { ...who, retired: vault.retired });
@@ -308,8 +336,12 @@ export async function confirmSession(
 
 /**
  * Open an agent's session (section 9.3): its own keys, its bearer token in
- * `api`, and its person at the key it pinned at enrollment. It reads its
- * person's contacts record, which is sealed to it, finds its own entry
+ * `api`, and its person at the key it pinned at enrollment, or since
+ * followed. If its person replaced their keys, it follows the chain from
+ * that key to their current one first, and refuses one that doesn't check
+ * out (`identity-key-changed`); the session then holds the new key in
+ * `agent.person`, with the one it came from in `agent.followedFrom`. It
+ * reads its person's contacts record, which is sealed to it, finds its own entry
  * there, checks that entry's enrollment under the person's key and against
  * its own keys, and trusts the person's pins, then its own first-seen
  * `pins`. Where its own pin disagrees with the record, the record wins, as
@@ -325,7 +357,7 @@ export async function openAgentSession(
   api: ApiClient,
   {
     identity,
-    person,
+    person: pinned,
     mark = null,
     marks,
     pins,
@@ -338,7 +370,34 @@ export async function openAgentSession(
   },
 ): Promise<ClientContext> {
   const { installationId } = await api.call(systemRoutes.installation);
-  const book = await readPersonContacts({ api, installationId, agent: identity, person }, mark);
+  // A server from before following serves no history to agents: nothing
+  // to follow there, as nobody can have replaced their keys.
+  const chain = await chainFrom(api, installationId, pinned).catch((error: unknown) => {
+    if (servesAgentsNoHistory(error)) return null;
+    throw error;
+  });
+  const person = chain?.last ?? pinned;
+  // Every earlier key of the person, from key version 1, as what they sealed
+  // to this agent before still opens: after this session too, when the key
+  // file holds the new key and there is nothing more to follow.
+  const history =
+    person.keyVersion > 1
+      ? await (async () => {
+          const { identity: first } = await api.call(identityRoutes.version, {
+            params: { identityId: person.id, keyVersion: 1 },
+          });
+          return chainFrom(api, installationId, first, person);
+        })().catch((error: unknown) => {
+          // A server that serves agents no history: earlier writing stays closed.
+          if (servesAgentsNoHistory(error)) return null;
+          throw error;
+        })
+      : null;
+  const earlier = history?.keys.slice(0, -1) ?? [];
+  const book = await readPersonContacts(
+    { api, installationId, agent: identity, person, earlier },
+    mark,
+  );
   const { shared } = book.payloads;
   const entry = shared.agents.find((agent) => agent.enrollment.agent.id === identity.public.id);
   if (!entry) throw new CryptoError('wrong-recipient', 'The person’s record lists no such agent');
@@ -347,6 +406,8 @@ export async function openAgentSession(
   }
   const trust = new TrustStore(installationId);
   trust.pinOwnPerson(person, entry.enrollment, identity);
+  // What the person signed and sealed before, for opening only.
+  if (history) trust.addEarlierKeys(history);
   let trusted = book.payloads;
   for (const change of await pins.load()) {
     try {
@@ -366,9 +427,15 @@ export async function openAgentSession(
     revisions: new RevisionCache(),
     marks,
     spaces: new Map(),
-    agent: { person, entry, pins },
+    agent: { person, entry, pins, followedFrom: chain ? pinned : null },
   };
 }
+
+// A server from before following answers an agent's history request as a
+// route it doesn't have or won't serve it; anything else, as a busy server,
+// is an error to try again.
+const servesAgentsNoHistory = (error: unknown) =>
+  error instanceof ApiError && [401, 403, 404].includes(error.status);
 
 /**
  * The contacts mark an agent's session accepted, for the CLI to keep as its
@@ -562,6 +629,22 @@ function changeHolds(change: ContactsChange, { shared }: ContactsPayloads): bool
     }
     case 'remove-owner':
       return !!entry(change.spaceId)?.removedOwners.some((id) => id === change.ownerId);
+    // Held when the pin is the followed key, or a later one (section 8.6).
+    case 'follow-key': {
+      const { identity } = change.to;
+      const pin = shared.contacts.find((c) => c.identity.id === identity.id);
+      return (
+        !!pin &&
+        (keyHash(pin.identity) === keyHash(identity) ||
+          pin.identity.keyVersion > identity.keyVersion)
+      );
+    }
+    // Held once every key above the restored pin is removed.
+    case 'decline-follow': {
+      const removed = new Set(shared.removed.map((r) => r.keyHash));
+      const fromHash = keyHash(change.from.identity);
+      return change.chain.every((hashed) => hashed === fromHash || removed.has(hashed));
+    }
     default:
       return true;
   }

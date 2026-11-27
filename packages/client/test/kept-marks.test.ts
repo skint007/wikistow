@@ -474,9 +474,11 @@ describe('pending changes across tabs', () => {
 describe('after replacing keys (section 4.6)', () => {
   const next = generateIdentity({ id: IdentityId.parse('alice'), kind: 'human', keyVersion: 2 });
 
-  it('reads marks sealed under an earlier key, and seals them under the new one', async () => {
+  it('reads what was kept under an earlier key, contacts mark included, and seals it again at once', async () => {
     const b = browser();
     const before = await KeptMarks.open(b.tab(), who);
+    const mark = { version: 4, contactsHash: 'A'.repeat(43) };
+    before.keepContacts({ mark, sealed: { kept: 'record' } });
     before.raise(spaceId, shareId, 7);
     await expect
       .poll(async () => (await KeptMarks.open(b.tab(), who)).get(spaceId, shareId))
@@ -491,9 +493,10 @@ describe('after replacing keys (section 4.6)', () => {
       retired: [identity],
     });
     expect(after.get(spaceId, shareId)).toBe(7);
-    expect(after.contactsMark).toBeNull();
-    // Its next write seals them under the new key, so they outlast the earlier one.
-    after.raise(spaceId, other, 3);
+    // The record is checked across the rotation when it is read (section 8.5).
+    expect(after.contactsMark).toEqual(mark);
+    expect(after.contactsRecord).toEqual({ kept: 'record' });
+    // Sealed under the new key at once, so the new key alone reads it.
     await expect
       .poll(async () =>
         (await KeptMarks.open(b.tab(), { identity: next, installationId })).get(spaceId, shareId),

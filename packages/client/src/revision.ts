@@ -442,7 +442,7 @@ function openV1RecordEnvelope({
     });
   }
   const envelope = parseWith(KeyEnvelopeV2, raw, 'Key envelope');
-  checkEnvelopeV2({
+  const key = checkEnvelopeV2({
     reader,
     trust,
     owners,
@@ -450,7 +450,7 @@ function openV1RecordEnvelope({
     namesThisVersion: envelope.revisionId === record.revisionId,
     signedBytes: () => keyEnvelopeV2Bytes(record, envelope),
   });
-  return openSealedKey(reader, envelope.sealedKey);
+  return openSealedKey(key, envelope.sealedKey);
 }
 
 const SignedRecord = SealedRevision.pick({ record: true, signature: true });
@@ -502,7 +502,8 @@ function checkRecord({
       `Revision does not match the requested ${mismatched.join(', ')}`,
     );
   }
-  const author = trust.require(record.authorId, record.authorKeyVersion);
+  // What an earlier key of the author signed opens, as their earlier writing (section 4.6).
+  const { identity: author } = trust.requireForOpening(record.authorId, record.authorKeyVersion);
   if (!verifySignature(author, bytes, signature)) {
     throw new CryptoError('bad-signature', 'Revision record signature is invalid');
   }
@@ -569,7 +570,7 @@ function openV2Envelope({
   raw: unknown;
 }): Uint8Array {
   const envelope = parseWith(KeyEnvelopeV2, raw, 'Key envelope');
-  checkEnvelopeV2({
+  const key = checkEnvelopeV2({
     reader,
     trust,
     owners,
@@ -577,7 +578,7 @@ function openV2Envelope({
     namesThisVersion: envelope.revisionId === record.revisionId,
     signedBytes: () => keyEnvelopeV2Bytes(record, envelope),
   });
-  return unsealCommitted(reader, envelope.sealedKey, record.keyCommitment);
+  return unsealCommitted(key, envelope.sealedKey, record.keyCommitment);
 }
 
 const SignedRecordV2 = SealedRevisionV2.pick({ record: true, signature: true });

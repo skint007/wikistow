@@ -242,12 +242,12 @@ describe('replacing keys', () => {
         })
       ).rotations,
     ).toEqual([]);
-    // Not to agents, which may look up fewer people.
+    // To the person's own agents, which follow the chain.
     for (const path of [
       `/api/identities/${old.id}/rotations`,
       `/api/identities/${old.id}/versions/1`,
     ]) {
-      expect((await asAgent(t, kept.token, path)).status).toBe(401);
+      expect((await asAgent(t, kept.token, path)).status).toBe(200);
     }
     // As are the earlier keys, to anyone signed in.
     const bob = await personWithVault(t);

@@ -582,7 +582,7 @@ function openV1MetadataEnvelope({
     });
   }
   const envelope = parseWith(MetadataEnvelopeV2, raw, 'Metadata envelope');
-  checkEnvelopeV2({
+  const key = checkEnvelopeV2({
     reader,
     trust,
     owners,
@@ -590,7 +590,7 @@ function openV1MetadataEnvelope({
     namesThisVersion: envelope.metadataRevisionId === record.metadataRevisionId,
     signedBytes: () => metadataEnvelopeV2Bytes(record, envelope),
   });
-  return openSealedKey(reader, envelope.sealedKey);
+  return openSealedKey(key, envelope.sealedKey);
 }
 
 // `owners` is given for v1 records, which only an accepted owner may author.
@@ -623,7 +623,8 @@ function checkMetadataRecord({
       `Metadata does not match the requested ${mismatched.join(', ')}`,
     );
   }
-  const author = trust.require(record.authorId, record.authorKeyVersion);
+  // What an earlier key of the author signed opens, as their earlier writing (section 4.6).
+  const { identity: author } = trust.requireForOpening(record.authorId, record.authorKeyVersion);
   if (!verifySignature(author, bytes, signature)) {
     throw new CryptoError('bad-signature', 'Metadata record signature is invalid');
   }
@@ -690,7 +691,7 @@ function openV2MetadataEnvelope({
   raw: unknown;
 }): Uint8Array {
   const envelope = parseWith(MetadataEnvelopeV2, raw, 'Metadata envelope');
-  checkEnvelopeV2({
+  const key = checkEnvelopeV2({
     reader,
     trust,
     owners,
@@ -698,7 +699,7 @@ function openV2MetadataEnvelope({
     namesThisVersion: envelope.metadataRevisionId === record.metadataRevisionId,
     signedBytes: () => metadataEnvelopeV2Bytes(record, envelope),
   });
-  return unsealCommitted(reader, envelope.sealedKey, record.keyCommitment);
+  return unsealCommitted(key, envelope.sealedKey, record.keyCommitment);
 }
 
 const SignedMetadataV2 = SealedMetadataV2.pick({ record: true, signature: true });

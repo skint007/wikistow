@@ -235,3 +235,38 @@ export function verifySignature(
     return false;
   }
 }
+
+// Each open vault's retired keys (section 4.6), by its current key's object,
+// so that opening code reached through many layers with only the current key
+// can still open what was sealed to an earlier one. Held weakly: they go
+// with the session's identity.
+const retiredOf = new WeakMap<PrivateIdentity, readonly PrivateIdentity[]>();
+
+/**
+ * Let `identity` open, but never sign or seal with, `retired`: its earlier
+ * keys, after the person replaced their keys (section 4.6, **Opening with
+ * earlier keys**). The session does this as it opens.
+ */
+export function openWithRetired(identity: PrivateIdentity, retired: readonly PrivateIdentity[]) {
+  if (retired.length > 0) retiredOf.set(identity, retired);
+}
+
+/** The earlier keys `identity` may open with (`openWithRetired`), oldest first. */
+export const retiredKeys = (identity: PrivateIdentity): readonly PrivateIdentity[] =>
+  retiredOf.get(identity) ?? [];
+
+/**
+ * The key of `reader` at `keyVersion`, for opening what was sealed to it:
+ * its current key, one of its retired keys, or `null`. `earlier` says
+ * whether it is a retired one, which opens only (section 4.6).
+ */
+export function readerAt(
+  reader: PrivateIdentity,
+  id: string,
+  keyVersion: number,
+): { key: PrivateIdentity; earlier: boolean } | null {
+  if (id !== reader.public.id) return null;
+  if (keyVersion === reader.public.keyVersion) return { key: reader, earlier: false };
+  const retired = retiredKeys(reader).find((key) => key.public.keyVersion === keyVersion);
+  return retired ? { key: retired, earlier: true } : null;
+}

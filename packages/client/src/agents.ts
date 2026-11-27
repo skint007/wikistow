@@ -94,7 +94,12 @@ export function sealForAgent({
     const wanted = new Set(keyVersions);
     const sealed = new Set<number>();
     return keyring.versions(spaceId, shareId).flatMap((held) => {
-      if (!wanted.has(held.keyVersion) || sealed.has(held.keyVersion) || !counts(held.sealer)) {
+      if (
+        !wanted.has(held.keyVersion) ||
+        sealed.has(held.keyVersion) ||
+        held.earlier ||
+        !counts(held.sealer)
+      ) {
         return [];
       }
       sealed.add(held.keyVersion);

@@ -16,6 +16,7 @@ import {
   type ErrorCode,
 } from '@wikistow/contracts';
 import {
+  type Actor,
   addComment,
   deleteComment,
   editComment,
@@ -58,6 +59,7 @@ import {
   addStatement,
   directory,
   directoryAvatars,
+  mayReadKeyHistory,
   listOwners,
   listShares,
   listPeople,
@@ -334,13 +336,21 @@ export function mountContentRoutes(
     },
   );
 
-  // For people, as the directory is. An agent may look up fewer people
-  // (section 9.6); it follows its person once following is built (#327).
-  routes.account(identityRoutes.rotations, async ({ params, query }) =>
-    readRotations(db, { identityId: params.identityId, from: query.from }),
+  // For people, of anyone, as the directory is; for an agent, of the
+  // people it may look up (section 9.6), its own person included, whose
+  // chain it follows. Anyone else is `not-found`.
+  const keyHistory = async (actor: Actor, identityId: string) => {
+    if (!(await mayReadKeyHistory(db, actor, identityId))) throw new ContentError('not-found');
+  };
+  routes.content(identityRoutes.rotations, async ({ params, query }, { actor }) =>
+    keyHistory(actor, params.identityId)
+      .then(() => readRotations(db, { identityId: params.identityId, from: query.from }))
+      .catch(toApiError),
   );
-  routes.account(identityRoutes.version, async ({ params }) => ({
-    identity: await readIdentityVersion(db, params).catch(toApiError),
+  routes.content(identityRoutes.version, async ({ params }, { actor }) => ({
+    identity: await keyHistory(actor, params.identityId)
+      .then(() => readIdentityVersion(db, params))
+      .catch(toApiError),
   }));
 
   routes.content(structureRoutes.listSpaces, async (_input, { actor }) => ({

@@ -21,7 +21,7 @@ import {
   type ContactsPayloads,
 } from '../contacts.ts';
 import { CryptoError } from '../errors.ts';
-import type { PrivateIdentity, PublicIdentity } from '../identity.ts';
+import { retiredKeys, type PrivateIdentity, type PublicIdentity } from '../identity.ts';
 
 /**
  * The newest contacts record this session has accepted, and its payloads.
@@ -67,8 +67,11 @@ export async function readContacts(
   });
   if (!opened.private) throw new CryptoError('malformed', 'The private part is missing');
   if (mark && compareContactsMark(mark, opened.record) === 'newer') {
+    // Versions signed before the person replaced their keys check under
+    // the key they were signed with, which the keyring holds retired.
     const last = requireContactsChain({
       owner: identity.public,
+      earlier: retiredKeys(identity).map((key) => key.public),
       installationId,
       mark,
       chain: served.chain,
@@ -116,8 +119,10 @@ export function openKeptContacts(
 
 /**
  * An agent's read of its person's record (sections 8.5 and 9.3): signed by
- * the person's key it pinned at enrollment, with the shared payload, which
- * is sealed to it, and the same mark checks as the person's own. It never
+ * the person's current key, which it reached from the key it pinned at
+ * enrollment, with the shared payload, which is sealed to it, and the same
+ * mark checks as the person's own; versions from before a rotation check
+ * under `earlier`, the person's keys along the chain it followed. It never
  * sees the private payload, and never writes the record.
  */
 export async function readPersonContacts(
@@ -126,11 +131,13 @@ export async function readPersonContacts(
     installationId,
     agent,
     person,
+    earlier = [],
   }: {
     api: ApiClient;
     installationId: InstallationId;
     agent: PrivateIdentity;
     person: PublicIdentity;
+    earlier?: readonly PublicIdentity[];
   },
   mark: ContactsMark | null,
 ): Promise<ContactsBook> {
@@ -147,7 +154,13 @@ export async function readPersonContacts(
     sealed: served.record,
   });
   if (mark && compareContactsMark(mark, opened.record) === 'newer') {
-    const last = requireContactsChain({ owner: person, installationId, mark, chain: served.chain });
+    const last = requireContactsChain({
+      owner: person,
+      earlier,
+      installationId,
+      mark,
+      chain: served.chain,
+    });
     if (contactsHash(last) !== contactsHash(opened.record)) {
       throw new CryptoError('contacts-fork', 'The contacts chain ends at another record');
     }

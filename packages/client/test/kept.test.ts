@@ -13,6 +13,7 @@ import {
   memoryKeptStore,
   MemoryKeyVersionMarks,
   newContactsPayloads,
+  newFolderMetadata,
   newId,
   newPayload,
   pageOperations,
@@ -430,5 +431,155 @@ describe('after replacing keys (section 4.6)', () => {
     expect(await under(second, [first])).toBe(true);
     expect(await under(first, [])).toBe(false);
     expect(await under(second, [])).toBe(false);
+  });
+  it('moves a file two queued changes name once, with both changes', async () => {
+    const store = memoryKeptStore();
+    const id = IdentityId.parse('kept-person');
+    const first = generateIdentity({ kind: 'human', id });
+    const second = generateIdentity({ kind: 'human', id, keyVersion: 2 });
+    const installationId = InstallationId.parse('kept-installation');
+    const before = await keptOperations.KeptContent.open(store, {
+      identity: first,
+      installationId,
+    });
+    await before.keepList({ spaces: [], order: { homeId: null, spaceIds: [] }, shared: [] });
+    const page = { spaceId: newId(SpaceId), pageId: newId(PageId) };
+    const basedOn = newId(RevisionId);
+    const ref = await before.queue.attach(page, {
+      name: 'photo.png',
+      mediaType: 'image/png',
+      bytes: utf8('an image'),
+    });
+    const version = await before.queue.saveDraft({
+      page,
+      basedOn,
+      region: null,
+      payload: {
+        ...newPayload({ title: 'With a photo', markdown: 'A photo' }),
+        attachments: [ref],
+      },
+      seen: null,
+    });
+    await before.queue.publish({ page, title: 'With a photo', draftHead: basedOn, version });
+    const kinds = async (content: keptOperations.KeptContent) =>
+      (await content.queue.entries()).map((entry) => entry.kind).sort();
+    expect(await kinds(before)).toEqual(['page', 'publish']);
+
+    // A read that fails moves nothing, so the Publish never goes without its draft.
+    const read = store.queue.read.bind(store.queue);
+    let fail = true;
+    let entries = 0;
+    store.queue.read = async (name) => {
+      // The second change's read fails, once the first has read.
+      if (fail && name.startsWith('e') && ++entries === 2) throw new Error('A read failed');
+      return read(name);
+    };
+    await expect(
+      keptOperations.sealKeptAgain(store, { identity: second, installationId, retired: [first] }),
+    ).rejects.toThrow('A read failed');
+    expect(await kinds(before)).toEqual(['page', 'publish']);
+    // Nor the pages kept, so the session keeps nothing there until it can.
+    expect(
+      await keptOperations.keptUnderEarlierKeys(store, {
+        identity: second,
+        installationId,
+        retired: [first],
+      }),
+    ).toBe(true);
+    // A file listed that reads as nothing, as the desktop app reads a failure, too.
+    fail = false;
+    store.queue.read = async (name) => (name.startsWith('b') ? null : read(name));
+    await expect(
+      keptOperations.sealKeptAgain(store, { identity: second, installationId, retired: [first] }),
+    ).rejects.toThrow('could not be read');
+    expect(await kinds(before)).toEqual(['page', 'publish']);
+    store.queue.read = read;
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+    const after = await keptOperations.KeptContent.open(store, {
+      identity: second,
+      installationId,
+    });
+    expect(await kinds(after)).toEqual(['page', 'publish']);
+    expect(await after.queue.held([ref])).toEqual([ref]);
+    expect(await before.queue.entries()).toEqual([]);
+    // Once everything is sealed again, a change that can't be read stops nothing.
+    store.queue.read = async (name) => {
+      if (name.startsWith('e')) throw new Error('A read failed');
+      return read(name);
+    };
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+  });
+
+  it('seals what was kept under an earlier key again under the new one, queued changes included', async () => {
+    const store = memoryKeptStore();
+    const id = IdentityId.parse('kept-person');
+    const first = generateIdentity({ kind: 'human', id });
+    const second = generateIdentity({ kind: 'human', id, keyVersion: 2 });
+    const installationId = InstallationId.parse('kept-installation');
+    const before = await keptOperations.KeptContent.open(store, {
+      identity: first,
+      installationId,
+    });
+    const list = { spaces: [], order: { homeId: null, spaceIds: [] }, shared: [] };
+    await before.keepList(list);
+    const folder = await before.queue.newFolder({
+      spaceId: newId(SpaceId),
+      parentId: null,
+      metadata: newFolderMetadata('Typed offline'),
+    });
+    const items = async () => [
+      ...(await store.items.list()).map((item) => item.name),
+      ...(await store.queue.list()).map((item) => item.name),
+    ];
+    const old = await items();
+    const [queued] = await store.queue.list();
+    const oldCopy = queued && (await store.queue.read(queued.name));
+
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+    // Opened at the new key alone, with nothing left under the old one.
+    const after = await keptOperations.KeptContent.open(store, {
+      identity: second,
+      installationId,
+    });
+    expect(after.spaceList()).toEqual(list);
+    expect(await after.queue.entry(folder.id)).toMatchObject({ kind: 'folder', id: folder.id });
+    const now = await items();
+    expect(now).toHaveLength(old.length);
+    expect(now.filter((name) => old.includes(name))).toEqual([]);
+    expect(
+      await keptOperations.keptUnderEarlierKeys(store, {
+        identity: second,
+        installationId,
+        retired: [first],
+      }),
+    ).toBe(false);
+    // Running again changes nothing.
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+    expect(await items()).toEqual(now);
+    // A copy left under the old key by a run that stopped goes, and is never sent twice.
+    if (!queued || !oldCopy) throw new Error('expected a queued change');
+    await store.queue.write(queued.name, oldCopy);
+    await keptOperations.sealKeptAgain(store, {
+      identity: second,
+      installationId,
+      retired: [first],
+    });
+    expect(await items()).toEqual(now);
   });
 });

@@ -16,6 +16,7 @@ export * from './export.ts';
 export * from './import.ts';
 export * from './import-archive.ts';
 export * from './folder-keys.ts';
+export * from './followed.ts';
 export * from './identity.ts';
 export * from './identity-rotation.ts';
 export * from './metadata.ts';
@@ -64,6 +65,7 @@ export {
 export * as agentOperations from './operations/agents.ts';
 export * as agentEnrollment from './operations/agent-enrollment.ts';
 export * as replaceKeysOperations from './operations/replace-keys.ts';
+export * as followOperations from './operations/follow.ts';
 export * as appAgentOperations from './operations/app-agents.ts';
 export * as contactsOperations from './operations/contacts.ts';
 export * as pluginOperations from './operations/plugins.ts';

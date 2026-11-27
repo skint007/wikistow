@@ -10,6 +10,7 @@ import {
   generateIdentity,
   InstallationId,
   enrollmentFingerprint,
+  openWithRetired,
   signIdentityRotation,
   toBase64,
   TrustStore,
@@ -273,5 +274,79 @@ describe('earlier keys (section 4.6)', () => {
     reloaded.addEarlierKeys(chain([s12, s23]));
     reloaded.reload(newContactsPayloads(), [k3.public]);
     expect(() => reloaded.requireForOpening(id, 2)).toThrow(unknown);
+  });
+});
+
+describe('following a rotation (section 8.4)', () => {
+  const installationId = InstallationId.parse('test-installation');
+  const id = IdentityId.parse('rotated');
+  const [k1, k2] = [1, 2].map((keyVersion) =>
+    generateIdentity({ kind: 'human', id, keyVersion }),
+  ) as [PrivateIdentity, PrivateIdentity];
+  const s12 = signIdentityRotation({ installationId, from: k1, to: k2, contacts: null });
+  const chain = verifyRotationChain({
+    installationId,
+    start: k1.public,
+    end: k2.public,
+    statements: [s12],
+  });
+  const pinnedAt = (key: PrivateIdentity) => {
+    const trust = new TrustStore(installationId);
+    trust.use(directoryEntry(key.public));
+    return trust;
+  };
+
+  it('makes the follow change without moving the pin, which moves when the record holds it', () => {
+    const trust = pinnedAt(k1);
+    const [pinned] = trust.takeChanges();
+    const change = trust.followChange(chain);
+    expect(change).toMatchObject({
+      kind: 'follow-key',
+      to: { identity: k2.public, method: 'first-seen' },
+      chain: [keyHash(k1.public), keyHash(k2.public)],
+    });
+    expect(trust.check(k2.public).kind).toBe('changed');
+    if (!change || pinned?.kind !== 'pin') throw new Error('expected a pin and a follow');
+    const payloads = [pinned, change].reduce(applyContactsChange, newContactsPayloads());
+    trust.load(payloads);
+    trust.addEarlierKeys(chain);
+    expect(trust.check(k2.public).kind).toBe('pinned');
+    expect(trust.isEarlier(k1.public)).toBe(true);
+    expect(trust.requireForOpening(id, 1)).toEqual({ identity: k1.public, earlier: true });
+    expect(() => trust.require(id, 1)).toThrow();
+  });
+
+  it('refuses a chain from another key, through a removed key, or after a decline', () => {
+    expect(() => pinnedAt(k2).followChange(chain)).toThrow(changed);
+    const removed = pinnedAt(k1);
+    removed.declineKey(k2.public);
+    expect(() => removed.followChange(chain)).toThrow(changed);
+    const trust = pinnedAt(k1);
+    const [pinned] = trust.takeChanges();
+    if (pinned?.kind !== 'pin') throw new Error('expected a pin');
+    const declined = applyContactsChange(applyContactsChange(newContactsPayloads(), pinned), {
+      kind: 'decline-follow',
+      from: pinned.pin,
+      chain: [keyHash(k2.public)],
+      removedAt: '2026-11-27T09:00:00.000Z',
+    });
+    trust.load(declined);
+    expect(() => trust.followChange(chain)).toThrow(changed);
+    // The restored pin counts for opening only: nothing is sealed to it,
+    // and neither it nor the declined key counts for writing.
+    expect(trust.check(k1.public).kind).toBe('removed');
+    expect(trust.opensOnly(k1.public)).toBe(true);
+    expect(trust.opensOnly(k2.public)).toBe(true);
+    expect(() => trust.require(id, 1)).toThrow();
+    expect(trust.requireForOpening(id, 1)).toEqual({ identity: k1.public, earlier: true });
+  });
+
+  it('opens with its own retired keys', () => {
+    const now = generateIdentity({ kind: 'human', id, keyVersion: 2 });
+    openWithRetired(now, [k1]);
+    const trust = new TrustStore(installationId);
+    trust.pinSelf(now);
+    expect(trust.requireForOpening(id, 1)).toEqual({ identity: k1.public, earlier: true });
+    expect(trust.isEarlier(k1.public)).toBe(true);
   });
 });
