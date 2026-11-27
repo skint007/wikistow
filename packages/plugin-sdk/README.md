@@ -86,7 +86,7 @@ A plugin keeps the person's choices for it (a width, a default folder, an on/off
 - `on('changed', handler)` calls `handler` with `get()`'s answer whenever they change, by the plugin itself or in Settings → Plugins. Another device's changes reach it at the next unlock, as it starts again and reads them.
 - Updating the plugin keeps them, Remove deletes them, and safe mode leaves them as they are. In the workshop's preview they are kept in memory, from version to version, so trying one doesn't change the person's own.
 
-A manifest can declare settings the app draws itself, in the plugin's row on the Plugins page under its **Settings** button, before any `settings.section`. Then a script has settings without drawing a view, and their values are checked. A theme has no code to read them, so declaring settings in one does nothing yet. Each is `{ key, label, description?, type, default? }`, `key` being `[A-Za-z][A-Za-z0-9_]*`, unique, and `default` a value the field takes:
+A manifest can declare settings the app draws itself, in the dialog the plugin's **Settings** button opens on the Plugins page, before any `settings.section`. Each is saved as it changes, so the dialog has no Save button. Then a script has settings without drawing a view, and their values are checked. A theme has no code to read them, so declaring settings in one does nothing yet. Each is `{ key, label, description?, type, default? }`, `key` being `[A-Za-z][A-Za-z0-9_]*`, unique, and `default` a value the field takes:
 
 | `type` | Drawn as | Value |
 | --- | --- | --- |
@@ -149,7 +149,7 @@ App plugins put interface in these places. In a region whose policy is **Add**, 
 | `page.footer` | Add | `{ id, view }` | Below the page's text | The same |
 | `page.aside` | Add | `{ id, view }` | Beside the text, under its contents, where the page card is 960px wide or more | Below the page |
 | `page.panel` | Add | `{ id, title, view }` | A sheet opened from the Plugins menu | The same |
-| `settings.section` | Add | `{ id, title, view }` | Under the plugin's row on the Plugins page (Settings → Plugins), opened by its **Settings** button; its view gets `{ settings }`, what `host.settings` gives | The same |
+| `settings.section` | Add | `{ id, title, view }` | In the plugin's settings dialog, opened by its **Settings** button on the Plugins page (Settings → Plugins), after the fields its manifest declares; its view gets `{ settings }`, what `host.settings` gives | The same |
 | `app.titlebar` | Add | `{ id, view }` | The desktop app's titlebar, before its menu: a small button or two, which the view names for screen readers | Not in the browser, which has no titlebar of its own |
 
 The page places' views get `{ page }`, the same handle a command gets, and `editor.toolbar`'s are drawn only in the draft view; settings sections get `{ settings }`, the plugin's `host.settings` (missing in an app older than it), titlebar buttons get nothing, and every view can use `host.app`, so a titlebar button can open the plugin's own page. Rail items, plugin pages and titlebar buttons show only while the vault is open, as app code runs only then. Pressing a titlebar button never moves the window, and moving the window or its own buttons never depend on a plugin. `examples/plugins/reading-room` has one.
