@@ -24,7 +24,7 @@ import { transactOnce, type Once } from '../idempotency.ts';
 import { blobs, nodes, pageHeads, publications, revisions, spaces } from '../db/schema/index.ts';
 import {
   accessTo,
-  canEdit,
+  canWrite,
   lockShare,
   lockSpace,
   lockSpaceOf,
@@ -93,7 +93,7 @@ async function lockShares(tx: Database, held: readonly (ShareRow | null)[]) {
 }
 
 // Whether access lets someone publish: edit access with publish rights.
-const publishes = (access: Access | null) => canEdit(access) && access?.canPublish === true;
+const publishes = (access: Access | null) => canWrite(access) && access?.canPublish === true;
 
 /**
  * The source page, for someone who can publish it: only they publish it
@@ -497,7 +497,7 @@ export async function detachPublication(
     const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
-    if (!canEdit(access)) throw new ContentError('not-found');
+    if (!canWrite(access)) throw new ContentError('not-found');
     if (!access.canPublish) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });

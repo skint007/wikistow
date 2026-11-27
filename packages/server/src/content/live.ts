@@ -41,7 +41,7 @@ import {
   spaceOwners,
 } from '../db/schema/index.ts';
 import { readSettings } from '../settings.ts';
-import { canEdit, lockShare, lockSpace, lockSpaceOf, readSnapshot, shareAt } from './access.ts';
+import { canWrite, lockShare, lockSpace, lockSpaceOf, readSnapshot, shareAt } from './access.ts';
 import { ContentError } from './errors.ts';
 import { requireCaller, type Actor, type Caller } from './identities.ts';
 import { checkKeyMaterial } from './key-material.ts';
@@ -201,7 +201,7 @@ async function sessionFor(
   if (!found) throw new ContentError('not-found');
   let writer: Writer | null = null;
   // Checked before any lock too, so someone who can't edit holds none on the way to not-found.
-  if (lock && !canEdit(await requirePageAccess(tx, caller, await requirePage(tx, found.pageId)))) {
+  if (lock && !canWrite(await requirePageAccess(tx, caller, await requirePage(tx, found.pageId)))) {
     throw new ContentError('not-found');
   }
   if (lock) {
@@ -219,7 +219,7 @@ async function sessionFor(
   }
   const page = await requirePage(tx, found.pageId, { lock });
   const access = await requirePageAccess(tx, caller, page);
-  if (!canEdit(access)) throw new ContentError('not-found');
+  if (!canWrite(access)) throw new ContentError('not-found');
   const query = tx.select().from(liveSessions).where(eq(liveSessions.id, sessionId));
   const [session] = lock ? await query.for('update') : await query;
   if (!session || session.pageId !== page.id) throw new ContentError('not-found');
@@ -232,7 +232,7 @@ async function editorOfPage(tx: Database, actor: Actor, pageId: string) {
   if (caller.personId !== null) throw new ContentError('not-found');
   const page = await requirePage(tx, pageId);
   const access = await requirePageAccess(tx, caller, page);
-  if (!canEdit(access)) throw new ContentError('not-found');
+  if (!canWrite(access)) throw new ContentError('not-found');
   return { caller, page, access };
 }
 
@@ -886,11 +886,11 @@ export async function startLive(db: Database, input: StartLive) {
     const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
-    if (!canEdit(access)) throw new ContentError('not-found');
+    if (!canWrite(access)) throw new ContentError('not-found');
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });
     // Again under the locks, so a change of access that landed meanwhile counts.
-    if (!canEdit(await requirePageAccess(tx, caller, page))) throw new ContentError('not-found');
+    if (!canWrite(await requirePageAccess(tx, caller, page))) throw new ContentError('not-found');
     const [heads] = await tx
       .select()
       .from(pageHeads)

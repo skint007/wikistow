@@ -56,8 +56,8 @@ export const writesUnderCurrent = (
 export type Finishing = {
   spaceId: SpaceId;
   rotations: PlannedRotation[];
-  /** Shares whose rotation couldn't be worked out here, with why. */
-  failed: { shareId: ShareId; code: string }[];
+  /** Shares whose rotation couldn't be worked out here, with why; `null` for the whole space. */
+  failed: { shareId: ShareId | null; code: string }[];
 };
 
 /**
@@ -79,8 +79,17 @@ export async function planFinishing(ctx: ClientContext): Promise<Finishing[]> {
     try {
       keys = await ownerKeys(ctx, space.id);
     } catch (error) {
-      if (error instanceof CryptoError || error instanceof ApiError) continue;
-      throw error;
+      if (!(error instanceof CryptoError || error instanceof ApiError)) throw error;
+      // Not an owner who acts here yet, as before confirming who added
+      // them: left for later. Anything else can't show it is done.
+      if (error.code !== 'unaccepted-owner') {
+        out.push({
+          spaceId: space.id,
+          rotations: [],
+          failed: [{ shareId: null, code: error.code }],
+        });
+      }
+      continue;
     }
     const finishing: Finishing = { spaceId: space.id, rotations: [], failed: [] };
     for (const share of await listShares(ctx, space.id)) {

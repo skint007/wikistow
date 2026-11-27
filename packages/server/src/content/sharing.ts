@@ -476,15 +476,49 @@ export async function giveKeys(
       })),
     ),
   });
+  // What they hold at their live key stays where it covers what is given,
+  // as for a member a rotation kept waiting (section 4.6): an envelope an
+  // owner they accept sealed must not give way to one sealed by a key their
+  // app may not accept, as a rotated owner's new key where nobody can add
+  // them again. Everything else of theirs in the share is replaced.
+  const kept = new Set<string>();
   if (given.length > 0) {
-    await tx
-      .delete(folderKeyEnvelopes)
+    const held = await tx
+      .select({
+        keyVersion: folderKeyEnvelopes.keyVersion,
+        recipientIdentityId: folderKeyEnvelopes.recipientIdentityId,
+        recipientKeyVersion: folderKeyEnvelopes.recipientKeyVersion,
+        drafts: folderKeyEnvelopes.drafts,
+      })
+      .from(folderKeyEnvelopes)
       .where(
         and(
           eq(folderKeyEnvelopes.shareId, share.id),
           inArray(folderKeyEnvelopes.recipientIdentityId, given),
         ),
       );
+    const wanted = new Map(envelopes.map((e) => [envelopeKey(e), e.draftKey !== null]));
+    const replaced = held.filter((h) => {
+      const key = `${h.recipientIdentityId}@${h.recipientKeyVersion}#${h.keyVersion}`;
+      const drafts = wanted.get(key);
+      if (drafts !== undefined && (h.drafts || !drafts)) {
+        kept.add(key);
+        return false;
+      }
+      return true;
+    });
+    for (const h of replaced) {
+      await tx
+        .delete(folderKeyEnvelopes)
+        .where(
+          and(
+            eq(folderKeyEnvelopes.shareId, share.id),
+            eq(folderKeyEnvelopes.keyVersion, h.keyVersion),
+            eq(folderKeyEnvelopes.recipientIdentityId, h.recipientIdentityId),
+            eq(folderKeyEnvelopes.recipientKeyVersion, h.recipientKeyVersion),
+          ),
+        );
+    }
   }
   for (const { identity, access } of people) {
     const row = { keyVersion: identity.keyVersion, role: access.role, canPublish: false };
@@ -493,7 +527,10 @@ export async function giveKeys(
       .values({ shareId: share.id, identityId: identity.id, addedBy, ...row })
       .onConflictDoUpdate({ target: [shareMembers.shareId, shareMembers.identityId], set: row });
   }
-  await storeFolderEnvelopes(tx, envelopes);
+  await storeFolderEnvelopes(
+    tx,
+    envelopes.filter((e) => !kept.has(envelopeKey(e))),
+  );
   return people;
 }
 
@@ -1078,15 +1115,8 @@ export async function applyRotation(
     expected,
   });
   if (rekeyed.size > 0) {
-    // Every version at the new key, in place of those at the replaced one.
-    await tx
-      .delete(folderKeyEnvelopes)
-      .where(
-        and(
-          eq(folderKeyEnvelopes.shareId, share.id),
-          inArray(folderKeyEnvelopes.recipientIdentityId, [...rekeyed]),
-        ),
-      );
+    // Every version at the new key, beside those at the replaced one, which
+    // their app opens with its retired keys whoever sealed the new ones.
     for (const id of rekeyed) {
       const at = live.get(id);
       if (!at) continue;

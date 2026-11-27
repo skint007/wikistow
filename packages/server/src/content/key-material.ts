@@ -2,7 +2,7 @@ import type { KeyWrap, PublicIdentity } from '@wikistow/contracts';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { agentProfiles, folderKeyEnvelopes, identities } from '../db/schema/index.ts';
-import { currentOwners, isOwner, type ShareRow } from './access.ts';
+import { currentOwners, type ShareRow } from './access.ts';
 import { ContentError } from './errors.ts';
 import { checkEnvelopes, type Envelope } from './verify.ts';
 
@@ -117,33 +117,4 @@ async function requirePersonWrites(tx: Database, agentId: string, share: ShareRo
     'forbidden',
     'An owner of this folder replaced their keys: its keys change before anything more is saved',
   );
-}
-
-/**
- * A change in a share that carries no keys, as unpublishing, is a member's
- * only while they hold an envelope of the share's current version: one a
- * rotation keeps waiting (protocol section 4.6) holds nothing of it, and
- * waits as a reader would. For an agent, its person must. Owners hold
- * every key, and outside shares there is nothing to check.
- */
-export async function requireHoldsCurrent(
-  tx: Database,
-  caller: { identity: { id: string }; personId: string | null },
-  share: ShareRow | null,
-) {
-  if (!share) return;
-  const person = caller.personId ?? caller.identity.id;
-  if (await isOwner(tx, person, share.spaceId)) return;
-  const [held] = await tx
-    .select({ shareId: folderKeyEnvelopes.shareId })
-    .from(folderKeyEnvelopes)
-    .where(
-      and(
-        eq(folderKeyEnvelopes.shareId, share.id),
-        eq(folderKeyEnvelopes.keyVersion, share.currentKeyVersion),
-        eq(folderKeyEnvelopes.recipientIdentityId, person),
-      ),
-    )
-    .limit(1);
-  if (!held) throw new ContentError('forbidden', 'You wait for this folder’s new keys');
 }

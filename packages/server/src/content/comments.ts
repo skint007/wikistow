@@ -39,6 +39,7 @@ import {
   accessTo,
   accessToPages,
   canEdit,
+  canWrite,
   isOwner,
   lockShare,
   lockSpace,
@@ -48,7 +49,7 @@ import {
 } from './access.ts';
 import { ContentError } from './errors.ts';
 import { humanActor, requireCaller, type Actor, type Caller } from './identities.ts';
-import { checkKeyMaterial, requireHoldsCurrent } from './key-material.ts';
+import { checkKeyMaterial } from './key-material.ts';
 import { isLiveVersion } from './live.ts';
 import { requirePage, requirePageAccess } from './pages.ts';
 import { charge, queueWriter, type Writer } from './quota.ts';
@@ -482,11 +483,9 @@ export async function resolveThread(
     const heads = await headsOf(tx, row.pageId);
     requireAudience(caller, access, heads, row.audience, { writing: false });
     if (!sees(canEdit(access), row, heads)) throw new ContentError('not-found');
-    if (row.authorAccountId !== caller.accountId && !canEdit(access)) {
+    if (row.authorAccountId !== caller.accountId && !canWrite(access)) {
       throw new ContentError('forbidden', 'Its starter or an editor resolves a thread');
     }
-    if (row.authorAccountId !== caller.accountId)
-      await requireHoldsCurrent(tx, caller, access.share);
     if ((row.resolvedAt !== null) === input.resolved) return;
     await tx
       .update(comments)

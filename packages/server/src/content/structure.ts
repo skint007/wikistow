@@ -31,6 +31,7 @@ import {
   accessTo,
   liveShares,
   canEdit,
+  canWrite,
   agentGrantsOf,
   capAgent,
   lockShare,
@@ -286,7 +287,7 @@ export async function createFolder(
       spaceId: input.spaceId,
       nodeId: input.parentId,
     });
-    if (!canEdit(access)) throw new ContentError('forbidden');
+    if (!canWrite(access)) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
     const parent = await container(tx, input.spaceId, input.parentId, { lock: true });
     if (parent.permissionVersion !== input.permissionVersion) {
@@ -677,7 +678,9 @@ async function readTree(
         : null,
     shares: spaceShares.flatMap((share) => {
       const held = view.held(share);
-      return held ? [{ ...shareOf(share), rootId: held.rootId, ...held.access }] : [];
+      if (!held) return [];
+      const { role, canPublish } = held.access;
+      return [{ ...shareOf(share), rootId: held.rootId, role, canPublish }];
     }),
     pages,
     // Only pages the caller edits: an agent's drafts are no reader's business.
@@ -720,7 +723,7 @@ export async function writeTarget(
           .where(and(eq(nodes.id, input.nodeId), eq(nodes.spaceId, input.spaceId)));
   if (input.nodeId !== null && !node) throw new ContentError('not-found');
   if (node?.kind === 'page') {
-    if (!canEdit(access)) await requirePublished(db, node.id);
+    if (!canWrite(access)) await requirePublished(db, node.id);
     return {
       permissionVersion: node.permissionVersion,
       share: access.share && shareOf(access.share),

@@ -29,7 +29,7 @@ import {
 import { endLapsedWhere } from '../public-links/links.ts';
 import {
   accessTo,
-  canEdit,
+  canWrite,
   currentOwners,
   isOwner,
   pathUp,
@@ -39,7 +39,6 @@ import {
   type ShareRow,
 } from './access.ts';
 import { ContentError } from './errors.ts';
-import { requireHoldsCurrent } from './key-material.ts';
 import { loseLiveKeys } from './live.ts';
 import { placeAtEnd } from './order.ts';
 import {
@@ -77,7 +76,7 @@ export async function checkMover(
 ): Promise<{ owner: boolean }> {
   const access = await accessTo(db, await requireCaller(db, actor), { spaceId, nodeId });
   if (!access) throw new ContentError('not-found');
-  if (!canEdit(access)) throw new ContentError('forbidden');
+  if (!canWrite(access)) throw new ContentError('forbidden');
   return { owner: access.role === 'owner' };
 }
 
@@ -170,11 +169,9 @@ export async function moveNode(
       }
     } else {
       const atOldParent = await accessTo(tx, caller, { spaceId, nodeId: node.parentId });
-      if (!canEdit(access) || !canEdit(atOldParent) || !canEdit(atDestination)) {
+      if (!canWrite(access) || !canWrite(atOldParent) || !canWrite(atDestination)) {
         throw new ContentError('forbidden');
       }
-      // A member a rotation keeps waiting moves nothing until given access.
-      await requireHoldsCurrent(tx, caller, access?.share ?? null);
     }
     // Where it is now, told only to someone who may move it from there.
     if (node.parentId !== input.expectedParentId) {

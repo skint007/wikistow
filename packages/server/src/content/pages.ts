@@ -45,6 +45,7 @@ import {
   accessTo,
   accessToPages,
   canEdit,
+  canWrite,
   lockShare,
   lockSpace,
   lockSpaceOf,
@@ -61,7 +62,7 @@ import { ContentError } from './errors.ts';
 import { placeAtEnd } from './order.ts';
 import { DEFAULT_CONTENT_LIMITS, requireCapacity } from './limits.ts';
 import { requireCaller, type Actor } from './identities.ts';
-import { checkKeyMaterial, requireHoldsCurrent } from './key-material.ts';
+import { checkKeyMaterial } from './key-material.ts';
 import { charge, queueWriter, usedBytes, type Writer } from './quota.ts';
 import { copyUploadAccess, sweepCopies } from './copies.ts';
 import { forgetMoves } from './moved.ts';
@@ -351,7 +352,7 @@ export async function createPage(
       nodeId: input.parentId,
     });
     if (!access) throw new ContentError('not-found');
-    if (!canEdit(access)) throw new ContentError('forbidden');
+    if (!canWrite(access)) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
     const parent =
       input.parentId === null
@@ -439,7 +440,7 @@ export async function saveDraft(
     const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
-    if (!canEdit(access)) throw new ContentError('not-found');
+    if (!canWrite(access)) throw new ContentError('not-found');
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });
     const [heads] = await tx
@@ -527,7 +528,7 @@ export async function publish(
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
     // Publishing starts from the draft, so it needs edit access as well.
-    if (!canEdit(access)) throw new ContentError('not-found');
+    if (!canWrite(access)) throw new ContentError('not-found');
     if (!access.canPublish) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });
@@ -600,9 +601,8 @@ export async function unpublish(
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
     // As for publishing, which it undoes.
-    if (!canEdit(access)) throw new ContentError('not-found');
+    if (!canWrite(access)) throw new ContentError('not-found');
     if (!access.canPublish) throw new ContentError('forbidden');
-    await requireHoldsCurrent(tx, caller, access.share);
     // Publishing's locks, in its order, which turning a public link on takes too,
     // but the node as its update below needs it. Under a share lock, a save
     // or publish that took the node beside it and waits on the heads would
@@ -1121,7 +1121,7 @@ export async function uploadBlob(
   const access = page.copyId
     ? await copyUploadAccess(db, caller, page.copyId)
     : await requirePageAccess(db, caller, page);
-  if (!access || !canEdit(access)) throw new ContentError('not-found');
+  if (!access || !canWrite(access)) throw new ContentError('not-found');
   if (input.audience === 'published' && !access.canPublish) throw new ContentError('forbidden');
   if (input.declaredSize > input.limits.uploadBytes) {
     throw new ContentError('too-large', 'Attachment is too large');

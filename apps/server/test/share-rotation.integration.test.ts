@@ -351,7 +351,7 @@ describe('the person’s own shares', () => {
     const { heads, permissionVersion } = await pages.loadPage(later, lib.page.pageId);
     if (!heads.publishedHead) throw new Error('expected the page published');
     const seen = { publishedHead: heads.publishedHead, permissionVersion };
-    expect(await rejection(pages.unpublishPage(later, lib.page, seen))).toBe('forbidden');
+    expect(await rejection(pages.unpublishPage(later, lib.page, seen))).toBe('not-found');
     // Nor move anything, which carries no keys either.
     const preview = await moves.previewMove(later, {
       spaceId: lib.spaceId,
@@ -400,6 +400,12 @@ describe('the person’s own shares', () => {
     expect(change.seals).toMatchObject([{ shares: [{ shareId: share.shareId }] }]);
     await groupOperations.applyGroupChange(ctx, change);
     expect(await groupOperations.loadWaiting(ctx)).toEqual([]);
+    // What he had stays as Alice's earlier key sealed it, which his app accepts.
+    const after = await openSession(dave.api, dave.vault);
+    await spaceKeys(after, lib.spaceId, { refresh: true });
+    expect(after.keyring.versions(lib.spaceId, share.shareId).map((v) => v.keyVersion)).toContain(
+      1,
+    );
   });
 });
 
