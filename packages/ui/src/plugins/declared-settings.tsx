@@ -1,7 +1,7 @@
 import type { InstalledPlugin } from '@wikistow/contracts';
 import type { Json, SettingField } from '@wikistow/plugin-sdk';
 import { settingFits } from '@wikistow/plugin-sdk/manifest';
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { FormMessage } from '@/components/layout/auth-card';
 import { Input } from '@/components/ui/input';
 import { Picker } from '@/components/ui/picker';
@@ -13,7 +13,8 @@ const message = (error: unknown) => (error instanceof Error ? error.message : 'I
 
 /**
  * The settings a plugin's manifest declares (`settings`, #310), drawn by
- * the app in the plugin's row on the Plugins page, whether or not it runs:
+ * the app in the plugin's settings dialog on the Plugins page, whether or
+ * not it runs:
  * each field with its value or default, saved as it is committed (on blur
  * or Enter for text and numbers, at once for the rest).
  */
@@ -118,7 +119,11 @@ function Setting({
   }
 }
 
-/** A text or number field, saved on blur or Enter when it changed and fits. */
+/**
+ * A text or number field, saved on blur or Enter when it changed and fits,
+ * and as it goes, such as when its dialog closes, if what was typed wasn't
+ * sent yet.
+ */
 function TypedSetting({
   id,
   described,
@@ -135,16 +140,33 @@ function TypedSetting({
   const shown = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
   const [text, setText] = useState(shown);
   const [wrong, setWrong] = useState(false);
+  // What was last sent, so going doesn't send it again before it comes back as `shown`.
+  const sent = useRef<string | null>(null);
   // What is typed starts again from the value whenever it changes, here or elsewhere.
-  useEffect(() => setText(shown), [shown]);
+  useEffect(() => {
+    setText(shown);
+    sent.current = null;
+  }, [shown]);
   const number = field.type === 'number';
   const commit = () => {
     if (text === shown) return setWrong(false);
     const next = number ? Number(text) : text;
     const fits = (!number || text.trim() !== '') && settingFits(field, next);
     setWrong(!fits);
-    if (fits) onSave(next);
+    if (!fits) return;
+    sent.current = text;
+    onSave(next);
   };
+  // Going, it commits what was typed unless that was sent: a browser may
+  // blur a field it takes away, as Chromium does, or may not, as Firefox.
+  const latest = useRef({ commit, text });
+  latest.current = { commit, text };
+  useEffect(
+    () => () => {
+      if (latest.current.text !== sent.current) latest.current.commit();
+    },
+    [],
+  );
   const range =
     field.type === 'number' && (field.min !== undefined || field.max !== undefined)
       ? [

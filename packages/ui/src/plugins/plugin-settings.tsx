@@ -740,9 +740,10 @@ function Replaces({ candidate }: { candidate: ApprovalRequest }) {
  * where it came from and on/off (for a library plugin, for the account and,
  * while that is on, on this device), its description and any problem, Remove
  * beside `actions`, then its commands' shortcuts and its page access. Settings opens its settings
- * under it: those its manifest declares, drawn by the app, then its own
- * sections (`settings.section`). The page's `plugin` search, which a
- * plugin's `navigate({ kind: 'settings' })` sets, opens them at once.
+ * in a dialog: those its manifest declares, drawn by the app, then its own
+ * sections (`settings.section`), each saved as it changes. The page's
+ * `plugin` search, which a plugin's `navigate({ kind: 'settings' })` sets,
+ * opens it at once.
  */
 export function PluginRow({
   status: { plugin, problem },
@@ -774,6 +775,10 @@ export function PluginRow({
   const hasSettings = declared || sections.length > 0;
   // Asked for by the plugin: its sections come once it runs, so this may turn true later.
   const asked = useSearch({ strict: false }).plugin === manifest.id && hasSettings;
+  // Closed for good when it has none left, as when the plugin stops, not only hidden.
+  useEffect(() => {
+    if (!hasSettings) setSettingsOpen(false);
+  }, [hasSettings]);
   const row = useRef<HTMLLIElement>(null);
   const navigate = useNavigate();
   useEffect(() => {
@@ -834,8 +839,8 @@ export function PluginRow({
           <Button
             size="sm"
             variant="outline"
-            aria-expanded={settingsOpen}
-            onClick={() => setSettingsOpen(!settingsOpen)}
+            aria-haspopup="dialog"
+            onClick={() => setSettingsOpen(true)}
           >
             Settings
           </Button>
@@ -850,8 +855,16 @@ export function PluginRow({
           Remove
         </Button>
       </div>
-      {settingsOpen && declared && <DeclaredSettings plugin={plugin} />}
-      {settingsOpen && <RegionPlace name="settings.section" pluginId={manifest.id} />}
+      <Dialog open={settingsOpen && hasSettings} onOpenChange={setSettingsOpen}>
+        <DialogContent className="grid gap-4" dialogClassName="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{manifest.name} settings</DialogTitle>
+            <DialogDescription>Each change is saved as you make it.</DialogDescription>
+          </DialogHeader>
+          {declared && <DeclaredSettings plugin={plugin} />}
+          <RegionPlace name="settings.section" pluginId={manifest.id} />
+        </DialogContent>
+      </Dialog>
       {here && <CommandShortcuts pluginId={manifest.id} />}
       {here && manifest.access !== 'none' && (
         <PageAccessEditor plugin={refOf(plugin)} most={manifest.access} />

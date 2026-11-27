@@ -1045,7 +1045,7 @@ export const REGIONS = {
     policy: 'add',
     registers: '{ id, title, view }',
     where:
-      "Under the plugin's row on the Plugins page (Settings → Plugins), opened by its **Settings** button; its view gets `{ settings }`, what `host.settings` gives",
+      "In the plugin's settings dialog, opened by its **Settings** button on the Plugins page (Settings → Plugins), after the fields its manifest declares; its view gets `{ settings }`, what `host.settings` gives",
     phone: 'The same',
   },
   'app.titlebar': {
