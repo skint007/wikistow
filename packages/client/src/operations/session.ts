@@ -373,7 +373,7 @@ export async function openAgentSession(
   // A server from before following serves no history to agents: nothing
   // to follow there, as nobody can have replaced their keys.
   const chain = await chainFrom(api, installationId, pinned).catch((error: unknown) => {
-    if (error instanceof ApiError) return null;
+    if (servesAgentsNoHistory(error)) return null;
     throw error;
   });
   const person = chain?.last ?? pinned;
@@ -389,7 +389,7 @@ export async function openAgentSession(
           return chainFrom(api, installationId, first, person);
         })().catch((error: unknown) => {
           // A server that serves agents no history: earlier writing stays closed.
-          if (error instanceof ApiError) return null;
+          if (servesAgentsNoHistory(error)) return null;
           throw error;
         })
       : null;
@@ -430,6 +430,12 @@ export async function openAgentSession(
     agent: { person, entry, pins, followedFrom: chain ? pinned : null },
   };
 }
+
+// A server from before following answers an agent's history request as a
+// route it doesn't have or won't serve it; anything else, as a busy server,
+// is an error to try again.
+const servesAgentsNoHistory = (error: unknown) =>
+  error instanceof ApiError && [401, 403, 404].includes(error.status);
 
 /**
  * The contacts mark an agent's session accepted, for the CLI to keep as its

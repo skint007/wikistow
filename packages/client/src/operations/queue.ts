@@ -419,10 +419,17 @@ export async function sealQueueAgain(
     const named: string[] = [];
     for (const blobHash of parsed.success ? filesOf(parsed.data) : []) {
       const old = blobNameOf(from, blobHash);
-      if (!listed.has(old)) continue;
+      if (files.has(old)) {
+        named.push(old);
+        continue;
+      }
+      // Read even when the listing left it out, as a listing can miss a file
+      // it couldn't look at; one listed that reads as nothing failed.
+      const blob = listed.has(old)
+        ? await readListed(store.queue, old)
+        : await store.queue.read(old);
+      if (blob === null) continue;
       named.push(old);
-      if (files.has(old)) continue;
-      const blob = await readListed(store.queue, old);
       // One that doesn't open is damaged: the change moves without it.
       const opened = blob && from.open(old, blob);
       if (opened) files.set(old, { opened, renamed: blobNameOf(to, blobHash) });
