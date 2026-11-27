@@ -31,6 +31,14 @@ export const KeptAnchor = z.strictObject({
 });
 export type KeptAnchor = z.infer<typeof KeptAnchor>;
 
+/**
+ * The hash of the rotation statement this device is sending, kept from
+ * just before it sends until it has a definite answer (section 4.6), so a
+ * reload in the middle knows the statement as its own (`rotationHash`).
+ */
+export const SentRotation = z.strictObject({ statementHash: z.string().min(1).max(100) });
+export type SentRotation = z.infer<typeof SentRotation>;
+
 async function read<T>(store: KeptStore, name: string, schema: z.ZodType<T, unknown>) {
   const bytes = await store.unlock.read(name).catch(() => null);
   if (!bytes) return null;
@@ -57,4 +65,7 @@ export const keptUnlock = (store: KeptStore) => ({
     write(store, 'installation', { installationId }),
   anchor: () => read(store, 'anchor', KeptAnchor),
   keepAnchor: (anchor: KeptAnchor) => write(store, 'anchor', anchor),
+  sentRotation: () => read(store, 'sent-rotation', SentRotation),
+  keepSentRotation: (sent: SentRotation) => write(store, 'sent-rotation', sent),
+  forgetSentRotation: () => store.unlock.remove('sent-rotation'),
 });

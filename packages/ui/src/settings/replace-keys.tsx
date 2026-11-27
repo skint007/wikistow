@@ -25,7 +25,7 @@ import { errorMessage } from '../errors';
 import { PassphraseFields, readPassphrase } from '../routes/_app/vault/setup';
 import { vaultMessage } from '../vault/messages';
 import { tellKeysReplaced } from '../data/kept-store';
-import { keepAnchor, keepChangedWrapper, startSession } from '../vault/open';
+import { keepAnchor, keepChangedWrapper, keepSentRotation, startSession } from '../vault/open';
 import { forgetKeptUnlock, PLAIN, useVault, vaultStore, zeroVault } from '../vault/store';
 import { workerVaultCrypto } from '../vault/worker-crypto';
 import { FormRow, useOpenedRow } from './rows';
@@ -406,6 +406,9 @@ async function sendAndFinish(
   queryClient: ReturnType<typeof useQueryClient>,
 ): Promise<Outcome> {
   const { prepared, epoch, password } = held;
+  // Kept until a definite answer, so a reload meanwhile knows the
+  // statement as this device's own (#764).
+  await keepSentRotation(replaceKeys.rotationHash(prepared.request.rotation)).catch(() => {});
   try {
     await withReauth(() => {
       // Locked meanwhile, as while signing in again: nothing is sent.
@@ -427,6 +430,7 @@ async function sendAndFinish(
       if (landedBefore === false && definitelyRefused(caught)) {
         // Nothing was stored, and these keys are of no use now.
         if (pending === held) pending = null;
+        await keepSentRotation(null).catch(() => {});
         // These keys only: another vault may be staged by now.
         zeroVault(prepared.vault);
         return {
@@ -457,6 +461,7 @@ async function sendAndFinish(
     const me = await api.call(accountRoutes.me).catch(() => null);
     if (me?.account.id === prepared.vault.accountId) {
       await keepAnchor(prepared.vault.identity.public);
+      await keepSentRotation(null).catch(() => {});
       // The new vault as served, kept for unlocking offline if it is this
       // rotation's, at the version served. Without an answer, the next
       // online unlock keeps it.
