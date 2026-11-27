@@ -33,6 +33,8 @@ const setAsked = (id: IdentityId | null) => {
   for (const listener of listeners) listener();
 };
 
+const followKey = (entry: FollowedEntry) => `${entry.from.identity.id} ${entry.to.keyHash}`;
+
 /** Show again the details of a follow of `id`: both keys, and **Not them?** */
 export const showFollow = (id: IdentityId) => setAsked(id);
 
@@ -71,14 +73,17 @@ export function FollowNotice({ ctx }: { ctx: ClientContext }) {
   // The follow on screen stays there, through a decline that takes it out
   // of the record, until the person closes it.
   const [open, setOpen] = useState<FollowedEntry | null>(null);
+  // Notices closed in this session, until the record says they were seen.
+  const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
   const next =
     follows?.find((entry) => entry.from.identity.id === again) ??
-    follows?.find((entry) => !entry.seen) ??
+    follows?.find((entry) => !entry.seen && !closed.has(followKey(entry))) ??
     null;
   useEffect(() => {
     if (!open && next) setOpen(next);
   }, [open, next]);
   const done = (seen: FollowedEntry | null) => {
+    if (open) setClosed((before) => new Set(before).add(followKey(open)));
     setOpen(null);
     setAsked(null);
     // Closing the notice is seeing it.
@@ -89,14 +94,7 @@ export function FollowNotice({ ctx }: { ctx: ClientContext }) {
         .catch(() => {});
     }
   };
-  return open ? (
-    <FollowDialog
-      key={`${open.from.identity.id} ${open.to.keyHash}`}
-      ctx={ctx}
-      follow={open}
-      onDone={done}
-    />
-  ) : null;
+  return open ? <FollowDialog key={followKey(open)} ctx={ctx} follow={open} onDone={done} /> : null;
 }
 
 function FollowDialog({

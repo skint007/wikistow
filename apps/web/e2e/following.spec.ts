@@ -69,7 +69,13 @@ test('a contact follows replaced keys with a notice, and the person still opens 
 
   await test.step('the owner replaces their keys, and opens what they wrote before', async () => {
     await replaceKeys(owner);
+    // Locked first, and unlocked with the new passphrase: a page load at once
+    // after replacing the keys asks whether you did (#764).
+    await owner.getByRole('button', { name: 'Account' }).click();
+    await owner.getByRole('menuitem', { name: 'Lock vault' }).click();
     await owner.goto(space);
+    await owner.getByLabel('Vault passphrase').fill(NEW_PASSPHRASE);
+    await owner.getByRole('button', { name: 'Unlock' }).click();
     await owner.getByRole('treeitem', { name: 'Diary' }).click();
     await expect(owner.getByText(TEXT.diary)).toBeVisible({ timeout: 30_000 });
     await shot(owner, 'opens-earlier');
