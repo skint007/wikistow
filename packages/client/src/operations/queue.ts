@@ -20,7 +20,7 @@ import type { ChangeSummary } from '../change.ts';
 import { decodeUtf8, utf8 } from '../encoding.ts';
 import { CryptoError } from '../errors.ts';
 import { newId } from '../ids.ts';
-import type { KeptSealer, KeptStore } from '../kept-store.ts';
+import type { KeptItems, KeptSealer, KeptStore } from '../kept-store.ts';
 import { NodeMetadata, reviseMetadata } from '../metadata.ts';
 import { parsePayload, type AttachmentRef, type PagePayload } from '../payload.ts';
 import { OWNER_REGION, RegionJson, regionInTree, type Region } from '../regions.ts';
@@ -397,8 +397,10 @@ export async function sealQueueAgain(
   const files = new Map<string, { opened: Uint8Array; renamed: string }>();
   for (const name of names.filter((n) => n.startsWith(ENTRY))) {
     // A read that fails stops the run, and the session keeps nothing there
-    // (`sealKeptAgain`), so nothing kept under either key is hidden.
-    const sealed = await store.queue.read(name);
+    // (`sealKeptAgain`), so nothing kept under either key is hidden. An item
+    // listed that reads as missing failed too, as the desktop app's files
+    // read every failure as nothing.
+    const sealed = await readListed(store.queue, name);
     const plaintext = sealed && from.open(name, sealed);
     if (!plaintext) continue;
     let json: unknown;
@@ -417,7 +419,7 @@ export async function sealQueueAgain(
       if (!listed.has(old)) continue;
       named.push(old);
       if (files.has(old)) continue;
-      const blob = await store.queue.read(old);
+      const blob = await readListed(store.queue, old);
       // One that doesn't open is damaged: the change moves without it.
       const opened = blob && from.open(old, blob);
       if (opened) files.set(old, { opened, renamed: blobNameOf(to, blobHash) });
@@ -451,6 +453,16 @@ export async function sealQueueAgain(
     await store.queue.remove([name]);
   }
   if (moved.size > 0) await store.queue.remove([...moved]);
+}
+
+/** An item `list` showed: its bytes, or a throw when it can't be read. */
+export async function readListed(
+  items: Pick<KeptItems, 'read'>,
+  name: string,
+): Promise<Uint8Array> {
+  const sealed = await items.read(name);
+  if (sealed === null) throw new Error(`The kept item ${name} could not be read`);
+  return sealed;
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) =>

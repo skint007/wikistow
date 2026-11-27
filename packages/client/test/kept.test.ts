@@ -486,7 +486,14 @@ describe('after replacing keys (section 4.6)', () => {
         retired: [first],
       }),
     ).toBe(true);
+    // A file listed that reads as nothing, as the desktop app reads a failure, too.
     fail = false;
+    store.queue.read = async (name) => (name.startsWith('b') ? null : read(name));
+    await expect(
+      keptOperations.sealKeptAgain(store, { identity: second, installationId, retired: [first] }),
+    ).rejects.toThrow('could not be read');
+    expect(await kinds(before)).toEqual(['page', 'publish']);
+    store.queue.read = read;
     await keptOperations.sealKeptAgain(store, {
       identity: second,
       installationId,

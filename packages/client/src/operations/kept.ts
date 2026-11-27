@@ -26,7 +26,7 @@ import { keptSealer, type KeptSealer, type KeptStore } from '../kept-store.ts';
 import type { PrivateIdentity } from '../identity.ts';
 import type { InstallationId } from '../ids.ts';
 import { fetchRevisions, pageLabels, type PageRef, type Wanted } from './pages.ts';
-import { OfflineQueue, sealQueueAgain } from './queue.ts';
+import { OfflineQueue, readListed, sealQueueAgain } from './queue.ts';
 import { sharedWithMe, type SharedItem } from './sharing.ts';
 import type { LoadedMetadata, OpenedRevision } from './records.ts';
 import { unreachable } from './search.ts';
@@ -248,13 +248,15 @@ export async function sealKeptAgain(
   }
   await store.exclusive(async () => {
     if (await indexOpens(store, to)) return;
+    const listed = new Set((await store.items.list()).map((item) => item.name));
     for (const key of [...retired].reverse()) {
       const from = keptSealer({ identity: key, installationId });
       const read = async (what: string) => {
         const name = from.name(what);
         // A read that fails stops the whole run, which the next session
-        // runs again; only an item missing, or damaged, is left behind.
-        const sealed = await store.items.read(name);
+        // runs again, an item listed that reads as missing included; only
+        // an item missing, or damaged, is left behind.
+        const sealed = listed.has(name) ? await readListed(store.items, name) : null;
         return { name, plaintext: sealed && from.open(name, sealed) };
       };
       const json = <T>(plaintext: Uint8Array | null, schema: z.ZodType<T, unknown>) => {
