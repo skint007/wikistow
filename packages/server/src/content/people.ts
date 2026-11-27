@@ -214,8 +214,9 @@ async function agentDirectory(db: Database, caller: Caller, ids: readonly string
  * Whether the caller may read the key history of the person `identityId`
  * (section 4.6): their statements and earlier keys. A person may, of
  * anyone, as the history routes always allowed; an agent only of the
- * people it may look up (`agentDirectory`): its own person, to follow
- * them, and the authors it needs to check.
+ * people its directory lists (`directory`): its own person, to follow
+ * them, the authors it needs to check, and the persons of agents whose
+ * writing it reads.
  */
 export async function mayReadKeyHistory(
   db: Database,
@@ -223,8 +224,8 @@ export async function mayReadKeyHistory(
   identityId: string,
 ): Promise<boolean> {
   if (actor.agentId === null) return true;
-  const caller = await requireCaller(db, actor);
-  return (await agentDirectory(db, caller, [identityId])).length > 0;
+  const { people } = await directory(db, actor, [identityId]);
+  return people.some((person) => person.identity.id === identityId);
 }
 
 /**

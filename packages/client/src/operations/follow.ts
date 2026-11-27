@@ -107,6 +107,13 @@ export async function takeEarlierKeys(
 
 /** The follows whose notice the person hasn't seen yet, as the record holds them. */
 export const unseenFollows = (ctx: ClientContext): FollowedEntry[] =>
+  followedIn(ctx.contacts.book.payloads.private.extensions).filter((entry) => !entry.seen);
+
+/**
+ * The follows not confirmed or declined yet, seen or not: for each, the key
+ * it started from, which a decline restores and contact details show.
+ */
+export const followsOf = (ctx: ClientContext): FollowedEntry[] =>
   followedIn(ctx.contacts.book.payloads.private.extensions);
 
 /** The person saw the notice that `id` replaced their keys. */

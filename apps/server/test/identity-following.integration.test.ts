@@ -2,6 +2,7 @@
 // rotated person opens what was sealed to their earlier key, their contacts'
 // apps and agents follow the chain to the new key, and a contact can decline.
 import {
+  ApiError,
   followOperations as follow,
   generateIdentity,
   inlineVaultCrypto,
@@ -171,6 +172,8 @@ describe('a contact', () => {
     if (!notice) throw new Error('expected a notice');
     await follow.seeFollow(elsewhere, notice);
     expect(follow.unseenFollows(elsewhere)).toEqual([]);
+    // Seen, it still names the key it came from, for details and a decline.
+    expect(follow.followsOf(elsewhere)).toMatchObject([{ from: { identity: old }, seen: true }]);
     expect(alice.vault.identity.public).toEqual(old);
   });
 
@@ -193,6 +196,13 @@ describe('a contact', () => {
     expect(await draftOf(bob.ctx, lib.page)).toMatchObject({
       payload: { markdown: 'Bob, before' },
     });
+    // Declining puts back a pin that only opens: still nothing written there.
+    const [notice] = follow.unseenFollows(bob.ctx);
+    if (!notice) throw new Error('expected a notice');
+    await follow.declineFollow(bob.ctx, notice);
+    expect(
+      await rejection(pages.editDraft(bob.ctx, lib.page, { markdown: 'Bob, declined' })),
+    ).toMatch(/missing-key|key-version/);
   });
 
   it('takes a chain that doesn’t check out, or a fork, as a key change', async () => {
@@ -335,6 +345,26 @@ describe('an agent', () => {
       ...agent.kept,
     });
     expect(again.agent?.followedFrom).toBeNull();
+  });
+
+  it('opens on a server from before following, which serves agents no history', async () => {
+    const { person: alice } = await personWithLibrary();
+    const agent = await enrolledAgent(t, alice);
+    await saveContacts(alice.ctx);
+    const send = agent.api.call as unknown as (r: RouteDef, input: unknown) => Promise<unknown>;
+    const older = {
+      ...agent.api,
+      call: (async (r: RouteDef, input: unknown) => {
+        if (r === identityRoutes.rotations) throw new ApiError(404, 'not-found', 'No such route');
+        return send(r, input);
+      }) as typeof agent.api.call,
+    };
+    const ctx = await openAgentSession(older, {
+      identity: agent.identity,
+      person: alice.vault.identity.public,
+      ...agent.kept,
+    });
+    expect(ctx.agent?.followedFrom).toBeNull();
   });
 
   it('refuses a chain that doesn’t check out', async () => {

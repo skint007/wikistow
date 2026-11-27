@@ -366,6 +366,16 @@ export class TrustStore {
     return held !== undefined && sameKeys(held, identity);
   }
 
+  /**
+   * Whether `identity` counts for opening only: an earlier key of its
+   * person, or a pin a decline restored (sections 4.6 and 8.4).
+   */
+  opensOnly(identity: PublicIdentity): boolean {
+    if (this.isEarlier(identity)) return true;
+    const pinned = this.#pins.get(identity.id);
+    return pinned !== undefined && sameKeys(pinned, identity) && this.isDeclined(pinned);
+  }
+
   /** The earlier keys of `id` this store holds, in ascending key version. */
   earlierKeys(id: IdentityId): PublicIdentity[] {
     return [...(this.#earlier.get(id)?.values() ?? [])].sort((a, b) => a.keyVersion - b.keyVersion);

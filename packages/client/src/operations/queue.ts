@@ -418,7 +418,9 @@ export async function sealQueueAgain(
       }
       files.push({ old, opened, renamed: blobNameOf(to, blobHash) });
     }
-    if (unread) continue;
+    // A change queued under the current key meanwhile is newer: it stays,
+    // and so does this one, under the old key, as it was.
+    if (unread || listed.has(entryNameOf(to, kind, id))) continue;
     for (const { old, opened, renamed } of files) {
       await store.queue.write(renamed, to.seal(renamed, opened));
       done.push(old);

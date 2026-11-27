@@ -189,12 +189,12 @@ export function agentOwners({
 // the predicates see owners accepted after they were made.
 //
 // With `trust`, a key it knows to be an earlier key of its person, one a
-// chain moved past, opens but never counts for writing (section 4.6), even
-// for a key version opened before the app followed.
+// chain moved past, or a pin a decline restored, opens but never counts for
+// writing (sections 4.6 and 8.4), even for a key version opened before.
 function predicates(
   accepted: ReadonlySet<string>,
   removed: ReadonlySet<string>,
-  trust?: Pick<TrustStore, 'isEarlier'>,
+  trust?: Pick<TrustStore, 'opensOnly'>,
 ): Pick<AcceptedOwners, 'opens' | 'writes'> {
   const opens = opensFor((owner) =>
     accepted.has(ownerKey({ id: owner.id, keyHash: keyHash(owner) })),
@@ -202,7 +202,7 @@ function predicates(
   return {
     opens,
     writes: writesFor(
-      (owner) => opens(owner) && !removed.has(owner.id) && !(trust?.isEarlier(owner) ?? false),
+      (owner) => opens(owner) && !removed.has(owner.id) && !(trust?.opensOnly(owner) ?? false),
     ),
   };
 }

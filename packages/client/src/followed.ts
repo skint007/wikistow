@@ -33,6 +33,8 @@ const FollowedEntry = z.looseObject({
   from: FollowedFrom,
   /** The key followed to, now the pin. */
   to: z.looseObject({ id: HumanId, keyHash: Hash32, keyVersion: z.number().int().positive() }),
+  /** The person saw the notice of the follow to `to`. Absent when not. */
+  seen: z.literal(true).optional(),
 });
 export type FollowedEntry = z.infer<typeof FollowedEntry>;
 

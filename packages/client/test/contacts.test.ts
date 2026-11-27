@@ -504,13 +504,23 @@ describe('following and declining (sections 8.4 and 8.6)', () => {
     expect(again.private.extensions['wikistow.followed']).toMatchObject({
       entries: [{ from: pin, to: { keyVersion: 3 } }],
     });
-    // Seen: the notice goes.
+    // Seen: the notice goes, and the key it started from stays.
     const seen = applyContactsChange(again, {
       kind: 'seen-follow',
       id: friend.public.id,
       keyHash: keyHash(latest.public),
     });
-    expect(seen.private.extensions['wikistow.followed']).toBeUndefined();
+    expect(seen.private.extensions['wikistow.followed']).toMatchObject({
+      entries: [{ from: pin, to: { keyVersion: 3 }, seen: true }],
+    });
+    const declined = applyContactsChange(seen, {
+      kind: 'decline-follow',
+      from: pin,
+      chain: hashes(later, latest),
+      removedAt: followedAt,
+    });
+    expect(pinOf(declined)).toEqual(pin);
+    expect(declined.private.extensions['wikistow.followed']).toBeUndefined();
   });
 
   it('is a no-op over a follow already made, and asks over another key', () => {

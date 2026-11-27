@@ -6,7 +6,7 @@ import {
   type ServedVaultWrapper,
   type SpaceId,
 } from '@wikistow/contracts';
-import type { ApiClient } from '../api/client.ts';
+import { ApiError, type ApiClient } from '../api/client.ts';
 import {
   applyContactsChange,
   type ContactsChange,
@@ -370,7 +370,12 @@ export async function openAgentSession(
   },
 ): Promise<ClientContext> {
   const { installationId } = await api.call(systemRoutes.installation);
-  const chain = await chainFrom(api, installationId, pinned);
+  // A server from before following serves no history to agents: nothing
+  // to follow there, as nobody can have replaced their keys.
+  const chain = await chainFrom(api, installationId, pinned).catch((error: unknown) => {
+    if (error instanceof ApiError) return null;
+    throw error;
+  });
   const person = chain?.last ?? pinned;
   // Every earlier key of the person, from key version 1, as what they sealed
   // to this agent before still opens: after this session too, when the key

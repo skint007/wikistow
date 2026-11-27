@@ -252,7 +252,9 @@ export async function sealKeptAgain(
       const from = keptSealer({ identity: key, installationId });
       const read = async (what: string) => {
         const name = from.name(what);
-        const sealed = await store.items.read(name).catch(() => null);
+        // A read that fails stops the whole run, which the next session
+        // runs again; only an item missing, or damaged, is left behind.
+        const sealed = await store.items.read(name);
         return { name, plaintext: sealed && from.open(name, sealed) };
       };
       const json = <T>(plaintext: Uint8Array | null, schema: z.ZodType<T, unknown>) => {

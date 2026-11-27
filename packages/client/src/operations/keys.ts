@@ -160,7 +160,7 @@ async function loadAgentSpaceKeys(
   // What its person sealed before replacing their keys opens too, and only opens.
   const byPerson = opensFor(
     (sealer) =>
-      sealer.id === person.id && (keyHash(sealer) === sealedBy || ctx.trust.isEarlier(sealer)),
+      sealer.id === person.id && (keyHash(sealer) === sealedBy || ctx.trust.opensOnly(sealer)),
   );
   return {
     spaceId,

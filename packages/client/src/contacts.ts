@@ -774,12 +774,16 @@ export function applyContactsChange(
       return declineFollow(base, change);
     case 'seen-follow': {
       const held = followedIn(own.extensions).find((entry) => entry.from.identity.id === change.id);
-      if (!held || held.to.keyHash !== change.keyHash) return base;
+      if (!held || held.to.keyHash !== change.keyHash || held.seen) return base;
+      // Kept, seen, with the key it started from, until a key is confirmed
+      // or the follow declined (section 8.6).
       return {
         shared,
         private: {
           ...own,
-          extensions: asExtensions(withFollowed(own.extensions, change.id, null)),
+          extensions: asExtensions(
+            withFollowed(own.extensions, change.id, { ...held, seen: true }),
+          ),
         },
       };
     }
@@ -983,6 +987,7 @@ function followKey(
   }
   if (at === -1) throw conflict(`${id} holds a key this follow didn’t start from`);
   const followed = followedIn(own.extensions).find((entry) => entry.from.identity.id === id);
+  // A new key to see; the earliest key followed from stays.
   const entry: FollowedEntry = {
     from: followed?.from ?? current,
     to: { id, keyHash: toHash, keyVersion: change.to.identity.keyVersion },
