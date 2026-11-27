@@ -423,14 +423,42 @@ export async function forgetKept(): Promise<void> {
   await Promise.all([store.clear().catch(() => {}), forgetModel().catch(() => {})]);
 }
 
-/** Run `signedOut` when another tab signs out, until the returned function is called. */
-export function onSignedOutElsewhere(signedOut: () => void): () => void {
+const KEYS_REPLACED = 'keys-replaced';
+// This tab, so it doesn't take its own message: every channel object hears it, here too.
+const THIS_TAB = typeof crypto === 'undefined' ? String(Math.random()) : crypto.randomUUID();
+
+/**
+ * After this tab replaced the person's keys (section 4.6): tell the
+ * browser's other tabs, which lock, so none keeps signing, sealing or
+ * keeping on this device with the old keys.
+ */
+export function tellKeysReplaced(): void {
+  if (desktop || typeof BroadcastChannel === 'undefined') return;
+  const channel = new BroadcastChannel(DATABASE);
+  channel.postMessage(`${KEYS_REPLACED} ${THIS_TAB}`);
+  channel.close();
+}
+
+/**
+ * Run `signedOut` when another tab signs out, and `replaced` when another
+ * tab replaced the keys, until the returned function is called.
+ */
+export function onSignedOutElsewhere(
+  signedOut: () => void,
+  replaced: () => void = signedOut,
+): () => void {
   if (desktop || typeof BroadcastChannel === 'undefined') return () => {};
   const channel = new BroadcastChannel(DATABASE);
   channel.onmessage = (event) => {
     if (event.data === SIGNED_OUT) {
       checked = null;
       signedOut();
+    } else if (
+      typeof event.data === 'string' &&
+      event.data.startsWith(`${KEYS_REPLACED} `) &&
+      event.data !== `${KEYS_REPLACED} ${THIS_TAB}`
+    ) {
+      replaced();
     }
   };
   return () => channel.close();

@@ -23,6 +23,7 @@ import { useReauth } from '../auth/reauth';
 import { errorMessage } from '../errors';
 import { PassphraseFields, readPassphrase } from '../routes/_app/vault/setup';
 import { vaultMessage } from '../vault/messages';
+import { tellKeysReplaced } from '../data/kept-store';
 import { keepAnchor, keepChangedWrapper, startSession } from '../vault/open';
 import { forgetKeptUnlock, PLAIN, useVault, vaultStore, zeroVault } from '../vault/store';
 import { workerVaultCrypto } from '../vault/worker-crypto';
@@ -49,8 +50,15 @@ type Outcome =
   | { kind: 'dropped'; message: string }
   | { kind: 'again'; message: string };
 
-/** The last send's outcome once it landed, shown again if the panel opens again. */
-let finished: Outcome | null = null;
+/**
+ * The last send's outcome once it landed, shown again if the panel opens
+ * again, until the next lock.
+ */
+let finished: (Outcome & { epoch: number }) | null = null;
+const finishedNow = () => {
+  if (finished && finished.epoch !== vaultStore.epoch()) finished = null;
+  return finished;
+};
 const current = () => {
   if (pending && pending.epoch !== vaultStore.epoch()) pending = null;
   return pending;
@@ -59,21 +67,24 @@ const current = () => {
 // A lock drops a rotation waiting to be sent, and its recovery key, at once.
 vaultStore.subscribe(() => {
   current();
+  finishedNow();
 });
 
 /**
  * Once a rotation landed but this tab couldn't open the new vault, what the
  * row says, so it says it after a lock too.
  */
-let landed = false;
+let landedFor: string | null = null;
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
 
 export function ReplaceKeys() {
   const { data: installation } = useQuery(installationQuery);
   const vault = useVault();
+  const { data: me } = useQuery(meQuery);
   if (!installation?.identityRotation) return null;
   const retired = vault.status === 'unlocked' && vault.vault.retired.length > 0;
+  const landed = landedFor !== null && landedFor === me?.account.id;
   return (
     <FormRow
       id="replace-keys"
@@ -101,9 +112,12 @@ export function ReplaceKeys() {
 
 function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVault }) {
   const [step, setStep] = useState<'choose' | 'save' | 'done'>(() =>
-    finished?.kind === 'done' ? 'done' : current() ? 'save' : 'choose',
+    finishedNow()?.kind === 'done' ? 'done' : current() ? 'save' : 'choose',
   );
-  const [password, setPassword] = useState(finished?.kind === 'done' && finished.password);
+  const [password, setPassword] = useState(() => {
+    const now = finishedNow();
+    return now?.kind === 'done' && now.password;
+  });
   if (step === 'done') return <Replaced password={password} />;
   if (step === 'save') {
     return (
@@ -142,6 +156,12 @@ function Choose({
     },
   });
   const [kept, setKept] = useState<ReadonlySet<string>>(new Set());
+  // The list again, and the ticks only of agents still on it.
+  const refresh = async () => {
+    const { data } = await agents.refetch();
+    const listed = new Set<string>(data?.keepable.map((agent) => agent.agentId) ?? []);
+    setKept((was) => new Set([...was].filter((id) => listed.has(id))));
+  };
   const [password, setPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -161,7 +181,13 @@ function Choose({
             zeroVault(opened);
             return true;
           },
-          () => false,
+          (error: unknown) => {
+            // Only a passphrase that doesn't open it is new; any other failure stops here.
+            if (error instanceof Error && 'code' in error && error.code === 'decrypt-failed') {
+              return false;
+            }
+            throw error;
+          },
         );
       if (reused) return setError('Choose a passphrase you haven’t used for your vault.');
       const epoch = vaultStore.epoch();
@@ -183,12 +209,12 @@ function Choose({
       onPrepared();
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'stale-head') {
-        void agents.refetch();
+        void refresh();
         setError(
           'Something changed on another device, such as an agent enrolled. Check the list, and try again.',
         );
       } else if (caught instanceof Error && 'code' in caught && caught.code === 'malformed') {
-        void agents.refetch();
+        void refresh();
         setError('An agent you ticked was revoked meanwhile. Check the list, and try again.');
       } else {
         setError(vaultMessage(caught));
@@ -388,16 +414,21 @@ async function sendAndFinish(
   // It landed: the device keeps what follows from it, while the same
   // account is signed in here, even if the vault locked meanwhile.
   if (pending === held) pending = null;
-  landed = true;
+  landedFor = prepared.vault.accountId;
+  // The browser's other tabs hold the old keys: they lock.
+  tellKeysReplaced();
   try {
     const me = queryClient.getQueryData(meQuery.queryKey);
     if (me?.account.id === prepared.vault.accountId) {
       await forgetKeptUnlock();
       await keepAnchor(prepared.vault.identity.public);
       // The new vault as served, kept for unlocking offline if it is this
-      // rotation's, whatever answer came back, at the version served.
-      const served = await api.call(vaultRoutes.getVault);
-      if (sameKeyring(served.wrapper, prepared.request.wrapper)) await keepChangedWrapper(served);
+      // rotation's, at the version served. Without an answer, the next
+      // online unlock keeps it.
+      const served = await api.call(vaultRoutes.getVault).catch(() => null);
+      if (served && sameKeyring(served.wrapper, prepared.request.wrapper)) {
+        await keepChangedWrapper(served);
+      }
     }
     if (vaultStore.epoch() !== epoch) throw new LockedMeanwhile();
     const ctx = await startSession(prepared.vault);
@@ -407,11 +438,13 @@ async function sendAndFinish(
       throw new LockedMeanwhile();
     }
     vaultStore.unlock(ctx, prepared.vault);
-    landed = false;
+    landedFor = null;
     await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
-    finished = { kind: 'done', password };
+    finished = { kind: 'done', password, epoch: vaultStore.epoch() };
   } catch {
-    finished = { kind: 'not-opened' };
+    // The old keys open nothing the server takes now: this tab locks too.
+    if (vaultStore.epoch() === epoch) vaultStore.lock({ forget: false });
+    finished = { kind: 'not-opened', epoch: vaultStore.epoch() };
   }
   return finished;
 }
@@ -439,11 +472,11 @@ function SaveAndSend({
   const groups = held?.prepared.recoveryKey.split('-') ?? [];
   const [asked] = useState(() => pickGroups(groups.length));
   const [error, setError] = useState<string | null>(
-    finished?.kind === 'not-opened' ? NOT_OPENED : null,
+    finishedNow()?.kind === 'not-opened' ? NOT_OPENED : null,
   );
   const [busy, setBusy] = useState(false);
   // Sent and landed, or dropped: never sent again.
-  const [dropped, setDropped] = useState(finished !== null);
+  const [dropped, setDropped] = useState(() => finishedNow() !== null);
 
   const show = (outcome: Outcome) => {
     setBusy(false);
@@ -464,7 +497,7 @@ function SaveAndSend({
   }, []);
 
   if (!held) {
-    return finished?.kind === 'not-opened' ? (
+    return finishedNow()?.kind === 'not-opened' || landedFor !== null ? (
       <p className="text-sm">{NOT_OPENED}</p>
     ) : (
       <div className="grid gap-3 text-sm">
@@ -521,7 +554,7 @@ function SaveAndSend({
         <Button type="submit" disabled={busy || dropped}>
           {busy ? 'Replacing…' : 'Replace my keys'}
         </Button>
-        {dropped && !landed && error && (
+        {dropped && landedFor === null && error && (
           <Button type="button" variant="outline" onClick={onRestart}>
             Start again
           </Button>

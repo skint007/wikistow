@@ -51,7 +51,10 @@ function RecoveryKey({ onOpened }: { onOpened: (vault: UnlockedVault) => void })
       );
       // As an unlock is judged: never below the keys this device last
       // unlocked with, nor past them but by their chain (section 4.6).
-      const judged = await judgeOpened(vault, { online: true });
+      const judged = await judgeOpened(vault, { online: true }).catch((error: unknown) => {
+        vaultStore.dropStaged();
+        throw error;
+      });
       if (judged !== 'ok') {
         vaultStore.dropStaged();
         throw new KeysRefused(judged);

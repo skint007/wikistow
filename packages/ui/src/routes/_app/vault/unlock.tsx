@@ -79,9 +79,11 @@ function Unlock() {
 
   // At launch, a remembered unlock opens the vault without asking.
   useEffect(() => {
-    // Its key is the old vault's once keys were replaced: not tried, nor forgotten.
-    if (checking || keys?.kind === 'replaced') {
-      if (keys?.kind === 'replaced') setCheckedRemembered(true);
+    // Once keys were replaced, or the directory shows keys that don't follow,
+    // a remembered unlock is neither tried nor forgotten (section 4.6).
+    const held = keys?.kind === 'replaced' || keys?.kind === 'substituted';
+    if (checking || held) {
+      if (held) setCheckedRemembered(true);
       return;
     }
     if (!desktop || !accountId || tried.current) return;

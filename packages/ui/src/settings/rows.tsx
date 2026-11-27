@@ -107,7 +107,10 @@ export const useOpenedRow = () => use(OpenedContext);
 
 /** Around the rows whose forms open in place, so only one is open at a time. */
 export function OneOpen({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState<string | null>(null);
+  // A link to `/settings#<row>` opens that row's form, if it has one.
+  const [open, setOpen] = useState<string | null>(() =>
+    typeof location === 'undefined' ? null : location.hash.slice(1) || null,
+  );
   const value = useMemo(() => ({ open, setOpen }), [open]);
   return <OpenedContext value={value}>{children}</OpenedContext>;
 }

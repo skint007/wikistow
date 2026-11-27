@@ -29,6 +29,13 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
   await other.getByRole('button', { name: 'Unlock' }).click();
   await expect(other.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
 
+  // Another tab of the same browser, unlocked too.
+  const sameBrowser = await page.context().newPage();
+  await sameBrowser.goto('/');
+  await sameBrowser.getByLabel('Vault passphrase').fill(PASSPHRASE);
+  await sameBrowser.getByRole('button', { name: 'Unlock' }).click();
+  await expect(sameBrowser.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
+
   await test.step('Settings replaces the keys, with a recovery key to save', async () => {
     await page.goto('/settings#security');
     await page.getByRole('button', { name: 'Start replace my keys' }).click();
@@ -56,6 +63,9 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
     await expect(page.getByText('Your keys are replaced.')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/You replaced your keys\. Moving what you share/)).toBeVisible();
     await shot(page, 'keys-replaced');
+    // The other tab held the old keys: it locked.
+    await expect(sameBrowser.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();
+    await sameBrowser.close();
   });
 
   await test.step('this device unlocks with the new passphrase only', async () => {
