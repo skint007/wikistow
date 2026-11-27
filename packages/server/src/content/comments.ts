@@ -247,6 +247,7 @@ export async function addComment(
     const page = await requirePage(tx, input.pageId, { lock: true });
     const heads = await headsOf(tx, page.id);
     requireAudience(caller, access, heads, input.audience, { writing: true });
+    requireNotWaiting(access);
     if (page.permissionVersion !== input.permissionVersion) {
       throw new ContentError('permission-version', 'Access changed; reload and try again');
     }

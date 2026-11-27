@@ -441,11 +441,14 @@ export async function addOwner(
       .select({ shareId: shareMembers.shareId })
       .from(shareMembers)
       .innerJoin(shares, eq(shares.id, shareMembers.shareId))
+      // A share rooted in the trash gives nobody anything until restored.
+      .leftJoin(nodes, eq(nodes.id, shares.rootId))
       .where(
         and(
           eq(shares.spaceId, input.spaceId),
           eq(shareMembers.identityId, added.id),
           lt(shareMembers.keyVersion, added.keyVersion),
+          isNull(nodes.trashId),
         ),
       )
       .limit(1);

@@ -27,7 +27,7 @@ import { enrolledAgent } from './support/agents.ts';
 import { personWithVault, rejection } from './support/content.ts';
 import { createTestApp, type TestApp } from './support/harness.ts';
 import { find, library, shareFolder, tampering, type Person } from './support/sharing.ts';
-import { ownerRoutes } from '@wikistow/contracts';
+import { ownerRoutes, sharingRoutes } from '@wikistow/contracts';
 
 type PageRef = pages.PageRef;
 
@@ -189,6 +189,38 @@ describe('a member who replaced their keys', () => {
     expect(await draftOf(bob.ctx, lib.page)).toMatchObject({
       payload: { markdown: 'Alice, after' },
     });
+  });
+
+  it('keeps what she held at her replaced key through a later raise', async () => {
+    const { person: alice } = await personWithLibrary();
+    const { person: bob, lib } = await personWithLibrary();
+    await shareFolder(bob.ctx, {
+      spaceId: lib.spaceId,
+      rootId: lib.shared,
+      people: [{ person: await find(bob, alice), role: 'reader', canPublish: false }],
+    });
+    const id = alice.vault.identity.public.id;
+    await rotate(alice);
+    const [entry] = await lookupPeople(bob.ctx, [id]);
+    if (!entry) throw new Error('expected Alice in the directory');
+    await rotated.applyRekey(
+      bob.ctx,
+      await rotated.planRekey(bob.ctx, { spaceId: lib.spaceId, person: entry }),
+    );
+    const share = await shareOf(bob.ctx, lib.spaceId);
+    await sharing.addMember(bob.ctx, {
+      spaceId: lib.spaceId,
+      shareId: share.shareId,
+      person: { ...entry, foundBy: null },
+      role: 'editor',
+    });
+    const { envelopes } = await bob.ctx.api.call(sharingRoutes.versionEnvelopes, {
+      params: { shareId: share.shareId, keyVersion: 1 },
+    });
+    const hers = envelopes.filter((e) => e.recipientId === id);
+    expect(hers.map((e) => e.recipientKeyVersion).sort()).toEqual([1, 2]);
+    // At her new key, Bob gave her the draft keys too.
+    expect(hers.find((e) => e.recipientKeyVersion === 2)?.draftKey).not.toBeNull();
   });
 
   it('can’t be named rekeyed, waiting or sealed to by someone the server lists as unchanged', async () => {

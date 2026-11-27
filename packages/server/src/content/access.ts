@@ -178,28 +178,25 @@ export async function membership(db: Database, identityId: string, shareId: stri
 const atCurrentKey = sql`${folderKeyEnvelopes.recipientKeyVersion} = (select max(${identities.keyVersion}) from ${identities} where ${identities.id} = ${folderKeyEnvelopes.recipientIdentityId} and ${identities.revokedAt} is null)`;
 
 // A member's access from their row, marked `waiting` while they hold no
-// envelope of the share's current version at their current key.
+// envelope of the share's current version at their current key: one read.
 async function memberAccess(
   db: Database,
-  member: { identityId: string; role: 'reader' | 'editor'; canPublish: boolean },
+  identityId: string,
   share: ShareRow,
-): Promise<Access> {
-  const [held] = await db
-    .select({ shareId: folderKeyEnvelopes.shareId })
-    .from(folderKeyEnvelopes)
-    .where(
-      and(
-        eq(folderKeyEnvelopes.shareId, share.id),
-        eq(folderKeyEnvelopes.keyVersion, share.currentKeyVersion),
-        eq(folderKeyEnvelopes.recipientIdentityId, member.identityId),
-        atCurrentKey,
-      ),
-    )
-    .limit(1);
+): Promise<Access | null> {
+  const [member] = await db
+    .select({
+      role: shareMembers.role,
+      canPublish: shareMembers.canPublish,
+      holds: sql<boolean>`exists (select 1 from ${folderKeyEnvelopes} where ${folderKeyEnvelopes.shareId} = ${share.id} and ${folderKeyEnvelopes.keyVersion} = ${share.currentKeyVersion} and ${folderKeyEnvelopes.recipientIdentityId} = ${identityId} and ${atCurrentKey})`,
+    })
+    .from(shareMembers)
+    .where(and(eq(shareMembers.shareId, share.id), eq(shareMembers.identityId, identityId)));
+  if (!member) return null;
   return {
     role: member.role,
     canPublish: member.canPublish,
-    ...(held ? {} : { waiting: true as const }),
+    ...(member.holds ? {} : { waiting: true as const }),
   };
 }
 
@@ -237,8 +234,8 @@ export async function accessTo(
   if (await isOwner(db, who.identity.id, spaceId))
     return { role: 'owner', canPublish: true, share };
   if (!share) return null;
-  const member = await membership(db, who.identity.id, share.id);
-  return member ? { ...(await memberAccess(db, member, share)), share } : null;
+  const member = await memberAccess(db, who.identity.id, share);
+  return member ? { ...member, share } : null;
 }
 
 /**
@@ -274,8 +271,7 @@ export async function personAccess(
   share: ShareRow,
 ): Promise<Access | null> {
   if (await isOwner(db, personId, share.spaceId)) return { role: 'owner', canPublish: true };
-  const member = await membership(db, personId, share.id);
-  return member && memberAccess(db, member, share);
+  return memberAccess(db, personId, share);
 }
 
 /**

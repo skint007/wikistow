@@ -8,7 +8,7 @@ import {
   type PublicIdentity,
 } from '@wikistow/contracts';
 import { folderKeyEnvelopeBytes, verifySignature } from '@wikistow/client';
-import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import { anyId } from '../db/any.ts';
@@ -23,6 +23,7 @@ import {
   groupMembers,
   groups,
   keyEnvelopes,
+  ownerStatements,
   metadataRevisions,
   metadataWraps,
   nodes,
@@ -499,8 +500,25 @@ export async function giveKeys(
         ),
       );
     const wanted = new Map(envelopes.map((e) => [envelopeKey(e), e.draftKey !== null]));
-    // Sealed by a key its sealer has since replaced: their app may accept
-    // only that key, so it stays even where it gives less than is given.
+    // Given now by the same owner at a key nobody has named them at in an
+    // owner statement: the member's app may accept only the key that sealed
+    // what they hold (section 4.6, as where that owner owns the space
+    // alone), so that stays even where it gives less than is given.
+    const vouched = new Set(
+      (
+        await tx
+          .select({ keyVersion: ownerStatements.ownerKeyVersion })
+          .from(ownerStatements)
+          .where(
+            and(
+              eq(ownerStatements.spaceId, share.spaceId),
+              eq(ownerStatements.ownerIdentityId, sealer.id),
+              ne(ownerStatements.signerIdentityId, sealer.id),
+            ),
+          )
+      ).map((row) => row.keyVersion),
+    );
+    const unvouched = !vouched.has(sealer.keyVersion);
     const sealers = new Map(
       (
         await lookupIdentities(
@@ -510,6 +528,8 @@ export async function giveKeys(
         )
       ).map((identity) => [identity.id as string, identity.keyVersion]),
     );
+    const keyOf = (id: string) =>
+      people.find(({ identity }) => identity.id === id)?.identity.keyVersion ?? 0;
     const replaced = held.filter((h) => {
       const key = `${h.recipientIdentityId}@${h.recipientKeyVersion}#${h.keyVersion}`;
       const drafts = wanted.get(key);
@@ -517,7 +537,15 @@ export async function giveKeys(
         sealerId: string;
         sealerKeyVersion: number;
       };
-      const sealedEarlier = (sealers.get(sealerId) ?? sealerKeyVersion) > sealerKeyVersion;
+      // At a key the member replaced: it opens what they had, and nothing
+      // given at their current key takes its place.
+      if (h.recipientKeyVersion < keyOf(h.recipientIdentityId)) {
+        return false;
+      }
+      const sealedEarlier =
+        sealerId === sealer.id &&
+        unvouched &&
+        (sealers.get(sealerId) ?? sealerKeyVersion) > sealerKeyVersion;
       if (drafts !== undefined && (h.drafts || !drafts || sealedEarlier)) {
         kept.add(key);
         return false;
