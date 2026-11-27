@@ -136,7 +136,9 @@ export function Combobox({
           // Keeps focus in the field, so the list stays open until a click
           // on an option lands, and its scrollbar can be dragged.
           onMouseDown={(event) => event.preventDefault()}
-          className="absolute top-10 right-0 left-0 z-20 grid gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+          // Over the page, but under its sticky bars (z-10), such as the
+          // phone's top bar, so a list scrolled under one doesn't take its taps.
+          className="absolute top-10 right-0 left-0 z-5 grid gap-1 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
         >
           <p role="status" className="px-2 pt-1 text-xs text-muted-foreground">
             {filter.trim()
