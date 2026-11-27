@@ -12,7 +12,7 @@ import {
   type UnlockedVault,
 } from '@wikistow/client';
 import { ApiError } from '@wikistow/client/api';
-import { vaultRoutes } from '@wikistow/contracts';
+import { accountRoutes, vaultRoutes } from '@wikistow/contracts';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Field } from '@/components/form/field';
@@ -87,7 +87,9 @@ export function ReplaceKeys() {
   const vault = useVault();
   const { data: me } = useQuery(meQuery);
   if (!installation?.identityRotation) return null;
-  const retired = vault.status === 'unlocked' && vault.vault.retired.length > 0;
+  // Past key version 1, the person replaced their keys: from the server's
+  // answer, so it shows while locked too.
+  const retired = (me?.identity?.keyVersion ?? 1) > 1;
   const landed = landedFor !== null && landedFor === me?.account.id;
   return (
     <FormRow
@@ -218,6 +220,7 @@ function Choose({
       }
       vaultStore.stage(prepared.vault);
       pending = { prepared, epoch, password, run: null };
+      landedFor = null;
       finished = null;
       onPrepared();
     } catch (caught) {
@@ -426,10 +429,10 @@ async function sendAndFinish(
   }
   // It landed: the device keeps what follows from it, while the same
   // account is signed in here, even if the vault locked meanwhile.
-  if (pending === held) pending = null;
   landedFor = prepared.vault.accountId;
   try {
-    const me = queryClient.getQueryData(meQuery.queryKey);
+    // Asked afresh: another tab may have signed in as someone else meanwhile.
+    const me = await api.call(accountRoutes.me).catch(() => null);
     if (me?.account.id === prepared.vault.accountId) {
       await forgetKeptUnlock();
       await keepAnchor(prepared.vault.identity.public);
@@ -454,10 +457,13 @@ async function sendAndFinish(
     landedFor = null;
     await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
     finished = { kind: 'done', password, epoch: vaultStore.epoch() };
+    // Only now, so a panel opened again meanwhile waited for this send.
+    if (pending === held) pending = null;
   } catch {
     // The old keys open nothing the server takes now: this tab locks too.
     if (vaultStore.epoch() === epoch) vaultStore.lock({ forget: false });
     finished = { kind: 'not-opened', epoch: vaultStore.epoch() };
+    if (pending === held) pending = null;
   }
   return finished;
 }
