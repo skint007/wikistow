@@ -177,13 +177,16 @@ export function planRotation({
 
   // Step 1: v must count for writing, or for verifying after a rotation of
   // identity keys, and be at or above the mark.
-  const holdsV = keyring
-    .versions(spaceId, shareId)
-    .some(
-      (version) =>
-        version.keyVersion === currentKeyVersion &&
-        (counts(version.sealer) || owners.earlier(version.sealer)),
-    );
+  const holdsV = keyring.versions(spaceId, shareId).some(
+    (version) =>
+      version.keyVersion === currentKeyVersion &&
+      (counts(version.sealer) ||
+        owners.earlier(version.sealer) ||
+        // An earlier key of the owner this removes, once on the removed list too.
+        (removing !== undefined &&
+          version.sealer.id === removing.id &&
+          trust.isEarlier(version.sealer))),
+  );
   if (!holdsV) {
     throw new CryptoError(
       'key-version',

@@ -104,9 +104,16 @@ const publishes = (access: Access | null) => canEdit(access) && access?.canPubli
  * their pick and their person, as everywhere (section 9.5). Not-found when
  * the caller can't see the page, forbidden when they can't publish it.
  */
-async function requireSourcePublisher(db: Database, who: Holder, sourcePageId: string) {
+async function requireSourcePublisher(
+  db: Database,
+  who: Holder,
+  sourcePageId: string,
+  { writing = true }: { writing?: boolean } = {},
+) {
   const source = await requirePage(db, sourcePageId);
-  if (!publishes(await requirePageAccess(db, who, source))) {
+  const access = await requirePageAccess(db, who, source);
+  // A member a rotation keeps waiting changes nothing (section 4.6).
+  if (!publishes(access) || (writing && !canWrite(access))) {
     throw new ContentError(
       'forbidden',
       'Only someone who can publish a page publishes it elsewhere',
@@ -149,7 +156,7 @@ export async function publicationOf(
   // One snapshot, so a move between reading the copy's folder and the
   // caller's access there can't name a folder outside their shares.
   return readSnapshot(db, async (tx) => {
-    await requireSourcePublisher(tx, caller, sourcePageId);
+    await requireSourcePublisher(tx, caller, sourcePageId, { writing: false });
     const row = await livePublication(tx, { sourcePageId, spaceId });
     const seen = row && (await seenBy(tx, caller, row));
     return seen?.state === 'live' ? { state: seen.state, pageId: seen.pageId } : seen;
