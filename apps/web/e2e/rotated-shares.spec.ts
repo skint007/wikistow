@@ -246,11 +246,13 @@ async function coOwnersThenRotate(
 
   await test.step('Olive’s app names Alice and offers to add them again', async () => {
     await olive.goto('/');
+    // The app says once that they replaced their keys, first: while that
+    // dialog is open, the page under it, the note included, is out of reach.
+    const notice = olive.getByRole('dialog', { name: `${aliceName} replaced their keys` });
+    await notice.getByRole('button', { name: 'OK' }).click({ timeout: 30_000 });
+    await expect(notice).toBeHidden();
     const note = olive.getByRole('complementary', { name: 'Waiting for you' });
     await expect(note).toContainText('an owner replaced their keys', { timeout: 30_000 });
-    // The app says once that they replaced their keys.
-    const notice = olive.getByRole('dialog', { name: `${aliceName} replaced their keys` });
-    await notice.getByRole('button', { name: 'OK' }).click();
     await note.getByRole('button', { name: new RegExp(`^Add .*${aliceName}.* again$`) }).click();
   });
   return { space };
