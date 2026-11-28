@@ -128,7 +128,7 @@ const roles = (result: ReturnType<typeof plan>) =>
   Object.fromEntries(result.remaining.map(({ identity, role }) => [identity.id, role]));
 
 describe('planning a rotation (section 7.5)', () => {
-  it('keep owners and members who held the version, by role, and leave out the rest', () => {
+  it('keep owners and members who held the version, by role, and keep the rest waiting', () => {
     const result = plan();
     expect(result.keyVersion).toBe(2);
     expect(roles(result)).toEqual({
@@ -141,7 +141,18 @@ describe('planning a rotation (section 7.5)', () => {
       { identityId: id(erin), reason: 'no-envelope' },
       { identityId: id(mallory), reason: 'no-envelope' },
     ]);
-    expect(result.removed).toEqual([id(erin), id(mallory)]);
+    // Kept as members with nothing new sealed: an owner gives them access, or removes them.
+    expect(result.removed).toEqual([]);
+    expect(result.waiting).toEqual([id(erin), id(mallory)]);
+  });
+
+  it('keeps a demotion the change asks for of a member who waits', () => {
+    const result = plan({
+      members: members.map((m) => ({ ...m, role: 'editor' as const })),
+      demote: [id(erin)],
+    });
+    expect(result.waiting).toContain(id(erin));
+    expect(result.demoted).toContain(id(erin));
   });
 
   it('leave out the person removed, and demote by the dialog, not the envelope', () => {

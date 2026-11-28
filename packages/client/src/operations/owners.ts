@@ -47,17 +47,21 @@ export async function addCoOwner(
   ctx: ClientContext,
   { spaceId, person, onProgress }: { spaceId: SpaceId; person: Lookup; onProgress?: Progress },
 ): Promise<void> {
-  const keys = await ownerKeys(ctx, spaceId);
+  const before = await ownerKeys(ctx, spaceId);
   const [added] = ctx.trust.recipients([person]);
   if (!added || added.kind !== 'human') {
     throw new CryptoError('malformed', 'Only a person can own a space');
   }
-  keys.owners.sealingOwners({ adding: added });
+  before.owners.sealingOwners({ adding: added });
   await saveContacts(
     ctx,
     [{ kind: 'add-co-owner', spaceId, owner: { id: added.id, keyHash: keyHash(added) } }],
     { sealTo: [added] },
   );
+  // Worked out again with them accepted, as an owner added again after
+  // replacing their keys (section 4.6) may have sealed versions since.
+  forgetSpaces(ctx);
+  const keys = await ownerKeys(ctx, spaceId);
 
   const folderKeyEnvelopes = [];
   for (const share of await listShares(ctx, spaceId)) {
@@ -185,7 +189,15 @@ export async function planOwnerRemoval(
   const keys = await ownerKeys(ctx, spaceId);
   const listed = keys.listed.find((owner) => owner.identity.id === ownerId);
   if (!listed) throw new CryptoError('unaccepted-owner', `The server lists no owner ${ownerId}`);
-  const owner = listed.identity;
+  // An owner who replaced their keys and whom nobody added again is removed
+  // at the latest key this app accepted for them, whose envelopes count in
+  // this removal (section 4.6).
+  const owner = keys.owners.opens(listed.identity)
+    ? listed.identity
+    : (ctx.trust
+        .earlierKeys(listed.identity.id)
+        .filter((key) => keys.owners.opens(key))
+        .at(-1) ?? listed.identity);
   const rotations: PlannedRotation[] = [];
   for (const share of await listShares(ctx, spaceId)) {
     rotations.push(

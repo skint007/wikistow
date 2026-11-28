@@ -39,6 +39,7 @@ import {
   accessTo,
   accessToPages,
   canEdit,
+  canWrite,
   isOwner,
   lockShare,
   lockSpace,
@@ -246,6 +247,7 @@ export async function addComment(
     const page = await requirePage(tx, input.pageId, { lock: true });
     const heads = await headsOf(tx, page.id);
     requireAudience(caller, access, heads, input.audience, { writing: true });
+    requireNotWaiting(access);
     if (page.permissionVersion !== input.permissionVersion) {
       throw new ContentError('permission-version', 'Access changed; reload and try again');
     }
@@ -323,6 +325,12 @@ async function lockedAccess(tx: Database, caller: Caller, pageId: string) {
   return requirePageAccess(tx, caller, page);
 }
 
+// A member a rotation keeps waiting changes nothing in the share, their own
+// comments included, until an owner gives them access (section 4.6).
+function requireNotWaiting(access: { waiting?: true }) {
+  if (access.waiting) throw new ContentError('forbidden', 'You wait for this folder’s new keys');
+}
+
 // Agents add comments but act on none, their own included (section 9.5).
 function requirePerson(caller: Caller) {
   if (caller.personId !== null) {
@@ -359,6 +367,7 @@ export async function editComment(
     const heads = await headsOf(tx, page.id);
     requireAudience(caller, access, heads, row.audience, { writing: true });
     if (!sees(canEdit(access), row, heads)) throw new ContentError('not-found');
+    requireNotWaiting(access);
     // Held before its version, as a delete holds it.
     const [held] = await tx.select().from(comments).where(eq(comments.id, row.id)).for('update');
     if (!held || held.deletedAt !== null) throw new ContentError('not-found');
@@ -425,6 +434,7 @@ export async function deleteComment(
       requireAudience(caller, access, heads, found.audience, { writing: false });
       if (!sees(canEdit(access), found, heads)) throw new ContentError('not-found');
       if (!author) throw new ContentError('forbidden', 'Only its author or an owner deletes it');
+      requireNotWaiting(access);
     }
     // Held, so a reply can't arrive under a first comment as it goes.
     const [row] = await tx.select().from(comments).where(eq(comments.id, found.id)).for('update');
@@ -482,9 +492,10 @@ export async function resolveThread(
     const heads = await headsOf(tx, row.pageId);
     requireAudience(caller, access, heads, row.audience, { writing: false });
     if (!sees(canEdit(access), row, heads)) throw new ContentError('not-found');
-    if (row.authorAccountId !== caller.accountId && !canEdit(access)) {
+    if (row.authorAccountId !== caller.accountId && !canWrite(access)) {
       throw new ContentError('forbidden', 'Its starter or an editor resolves a thread');
     }
+    requireNotWaiting(access);
     if ((row.resolvedAt !== null) === input.resolved) return;
     await tx
       .update(comments)

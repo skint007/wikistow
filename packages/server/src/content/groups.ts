@@ -10,6 +10,7 @@ import { audit } from '../admin/audit.ts';
 import type { Database } from '../db/client.ts';
 import {
   agentProfiles,
+  folderKeyEnvelopes,
   groupMembers,
   groups,
   identities,
@@ -340,6 +341,8 @@ async function settle(
         keyVersion,
         removed: rotation.removed,
         demoted: rotation.demoted,
+        ...(rotation.rekeyed.length > 0 && { rekeyed: rotation.rekeyed }),
+        ...(rotation.waiting.length > 0 && { waiting: rotation.waiting }),
         ...(groupId ? { groupId } : {}),
       },
     });
@@ -1042,6 +1045,28 @@ export async function listWaiting(db: Database, accountId: string) {
     shareIds.length === 0
       ? []
       : await db.select().from(shareMembers).where(inArray(shareMembers.shareId, shareIds));
+  // Who holds an envelope of each share's current version, in one read.
+  const current = new Map<string, Set<string>>();
+  if (shareIds.length > 0) {
+    const holding = await db
+      .selectDistinct({
+        shareId: folderKeyEnvelopes.shareId,
+        identityId: folderKeyEnvelopes.recipientIdentityId,
+      })
+      .from(folderKeyEnvelopes)
+      .innerJoin(shares, eq(shares.id, folderKeyEnvelopes.shareId))
+      .where(
+        and(
+          inArray(folderKeyEnvelopes.shareId, shareIds),
+          eq(folderKeyEnvelopes.keyVersion, shares.currentKeyVersion),
+        ),
+      );
+    for (const { shareId, identityId } of holding) {
+      const set = current.get(shareId) ?? new Set<string>();
+      set.add(identityId);
+      current.set(shareId, set);
+    }
+  }
   const people = new Map<string, Person>(
     (await peopleById(db, [...new Set([...access.values()].flatMap((m) => [...m.keys()]))])).map(
       (p) => [p.identity.id, p],
@@ -1052,7 +1077,12 @@ export async function listWaiting(db: Database, accountId: string) {
       const person = people.get(identityId);
       if (!person) return [];
       const row = rows.find((r) => r.shareId === share.id && r.identityId === identityId);
-      if (row?.keyVersion === person.identity.keyVersion && keysCover(row.role, grant)) return [];
+      // A row with no envelope of the current version waits too, as a
+      // rotation leaves a member it names in `waiting`.
+      const holds = current.get(share.id)?.has(identityId) ?? false;
+      if (row?.keyVersion === person.identity.keyVersion && keysCover(row.role, grant) && holds) {
+        return [];
+      }
       return [
         {
           spaceId: share.spaceId,
@@ -1060,7 +1090,10 @@ export async function listWaiting(db: Database, accountId: string) {
           person,
           role: grant.role,
           canPublish: grant.canPublish,
-          holds: row ? { keyVersion: row.keyVersion, role: row.role } : null,
+          holds:
+            row && (holds || row.keyVersion !== person.identity.keyVersion)
+              ? { keyVersion: row.keyVersion, role: row.role }
+              : null,
         },
       ];
     }),

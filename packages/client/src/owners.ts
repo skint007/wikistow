@@ -88,6 +88,13 @@ export class AcceptedOwners {
    */
   readonly writes: WritesOwner;
   /**
+   * An accepted owner this person hasn't removed, at a key this app knows
+   * to be an earlier key of theirs (section 4.6): a version that key sealed
+   * counts in a rotation for verifying, never for writing, and its
+   * envelopes add nobody by themselves (`planRotation`).
+   */
+  readonly earlier: (owner: PublicIdentity) => boolean;
+  /**
    * The signer of the first statement naming this app's person, at their
    * current key, that the app accepts: the owner who added them, whom their
    * app names back in a statement of its own. `null` when there is none.
@@ -114,7 +121,7 @@ export class AcceptedOwners {
     token: typeof minted,
     fields: Pick<
       AcceptedOwners,
-      'opens' | 'writes' | 'adder' | 'adderToConfirm' | 'firstSight' | 'changes'
+      'opens' | 'writes' | 'earlier' | 'adder' | 'adderToConfirm' | 'firstSight' | 'changes'
     > & {
       sealingOwners: (options: SealingOptions) => PublicIdentity[];
     },
@@ -122,6 +129,7 @@ export class AcceptedOwners {
     if (token !== minted) throw new CryptoError('malformed', 'Only acceptOwners makes owners');
     this.opens = fields.opens;
     this.writes = fields.writes;
+    this.earlier = fields.earlier;
     this.adder = fields.adder;
     this.adderToConfirm = fields.adderToConfirm;
     this.firstSight = fields.firstSight;
@@ -135,7 +143,7 @@ export class AcceptedOwners {
    * listed at a key this app accepted for them. Otherwise `unaccepted-owner`,
    * naming them. `removing` is the owner this action removes, left out
    * without refusing; `adding` is the co-owner being added, at the key the
-   * person chose.
+   * person chose, an owner the server lists being added again included.
    */
   sealingOwners(options: SealingOptions = {}): PublicIdentity[] {
     return this.#sealingOwners(options);
@@ -151,7 +159,7 @@ const ownerKey = (owner: { id: string; keyHash: string }) => `${owner.id} ${owne
  */
 export const ownersFromContacts = (
   entry: SpaceOwners | undefined,
-): Pick<AcceptedOwners, 'opens' | 'writes'> =>
+): Pick<AcceptedOwners, 'opens' | 'writes' | 'earlier'> =>
   predicates(
     new Set((entry?.owners ?? []).map(ownerKey)),
     new Set<string>(entry?.removedOwners ?? []),
@@ -175,6 +183,7 @@ export function agentOwners({
   return new AcceptedOwners(minted, {
     opens: ownersFromContacts(entry).opens,
     writes: writesFor((sealer) => sealer.id === person.id && keyHash(sealer) === sealedBy),
+    earlier: () => false,
     adder: null,
     adderToConfirm: null,
     firstSight: null,
@@ -194,8 +203,8 @@ export function agentOwners({
 function predicates(
   accepted: ReadonlySet<string>,
   removed: ReadonlySet<string>,
-  trust?: Pick<TrustStore, 'opensOnly'>,
-): Pick<AcceptedOwners, 'opens' | 'writes'> {
+  trust?: Pick<TrustStore, 'opensOnly' | 'isEarlier'>,
+): Pick<AcceptedOwners, 'opens' | 'writes' | 'earlier'> {
   const opens = opensFor((owner) =>
     accepted.has(ownerKey({ id: owner.id, keyHash: keyHash(owner) })),
   );
@@ -204,6 +213,8 @@ function predicates(
     writes: writesFor(
       (owner) => opens(owner) && !removed.has(owner.id) && !(trust?.opensOnly(owner) ?? false),
     ),
+    earlier: (owner) =>
+      opens(owner) && !removed.has(owner.id) && (trust?.isEarlier(owner) ?? false),
   };
 }
 
@@ -364,13 +375,15 @@ export function acceptOwners({
       return signer && counts(signer) ? [signer] : [];
     })[0] ?? null;
 
-  const { opens, writes } = predicates(accepted, removed, trust);
+  const { opens, writes, earlier } = predicates(accepted, removed, trust);
 
   return new AcceptedOwners(minted, {
     opens,
     writes,
+    earlier,
     sealingOwners({ removing, adding }) {
-      const kept = listedOwners.filter((owner) => owner.id !== removing);
+      // An owner added again at their new key (section 7.6) is sealed to as added.
+      const kept = listedOwners.filter((owner) => owner.id !== removing && owner.id !== adding?.id);
       const refused = kept.filter((owner) => !writes(owner));
       if (refused.length > 0) {
         throw new CryptoError(

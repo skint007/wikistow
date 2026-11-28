@@ -25,6 +25,7 @@ import { blobs, nodes, pageHeads, publications, revisions, spaces } from '../db/
 import {
   accessTo,
   canEdit,
+  canWrite,
   lockShare,
   lockSpace,
   lockSpaceOf,
@@ -93,6 +94,7 @@ async function lockShares(tx: Database, held: readonly (ShareRow | null)[]) {
 }
 
 // Whether access lets someone publish: edit access with publish rights.
+// Publish rights, by which publications lapse; writes also take `canWrite`.
 const publishes = (access: Access | null) => canEdit(access) && access?.canPublish === true;
 
 /**
@@ -102,9 +104,16 @@ const publishes = (access: Access | null) => canEdit(access) && access?.canPubli
  * their pick and their person, as everywhere (section 9.5). Not-found when
  * the caller can't see the page, forbidden when they can't publish it.
  */
-async function requireSourcePublisher(db: Database, who: Holder, sourcePageId: string) {
+async function requireSourcePublisher(
+  db: Database,
+  who: Holder,
+  sourcePageId: string,
+  { writing = true }: { writing?: boolean } = {},
+) {
   const source = await requirePage(db, sourcePageId);
-  if (!publishes(await requirePageAccess(db, who, source))) {
+  const access = await requirePageAccess(db, who, source);
+  // A member a rotation keeps waiting changes nothing (section 4.6).
+  if (!publishes(access) || (writing && !canWrite(access))) {
     throw new ContentError(
       'forbidden',
       'Only someone who can publish a page publishes it elsewhere',
@@ -147,7 +156,7 @@ export async function publicationOf(
   // One snapshot, so a move between reading the copy's folder and the
   // caller's access there can't name a folder outside their shares.
   return readSnapshot(db, async (tx) => {
-    await requireSourcePublisher(tx, caller, sourcePageId);
+    await requireSourcePublisher(tx, caller, sourcePageId, { writing: false });
     const row = await livePublication(tx, { sourcePageId, spaceId });
     const seen = row && (await seenBy(tx, caller, row));
     return seen?.state === 'live' ? { state: seen.state, pageId: seen.pageId } : seen;
@@ -164,7 +173,7 @@ export async function publicationOf(
 export async function publicationsOf(db: Database, actor: Actor, sourcePageId: string) {
   const caller = await requireCaller(db, actor);
   return readSnapshot(db, async (tx) => {
-    const source = await requireSourcePublisher(tx, caller, sourcePageId);
+    const source = await requireSourcePublisher(tx, caller, sourcePageId, { writing: false });
     const rows = await tx
       .select()
       .from(publications)
@@ -221,7 +230,7 @@ export async function openPublication(
       nodeId: input.parentId,
     });
     if (!access) throw new ContentError('not-found');
-    if (!publishes(access)) throw new ContentError('forbidden');
+    if (!publishes(access) || !canWrite(access)) throw new ContentError('forbidden');
     const live = await livePublication(tx, {
       sourcePageId: source.id,
       spaceId: input.destinationSpaceId,
@@ -414,7 +423,7 @@ export async function sendPublication(
     const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
-    if (!publishes(access)) throw new ContentError('forbidden');
+    if (!publishes(access) || !canWrite(access)) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });
     const row = await requireLiveAt(tx, page.id);
@@ -497,7 +506,7 @@ export async function detachPublication(
     const writer = await queueWriter(tx, caller.accountId);
     await lockSpaceOf(tx, input.pageId);
     const access = await requirePageAccess(tx, caller, await requirePage(tx, input.pageId));
-    if (!canEdit(access)) throw new ContentError('not-found');
+    if (!canWrite(access)) throw new ContentError('not-found');
     if (!access.canPublish) throw new ContentError('forbidden');
     const share = await lockShare(tx, access.share);
     const page = await requirePage(tx, input.pageId, { lock: true });

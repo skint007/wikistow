@@ -3,6 +3,7 @@ import { and, eq, getTableColumns, inArray, isNotNull, isNull, sql } from 'drizz
 import type { Database } from '../db/client.ts';
 import {
   agentGrants,
+  folderKeyEnvelopes,
   groupMembers,
   groups,
   identities,
@@ -18,7 +19,13 @@ import { ContentError } from './errors.ts';
 import { currentIdentity, lookupIdentities } from './identities.ts';
 
 export type AccessRole = 'reader' | 'editor' | 'owner';
-export type Access = { role: AccessRole; canPublish: boolean };
+/**
+ * What someone may do. `waiting` marks a member holding no envelope of the
+ * share's current version, as a rotation leaves one it names in `waiting`
+ * (section 4.6), and an agent of theirs: they read what their keys open,
+ * but change nothing there (`canWrite`) until an owner gives them access.
+ */
+export type Access = { role: AccessRole; canPublish: boolean; waiting?: true };
 
 export type ShareRow = typeof shares.$inferSelect;
 
@@ -166,6 +173,33 @@ export async function membership(db: Database, identityId: string, shareId: stri
   return member ?? null;
 }
 
+// An envelope addressed to the member's current key: one at a key they
+// replaced (section 4.6) opens what they had, and waits like none.
+const atCurrentKey = sql`${folderKeyEnvelopes.recipientKeyVersion} = (select max(${identities.keyVersion}) from ${identities} where ${identities.id} = ${folderKeyEnvelopes.recipientIdentityId} and ${identities.revokedAt} is null)`;
+
+// A member's access from their row, marked `waiting` while they hold no
+// envelope of the share's current version at their current key: one read.
+async function memberAccess(
+  db: Database,
+  identityId: string,
+  share: ShareRow,
+): Promise<Access | null> {
+  const [member] = await db
+    .select({
+      role: shareMembers.role,
+      canPublish: shareMembers.canPublish,
+      holds: sql<boolean>`exists (select 1 from ${folderKeyEnvelopes} where ${folderKeyEnvelopes.shareId} = ${share.id} and ${folderKeyEnvelopes.keyVersion} = ${share.currentKeyVersion} and ${folderKeyEnvelopes.recipientIdentityId} = ${identityId} and ${atCurrentKey})`,
+    })
+    .from(shareMembers)
+    .where(and(eq(shareMembers.shareId, share.id), eq(shareMembers.identityId, identityId)));
+  if (!member) return null;
+  return {
+    role: member.role,
+    canPublish: member.canPublish,
+    ...(member.holds ? {} : { waiting: true as const }),
+  };
+}
+
 /** Who access is worked out for: a person, or an agent acting for `personId`. */
 export type Holder = { identity: { id: string }; personId: string | null };
 
@@ -200,8 +234,8 @@ export async function accessTo(
   if (await isOwner(db, who.identity.id, spaceId))
     return { role: 'owner', canPublish: true, share };
   if (!share) return null;
-  const member = await membership(db, who.identity.id, share.id);
-  return member ? { role: member.role, canPublish: member.canPublish, share } : null;
+  const member = await memberAccess(db, who.identity.id, share);
+  return member ? { ...member, share } : null;
 }
 
 /**
@@ -237,8 +271,7 @@ export async function personAccess(
   share: ShareRow,
 ): Promise<Access | null> {
   if (await isOwner(db, personId, share.spaceId)) return { role: 'owner', canPublish: true };
-  const member = await membership(db, personId, share.id);
-  return member && { role: member.role, canPublish: member.canPublish };
+  return memberAccess(db, personId, share);
 }
 
 /**
@@ -251,7 +284,11 @@ export function capAgent(
   person: Access,
 ): Access {
   const role = grant.role === 'editor' && person.role !== 'reader' ? 'editor' : 'reader';
-  return { role, canPublish: role === 'editor' && grant.canPublish && person.canPublish };
+  return {
+    role,
+    canPublish: role === 'editor' && grant.canPublish && person.canPublish,
+    ...(person.waiting ? { waiting: true as const } : {}),
+  };
 }
 
 /** One way an agent reaches a share: its own pick, or a group its person confirmed. */
@@ -360,6 +397,9 @@ async function withinPick(
 
 export const canEdit = (access: Access | null) => access !== null && access.role !== 'reader';
 
+/** Whether someone may change something: an editor or owner who isn't waiting (`Access.waiting`). */
+export const canWrite = (access: Access | null) => canEdit(access) && access?.waiting !== true;
+
 type NodeRow = Pick<typeof nodes.$inferSelect, 'id' | 'parentId'>;
 
 /**
@@ -463,10 +503,34 @@ export async function treeView(
         .map(({ share_members: member }) => [member.shareId, member] as const),
     );
     if (!owner && memberships.size === 0) return null;
+    // The shares whose current version they hold an envelope of, in one read.
+    const holding = new Set(
+      owner || memberships.size === 0
+        ? []
+        : (
+            await db
+              .selectDistinct({ shareId: folderKeyEnvelopes.shareId })
+              .from(folderKeyEnvelopes)
+              .innerJoin(shares, eq(shares.id, folderKeyEnvelopes.shareId))
+              .where(
+                and(
+                  inArray(folderKeyEnvelopes.shareId, [...memberships.keys()]),
+                  eq(folderKeyEnvelopes.keyVersion, shares.currentKeyVersion),
+                  eq(folderKeyEnvelopes.recipientIdentityId, caller.identity.id),
+                  atCurrentKey,
+                ),
+              )
+          ).map((row) => row.shareId),
+    );
     const at: TreeView['at'] = (share) => {
       if (owner) return { role: 'owner', canPublish: true };
       const member = share && memberships.get(share.id);
-      return member ? { role: member.role, canPublish: member.canPublish } : null;
+      if (!member) return null;
+      return {
+        role: member.role,
+        canPublish: member.canPublish,
+        ...(holding.has(member.shareId) ? {} : { waiting: true as const }),
+      };
     };
     return {
       owner,

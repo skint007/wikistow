@@ -19,7 +19,7 @@ import {
   ownerStatementBytes,
   verifySignature,
 } from '@wikistow/client';
-import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import type { BlobStore } from '../blobs/store.ts';
@@ -433,6 +433,28 @@ export async function addOwner(
       throw new ContentError(
         'recipients-mismatch',
         'An owner must be a person, at their current key',
+      );
+    }
+    // A member who replaced their keys is given a share's keys again only by
+    // a rotation (section 4.6), so they become an owner only after it.
+    const [replaced] = await tx
+      .select({ shareId: shareMembers.shareId })
+      .from(shareMembers)
+      .innerJoin(shares, eq(shares.id, shareMembers.shareId))
+      // A share in the trash counts too: restored, its version would be current.
+      .where(
+        and(
+          eq(shares.spaceId, input.spaceId),
+          eq(shareMembers.identityId, added.id),
+          lt(shareMembers.keyVersion, added.keyVersion),
+        ),
+      )
+      .limit(1);
+    if (replaced) {
+      throw new ContentError(
+        'recipients-mismatch',
+        'They replaced their keys: rotate the keys of the folders they wait in first',
+        { shareId: replaced.shareId },
       );
     }
     await checkStatement(tx, input.statement, {

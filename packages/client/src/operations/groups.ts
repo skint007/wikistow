@@ -21,6 +21,7 @@ import { isAgentId } from '../identity.ts';
 import { MetadataRevisionId, newId } from '../ids.ts';
 import { newFolderMetadata, reviseMetadata, sealMetadataV2 } from '../metadata.ts';
 import type { DirectoryEntry, Lookup } from '../trust.ts';
+import { followRotations } from './follow.ts';
 import { forgetSpaces, pinAuthors } from './keys.ts';
 import { openServedMetadata, treeTarget, type LoadedMetadata } from './records.ts';
 import { saveContacts, type ClientContext } from './session.ts';
@@ -427,13 +428,19 @@ async function rotationsFor(
 /**
  * For each person, the shares of `shareIds` where the keys they hold at
  * their current key fall short of their access in `after`, each with the
- * role to seal. Someone whose key changed, unconfirmed, waits instead.
+ * role to seal. Someone whose key changed, unconfirmed, waits instead. A
+ * member who replaced their keys is left out of a share they hold at a
+ * key they replaced: only a rotation gives it to them (section 4.6).
+ * `lacking` holds `shareId identityId` for members the server lists as
+ * holding nothing of the current version (`lackingNow`), as a rotation
+ * leaves a member waiting at their current key.
  */
 function sealsFor(
   ctx: ClientContext,
   after: SpaceGroups,
   shareIds: readonly ShareId[],
   people: readonly Lookup[],
+  lacking: ReadonlySet<string> = new Set(),
 ): Pick<GroupChange, 'seals' | 'waits'> {
   const seals: GroupChange['seals'] = [];
   const waits: GroupChange['waits'] = [];
@@ -443,9 +450,11 @@ function sealsFor(
       const access = accessOf(after, shareId, identity.id);
       if (!access) return [];
       const row = requireListed(after, shareId).members.find((m) => m.identityId === identity.id);
+      if (row && row.keyVersion < identity.keyVersion) return [];
       const holds =
         row?.keyVersion === identity.keyVersion &&
-        (row.role === 'editor' || access.role === 'reader');
+        (row.role === 'editor' || access.role === 'reader') &&
+        !lacking.has(`${shareId} ${identity.id}`);
       return holds ? [] : [{ shareId, role: access.role }];
     });
     if (shares.length === 0) continue;
@@ -523,7 +532,7 @@ export async function planAddMember(
     members: [...g.members, entryOf(person)],
   }));
   const shareIds = group.shares.map((s) => s.shareId);
-  const { seals, waits } = sealsFor(ctx, after, shareIds, [person]);
+  const { seals, waits } = sealsFor(ctx, after, shareIds, [person], await lackingNow(ctx, spaceId));
   requireNoneWaiting(waits);
   return {
     spaceId,
@@ -628,7 +637,10 @@ export async function planShareGroup(
   // lowering it seal nothing, so anyone short of keys waits, as before.
   const before = group.shares.find((s) => s.shareId === shareId);
   if (before && !(before.role === 'reader' && granted.role === 'editor')) return change;
-  return { ...change, ...sealsFor(ctx, after, [shareId], group.members.map(asLookup)) };
+  return {
+    ...change,
+    ...sealsFor(ctx, after, [shareId], group.members.map(asLookup), await lackingNow(ctx, spaceId)),
+  };
 }
 
 /**
@@ -702,10 +714,12 @@ export async function planRemovalEverywhere(
 /**
  * Give access to someone waiting in a space (section 7.9): every version
  * of each share where their access is more than the keys they hold at
- * their current key, by role. After a key change this seals everything
- * they reach, directly and through groups, to the new key, replacing
- * Share again. `person` is as the waiting list gives them; their key must
- * be confirmed first (`identity-key-changed` otherwise).
+ * their current key, by role. After a confirmed key change this seals
+ * everything they reach, directly and through groups, to the new key,
+ * replacing Share again; after they replaced their keys it seals nothing,
+ * as only a rotation gives them keys (`planRekey`, section 4.6). `person`
+ * is as the waiting list gives them; their key must be confirmed first
+ * (`identity-key-changed` otherwise).
  */
 export async function planGiveAccess(
   ctx: ClientContext,
@@ -718,6 +732,7 @@ export async function planGiveAccess(
     state,
     state.shares.map((s) => s.shareId),
     [lookup],
+    await lackingNow(ctx, spaceId),
   );
   requireNoneWaiting(waits);
   return {
@@ -729,6 +744,21 @@ export async function planGiveAccess(
     after: state,
     permissionVersion: state.permissionVersion,
   };
+}
+
+/**
+ * Members of the space's shares the server lists as holding nothing of the
+ * share's current version though their row is at their current key, as
+ * `shareId identityId`: a rotation kept them waiting (section 4.6). The
+ * server's list, so it only ever adds envelopes this app would seal anyway.
+ */
+async function lackingNow(ctx: ClientContext, spaceId: SpaceId): Promise<Set<string>> {
+  const { waiting } = await ctx.api.call(groupRoutes.waiting);
+  return new Set(
+    waiting
+      .filter((w) => w.spaceId === spaceId && w.holds === null)
+      .map((w) => `${w.shareId} ${w.person.identity.id}`),
+  );
 }
 
 function requireNoneWaiting(waits: GroupChange['waits']) {
@@ -868,6 +898,12 @@ export type Waiting = {
  */
 export async function loadWaiting(ctx: ClientContext): Promise<Waiting[]> {
   const { waiting } = await ctx.api.call(groupRoutes.waiting);
+  // Someone who replaced their keys is followed first, so they read as
+  // having replaced them, not as a key change (section 4.6).
+  await followRotations(
+    ctx,
+    waiting.map(({ person }) => person),
+  ).catch(() => []);
   const out: Waiting[] = [];
   for (const { spaceId, person, ...share } of waiting) {
     let entry = out.find(

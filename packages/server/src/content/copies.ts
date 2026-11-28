@@ -45,7 +45,7 @@ import {
 } from '../db/schema/index.ts';
 import {
   accessTo,
-  canEdit,
+  canWrite,
   isOwner,
   lockShare,
   lockSpace,
@@ -226,7 +226,7 @@ async function requireCopier(
     const access =
       there && (await accessTo(tx, holder, { spaceId: copy.sourceSpaceId, nodeId: there.id }));
     if (!access) throw new ContentError('not-found');
-    if (!canEdit(access)) {
+    if (!canWrite(access)) {
       throw new ContentError('forbidden', 'Only someone who can edit it copies it');
     }
   }
@@ -235,7 +235,7 @@ async function requireCopier(
     nodeId: copy.destinationParentId,
   });
   if (!at) throw new ContentError('not-found');
-  if (!canEdit(at)) throw new ContentError('forbidden');
+  if (!canWrite(at)) throw new ContentError('forbidden');
   return { share: at.share, canPublish: at.canPublish };
 }
 
@@ -516,7 +516,7 @@ export async function sendCopyRecords(
         nodeId: copy.destinationParentId,
       });
       if (!access) throw new ContentError('not-found');
-      if (!canEdit(access)) throw new ContentError('forbidden');
+      if (!canWrite(access)) throw new ContentError('forbidden');
       const share = await lockShare(tx, access.share);
       // The records are written for the parent as it was at the opening.
       requireVersion(

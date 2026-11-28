@@ -225,6 +225,18 @@ export async function keepAnchor(identity: UnlockedVault['identity']['public']) 
 }
 
 /**
+ * Keep the hash of the rotation statement about to be sent, or forget it
+ * once there is a definite answer (section 4.6): a reload in the middle of
+ * the send then knows the statement the server shows as this device's own.
+ */
+export async function keepSentRotation(statementHash: string | null) {
+  const content = await keptContent();
+  if (!content) return;
+  if (statementHash === null) await keptUnlock(content).forgetSentRotation();
+  else await keptUnlock(content).keepSentRotation({ statementHash });
+}
+
+/**
  * Before anything kept is replaced or forgotten because the vault changed,
  * or a passphrase is asked for: what the directory says of the key this
  * device last unlocked with (`checkKeys`). A valid chain to keys it doesn't
@@ -240,10 +252,22 @@ export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck |
   const me = await keptUnlock(content).me();
   if (me?.identity && me.identity.id !== kept.anchor.id) return null;
   try {
-    const check = await replaceKeysOperations.checkKeys(quietApi, kept.anchor);
+    const sent = await keptUnlock(content).sentRotation();
+    const check = await replaceKeysOperations.checkKeys(quietApi, kept.anchor, {
+      sent: sent?.statementHash ?? null,
+    });
     // Recorded only over the anchor it checked: another tab's rotation may
     // have moved it meanwhile.
     const now = await keptUnlock(content).anchor();
+    if (check.kind === 'replaced' && check.own && now && sameKeys(now.anchor, kept.anchor)) {
+      // This device's own rotation, landed while the tab that sent it
+      // reloaded or left (#764): the anchor moves as if it had answered,
+      // and the page asks for the new passphrase.
+      await keptUnlock(content).keepAnchor({ anchor: check.current, successor: null });
+      await keptUnlock(content).forgetSentRotation();
+      tellKeysReplaced();
+      return { kind: 'same' };
+    }
     if (check.kind === 'replaced' && now && sameKeys(now.anchor, kept.anchor)) {
       const recorded = now.successor !== null && sameKeys(now.successor, check.current);
       await keptUnlock(content).keepAnchor({ ...now, successor: check.current });
@@ -254,7 +278,7 @@ export async function checkKeptKeys(): Promise<replaceKeysOperations.KeysCheck |
     return check;
   } catch (error) {
     // Without a clear answer, what the device recorded before stands.
-    if (kept.successor) return { kind: 'replaced', current: kept.successor };
+    if (kept.successor) return { kind: 'replaced', current: kept.successor, own: false };
     if (noAnswer(error)) return null;
     throw error;
   }

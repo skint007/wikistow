@@ -5,7 +5,7 @@ import { anyId } from '../db/any.ts';
 import type { Database } from '../db/client.ts';
 import { nodes, pageHeads, spaces } from '../db/schema/index.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
-import { accessTo, canEdit, lockShare, lockSpace, type ShareRow } from './access.ts';
+import { accessTo, canWrite, lockShare, lockSpace, type ShareRow } from './access.ts';
 import { ContentError } from './errors.ts';
 import { requireCaller, type Actor } from './identities.ts';
 import { createPage, publish, saveDraft } from './pages.ts';
@@ -130,7 +130,7 @@ async function holdForBatch(
   let atTop = false;
   for (const nodeId of [...parents, ...written]) {
     const access = await accessTo(tx, caller, { spaceId, nodeId });
-    if (!access || !canEdit(access)) continue;
+    if (!access || !canWrite(access)) continue;
     if (access.share) shares.set(access.share.id, access.share);
     if (nodeId === null) atTop = true;
     else editable.push(nodeId);

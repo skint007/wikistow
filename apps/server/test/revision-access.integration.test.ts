@@ -217,7 +217,14 @@ async function oneByOne(who: Holder, places: readonly RevisionPlace[]) {
   for (const place of places) {
     if (!access.has(place.pageId)) {
       const at = await accessTo(t.db, who, { spaceId: place.spaceId, nodeId: place.pageId });
-      access.set(place.pageId, at && { role: at.role, canPublish: at.canPublish });
+      access.set(
+        place.pageId,
+        at && {
+          role: at.role,
+          canPublish: at.canPublish,
+          ...(at.waiting && { waiting: at.waiting }),
+        },
+      );
     }
     const at = access.get(place.pageId) ?? null;
     if (canEdit(at)) {

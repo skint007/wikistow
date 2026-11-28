@@ -8,7 +8,7 @@ import {
   type PublicIdentity,
 } from '@wikistow/contracts';
 import { folderKeyEnvelopeBytes, verifySignature } from '@wikistow/client';
-import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import { audit } from '../admin/audit.ts';
 import { anyId } from '../db/any.ts';
@@ -23,6 +23,7 @@ import {
   groupMembers,
   groups,
   keyEnvelopes,
+  ownerStatements,
   metadataRevisions,
   metadataWraps,
   nodes,
@@ -369,9 +370,13 @@ export type Recipients = ReadonlyMap<string, { identity: PublicIdentity; access:
 
 /**
  * People whose access in `share` (effective, from `access`) needs keys
- * they don't hold at their live key: no member row, a row at an older
- * identity key version, or a reader's keys where they are an editor. They
- * wait until an owner's app seals to them (section 7.9).
+ * they don't hold at their live key: no member row, a reader's keys where
+ * they are an editor, or a row with no envelope of the current version, as
+ * a rotation leaves a member it names in `waiting`. They wait until an
+ * owner's app seals to them (section 7.9). A member who replaced their keys
+ * (a row at an older identity key version) is never among them: only a
+ * rotation gives them keys again (section 4.6), so nothing else can seal
+ * them versions the key they replaced holds.
  */
 export async function lackingKeys(
   tx: Database,
@@ -384,16 +389,44 @@ export async function lackingKeys(
       row,
     ]),
   );
+  const held = await holdingCurrent(tx, share, [...access.keys()]);
   const live = await lookupIdentities(tx, [...access.keys()]);
   return new Map(
     live.flatMap((identity) => {
       const grant = access.get(identity.id);
       if (!grant || identity.kind !== 'human') return [];
       const row = rows.get(identity.id);
-      if (row?.keyVersion === identity.keyVersion && keysCover(row.role, grant)) return [];
+      if (row && row.keyVersion < identity.keyVersion) return [];
+      if (
+        row?.keyVersion === identity.keyVersion &&
+        keysCover(row.role, grant) &&
+        held.has(identity.id)
+      ) {
+        return [];
+      }
       return [[identity.id, { identity, access: grant }] as const];
     }),
   );
+}
+
+/** Which of `identityIds` hold an envelope of `share`'s current version. */
+export async function holdingCurrent(
+  db: Database,
+  share: Pick<ShareRow, 'id' | 'currentKeyVersion'>,
+  identityIds: readonly string[],
+): Promise<Set<string>> {
+  if (identityIds.length === 0) return new Set();
+  const rows = await db
+    .selectDistinct({ id: folderKeyEnvelopes.recipientIdentityId })
+    .from(folderKeyEnvelopes)
+    .where(
+      and(
+        eq(folderKeyEnvelopes.shareId, share.id),
+        eq(folderKeyEnvelopes.keyVersion, share.currentKeyVersion),
+        inArray(folderKeyEnvelopes.recipientIdentityId, [...identityIds]),
+      ),
+    );
+  return new Set(rows.map((row) => row.id));
 }
 
 /**
@@ -444,15 +477,102 @@ export async function giveKeys(
       })),
     ),
   });
+  // What they hold at their live key stays where it covers what is given,
+  // as for a member a rotation kept waiting (section 4.6): an envelope an
+  // owner they accept sealed must not give way to one sealed by a key their
+  // app may not accept, as a rotated owner's new key where nobody can add
+  // them again. Everything else of theirs in the share is replaced.
+  const kept = new Set<string>();
   if (given.length > 0) {
-    await tx
-      .delete(folderKeyEnvelopes)
+    const held = await tx
+      .select({
+        keyVersion: folderKeyEnvelopes.keyVersion,
+        recipientIdentityId: folderKeyEnvelopes.recipientIdentityId,
+        recipientKeyVersion: folderKeyEnvelopes.recipientKeyVersion,
+        drafts: folderKeyEnvelopes.drafts,
+        envelope: folderKeyEnvelopes.envelope,
+      })
+      .from(folderKeyEnvelopes)
       .where(
         and(
           eq(folderKeyEnvelopes.shareId, share.id),
           inArray(folderKeyEnvelopes.recipientIdentityId, given),
         ),
       );
+    const wanted = new Map(envelopes.map((e) => [envelopeKey(e), e.draftKey !== null]));
+    // Whether another owner has named the giver at their current key in an
+    // owner statement, which the member's app accepts them through.
+    const vouched = new Set(
+      (
+        await tx
+          .select({ keyVersion: ownerStatements.ownerKeyVersion })
+          .from(ownerStatements)
+          .where(
+            and(
+              eq(ownerStatements.spaceId, share.spaceId),
+              eq(ownerStatements.ownerIdentityId, sealer.id),
+              ne(ownerStatements.signerIdentityId, sealer.id),
+            ),
+          )
+      ).map((row) => row.keyVersion),
+    );
+    const unvouched = !vouched.has(sealer.keyVersion);
+    // A giver who replaced their keys, at a key no other owner has named
+    // yet, may be one the member's app doesn't accept: what the member
+    // holds stays, whoever sealed it, even where it gives less.
+    const keepAll = sealer.keyVersion > 1 && unvouched;
+    // The current key of each sealer of what they hold: one since replaced
+    // opens only, so what it sealed gives way to what a giver they accept
+    // gives (`keepAll` aside).
+    const sealers = new Map(
+      (
+        await lookupIdentities(
+          tx,
+          [...new Set(held.map((h) => (h.envelope as { sealerId: string }).sealerId))],
+          { hold: false },
+        )
+      ).map((identity) => [identity.id as string, identity.keyVersion]),
+    );
+    const keyOf = (id: string) =>
+      people.find(({ identity }) => identity.id === id)?.identity.keyVersion ?? 0;
+    const replaced = held.filter((h) => {
+      const key = `${h.recipientIdentityId}@${h.recipientKeyVersion}#${h.keyVersion}`;
+      const drafts = wanted.get(key);
+      // At a key the member replaced: it opens what they had, and nothing
+      // given at their current key takes its place.
+      if (h.recipientKeyVersion < keyOf(h.recipientIdentityId)) {
+        return false;
+      }
+      // One the giver sealed at their current key gives way as ever.
+      const { sealerId, sealerKeyVersion } = h.envelope as {
+        sealerId: string;
+        sealerKeyVersion: number;
+      };
+      const givers = sealerId === sealer.id && sealerKeyVersion === sealer.keyVersion;
+      // Only at the current version, where writing needs it: what an earlier
+      // version holds stays, as the member's app may open it through that key.
+      const replacedSince =
+        h.keyVersion === share.currentKeyVersion &&
+        (sealers.get(sealerId) ?? sealerKeyVersion) > sealerKeyVersion;
+      const covers = h.drafts || !drafts;
+      if (drafts !== undefined && ((covers && !replacedSince) || (keepAll && !givers))) {
+        kept.add(key);
+        return false;
+      }
+      return true;
+    });
+    for (const h of replaced) {
+      await tx
+        .delete(folderKeyEnvelopes)
+        .where(
+          and(
+            eq(folderKeyEnvelopes.shareId, share.id),
+            eq(folderKeyEnvelopes.keyVersion, h.keyVersion),
+            eq(folderKeyEnvelopes.recipientIdentityId, h.recipientIdentityId),
+            eq(folderKeyEnvelopes.recipientKeyVersion, h.recipientKeyVersion),
+          ),
+        );
+    }
   }
   for (const { identity, access } of people) {
     const row = { keyVersion: identity.keyVersion, role: access.role, canPublish: false };
@@ -461,7 +581,10 @@ export async function giveKeys(
       .values({ shareId: share.id, identityId: identity.id, addedBy, ...row })
       .onConflictDoUpdate({ target: [shareMembers.shareId, shareMembers.identityId], set: row });
   }
-  await storeFolderEnvelopes(tx, envelopes);
+  await storeFolderEnvelopes(
+    tx,
+    envelopes.filter((e) => !kept.has(envelopeKey(e))),
+  );
   return people;
 }
 
@@ -889,6 +1012,13 @@ export async function addMember(
     }
     const [live] = await lookupIdentities(tx, [member.identityId]);
     if (!live) throw new ContentError('recipients-mismatch', 'Members must be people');
+    // Only a rotation gives keys again to a member who replaced theirs (section 4.6).
+    if (existing && existing.keyVersion < live.keyVersion) {
+      throw new ContentError(
+        'recipients-mismatch',
+        'They replaced their keys: rotate the share’s keys with them instead',
+      );
+    }
     const lacks = !(existing?.keyVersion === member.keyVersion && keysCover(existing.role, access));
     await giveKeys(tx, {
       share,
@@ -930,14 +1060,22 @@ export async function addMember(
 /**
  * Apply one rotation of a held share (section 7.5, step 4): the current
  * version is still `expectedKeyVersion` (`stale-head` otherwise, naming it),
- * and the new version goes to exactly the listed members less `removed`,
- * at their listed keys, and every owner in `owners` at their live key, with
- * the draft key exactly for those who stay editors after `demoted`. No
- * agent is among them: only an agent's own person seals to it (section
- * 9.4). Then the removed go, with their agents' grants in the share, the
- * demoted become readers, direct grant included, and the share moves to
- * its next version. Someone removed or demoted who keeps more through a
- * group waits for an owner to seal to them (section 7.9).
+ * and the new version goes to exactly the listed members less `removed`
+ * and `waiting`, at their listed keys, and every owner in `owners` at their
+ * live key, with the draft key exactly for those who stay editors after
+ * `demoted`. No agent is among them: only an agent's own person seals to
+ * it (section 9.4). Then the removed go, with their agents' grants in the
+ * share, the demoted become readers, direct grant included, and the share
+ * moves to its next version. Someone removed or demoted who keeps more
+ * through a group waits for an owner to seal to them (section 7.9).
+ *
+ * A member who replaced their keys (section 4.6), whose live key version is
+ * above their row's, gets nothing at the key they replaced: they are in
+ * `rekeyed`, given every version `1` to the new one at their live key, and
+ * their row takes it; or `waiting` or `removed`. A rotation that would seal
+ * to them at their row's key is `stale-head`, as their rotation landed since
+ * the owner's app looked. Their rows are held `FOR SHARE` until commit, so
+ * a member's rotation can't land in between.
  */
 export async function applyRotation(
   tx: Database,
@@ -963,28 +1101,85 @@ export async function applyRotation(
   const listed = new Map(members.map((m) => [m.identityId, m]));
   const removed = new Set<string>(rotation.removed);
   const demoted = new Set<string>(rotation.demoted);
-  const strays = [...removed, ...demoted].some((id) => !listed.has(id));
-  if (strays || [...demoted].some((id) => removed.has(id))) {
+  const rekeyed: ReadonlySet<string> = new Set<string>(rotation.rekeyed);
+  const waiting: ReadonlySet<string> = new Set<string>(rotation.waiting);
+  const named = [...removed, ...demoted, ...rekeyed, ...waiting];
+  const strays = named.some((id) => !listed.has(id));
+  const overlap = [...removed].some((id) => demoted.has(id) || rekeyed.has(id) || waiting.has(id));
+  if (strays || overlap || [...rekeyed].some((id) => waiting.has(id))) {
     throw new ContentError('stale-head', 'The members changed since you loaded them', {
       shareId: share.id,
     });
   }
   const keyVersion = share.currentKeyVersion + 1;
   const staying = members.filter((m) => !removed.has(m.identityId));
+  // Held until commit, so a member's rotation waits for this one, or this
+  // one sees it.
+  const live = new Map<string, PublicIdentity>(
+    (
+      await lookupIdentities(
+        tx,
+        staying.map((m) => m.identityId),
+      )
+    ).map((identity) => [identity.id, identity]),
+  );
+  const replacedKeys = (m: (typeof members)[number]) =>
+    (live.get(m.identityId)?.keyVersion ?? m.keyVersion) > m.keyVersion;
+  const expected: Expected[] = [...ownersExpected(owners, keyVersion)];
+  for (const m of staying) {
+    const drafts = m.role === 'editor' && !demoted.has(m.identityId);
+    if (waiting.has(m.identityId)) continue;
+    if (rekeyed.has(m.identityId)) {
+      const at = live.get(m.identityId);
+      if (!at || !replacedKeys(m)) {
+        throw new ContentError(
+          'recipients-mismatch',
+          'Only a member who replaced their keys is rekeyed',
+          {
+            shareId: share.id,
+          },
+        );
+      }
+      for (let version = 1; version <= keyVersion; version++) {
+        expected.push({
+          recipientId: m.identityId,
+          recipientKeyVersion: at.keyVersion,
+          keyVersion: version,
+          drafts,
+        });
+      }
+      continue;
+    }
+    if (replacedKeys(m)) {
+      throw new ContentError('stale-head', 'A member replaced their keys since you loaded them', {
+        shareId: share.id,
+      });
+    }
+    expected.push({
+      recipientId: m.identityId,
+      recipientKeyVersion: m.keyVersion,
+      keyVersion,
+      drafts,
+    });
+  }
   await checkFolderEnvelopes(tx, rotation.envelopes, {
     spaceId: share.spaceId,
     shareId: share.id,
     sealer,
-    expected: [
-      ...ownersExpected(owners, keyVersion),
-      ...staying.map((m) => ({
-        recipientId: m.identityId,
-        recipientKeyVersion: m.keyVersion,
-        keyVersion,
-        drafts: m.role === 'editor' && !demoted.has(m.identityId),
-      })),
-    ],
+    expected,
   });
+  if (rekeyed.size > 0) {
+    // Every version at the new key, beside those at the replaced one, which
+    // their app opens with its retired keys whoever sealed the new ones.
+    for (const id of rekeyed) {
+      const at = live.get(id);
+      if (!at) continue;
+      await tx
+        .update(shareMembers)
+        .set({ keyVersion: at.keyVersion })
+        .where(and(eq(shareMembers.shareId, share.id), eq(shareMembers.identityId, id)));
+    }
+  }
   if (removed.size > 0) {
     await tx
       .delete(shareMembers)
@@ -1038,7 +1233,13 @@ export async function rotateShare(
       actor: input.accountId,
       action: 'share.rotated',
       target: { kind: 'share', id: share.id },
-      details: { keyVersion, removed: input.removed, demoted: input.demoted },
+      details: {
+        keyVersion,
+        removed: input.removed,
+        demoted: input.demoted,
+        ...(input.rekeyed.length > 0 && { rekeyed: input.rekeyed }),
+        ...(input.waiting.length > 0 && { waiting: input.waiting }),
+      },
     });
     return keyVersion;
   });

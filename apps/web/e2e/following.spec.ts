@@ -33,7 +33,10 @@ async function replaceKeys(page: Page) {
     await field.fill(groups[index] ?? '');
   }
   await page.getByRole('button', { name: 'Replace my keys' }).click();
-  await expect(page.getByText('Your keys are replaced.')).toBeVisible({ timeout: 30_000 });
+  // Exactly: "once your keys are replaced" is in the panel before it lands.
+  await expect(page.getByText('Your keys are replaced.', { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 test('a contact follows replaced keys with a notice, and the person still opens what they wrote', async ({
@@ -69,13 +72,9 @@ test('a contact follows replaced keys with a notice, and the person still opens 
 
   await test.step('the owner replaces their keys, and opens what they wrote before', async () => {
     await replaceKeys(owner);
-    // Locked first, and unlocked with the new passphrase: a page load at once
-    // after replacing the keys asks whether you did (#764).
-    await owner.getByRole('button', { name: 'Account' }).click();
-    await owner.getByRole('menuitem', { name: 'Lock vault' }).click();
+    // A page load at once opens the new vault, and asks nothing (#764).
     await owner.goto(space);
-    await owner.getByLabel('Vault passphrase').fill(NEW_PASSPHRASE);
-    await owner.getByRole('button', { name: 'Unlock' }).click();
+    await expect(owner.getByRole('heading', { name: 'Did you replace your keys?' })).toBeHidden();
     await owner.getByRole('treeitem', { name: 'Diary' }).click();
     await expect(owner.getByText(TEXT.diary)).toBeVisible({ timeout: 30_000 });
     await shot(owner, 'opens-earlier');

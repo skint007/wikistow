@@ -9,7 +9,7 @@ import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { nodes, shares } from '../db/schema/index.ts';
 import { transactOnce, type Once } from '../idempotency.ts';
-import { accessTo, canEdit, lockSpace } from './access.ts';
+import { accessTo, canWrite, lockSpace } from './access.ts';
 import { ContentError } from './errors.ts';
 import { requireCaller, type Actor } from './identities.ts';
 
@@ -173,7 +173,7 @@ async function requireArranger(
   }
   const access = await accessTo(tx, caller, { spaceId, nodeId: parentId });
   if (!access) throw new ContentError('not-found');
-  if (!canEdit(access)) throw new ContentError('forbidden');
+  if (!canWrite(access)) throw new ContentError('forbidden');
   return caller;
 }
 

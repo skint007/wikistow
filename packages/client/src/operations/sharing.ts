@@ -967,6 +967,7 @@ export async function planShareRotation(
     shareId,
     leaveOut = [],
     demote = [],
+    tick = [],
     removing,
     keys: given,
   }: {
@@ -974,6 +975,8 @@ export async function planShareRotation(
     shareId: ShareId;
     leaveOut?: readonly IdentityId[];
     demote?: readonly IdentityId[];
+    /** Offers of an earlier plan the owner ticked (`RotationPlan.offers`), with the role to give. */
+    tick?: readonly { identityId: IdentityId; role: 'reader' | 'editor' }[];
     removing?: PublicIdentity;
     keys?: SpaceKeys;
   },
@@ -1010,6 +1013,7 @@ export async function planShareRotation(
     ...(removing ? { removing } : {}),
     leaveOut,
     demote,
+    tick,
     keyring: ctx.keyring,
     marks: ctx.marks,
     trust: ctx.trust,
@@ -1017,6 +1021,21 @@ export async function planShareRotation(
   });
   const { permissionVersion } = await treeTarget(ctx, spaceId, share.rootId);
   return { plan, permissionVersion };
+}
+
+// Every version of a share up to `upTo` this app holds, one each: one that
+// counts for writing where it has one, else any it opened. For giving a
+// member who replaced their keys the history they held at their old key.
+function heldHistory(ctx: ClientContext, spaceId: SpaceId, shareId: ShareId, upTo: number) {
+  const held = ctx.keyring.versions(spaceId, shareId);
+  return Array.from({ length: upTo }, (_, i) => {
+    const ofVersion = held.filter((h) => h.keyVersion === i + 1);
+    const chosen = ofVersion.find((h) => !h.earlier) ?? ofVersion[0];
+    if (!chosen) {
+      throw new CryptoError('missing-key', `Version ${i + 1} of share ${shareId} isn't held here`);
+    }
+    return chosen;
+  });
 }
 
 /**
@@ -1027,16 +1046,31 @@ export async function planShareRotation(
 export function sealPlanned(ctx: ClientContext, plan: RotationPlan) {
   const keys = newFolderKeys();
   try {
+    // A member who replaced their keys gets every earlier version too, at
+    // their new key (section 4.6), from any key this app opened for it.
+    const rekeyed = new Set<string>(plan.rekeyed);
+    const history = plan.remaining
+      .filter(({ identity }) => rekeyed.has(identity.id))
+      .flatMap((recipient) =>
+        heldHistory(ctx, plan.spaceId, plan.shareId, plan.keyVersion - 1).flatMap((held) =>
+          sealVersion(ctx, plan.spaceId, plan.shareId, held.keyVersion, held, [recipient]),
+        ),
+      );
     return {
       expectedKeyVersion: plan.keyVersion - 1,
       removed: plan.removed,
       demoted: plan.demoted,
-      envelopes: sealRotation({
-        sealer: ctx.identity,
-        installationId: ctx.installationId,
-        plan,
-        keys,
-      }),
+      rekeyed: plan.rekeyed,
+      waiting: plan.waiting,
+      envelopes: [
+        ...sealRotation({
+          sealer: ctx.identity,
+          installationId: ctx.installationId,
+          plan,
+          keys,
+        }),
+        ...history,
+      ],
     };
   } finally {
     sodium.memzero(keys.draftKey);

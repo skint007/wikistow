@@ -22,10 +22,13 @@ import {
   sameKeys,
   type PrivateIdentity,
 } from '../identity.ts';
+import { hash } from '../encoding.ts';
 import {
+  identityRotationBytes,
   parseIdentityRotation,
   signIdentityRotation,
   verifyRotationChain,
+  type IdentityRotation,
 } from '../identity-rotation.ts';
 import type { KeptAnchor } from '../kept-unlock.ts';
 import { enrollAgent } from '../trust.ts';
@@ -291,10 +294,24 @@ export function sendRotation(api: ApiClient, prepared: PreparedRotation) {
  */
 export type KeysCheck =
   | { kind: 'same' }
-  | { kind: 'replaced'; current: PublicIdentity }
+  /** `own` when the chain is the one statement whose hash this device kept as it sent it. */
+  | { kind: 'replaced'; current: PublicIdentity; own: boolean }
   | { kind: 'substituted' };
 
-export async function checkKeys(api: ApiClient, anchor: PublicIdentity): Promise<KeysCheck> {
+/**
+ * The hash a device keeps beside its anchor as it sends its rotation:
+ * BLAKE2b-256 of the statement's signed bytes (section 4.6), so after a
+ * reload, or a page left, in the middle of the send, it knows the
+ * statement the server then shows as its own.
+ */
+export const rotationHash = (statement: IdentityRotation): string =>
+  hash(identityRotationBytes(statement));
+
+export async function checkKeys(
+  api: ApiClient,
+  anchor: PublicIdentity,
+  { sent }: { sent?: string | null } = {},
+): Promise<KeysCheck> {
   const { installationId } = await api.call(systemRoutes.installation);
   const { current, rotations } = await api.call(identityRoutes.rotations, {
     params: { identityId: anchor.id },
@@ -303,13 +320,11 @@ export async function checkKeys(api: ApiClient, anchor: PublicIdentity): Promise
   if (current && sameKeys(current, anchor)) return { kind: 'same' };
   if (!current || current.keyVersion <= anchor.keyVersion) return { kind: 'substituted' };
   try {
-    verifyRotationChain({
-      installationId,
-      start: anchor,
-      end: current,
-      statements: rotations.map(parseIdentityRotation),
-    });
-    return { kind: 'replaced', current };
+    const statements = rotations.map(parseIdentityRotation);
+    verifyRotationChain({ installationId, start: anchor, end: current, statements });
+    const [only, ...more] = statements;
+    const own = !!sent && !!only && more.length === 0 && rotationHash(only) === sent;
+    return { kind: 'replaced', current, own };
   } catch {
     return { kind: 'substituted' };
   }

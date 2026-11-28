@@ -11,8 +11,10 @@ import { NewMark } from './new-mark';
 const LEFT_OUT: Record<RotationPlan['leftOut'][number]['reason'], string> = {
   'left-out': 'Loses access',
   'key-changed': 'Left out: their key changed and you haven’t confirmed it',
-  'no-envelope': 'Left out: they need to be added again',
+  'no-envelope': 'Waits: no owner you accept gave them these keys. Give them access later.',
   'unknown-key': 'Left out: this app can’t check their key, so add them again',
+  'old-key': 'Waits: only earlier keys of an owner gave them access',
+  'replaced-keys': 'Waits: they replaced their keys',
 };
 
 /** One share's rotation, with the name the owner knows the share by. */

@@ -28,6 +28,7 @@ import {
   accessToPages,
   accessToPagesIn,
   canEdit,
+  canWrite,
   lockShare,
   lockSpaceOf,
   shareAt,
@@ -46,6 +47,8 @@ import type { ListedFile } from './render.ts';
 import type { Renderer } from './renderer.ts';
 import { Outline, pageOfKey, READER_VERSION, Segment } from './segments.ts';
 
+// Publish rights, as links and copies lapse by them: a member a rotation
+// keeps waiting keeps theirs, and only changes nothing (`canWrite`).
 const publishes = (access: Access | null) => canEdit(access) && access?.canPublish === true;
 
 /** The most a copy's file may be, here: `MAX_FILE_BYTES`, or the upload limit if lower. */
@@ -126,7 +129,7 @@ async function lockPage(tx: Database, pageId: string, caller: Caller | null) {
   if (caller) {
     const publisher = async () => {
       const access = await requirePageAccess(tx, caller, page);
-      if (!canEdit(access)) throw new ContentError('not-found');
+      if (!canWrite(access)) throw new ContentError('not-found');
       if (!access.canPublish) throw new ContentError('forbidden');
       return access;
     };
@@ -235,7 +238,7 @@ export async function stageCopy(db: Database, renderer: Renderer, input: StageIn
   const caller = await requireCaller(db, humanActor(accountId));
   const page = await requirePage(db, pageId);
   const access = await requirePageAccess(db, caller, page);
-  if (!canEdit(access)) throw new ContentError('not-found');
+  if (!canWrite(access)) throw new ContentError('not-found');
   if (!access.canPublish) throw new ContentError('forbidden');
   const [link] = await db.select().from(publicLinks).where(eq(publicLinks.pageId, pageId));
   if (!link) throw noLink();

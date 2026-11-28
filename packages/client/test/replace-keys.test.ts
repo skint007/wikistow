@@ -13,7 +13,7 @@ import {
   type PrivateIdentity,
 } from '../src/index.ts';
 
-const { checkKeys, judgeUnlock } = replaceKeysOperations;
+const { checkKeys, judgeUnlock, rotationHash } = replaceKeysOperations;
 const installationId = InstallationId.parse('replace-keys-installation');
 const id = IdentityId.parse('replacing-person');
 const keyAt = (keyVersion: number) => generateIdentity({ kind: 'human', id, keyVersion });
@@ -89,10 +89,29 @@ describe('checkKeys', () => {
     expect(await checkKeys(serving(k3, [s12, s23]), k1.public)).toEqual({
       kind: 'replaced',
       current: k3.public,
+      own: false,
     });
     expect(await checkKeys(serving(k3, [s12, s23]), k2.public)).toEqual({
       kind: 'replaced',
       current: k3.public,
+      own: false,
+    });
+  });
+
+  it('knows its own statement by the hash it kept as it sent it (#764)', async () => {
+    const sent = rotationHash(s12);
+    expect(await checkKeys(serving(k2, [s12]), k1.public, { sent })).toEqual({
+      kind: 'replaced',
+      current: k2.public,
+      own: true,
+    });
+    // Another statement, or a chain of more than that one, is someone's else.
+    const other = rotationHash(s23);
+    expect(await checkKeys(serving(k2, [s12]), k1.public, { sent: other })).toMatchObject({
+      own: false,
+    });
+    expect(await checkKeys(serving(k3, [s12, s23]), k1.public, { sent })).toMatchObject({
+      own: false,
     });
   });
 

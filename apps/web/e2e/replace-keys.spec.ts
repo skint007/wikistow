@@ -6,6 +6,7 @@ import { expect, signIn, test } from './fixtures';
 import { adminTab, choosePassphrase, memberWithVault, PASSPHRASE } from './vault';
 
 const NEW_PASSPHRASE = 'a brand new vault passphrase for tests';
+const REPLACED = 'Your keys are replaced.';
 
 // Pictures for a pull request, only when asked for (`E2E_SHOTS=<directory>`).
 const shot = async (page: Page, name: string) => {
@@ -60,7 +61,8 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
       await field.fill(groups[index] ?? '');
     }
     await page.getByRole('button', { name: 'Replace my keys' }).click();
-    await expect(page.getByText('Your keys are replaced.')).toBeVisible({ timeout: 30_000 });
+    // Exactly: "once your keys are replaced" is in the panel before it lands.
+    await expect(page.getByText(REPLACED, { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/Your keys were replaced\. Moving what you share/)).toBeVisible();
     await shot(page, 'keys-replaced');
     // The other tab held the old keys: it locked.
@@ -104,3 +106,58 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
     await expect(other.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
   });
 });
+
+// #764: the tab that sent the rotation reloads before it hears the answer.
+// The device kept the statement's hash, so it knows the rotation as its own:
+// it asks only for the new passphrase, never whether the person did it.
+test('A page load in the middle of Replace my keys asks only for the new passphrase', async ({
+  page,
+  admin,
+  freshPage,
+}) => {
+  test.slow();
+  const adminPage = await adminTab(freshPage, admin.email);
+  await memberWithVault(page, adminPage);
+  // The server takes the rotation, but its answer never reaches the tab.
+  let landed: () => void = () => {};
+  const landing = new Promise<void>((resolve) => (landed = resolve));
+  await page.route('**/api/me/identity/rotate', async (route) => {
+    await route.fetch();
+    landed();
+  });
+  await replaceKeys(page, { wait: false });
+  await landing;
+  await page.unroute('**/api/me/identity/rotate');
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Did you replace your keys?' })).toBeHidden();
+  await shot(page, 'reload-mid-send');
+  await page.getByLabel('Vault passphrase').fill(NEW_PASSPHRASE);
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await expect(page.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
+  // The tab keeps the new vault through a reload, and asks nothing.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Pick a page' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Did you replace your keys?' })).toBeHidden();
+});
+
+/**
+ * Replace the keys from Settings, with no agents. With `wait`, until the
+ * panel says they are replaced.
+ */
+async function replaceKeys(page: Page, { wait = true }: { wait?: boolean } = {}) {
+  await page.goto('/settings#security');
+  await page.getByRole('button', { name: 'Start replace my keys' }).click();
+  await choosePassphrase(page, NEW_PASSPHRASE);
+  await page.getByRole('button', { name: 'Make new keys' }).click();
+  const shown = page.getByTestId('rotation-recovery-key');
+  await expect(shown).toBeVisible({ timeout: 30_000 });
+  const groups = (await shown.textContent())?.trim().split(/\s+/) ?? [];
+  for (const field of await page.getByLabel(/^Group \d+$/).all()) {
+    const index = Number((await field.getAttribute('id'))?.replace('rotation-group-', ''));
+    await field.fill(groups[index] ?? '');
+  }
+  await page.getByRole('button', { name: 'Replace my keys' }).click();
+  if (wait)
+    await expect(page.getByText(REPLACED, { exact: true })).toBeVisible({ timeout: 30_000 });
+}
