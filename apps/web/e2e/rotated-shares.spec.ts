@@ -166,7 +166,10 @@ test('an owner gives a member who replaced their keys the share again with Rotat
     await expect(dialog.getByText('Replaced their keys')).toBeVisible();
     await shot(owner, 'waiting-replaced');
     await dialog.getByRole('button', { name: 'Rotate keys and give access' }).click();
-    await expect(dialog.getByText('Who keeps access')).toBeVisible({ timeout: 30_000 });
+    // Enabled once the review is worked out ("Working out who keeps access…" shows first).
+    await expect(dialog.getByRole('button', { name: 'Rotate keys and give access' })).toBeEnabled({
+      timeout: 30_000,
+    });
     await shot(owner, 'rotate-and-give');
     await dialog.getByRole('button', { name: 'Rotate keys and give access' }).click();
     await expect(dialog.getByText('Mark Member has their keys now, at their new key.')).toBeVisible(
