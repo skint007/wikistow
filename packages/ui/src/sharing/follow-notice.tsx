@@ -8,14 +8,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { KeyRound, ShieldAlert } from 'lucide-react';
-import {
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type KeyboardEvent,
-  type RefObject,
-} from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -134,26 +127,51 @@ function FollowDialog({
     }, ARMING_MS);
     return () => clearTimeout(timer);
   }, []);
-  // Whether the last press on a button, by pointer or key, started before
-  // it was armed, as on a button still dimmed: its click, when the press
-  // ends, doesn't count. A click with no press, as a screen reader sends,
-  // counts once armed.
-  const pressedEarly = useRef(false);
+  // A press under way that began before it was armed, by pointer or by
+  // Enter or Space (held down, its repeats included), until it ends: a click
+  // it makes, as on a button still dimmed, doesn't count. Heard anywhere, so
+  // a press dragged off and released elsewhere ends too. A click with no
+  // press, as a screen reader sends, counts once armed.
+  const early = useRef({ pointer: false, key: false });
+  useEffect(() => {
+    const activates = (event: globalThis.KeyboardEvent) =>
+      event.key === 'Enter' || event.key === ' ';
+    // A press's click comes as it ends, so the press is over a task later.
+    const later = (end: () => void) => setTimeout(end);
+    const pointerDown = () => {
+      early.current.pointer = !armedNow.current;
+    };
+    const pointerUp = () =>
+      later(() => {
+        early.current.pointer = false;
+      });
+    const keyDown = (event: globalThis.KeyboardEvent) => {
+      if (activates(event) && !event.repeat) early.current.key = !armedNow.current;
+    };
+    const keyUp = (event: globalThis.KeyboardEvent) => {
+      if (activates(event))
+        later(() => {
+          early.current.key = false;
+        });
+    };
+    const listeners = [
+      ['pointerdown', pointerDown],
+      ['pointerup', pointerUp],
+      ['pointercancel', pointerUp],
+      ['keydown', keyDown],
+      ['keyup', keyUp],
+    ] as const;
+    for (const [type, listener] of listeners)
+      document.addEventListener(type, listener as EventListener, true);
+    return () => {
+      for (const [type, listener] of listeners)
+        document.removeEventListener(type, listener as EventListener, true);
+    };
+  }, []);
   const onceArmed = (act: () => void) => ({
     'aria-disabled': armed ? undefined : true,
-    onPointerDown: () => {
-      pressedEarly.current = !armedNow.current;
-    },
-    onKeyDown: (event: KeyboardEvent) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        // A key held down since before: its repeats are the same press.
-        if (!event.repeat) pressedEarly.current = !armedNow.current;
-      }
-    },
     onClick: () => {
-      const early = pressedEarly.current;
-      pressedEarly.current = false;
-      if (armedNow.current && !early) act();
+      if (armedNow.current && !early.current.pointer && !early.current.key) act();
     },
   });
   const title = useRef<HTMLHeadingElement>(null);

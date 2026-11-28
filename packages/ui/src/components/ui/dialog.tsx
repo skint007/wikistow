@@ -77,6 +77,9 @@ function DialogContent({
 }) {
   const { open, onOpenChange, titleId, descriptionId } = useDialog();
   const [dialog, setDialog] = React.useState<HTMLDialogElement | null>(null);
+  // Where the focus was inside it, given back if a browser closes it past
+  // a refused Escape and it opens again: opening would focus its first control.
+  const lastFocus = React.useRef<HTMLElement | null>(null);
   const dismiss = () => {
     if (locked) return;
     if (onDismiss) onDismiss();
@@ -122,9 +125,15 @@ function DialogContent({
       onClose={(event) => {
         if (event.currentTarget.open) return;
         if ((locked || onDismiss || !closesOnEscape) && open) {
+          // Read first: opening focuses its first control, which updates it.
+          const was = lastFocus.current;
           event.currentTarget.showModal();
+          if (was?.isConnected && event.currentTarget.contains(was)) was.focus();
           if (!locked && closesOnEscape) onDismiss?.();
         } else onOpenChange(false);
+      }}
+      onFocus={(event) => {
+        lastFocus.current = event.target;
       }}
       // A click on the backdrop lands on the <dialog> itself.
       onClick={(event) => {

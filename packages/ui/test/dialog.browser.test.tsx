@@ -18,6 +18,7 @@ function OnlyItsButton() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent closesOnBackdrop={false} closesOnEscape={false}>
         <DialogTitle>Steps</DialogTitle>
+        <input aria-label="First" />
         <input aria-label="Typed" />
       </DialogContent>
     </Dialog>
@@ -37,18 +38,20 @@ it('closes only with its close button', async () => {
   expect(dialog.open).toBe(true);
 
   // Escape, twice: a browser may close it past a refused first one.
-  await act(() => userEvent.click(document.querySelector('input')!));
+  const typed = document.querySelector<HTMLInputElement>('input[aria-label=Typed]')!;
+  await act(() => userEvent.click(typed));
   await act(() => userEvent.keyboard('{Escape}'));
   await act(() => userEvent.keyboard('{Escape}'));
   await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
   expect(dialog.open).toBe(true);
-  expect(dialog.querySelector('input')).not.toBeNull();
+  // Opened again, if it was closed, the focus is where it was.
+  expect(document.activeElement).toBe(typed);
 
   // A click on the backdrop lands on the <dialog> itself.
   await act(() => userEvent.click(dialog, { position: { x: 1, y: 1 } }));
   expect(dialog.open).toBe(true);
 
-  await act(() => userEvent.click(document.querySelector('button')!));
+  await act(() => userEvent.click(dialog.querySelector('button')!));
   await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
   expect(dialog.open).toBe(false);
 });
