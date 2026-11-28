@@ -4,6 +4,8 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+## 0.32.0-beta.1 - 2026-11-28
+
 ### Highlights
 
 #### Upgrade notes
@@ -14,12 +16,16 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 - Replace my keys, in Settings → Security, is for when someone else may have your keys, such as when someone used a device of yours while it was unlocked, or saw your recovery key. It makes you new keys, a new passphrase and a new recovery key, and signs out your other devices. People you share with move to your new keys, with a notice. Then your app gives your shared folders new keys, and asks who keeps access. In a space you own with others, another owner adds you again; a space you own alone can be copied into a new one to share again.
 
+#### UI polish
+
+- What’s new opens a release from one field, which narrows as you type a version or a date.
+- A plugin’s Settings, on the Plugins page, opens in a dialog.
+
 ### Changes
 
 #### App
 
 - Replace my keys, in Settings → Security, now that the server lets people use it by default (#327). Before you confirm, it names the spaces you own alone, where nobody can add you again, and those you own with others. Once your keys are replaced, **Finish replacing your keys** gives each of your shared folders new keys, with the people your old key gave access to listed unticked, and is offered again at each unlock until it is done. An owner sees someone who replaced their keys under **Give access** with **Rotate keys and give access**; a co-owner is offered to add again an owner who replaced theirs, or to remove them instead; and a space you own alone can be copied into a new one, shared with nobody. (#767)
-
 - What's new goes to a release from one field, in place of a pill for each: it lists every release with its date and Prerelease and This version marks, narrows as a version or a date is typed, and opens the one chosen by mouse, by the arrows or by Enter. The app's comboboxes, Add property among them, keep the list open for a press on its scrollbar, leave keys an input method composes alone, stay under the sticky bars and scroll only their list. (#760)
 - A plugin's **Settings** on the Plugins page opens a dialog, titled with its name, in place of opening its settings under its row: the fields its manifest declares, then its own sections, scrolling on their own. A field still being typed in when the dialog closes is saved, and a save that fails after it closed is said in the row. `?plugin=` opens the dialog. Dialogs now show themselves before what they hold is drawn, so a plugin's section measures the dialog it is in. (#762)
 
