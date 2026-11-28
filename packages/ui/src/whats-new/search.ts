@@ -15,17 +15,36 @@ export const matchingHighlights = (release: Release, words: readonly string[]) =
   release.highlights.flatMap(({ items }) => items.filter((item) => highlightMatches(item, words)));
 
 /**
- * `text` in parts, each marked when it is one of `words`, ignoring case:
- * joined again, the parts are `text`.
+ * A highlight in parts, each in code or not, as backticks mark it, and
+ * each in pieces, marked or not: every place a word occurs is marked, found in the text
+ * without its backticks, as `highlightMatches` finds it, so a word that
+ * runs into code or out of it is marked on both sides. Joined again, with
+ * backticks around the code, the parts' pieces are `item`.
  */
-export function markWords(text: string, words: readonly string[]) {
-  const escaped = words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  if (escaped.length === 0) return [{ text, marked: false }];
-  // Longer words first, so one inside another marks the whole of it.
-  escaped.sort((a, b) => b.length - a.length);
-  const pattern = new RegExp(`(${escaped.join('|')})`, 'gi');
-  return text
-    .split(pattern)
-    .filter((part) => part !== '')
-    .map((part) => ({ text: part, marked: words.includes(part.toLowerCase()) }));
+export function highlightParts(item: string, words: readonly string[]) {
+  const parts = item.split('`');
+  const plain = parts.join('');
+  const lower = plain.toLowerCase();
+  // Marks by position, unless lowercasing changed the length (as for "İ").
+  const marked = new Array<boolean>(plain.length).fill(false);
+  if (lower.length === plain.length) {
+    for (const word of words) {
+      for (let at = lower.indexOf(word); word && at >= 0; at = lower.indexOf(word, at + 1)) {
+        marked.fill(true, at, at + word.length);
+      }
+    }
+  }
+  let offset = 0;
+  return parts.map((part, index) => {
+    const pieces: { text: string; marked: boolean }[] = [];
+    for (let at = 0; at < part.length;) {
+      const on = marked[offset + at] ?? false;
+      let end = at + 1;
+      while (end < part.length && (marked[offset + end] ?? false) === on) end++;
+      pieces.push({ text: part.slice(at, end), marked: on });
+      at = end;
+    }
+    offset += part.length;
+    return { code: index % 2 === 1, pieces };
+  });
 }

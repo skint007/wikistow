@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vite-plus
 import { userEvent } from 'vite-plus/test/browser/context';
 import changelog from '../../../CHANGELOG.md?raw';
 import { parseChangelog } from '../src/whats-new/changelog.ts';
-import { matchingHighlights } from '../src/whats-new/search.ts';
+import { highlightParts, matchingHighlights } from '../src/whats-new/search.ts';
 
 // What's new goes to any release from one field (#757), however many
 // releases there are: by mouse, by the arrows, or by Enter on what's typed;
@@ -197,7 +197,13 @@ it('finds releases by a word in their highlights, showing the change that matche
   expect(shown.textContent).toContain(first.replaceAll('`', ''));
   expect(shown.querySelector('mark')?.textContent?.toLowerCase()).toBe(word);
   await act(() => userEvent.click(shown));
-  expectOpenedAt(target.version);
+  expect(release(target.version).open).toBe(true);
+  expect(field().value).toBe('');
+  // The focus goes to the first highlight holding the word, in view.
+  const focused = document.activeElement as HTMLElement;
+  expect(focused.tagName).toBe('LI');
+  expect(release(target.version).contains(focused)).toBe(true);
+  expect(focused.querySelector('mark')).not.toBeNull();
   // Opened, the matches are marked there, and nowhere else.
   const marks = [...document.querySelectorAll('mark')];
   expect(marks.length).toBeGreaterThan(0);
@@ -223,6 +229,23 @@ it('matches every word typed, in any order, and Enter opens the first', async ()
   await act(() => userEvent.keyboard(`${word} ${other}`));
   expect(options().some((o) => o.firstElementChild?.textContent === target.version)).toBe(true);
   await act(() => userEvent.keyboard('{Enter}'));
-  expectOpenedAt(first!.version);
+  expect(release(first!.version).open).toBe(true);
+  expect(release(first!.version).contains(document.activeElement)).toBe(true);
   expect(release(first!.version).querySelectorAll('mark').length).toBeGreaterThanOrEqual(2);
+});
+
+it('marks a word that runs into code on both sides, as it matches', () => {
+  // As `IDENTITY_ROTATION=off`. reads, pasted from the page without its backticks.
+  const parts = highlightParts('Set `IDENTITY_ROTATION=off`. Then', ['identity_rotation=off.']);
+  expect(parts).toEqual([
+    { code: false, pieces: [{ text: 'Set ', marked: false }] },
+    { code: true, pieces: [{ text: 'IDENTITY_ROTATION=off', marked: true }] },
+    {
+      code: false,
+      pieces: [
+        { text: '.', marked: true },
+        { text: ' Then', marked: false },
+      ],
+    },
+  ]);
 });

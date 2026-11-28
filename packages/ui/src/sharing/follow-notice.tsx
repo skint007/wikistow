@@ -8,7 +8,14 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { KeyRound, ShieldAlert } from 'lucide-react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+  type RefObject,
+} from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -115,13 +122,33 @@ function FollowDialog({
   const { busy, error, run } = useAction();
   const [step, setStep] = useState<'notice' | 'decline'>('notice');
   const [warnings, setWarnings] = useState<followOperations.DeclinedOwnerSpace[] | null>(null);
-  // It opens on its own, maybe under a click already on its way: its buttons
-  // take none until it has been on screen a moment.
+  // It opens on its own, maybe under a click or a key already on its way:
+  // its buttons take a press only once it has been on screen a moment, and
+  // the focus starts on its title, where Enter does nothing.
   const [armed, setArmed] = useState(false);
+  const armedNow = useRef(false);
   useEffect(() => {
-    const timer = setTimeout(() => setArmed(true), ARMING_MS);
+    const timer = setTimeout(() => {
+      armedNow.current = true;
+      setArmed(true);
+    }, ARMING_MS);
     return () => clearTimeout(timer);
   }, []);
+  // Whether the pointer's last press on a button started once armed: one
+  // started before, as on a button still dimmed, doesn't count when it ends.
+  const pressedArmed = useRef(false);
+  const onceArmed = (act: () => void) => ({
+    'aria-disabled': armed ? undefined : true,
+    onPointerDown: () => {
+      pressedArmed.current = armedNow.current;
+    },
+    onClick: (event: MouseEvent) => {
+      // A click from the keyboard has no press (`detail` 0).
+      if (!armedNow.current || (event.detail > 0 && !pressedArmed.current)) return;
+      act();
+    },
+  });
+  const title = useRef<HTMLHeadingElement>(null);
   const id = follow.from.identity.id;
   const person = describePerson(ctx, id, null);
   const name = person.name;
@@ -151,7 +178,12 @@ function FollowDialog({
         ) : step === 'notice' ? (
           <>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+              <FocusOnOpen target={title} />
+              <DialogTitle
+                ref={title}
+                tabIndex={-1}
+                className="flex items-center gap-2 outline-none"
+              >
                 <KeyRound className="size-5" strokeWidth={1.75} />
                 <span>
                   <Name>{name}</Name> replaced their keys
@@ -181,14 +213,10 @@ function FollowDialog({
             </dl>
             <ErrorLine error={error} />
             <DialogFooter>
-              <Button
-                variant="outline"
-                disabled={busy || !armed}
-                onClick={() => setStep('decline')}
-              >
+              <Button variant="outline" disabled={busy} {...onceArmed(() => setStep('decline'))}>
                 Not them?
               </Button>
-              <Button disabled={busy || !armed} onClick={() => close(true)}>
+              <Button disabled={busy} {...onceArmed(() => close(true))}>
                 OK
               </Button>
             </DialogFooter>
@@ -224,6 +252,17 @@ function FollowDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * Moves the focus to `target` once the dialog it is in has opened: an
+ * effect runs after the dialog's own, which focuses its first control.
+ */
+function FocusOnOpen({ target }: { target: RefObject<HTMLElement | null> }) {
+  useEffect(() => {
+    target.current?.focus();
+  }, []);
+  return null;
 }
 
 // Where an owner accepted the declined key (protocol section 8.4, **An

@@ -9,7 +9,7 @@ import { linkHint } from '../../desktop';
 import { parseChangelog, REPOSITORY, type Release } from '../../whats-new/changelog';
 import {
   highlightMatches,
-  markWords,
+  highlightParts,
   matchingHighlights,
   searchWords,
 } from '../../whats-new/search';
@@ -92,18 +92,19 @@ function WhatsNew() {
   // Its highlights' matches stay marked until the next search.
   const [found, setFound] = useState<Found | null>(null);
   // Opens the release and moves to it, so the keyboard carries on from there.
-  // Open first, so there is room to bring it to the top; with the words
-  // found, they are marked, and the first in view.
+  // Open first, so there is room to bring it to the top. With the words
+  // found, they are marked, and the first highlight holding them takes the
+  // focus instead, so the focus is never out of view.
   const jump = (version: string, words: string[]) => {
     flushSync(() => {
       toggle(version, true);
       setFound(words.length > 0 ? { version, words } : null);
     });
     const details = document.getElementById(`v${version}`);
-    const summary = details?.querySelector('summary');
-    summary?.scrollIntoView({ block: 'start' });
-    summary?.focus({ preventScroll: true });
-    details?.querySelector('mark')?.scrollIntoView({ block: 'nearest' });
+    const found = details?.querySelector('mark')?.closest('li');
+    const target = found ?? details?.querySelector('summary');
+    target?.scrollIntoView({ block: found ? 'center' : 'start' });
+    target?.focus({ preventScroll: true });
   };
 
   return (
@@ -255,7 +256,12 @@ function ReleaseNotes({
             <h3 className="text-sm font-bold">{category}</h3>
             <ul className="grid list-disc gap-1.5 pl-5 text-sm leading-relaxed">
               {items.map((item) => (
-                <li key={item}>
+                <li
+                  key={item}
+                  // Where a search opens it, the focus goes, so it can.
+                  tabIndex={highlightMatches(item, words) ? -1 : undefined}
+                  className="scroll-mt-4 rounded-row outline-offset-2 max-[899px]:scroll-mt-16"
+                >
                   <Highlight text={item} words={highlightMatches(item, words) ? words : []} />
                 </li>
               ))}
@@ -279,8 +285,8 @@ function ReleaseNotes({
 
 /** A highlight's text, with what's between backticks shown as code, and `words` marked. */
 function Highlight({ text, words = [] }: { text: string; words?: readonly string[] }) {
-  return text.split('`').map((part, index) => {
-    const marked = markWords(part, words).map((piece, at) =>
+  return highlightParts(text, words).map(({ code, pieces }, index) => {
+    const shown = pieces.map((piece, at) =>
       piece.marked ? (
         <mark
           key={at}
@@ -292,12 +298,12 @@ function Highlight({ text, words = [] }: { text: string; words?: readonly string
         piece.text
       ),
     );
-    return index % 2 === 1 ? (
+    return code ? (
       <code key={index} className="rounded-row bg-muted px-1.5 py-0.5 font-mono text-[0.9em]">
-        {marked}
+        {shown}
       </code>
     ) : (
-      <span key={index}>{marked}</span>
+      <span key={index}>{shown}</span>
     );
   });
 }

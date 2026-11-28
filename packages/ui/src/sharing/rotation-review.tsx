@@ -73,7 +73,8 @@ export function RotationReview({
           key={plan.shareId}
           label={label}
           plan={plan}
-          titled={plans.length > 1}
+          // Plain, with no footnote to name it, even one folder is named.
+          titled={plain || plans.length > 1}
           ownerIds={ownerIds}
           person={person}
           busy={busy}
