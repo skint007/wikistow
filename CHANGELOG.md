@@ -4,6 +4,12 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Changes
+
+#### Development
+
+- Board work is planned by release: each issue's milestone is the version it ships in, or Later. `board add` files into the next minor version by default, `board plan` moves an issue, `board ship` closes a released version, and `board check` finds issues with no release. (#772)
+
 ## 0.32.0-beta.1 - 2026-11-28
 
 ### Highlights
