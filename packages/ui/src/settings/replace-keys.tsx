@@ -95,14 +95,19 @@ export function ReplaceKeys() {
   const retired = (me?.identity?.keyVersion ?? 1) > 1;
   // Whether shared folders are left at keys the old key opens: unknown while locked.
   const unlockedCtx = vault.status === 'unlocked' ? vault.ctx : null;
-  const checking = vault.status === 'unlocked' && retired && !!installation?.identityRotation;
+  const checking = vault.status === 'unlocked' && retired;
   const { data: finishing } = useQuery({ ...finishingQuery(unlockedCtx), enabled: checking });
   // Spaces owned with others wait for another owner to add the person again.
   const { data: owned } = useQuery({ ...ownedQuery(unlockedCtx), enabled: checking });
-  if (!installation?.identityRotation) return null;
+  // Off on the server, someone who replaced their keys still finishes and
+  // copies what the rotation left; nobody can start a new one.
+  const canRotate = !!installation?.identityRotation;
+  if (!canRotate && !retired) return null;
   const landed = landedFor !== null && landedFor === me?.account.id;
   const finishedSharing =
-    leftToFinish(finishing) === 0 && owned !== undefined && !owned.some((s) => s.waitsForReAdd);
+    leftToFinish(finishing) === 0 &&
+    owned !== undefined &&
+    !owned.some((s) => s.waitsForReAdd || s.confirmFirst);
   return (
     <FormRow
       id="replace-keys"
@@ -120,7 +125,7 @@ export function ReplaceKeys() {
       }
     >
       {vault.status === 'unlocked' ? (
-        <ReplaceKeysFlow ctx={vault.ctx} vault={vault.vault} />
+        <ReplaceKeysFlow ctx={vault.ctx} vault={vault.vault} canRotate={canRotate} />
       ) : (
         <p className="text-sm">
           Unlock your vault first. If you lost your passphrase, use your recovery key.
@@ -130,7 +135,15 @@ export function ReplaceKeys() {
   );
 }
 
-function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVault }) {
+function ReplaceKeysFlow({
+  ctx,
+  vault,
+  canRotate,
+}: {
+  ctx: ClientContext;
+  vault: UnlockedVault;
+  canRotate: boolean;
+}) {
   const [step, setStep] = useState<'choose' | 'save' | 'done'>(() =>
     finishedNow()?.kind === 'done' ? 'done' : current() ? 'save' : 'choose',
   );
@@ -160,7 +173,13 @@ function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVa
   return (
     <div className="grid gap-6">
       {vault.identity.public.keyVersion > 1 && <SpacesAfterRotation ctx={ctx} />}
-      <Choose ctx={ctx} vault={vault} onPrepared={() => setStep('save')} />
+      {canRotate ? (
+        <Choose ctx={ctx} vault={vault} onPrepared={() => setStep('save')} />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          This server doesn’t let anyone replace their keys now.
+        </p>
+      )}
     </div>
   );
 }

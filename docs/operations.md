@@ -74,7 +74,7 @@ The server keeps no prompt or reply. It doesn't store them, and its log has one 
 
 ## Replacing keys
 
-People can replace their identity keys in **Settings → Security → Replace my keys**, as when theirs may have leaked ([protocol section 4.6](../wikistow/protocol.md#46-identity-key-rotation)). It is on by default. To turn it off, set `IDENTITY_ROTATION=off` in the server's environment and restart. The app then hides **Replace my keys**, and the server refuses new rotations. People who already replaced theirs keep their new keys, and the people they share with keep following them.
+People can replace their identity keys in **Settings → Security → Replace my keys**, as when theirs may have leaked ([protocol section 4.6](../wikistow/protocol.md#46-identity-key-rotation)). It is on by default. To turn it off, set `IDENTITY_ROTATION=off` in the server's environment and restart. The server then refuses new rotations, and the app offers **Replace my keys** to nobody. People who already replaced theirs keep their new keys, the people they share with keep following them, and their Settings still shows what is left to move to the new keys and offers to copy a space they own alone.
 
 | Variable | Meaning |
 | --- | --- |

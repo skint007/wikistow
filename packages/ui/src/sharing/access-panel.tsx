@@ -58,6 +58,7 @@ import { AccessSelect, PersonFinder, type Found } from './person-finder';
 import { NewMark } from './new-mark';
 import { NotInAnyShare, RotationConfirm } from './rotation-confirm';
 import { StopSharing } from './stop-sharing';
+import { useTicks, withTicks } from './ticks';
 import { ErrorLine, useAction } from './use-action';
 
 export type ListedShare = Awaited<ReturnType<typeof sharingOperations.listShares>>[number];
@@ -77,7 +78,13 @@ type Pending =
       /** What to say when the server lists nothing to rotate. */
       none: ReactNode;
       make: () => Promise<ShareRotation[]>;
-      apply: (plans: ShareRotation[]) => Promise<void>;
+      /** `tick`: the offers the owner ticked, by share, where `ticking` lets them. */
+      apply: (
+        plans: ShareRotation[],
+        tick: ReadonlyMap<ShareId, readonly rotatedShareOperations.Tick[]>,
+      ) => Promise<void>;
+      /** Members only an earlier key gave access can be ticked in (section 4.6). */
+      ticking?: true;
     }
   | {
       /** A group change that takes access away: rotations, maybe none. */
@@ -161,10 +168,14 @@ export function AccessPanel({
     setDone(message);
   };
 
+  // Offers the owner ticks in a rotation that lets them (section 4.6).
+  const { ticks, onTick, chosen, reset: resetTicks } = useTicks();
+
   // Show a change to confirm; nothing is sealed or rotated until the owner does.
   const ask = (next: Pending) => {
     setDone(null);
     setError(null);
+    resetTicks();
     setPending(next);
   };
 
@@ -340,8 +351,16 @@ export function AccessPanel({
           (await rotatedShareOperations.planRekey(ctx, { spaceId, person: entry })).map(
             (planned) => ({ label: shareNameById(tree, planned.plan.shareId), planned }),
           ),
-        apply: (plans) =>
-          runCommand(rekeyMember, { plans: plans.map((p) => p.planned) }, env).then(() => {}),
+        apply: async (confirmed, tick) => {
+          const plans = await withTicks(
+            confirmed.map((p) => p.planned),
+            tick,
+            (again) =>
+              rotatedShareOperations.planRekey(ctx, { spaceId, person: entry, tick: again }),
+          );
+          await runCommand(rekeyMember, { plans: [...plans] }, env);
+        },
+        ticking: true,
       });
       return;
     }
@@ -510,7 +529,8 @@ export function AccessPanel({
         plansOf={(plans) =>
           plans.map(({ label: l, planned }) => ({ label: l, plan: planned.plan }))
         }
-        apply={pending.apply}
+        apply={(plans) => pending.apply(plans, chosen(plans.map((p) => p.planned)))}
+        {...(pending.ticking ? { ticks, onTick } : {})}
         ownerIds={ownerIds}
         review={reviewKey}
         onCancel={() => setPending(null)}

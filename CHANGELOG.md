@@ -8,7 +8,7 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### Upgrade notes
 
-- Replacing keys is on by default. A server administrator can turn it off with `IDENTITY_ROTATION=off`. Before you replace your keys, update WikiStow on your other devices and the `wikistow` CLI your agents use: older versions can’t open your new vault.
+- Replacing keys is on by default. A server administrator can turn it off with `IDENTITY_ROTATION=off`. Before you replace your keys, update WikiStow on your other devices and the `wikistow` CLI your agents use: older versions can’t open your new vault. Owners using the desktop app or the CLI should update too: an older one can’t change keys in a shared folder whose member replaced theirs.
 
 #### Features
 

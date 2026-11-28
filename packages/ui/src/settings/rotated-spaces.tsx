@@ -2,6 +2,7 @@
 // #327): named before they confirm, and after it lands, the shares left to
 // move and a copy of each space they own alone.
 import {
+  CryptoError,
   keyHash,
   rotatedShareOperations,
   sharingOperations,
@@ -34,7 +35,16 @@ import { PLAIN, useClient } from '../vault/store';
  * waits for another owner to add them again at their current key, as no
  * owner statement but their own names it yet.
  */
-type Owned = rotatedShareOperations.OwnedSpace & { sharing: boolean; waitsForReAdd: boolean };
+type Owned = rotatedShareOperations.OwnedSpace & {
+  sharing: boolean;
+  waitsForReAdd: boolean;
+  /**
+   * Past key version 1, a space where this app takes no owner action until
+   * the person confirms who added them, as after a co-owner added them
+   * again: finishing skips it until then (`planFinishing`).
+   */
+  confirmFirst: boolean;
+};
 
 /** The spaces this person owns, alone or with other owners. */
 export const ownedQuery = (ctx: ClientContext | null) =>
@@ -50,6 +60,14 @@ export const ownedQuery = (ctx: ClientContext | null) =>
           // Unknown counts as shared, and as not waiting: named, never hidden.
           let sharing = true;
           let waitsForReAdd = false;
+          let confirmFirst = false;
+          if (self.keyVersion > 1) {
+            try {
+              await sharingOperations.ownerKeys(ctx, space.spaceId);
+            } catch (error) {
+              confirmFirst = error instanceof CryptoError && error.code === 'unaccepted-owner';
+            }
+          }
           try {
             const shares = await sharingOperations.listShares(ctx, space.spaceId);
             sharing = !space.alone || shares.some((share) => share.members.length > 0);
@@ -65,7 +83,7 @@ export const ownedQuery = (ctx: ClientContext | null) =>
           } catch {
             // Left as unknown.
           }
-          return { ...space, sharing, waitsForReAdd };
+          return { ...space, sharing, waitsForReAdd, confirmFirst };
         }),
       );
     },
@@ -151,6 +169,7 @@ export function SpacesAfterRotation({ ctx }: { ctx: ClientContext }) {
   const toFinish = leftToFinish(finishing);
   const failed = (finishing ?? []).some((space) => space.failed.length > 0);
   const waiting = shared.filter((space) => space.waitsForReAdd);
+  const confirming = [...owned.alone, ...shared].filter((space) => space.confirmFirst);
   const [finishOpen, setFinishOpen] = useState(false);
   const [copying, setCopying] = useState<{ spaceId: SpaceId; name: string } | null>(null);
   return (
@@ -168,9 +187,15 @@ export function SpacesAfterRotation({ ctx }: { ctx: ClientContext }) {
             Move them to your new keys
           </Button>
         </div>
-      ) : waiting.length === 0 ? (
+      ) : waiting.length === 0 && confirming.length === 0 ? (
         <p>Your shared folders use your new keys.</p>
       ) : null}
+      {confirming.length > 0 && (
+        <p data-testid="rotation-confirm-owner">
+          In {list(confirming)}, confirm who added you as an owner: open the space. Until you do,
+          its shared folders keep keys your old key opens.
+        </p>
+      )}
       {failed && (
         <p className="text-destructive">
           This app couldn’t work out new keys for some of them. It tries again each time you unlock.

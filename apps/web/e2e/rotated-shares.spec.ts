@@ -46,6 +46,18 @@ async function replaceKeys(page: Page, check?: () => Promise<void>) {
   });
 }
 
+/** Settings → Security with Replace my keys open, as the page may have kept it open. */
+async function openReplaceKeys(page: Page) {
+  await page.goto('/settings#security');
+  // Read afresh: a goto that changes only the hash keeps what the page loaded.
+  await page.reload();
+  const start = page.getByRole('button', { name: 'Start replace my keys' });
+  const after = page.getByTestId('rotation-after');
+  await expect(start.or(after)).toBeVisible({ timeout: 30_000 });
+  if (await start.isVisible()) await start.click();
+  await expect(after).toBeVisible();
+}
+
 /** A space with a shared folder holding a published page. */
 async function gardenSharedWith(owner: Page, email: string, access: 'reader' | 'editor') {
   await newSpace(owner, 'Family');
@@ -250,13 +262,17 @@ test('a co-owner adds a rotated owner again', async ({ page: alice, freshPage, a
   });
 
   await test.step('Alice confirms who added them again, and waits for nobody', async () => {
+    // Until Alice confirms, the rotation isn't finished there.
+    await openReplaceKeys(alice);
+    await expect(alice.getByTestId('rotation-confirm-owner')).toContainText('Shared house', {
+      timeout: 30_000,
+    });
     await alice.goto(space);
     const confirm = alice.getByRole('dialog', { name: /Olive Other added you as an owner/ });
     await expect(confirm).toBeVisible({ timeout: 30_000 });
     await confirm.getByRole('button', { name: 'Confirm' }).click();
     await expect(confirm).toBeHidden({ timeout: 30_000 });
-    await alice.goto('/settings#security');
-    await alice.getByRole('button', { name: 'Start replace my keys' }).click();
+    await openReplaceKeys(alice);
     await expect(alice.getByTestId('rotation-after')).toContainText(
       'Your shared folders use your new keys.',
       { timeout: 30_000 },
