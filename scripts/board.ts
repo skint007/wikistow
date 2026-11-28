@@ -1,14 +1,20 @@
 // Keeps the project board in step with the repo (docs/project-board.md).
 //
 //   node scripts/board.ts setup                         adds the fields, label and views below; a second run changes nothing
-//   node scripts/board.ts add <title> --body-file F --area A… [--low] [--no-area]
-//   node scripts/board.ts ask <title> --body-file F --waiting decide|try|do --next "…" [--area A…]
+//   node scripts/board.ts add <title> --body-file F --area A… [--low] [--no-area] [--release V|--later]
+//   node scripts/board.ts ask <title> --body-file F --waiting decide|try|do --next "…" [--area A…] [--release V|--later]
+//   node scripts/board.ts plan <#n> <version>|later      moves it to that release's milestone
+//   node scripts/board.ts ship <version>                closes the milestone once v<version> is tagged
 //   node scripts/board.ts start <#n>                    In Progress
 //   node scripts/board.ts wait <#n> decide|try|do|outside --next "…"   or   wait <#n> --clear
 //   node scripts/board.ts drop <#n> --why "…" [--duplicate-of M]       closes it as not planned, then Dropped
 //   node scripts/board.ts set <#n> Field=Value…         any field but Priority; Field= clears it
-//   node scripts/board.ts list [--waiting] [--area A]
+//   node scripts/board.ts list [--waiting] [--area A] [--release V|--later]
 //   node scripts/board.ts check                         problems exit 1; notes only warn
+//
+// Each issue's release is its GitHub milestone, named for the version, such as
+// 0.33.0, or Later. Without --release or --later, add and ask file into the
+// next minor version after the newest tag.
 //
 // It needs `gh` signed in with the `project` scope (`gh auth refresh -s project`).
 // Every run looks up the board's IDs by name, so nothing here or in the docs
@@ -74,6 +80,8 @@ const LABELS = [
 /** Views setup creates, or whose filter it sets. Columns are set only on a view it creates. */
 const VIEWS: {
   name: string;
+  /** A view of this name is renamed to `name`, when no view has `name` yet. */
+  was?: string;
   layout: 'TABLE_LAYOUT' | 'BOARD_LAYOUT';
   filter: string;
   fields?: string[];
@@ -91,7 +99,17 @@ const VIEWS: {
     filter: 'is:open label:low',
     fields: ['Title', 'Labels', 'Status'],
   },
+  {
+    name: 'By release',
+    was: 'Milestones',
+    layout: 'TABLE_LAYOUT',
+    filter: 'is:open is:issue',
+    fields: ['Title', 'Milestone', 'Status', 'Priority', 'Labels'],
+  },
 ];
+
+/** The milestone for work not given a version yet. */
+const LATER = 'Later';
 
 const say = (text: string) => process.stdout.write(`${text}\n`);
 const PRIORITY_ORDER = ['P0', 'P1', 'P2'];
@@ -197,6 +215,7 @@ type Item = {
     state?: 'OPEN' | 'CLOSED' | 'MERGED';
     stateReason?: 'COMPLETED' | 'NOT_PLANNED' | 'DUPLICATE' | 'REOPENED' | null;
     labels?: { nodes: { name: string }[] };
+    milestone?: { title: string } | null;
     comments?: { nodes: { body: string }[] };
   } | null;
 };
@@ -257,6 +276,9 @@ function items(): Item[] {
                         nodes {
                           name
                         }
+                      }
+                      milestone {
+                        title
                       }
                       comments(last: 3) {
                         nodes {
@@ -537,6 +559,22 @@ function setup() {
 
   for (const spec of VIEWS) {
     let view = p.views.find((v) => same(v.name, spec.name));
+    const old = spec.was && !view ? p.views.find((v) => same(v.name, spec.was!)) : undefined;
+    if (old) {
+      graphql(
+        `
+          mutation ($view: ID!, $name: String!) {
+            updateProjectV2View(input: { viewId: $view, name: $name }) {
+              clientMutationId
+            }
+          }
+        `,
+        { view: old.id, name: spec.name },
+      );
+      changes.push(`view ${old.name}: renamed ${spec.name}`);
+      old.name = spec.name;
+      view = old;
+    }
     if (!view) {
       const data = graphql<{ createProjectV2View: { projectV2View: View } }>(
         `
@@ -588,6 +626,143 @@ function setup() {
   say(changes.length ? changes.join('\n') : 'Nothing to change.');
 }
 
+// --- releases ---------------------------------------------------------------
+
+type Version = [number, number, number];
+const compare = (a: Version, b: Version) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+
+function parseVersion(text: string): Version | undefined {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(text.trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
+}
+
+type Tag = { version: Version; beta: boolean };
+let tagList: Tag[] | undefined;
+/** The repo's release tags, read from GitHub so a stale checkout can't pick an old version. */
+function tags(): Tag[] {
+  tagList ??= gh(['api', '--paginate', `repos/${REPO}/git/matching-refs/tags/v`, '--jq', '.[].ref'])
+    .split('\n')
+    .flatMap((ref) => {
+      const m = /^refs\/tags\/v(\d+\.\d+\.\d+)(-.+)?$/.exec(ref.trim());
+      const version = m && parseVersion(m[1]!);
+      return version ? [{ version, beta: !!m[2] }] : [];
+    });
+  return tagList;
+}
+
+const highest = (list: Tag[]) =>
+  list.map((t) => t.version).sort((a, b) => compare(b, a))[0] as Version | undefined;
+
+/** The version a new issue ships in by default: the minor after the newest tag, beta or not. */
+function nextRelease(): string {
+  const top = highest(tags());
+  if (!top) fail(['No v* tags on GitHub: give --release or --later.']);
+  return `${top[0]}.${top[1] + 1}.0`;
+}
+
+type Milestone = { number: number; title: string; state: 'open' | 'closed'; open_issues: number };
+let milestoneList: Milestone[] | undefined;
+function milestones(): Milestone[] {
+  milestoneList ??= gh([
+    'api',
+    '--paginate',
+    `repos/${REPO}/milestones?state=all&per_page=100`,
+    '--jq',
+    '.[] | {number, title, state, open_issues}',
+  ])
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Milestone);
+  return milestoneList;
+}
+
+/** `0.33.0`, `v0.33.0` or `later` as a milestone title, or undefined when it is neither. */
+function releaseName(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  if (same(text, LATER)) return LATER;
+  const v = parseVersion(text);
+  return v && v.join('.');
+}
+
+/** The open milestone for a release, created when there is none; a shipped release is refused. */
+function openRelease(text: string): string {
+  const title = releaseName(text);
+  if (!title) fail([`A release is a version, such as 0.33.0, or later; not “${text}”.`]);
+  const found = milestones().find((m) => same(m.title, title));
+  if (found?.state === 'closed')
+    fail([`${title}’s milestone is closed, so it has shipped. Pick a later release.`]);
+  if (found) return found.title;
+  const v = parseVersion(title);
+  const stable = highest(tags().filter((t) => !t.beta));
+  if (v && stable && compare(v, stable) <= 0)
+    fail([
+      `v${title} isn't after v${stable.join('.')}, the newest stable release. Pick a later one.`,
+    ]);
+  const made = JSON.parse(
+    gh([
+      'api',
+      '-X',
+      'POST',
+      `repos/${REPO}/milestones`,
+      '-f',
+      `title=${title}`,
+      '-f',
+      `description=${title === LATER ? 'Not planned for a release yet' : `What ships in ${title}`}`,
+    ]),
+  ) as Milestone;
+  milestones().push({ ...made, open_issues: 0 });
+  say(`Milestone ${title}: created`);
+  return title;
+}
+
+/** `--release V` or `--later`, else the next release. */
+function chosenRelease(release: string | undefined, later: boolean | undefined): string {
+  if (release && later) fail(['Give --release or --later, not both.']);
+  return openRelease(later ? LATER : (release ?? nextRelease()));
+}
+
+function plan(number: number, release: string | undefined) {
+  if (!release) fail(['Give the release: a version, such as 0.33.0, or later.']);
+  const title = openRelease(release);
+  gh(['issue', 'edit', String(number), '--repo', REPO, '--milestone', title]);
+  say(`#${number} in ${title}.`);
+}
+
+/** Closes a shipped version's milestone. Open issues in it must move first. */
+function ship(release: string | undefined) {
+  const title = releaseName(release);
+  const v = title && parseVersion(title);
+  if (!v) fail([`Give the version that shipped, such as 0.32.0, not “${release ?? ''}”.`]);
+  if (!tags().some((t) => !t.beta && compare(t.version, v) === 0))
+    fail([`v${title} isn't tagged on GitHub yet: tag it first.`]);
+  const found = milestones().find((m) => same(m.title, title));
+  if (!found) fail([`No milestone ${title}.`]);
+  if (found.state === 'closed') return say(`${title} is closed already.`);
+  const left: { number: number; title: string }[] = JSON.parse(
+    gh([
+      'issue',
+      'list',
+      '--repo',
+      REPO,
+      '--milestone',
+      found.title,
+      '--state',
+      'open',
+      '--limit',
+      '200',
+      '--json',
+      'number,title',
+    ]),
+  );
+  if (left.length)
+    fail([
+      `${title} still has open issues. Move each with \`board plan <#n> <version>|later\`:`,
+      ...left.map((i) => `  #${i.number} ${i.title}`),
+    ]);
+  gh(['api', '-X', 'PATCH', `repos/${REPO}/milestones/${found.number}`, '-f', 'state=closed']);
+  say(`${title} closed.`);
+}
+
 // --- commands ---------------------------------------------------------------
 
 function issueNumber(arg: string | undefined): number {
@@ -611,7 +786,12 @@ function areaLabels(areas: string[]): string[] {
   });
 }
 
-function fileIssue(title: string, bodyFile: string | undefined, labels: string[]): number {
+function fileIssue(
+  title: string,
+  bodyFile: string | undefined,
+  labels: string[],
+  release: string,
+): number {
   if (!bodyFile) fail(['--body-file is required.']);
   const url = gh([
     'issue',
@@ -623,10 +803,12 @@ function fileIssue(title: string, bodyFile: string | undefined, labels: string[]
     '--body-file',
     bodyFile,
     ...labels.flatMap((l) => ['--label', l]),
+    '--milestone',
+    release,
   ]).trim();
   const number = Number(url.split('/').pop());
   // Said first, so a failure below still shows the issue was filed.
-  say(url);
+  say(`${url}  ${release}`);
   itemId(number);
   return number;
 }
@@ -652,11 +834,23 @@ async function drop(number: number, why: string | undefined, duplicateOf: string
   say(`#${number} Dropped.`);
 }
 
-function list(onlyWaiting: boolean, area: string | undefined) {
+/** Release order: versions oldest first, then Later, then no release. */
+function releaseOrder(a: string | undefined, b: string | undefined): number {
+  const key = (t: string | undefined) =>
+    t === undefined ? 2 : same(t, LATER) ? 1 : parseVersion(t) ? 0 : 1;
+  const va = a ? parseVersion(a) : undefined;
+  const vb = b ? parseVersion(b) : undefined;
+  return key(a) - key(b) || (va && vb ? compare(va, vb) : 0);
+}
+
+function list(onlyWaiting: boolean, area: string | undefined, release: string | undefined) {
   const rank = (i: Item) => {
     const p = PRIORITY_ORDER.indexOf(i.priority?.name ?? '');
     return p < 0 ? PRIORITY_ORDER.length : p;
   };
+  const shown = release && releaseName(release);
+  if (release && !shown)
+    fail([`A release is a version, such as 0.33.0, or later; not “${release}”.`]);
   const open = items()
     .filter((i) => i.content?.__typename !== 'PullRequest' && i.content?.state !== 'CLOSED')
     .filter((i) => !onlyWaiting || i.waiting)
@@ -665,13 +859,20 @@ function list(onlyWaiting: boolean, area: string | undefined) {
         !area ||
         i.content?.labels?.nodes.some((l) => same(l.name, `area: ${area}`) || same(l.name, area)),
     )
-    .sort((a, b) => rank(a) - rank(b) || (a.content?.number ?? 0) - (b.content?.number ?? 0));
+    .filter((i) => !shown || same(i.content?.milestone?.title ?? '', shown))
+    .sort(
+      (a, b) =>
+        releaseOrder(a.content?.milestone?.title, b.content?.milestone?.title) ||
+        rank(a) - rank(b) ||
+        (a.content?.number ?? 0) - (b.content?.number ?? 0),
+    );
   for (const i of open) {
     const c = i.content!;
     const labels = c.labels?.nodes.map((l) => l.name.replace(/^area: /, '')).join(', ');
     say(
       [
         c.number ? `#${c.number}` : 'draft',
+        c.milestone?.title ?? 'no release',
         i.status?.name ?? '-',
         i.priority?.name ?? '-',
         i.waiting?.name ?? '',
@@ -784,6 +985,22 @@ async function check() {
       problems.push(`#${n} waits on ${i.waiting.name} with no Next step.`);
     if (!labels.some((l) => l.startsWith('area:')) && !labels.includes('question'))
       notes.push(`#${n} has no area: label.`);
+    const release = c.milestone?.title;
+    if (!release) problems.push(`#${n} has no release: \`board plan ${n} <version>|later\`.`);
+    else if (milestones().find((m) => m.title === release)?.state === 'closed')
+      problems.push(`#${n} is open in ${release}, which has shipped: move it with \`board plan\`.`);
+  }
+
+  const stable = highest(tags().filter((t) => !t.beta));
+  for (const m of milestones()) {
+    if (m.state !== 'open') continue;
+    const v = parseVersion(m.title);
+    if (!v && m.title !== LATER)
+      problems.push(`Milestone “${m.title}” is open but isn't a version or ${LATER}.`);
+    else if (v && stable && compare(v, stable) <= 0)
+      problems.push(
+        `${m.title} has shipped (v${stable.join('.')} is tagged): \`board ship ${m.title}\`.`,
+      );
   }
 
   let newest = '';
@@ -833,6 +1050,8 @@ const { values: flags, positionals } = parseArgs({
     clear: { type: 'boolean' },
     why: { type: 'string' },
     'duplicate-of': { type: 'string' },
+    release: { type: 'string' },
+    later: { type: 'boolean' },
   },
 });
 const [command, ...rest] = positionals;
@@ -845,19 +1064,23 @@ switch (command) {
     const areas = flags.area ?? [];
     if (!areas.length && !flags['no-area'])
       fail(['Give an --area, or --no-area and say why in your reply.']);
-    fileIssue(rest.join(' '), flags['body-file'], [
-      ...areaLabels(areas),
-      ...(flags.low ? ['low'] : []),
-    ]);
+    fileIssue(
+      rest.join(' '),
+      flags['body-file'],
+      [...areaLabels(areas), ...(flags.low ? ['low'] : [])],
+      chosenRelease(flags.release, flags.later),
+    );
     break;
   }
   case 'ask': {
     const name = waiting(flags.waiting);
     if (!flags.next) fail(['--next is required: one plain sentence saying what to do, and where.']);
-    const number = fileIssue(rest.join(' '), flags['body-file'], [
-      'question',
-      ...areaLabels(flags.area ?? []),
-    ]);
+    const number = fileIssue(
+      rest.join(' '),
+      flags['body-file'],
+      ['question', ...areaLabels(flags.area ?? [])],
+      chosenRelease(flags.release, flags.later),
+    );
     const item = itemId(number);
     setField(item, 'Waiting', name);
     setField(item, 'Next step', flags.next);
@@ -893,14 +1116,20 @@ switch (command) {
     }
     break;
   }
+  case 'plan':
+    plan(issueNumber(rest[0]), rest[1]);
+    break;
+  case 'ship':
+    ship(rest[0]);
+    break;
   case 'list':
-    list(flags.waiting === true, flags.area?.[0]);
+    list(flags.waiting === true, flags.area?.[0], flags.later ? LATER : flags.release);
     break;
   case 'check':
     await check();
     break;
   default:
     fail([
-      'Usage: node scripts/board.ts setup|add|ask|start|wait|drop|set|list|check (see the top of scripts/board.ts)',
+      'Usage: node scripts/board.ts setup|add|ask|start|wait|drop|set|plan|ship|list|check (see the top of scripts/board.ts)',
     ]);
 }

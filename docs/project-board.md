@@ -5,19 +5,31 @@ Work on WikiStow is tracked on the public [WikiStow board](https://github.com/us
 Change the board with `scripts/board.ts`, which looks up the board's IDs by name on every run:
 
 ```sh
-node scripts/board.ts list [--waiting] [--area search]      # open cards, by Priority
-node scripts/board.ts add "<title>" --body-file F --area search [--area …] [--low]
+node scripts/board.ts list [--waiting] [--area search] [--release 0.33.0|--later]   # open cards, by release, then Priority
+node scripts/board.ts add "<title>" --body-file F --area search [--area …] [--low] [--release 0.33.0|--later]
 node scripts/board.ts start 123                             # In Progress
-node scripts/board.ts ask "<title>" --body-file F --waiting decide --next "<one sentence>"
+node scripts/board.ts ask "<title>" --body-file F --waiting decide --next "<one sentence>" [--release …|--later]
 node scripts/board.ts wait 123 decide|try|do|outside --next "<one sentence>"
 node scripts/board.ts wait 123 --clear
 node scripts/board.ts drop 123 --why "<reason>" [--duplicate-of 120]
 node scripts/board.ts set 123 Status=Done "Next step="      # any field but Priority; Field= clears it
+node scripts/board.ts plan 123 0.33.0|later                 # moves it to another release
+node scripts/board.ts ship 0.32.0                           # closes the release once v0.32.0 is tagged
 node scripts/board.ts check                                 # problems exit 1; notes only warn
 node scripts/board.ts setup                                 # creates the fields, label and views; changes nothing when they exist
 ```
 
 It needs the token's `project` scope. If a command says the scope is missing, run `gh auth refresh -s project`; Scott approves it in a browser.
+
+## Releases
+
+Work is planned by release. Each issue's release is its GitHub milestone, named for the version it ships in, such as `0.33.0`. **Later** holds what isn't planned for a version yet. The board shows the milestone as its Milestone field, and the **By release** view lists the open issues with it.
+
+- **Filing.** `add` and `ask` file into the next minor version after the newest tag, beta or not: with `v0.32.0-beta.1` out, that is `0.33.0`. Give `--release` for another version, such as a beta's feedback and its "Is it good?" question, which go in the version being tried. Give `--later` only when Scott says so. Scott moves issues between releases; `plan` does it. A release's milestone is made when the first issue goes in.
+- **Patches.** Fixes go in the next minor version too. A patch release, such as `0.32.1`, ships what `main` holds, and its issues stay in their milestone until that version ships, or move to `0.32.1` if Scott asks for one.
+- **Betas.** Every beta of a version, `0.33.0-beta.1`, `-beta.2` and so on, belongs to that version's milestone.
+- **Order.** Priority is the order of work within a release. `list` sorts by release, then by Priority.
+- **Shipping.** Once the stable tag is pushed, run `ship <version>`, which closes the milestone. It refuses while an issue in it is open: move each to the next release, or Later, with `plan`. A closed milestone takes no new issues, and neither does a version that isn't after the newest stable tag.
 
 ## Status
 
@@ -48,7 +60,7 @@ A question that outlives your turn gets a card. File a new one with `board ask`,
 
 The **Waiting** view lists these cards. Choices you make without Scott go in the PR body under "Decided without you". They get no card. Never record one as Scott's decision.
 
-After you push a beta tag, ask whether it is good: `board ask "Is 0.27.0-beta.1 good?" --waiting try --next "…"`, with what to try, taken from the highlights. A later beta updates the same question, and the version PR that promotes it closes it.
+After you push a beta tag, ask whether it is good: `board ask "Is 0.27.0-beta.1 good?" --release 0.27.0 --waiting try --next "…"`, with what to try, taken from the highlights. A later beta updates the same question, and the version PR that promotes it closes it.
 
 ## Dropping
 
@@ -73,6 +85,8 @@ Run `node scripts/board.ts check` after each batch and before cutting a release.
 - an issue closed as not planned or as a duplicate that isn't Dropped;
 - In Review with no open PR naming the issue, or In Progress with an open PR that closes it;
 - a `question` with no Waiting, Waiting with no Next step, or Waiting on a closed card;
+- an open issue with no release, or in a release that has shipped (its milestone is closed);
+- an open milestone whose name isn't a version or Later, or whose version isn't after the newest stable tag, so it shipped but wasn't closed with `ship`;
 - a beta as the newest tag with no open question asking whether it is good.
 
 Its notes only warn: an issue without an `area:` label, In Progress for over three days with no open PR, a draft item on the board, and a Dropped issue with no "Dropped:" comment giving the reason.
