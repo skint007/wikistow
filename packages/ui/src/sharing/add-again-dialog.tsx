@@ -1,7 +1,7 @@
-import { fingerprint, type DirectoryEntry, type SpaceId } from '@wikistow/client';
+import { CryptoError, fingerprint, type DirectoryEntry, type SpaceId } from '@wikistow/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Name } from '@/components/name';
+import { Name, plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -15,6 +15,7 @@ import { runCommand } from '../commands/command';
 import { addCoOwner } from '../commands/sharing-commands';
 import { refreshAccess } from '../data/queries';
 import { useClient } from '../vault/store';
+import { sharingMessage } from './messages';
 import { useOwnerRequirements } from './owner-standing';
 import { ErrorLine, HoldOpen, useAction, useHoldOpen } from './use-action';
 
@@ -47,7 +48,13 @@ export function AddAgainDialog({
   const ctx = useClient();
   const queryClient = useQueryClient();
   const satisfies = useOwnerRequirements(spaceId);
-  const { busy, error, run } = useAction();
+  // A folder still at keys only their old key made can't be passed on to
+  // their new key: their own app moves it when they finish (section 4.6).
+  const { busy, error, run } = useAction((caught) =>
+    caught instanceof CryptoError && caught.code === 'key-version'
+      ? `A shared folder here still uses keys ${plainText(name)}’s old key made. Ask them to finish replacing their keys in Settings, then add them again.`
+      : sharingMessage(caught),
+  );
   const { locked, hold } = useHoldOpen();
   const [progress, setProgress] = useState<string | null>(null);
   const add = () =>
@@ -87,7 +94,8 @@ export function AddAgainDialog({
           <p className="text-sm">
             If they didn’t replace their keys, don’t add them: someone else may hold their old key.
             You can remove them as an owner instead. Every shared folder then gets new keys without
-            them.
+            them, unless they already gave a folder keys with their new key, which this app can’t
+            open: then only adding them again works.
           </p>
           {progress && busy && (
             <p role="status" className="text-sm font-bold">

@@ -516,8 +516,13 @@ describe('the person’s own shares', () => {
     // A space made since, at the new key, isn't one the rotation changed.
     const later = await spaceOperations.createSpace(ctx, { name: 'Made since' });
     const owned = await rotated.ownedSpaces(ctx);
-    expect(owned).toContainEqual({ spaceId: lib.spaceId, alone: true, earlierKey: true });
-    expect(owned).toContainEqual({ spaceId: later, alone: true, earlierKey: false });
+    expect(owned).toContainEqual({
+      spaceId: lib.spaceId,
+      alone: true,
+      earlierKey: true,
+      checked: true,
+    });
+    expect(owned).toContainEqual({ spaceId: later, alone: true, earlierKey: false, checked: true });
     // Give access seals to him again, at his current key.
     const [entry] = await lookupPeople(ctx, [daveId]);
     if (!entry) throw new Error('expected Dave in the directory');

@@ -291,14 +291,20 @@ export function ownersToAddAgain(ctx: ClientContext, keys: SpaceKeys): Directory
  * key other than their current one (or holds no entry for it): one a
  * rotation of their keys changes, unlike a space made since.
  */
-export type OwnedSpace = { spaceId: SpaceId; alone: boolean; earlierKey: boolean };
+export type OwnedSpace = {
+  spaceId: SpaceId;
+  alone: boolean;
+  earlierKey: boolean;
+  /** False where its owners couldn't be read: then `alone` and `earlierKey` are guesses. */
+  checked: boolean;
+};
 
 /**
  * The spaces this person owns, as the server lists them, and which of them
  * they own alone (section 4.6): there nobody can add them again after a
  * rotation of their keys, so its members keep what they had and open
  * nothing new, and the app offers to copy it into a new space. A space
- * whose owners can't be read is left out.
+ * whose owners can't be read is listed as not `checked`.
  */
 export async function ownedSpaces(ctx: ClientContext): Promise<OwnedSpace[]> {
   const spaces = (await loadSpaces(ctx)).filter((space) => space.role === 'owner');
@@ -313,9 +319,12 @@ export async function ownedSpaces(ctx: ClientContext): Promise<OwnedSpace[]> {
         spaceId: space.id,
         alone: !keys.listed.some(({ identity }) => identity.id !== self),
         earlierKey: own.length === 0 || own.some((o) => o.keyHash !== hash),
+        checked: true,
       });
     } catch (error) {
       if (!(error instanceof CryptoError || error instanceof ApiError)) throw error;
+      // Named all the same, as one that couldn't be checked.
+      out.push({ spaceId: space.id, alone: false, earlierKey: true, checked: false });
     }
   }
   return out;

@@ -107,8 +107,10 @@ function useOwned(ctx: ClientContext) {
     isPending,
     isError,
     // A space owned alone that nobody else is in changes for nobody.
-    alone: named.filter((space) => space.alone && space.sharing),
-    shared: named.filter((space) => !space.alone),
+    alone: named.filter((space) => space.checked && space.alone && space.sharing),
+    shared: named.filter((space) => space.checked && !space.alone),
+    // Its owners couldn't be read: named, as either.
+    unchecked: named.filter((space) => !space.checked),
   };
 }
 
@@ -127,7 +129,7 @@ const list = (spaces: readonly { spaceId: string; name: string }[]) =>
  * had but open nothing new.
  */
 export function SpacesBeforeRotation({ ctx }: { ctx: ClientContext }) {
-  const { isPending, isError, alone, shared } = useOwned(ctx);
+  const { isPending, isError, alone, shared, unchecked } = useOwned(ctx);
   if (isPending) return <p className="text-muted-foreground">Checking the spaces you own…</p>;
   if (isError) {
     return (
@@ -138,7 +140,7 @@ export function SpacesBeforeRotation({ ctx }: { ctx: ClientContext }) {
       </p>
     );
   }
-  if (alone.length === 0 && shared.length === 0) return null;
+  if (alone.length === 0 && shared.length === 0 && unchecked.length === 0) return null;
   return (
     <div className="grid gap-2" data-testid="rotation-spaces">
       <p className="font-bold">The spaces you own</p>
@@ -157,6 +159,13 @@ export function SpacesBeforeRotation({ ctx }: { ctx: ClientContext }) {
           In {list(alone)}, which you own alone, nobody can add you again. The people you share them
           with keep what they could already read, but open nothing new there. To share it again, the
           app offers to copy each one into a new space, shared with nobody until you share it.
+        </p>
+      )}
+      {unchecked.length > 0 && (
+        <p>
+          This app couldn’t check who else owns {list(unchecked)}. If you own one alone, its people
+          open nothing new there after this; if you own it with others, another owner adds you
+          again.
         </p>
       )}
     </div>
