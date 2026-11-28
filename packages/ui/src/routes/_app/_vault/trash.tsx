@@ -18,7 +18,7 @@ import {
 import { contentChanged } from '../../../data/content-changed';
 import { spacesQuery, trashQuery } from '../../../data/queries';
 import { errorMessage } from '../../../errors';
-import { useClient } from '../../../vault/store';
+import { PLAIN, useClient } from '../../../vault/store';
 
 export const Route = createFileRoute('/_app/_vault/trash')({ component: Trash });
 
@@ -72,6 +72,8 @@ function Trash() {
       setBusy(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: trashQuery(ctx).queryKey }),
+        // A restored share may be one left to move to replaced keys (section 4.6).
+        queryClient.invalidateQueries({ queryKey: [PLAIN, 'rotation-finishing'] }),
         contentChanged(
           queryClient,
           ctx,

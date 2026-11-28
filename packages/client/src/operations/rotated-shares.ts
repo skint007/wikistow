@@ -119,6 +119,45 @@ export async function planFinishing(ctx: ClientContext): Promise<Finishing[]> {
 }
 
 /**
+ * Whether a rotation worked out again with the offers the person ticked
+ * (`tick`) changes more than those ticks against the one they confirmed:
+ * anyone else kept, left out or demoted differently, or a ticked member not
+ * at the key and role they were offered at and ticked for. Then it must be
+ * shown again, never sent.
+ */
+export function changedBeyondTicks(
+  confirmed: PlannedRotation,
+  planned: PlannedRotation,
+  tick: readonly Tick[] = [],
+): boolean {
+  const ticked = new Set<string>(tick.map((t) => t.identityId));
+  const people = (p: PlannedRotation) =>
+    JSON.stringify([
+      p.plan.shareId,
+      p.plan.keyVersion,
+      p.plan.remaining
+        .filter(({ identity }) => !ticked.has(identity.id))
+        .map(({ identity, role }) => `${identity.id} ${keyHash(identity)} ${role}`)
+        .sort(),
+      [...p.plan.removed].sort(),
+    ]);
+  // Each ticked member at the key the person saw them offered at.
+  const offeredAt = (id: string) =>
+    confirmed.plan.offers.find((o) => o.identityId === id)?.identity;
+  // Every demotion confirmed stays; a tick as a reader may add its own.
+  return (
+    people(planned) !== people(confirmed) ||
+    confirmed.plan.demoted.some((id) => !planned.plan.demoted.includes(id)) ||
+    planned.plan.demoted.some((id) => !ticked.has(id) && !confirmed.plan.demoted.includes(id)) ||
+    tick.some((t) => {
+      const shown = offeredAt(t.identityId);
+      const now = planned.plan.remaining.find(({ identity }) => identity.id === t.identityId);
+      return !shown || !now || keyHash(now.identity) !== keyHash(shown) || now.role !== t.role;
+    })
+  );
+}
+
+/**
  * Send one rotation the person confirmed, with the offers they ticked.
  * It is worked out again with them: if more than the ticks changed who
  * keeps the share, it stops with `stale-head`, to be shown again.
@@ -129,7 +168,6 @@ export async function applyWithTicks(
   tick: readonly Tick[] = [],
 ): Promise<number> {
   const { spaceId, shareId } = confirmed.plan;
-  const ticked = new Set<string>(tick.map((t) => t.identityId));
   // Worked out as confirmed: the same members left out and demoted.
   const leaveOut = confirmed.plan.leftOut
     .filter((l) => l.reason === 'left-out')
@@ -144,29 +182,9 @@ export async function applyWithTicks(
           leaveOut,
           demote: confirmed.plan.demoted,
         });
-  const people = (p: PlannedRotation) =>
-    JSON.stringify([
-      p.plan.keyVersion,
-      p.plan.remaining
-        .filter(({ identity }) => !ticked.has(identity.id))
-        .map(({ identity, role }) => `${identity.id} ${keyHash(identity)} ${role}`)
-        .sort(),
-      [...p.plan.removed].sort(),
-    ]);
-  // Each ticked member at the key the person saw them offered at.
-  const offeredAt = (id: string) =>
-    confirmed.plan.offers.find((o) => o.identityId === id)?.identity;
-  // Every demotion confirmed stays; a tick as a reader may add its own.
-  const changed =
-    people(planned) !== people(confirmed) ||
-    confirmed.plan.demoted.some((id) => !planned.plan.demoted.includes(id)) ||
-    planned.plan.demoted.some((id) => !ticked.has(id) && !confirmed.plan.demoted.includes(id)) ||
-    tick.some((t) => {
-      const shown = offeredAt(t.identityId);
-      const now = planned.plan.remaining.find(({ identity }) => identity.id === t.identityId);
-      return !shown || !now || keyHash(now.identity) !== keyHash(shown) || now.role !== t.role;
-    });
-  if (changed) throw new ApiError(409, 'stale-head', 'Who keeps the share changed; look again');
+  if (changedBeyondTicks(confirmed, planned, tick)) {
+    throw new ApiError(409, 'stale-head', 'Who keeps the share changed; look again');
+  }
   return applyShareRotation(ctx, planned);
 }
 
@@ -185,7 +203,16 @@ export const replacedKeys = (waiting: Waiting) =>
  */
 export async function planRekey(
   ctx: ClientContext,
-  { spaceId, person }: { spaceId: SpaceId; person: DirectoryEntry },
+  {
+    spaceId,
+    person,
+    tick = new Map(),
+  }: {
+    spaceId: SpaceId;
+    person: DirectoryEntry;
+    /** Other offers the owner ticked, by share (`RotationPlan.offers`). */
+    tick?: ReadonlyMap<ShareId, readonly Tick[]>;
+  },
 ): Promise<PlannedRotation[]> {
   const keys = await ownerKeys(ctx, spaceId);
   const plans: PlannedRotation[] = [];
@@ -202,7 +229,10 @@ export async function planRekey(
         spaceId,
         shareId: share.shareId,
         keys,
-        tick: [{ identityId: person.identity.id, role: offer?.vouched ? row.role : 'reader' }],
+        tick: [
+          { identityId: person.identity.id, role: offer?.vouched ? row.role : 'reader' },
+          ...(tick.get(share.shareId) ?? []).filter((t) => t.identityId !== person.identity.id),
+        ],
       });
     } catch (error) {
       // A share rooted in the trash gives nobody anything until restored.
@@ -255,8 +285,13 @@ export function ownersToAddAgain(ctx: ClientContext, keys: SpaceKeys): Directory
   });
 }
 
-/** A space this person owns, with whether the server lists another owner there. */
-export type OwnedSpace = { spaceId: SpaceId; alone: boolean };
+/**
+ * A space this person owns, with whether the server lists another owner
+ * there, and whether this person's own record holds them as its owner at a
+ * key other than their current one (or holds no entry for it): one a
+ * rotation of their keys changes, unlike a space made since.
+ */
+export type OwnedSpace = { spaceId: SpaceId; alone: boolean; earlierKey: boolean };
 
 /**
  * The spaces this person owns, as the server lists them, and which of them
@@ -268,13 +303,16 @@ export type OwnedSpace = { spaceId: SpaceId; alone: boolean };
 export async function ownedSpaces(ctx: ClientContext): Promise<OwnedSpace[]> {
   const spaces = (await loadSpaces(ctx)).filter((space) => space.role === 'owner');
   const self = ctx.identity.public.id;
+  const hash = keyHash(ctx.identity.public);
   const out: OwnedSpace[] = [];
   for (const space of spaces) {
     try {
       const keys = await spaceKeys(ctx, space.id);
+      const own = ownersEntry(ctx, space.id)?.owners.filter((o) => o.id === self) ?? [];
       out.push({
         spaceId: space.id,
         alone: !keys.listed.some(({ identity }) => identity.id !== self),
+        earlierKey: own.length === 0 || own.some((o) => o.keyHash !== hash),
       });
     } catch (error) {
       if (!(error instanceof CryptoError || error instanceof ApiError)) throw error;

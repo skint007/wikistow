@@ -174,6 +174,8 @@ function Choose({
   vault: UnlockedVault;
   onPrepared: () => void;
 }) {
+  // The spaces the person owns, named before they confirm (`SpacesBeforeRotation`).
+  const owned = useQuery(ownedQuery(ctx));
   // Names from the contacts record: under PLAIN, so a lock drops them.
   const agents = useQuery({
     queryKey: [PLAIN, 'rotation-agents', vault.identity.public.keyVersion],
@@ -368,7 +370,8 @@ function Choose({
       {error && <FormMessage>{error}</FormMessage>}
       <Button
         type="submit"
-        disabled={busy || agents.isPending || Boolean(agents.error)}
+        // Not before the spaces the person owns are named (#327, item 7).
+        disabled={busy || agents.isPending || Boolean(agents.error) || owned.isPending}
         className="justify-self-start"
       >
         {busy ? 'Making new keys…' : 'Make new keys'}

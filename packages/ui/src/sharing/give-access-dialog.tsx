@@ -22,6 +22,7 @@ import { ACCESS_LABELS, accessOf } from './model';
 import { shareNameById } from './names';
 import { useOwnerRequirements } from './owner-standing';
 import { RotationConfirm } from './rotation-confirm';
+import { useTicks, withTicks } from './ticks';
 import { describePerson, peopleQuery, type Person } from './people';
 import { HoldOpen, useHoldOpen } from './use-action';
 
@@ -61,6 +62,7 @@ export function GiveAccessDialog({
   const [giving, setGiving] = useState<Person | null>(null);
   // Someone who replaced their keys, given access by a rotation (section 4.6).
   const [rekeying, setRekeying] = useState<Person | null>(null);
+  const { ticks, onTick, chosen, reset } = useTicks();
   const { data: keys } = useQuery({ ...spaceKeysQuery(ctx, spaceId), enabled: open });
   const [done, setDone] = useState<ReactNode>(null);
   const person = (w: groupOperations.Waiting) =>
@@ -124,7 +126,15 @@ export function GiveAccessDialog({
         plansOf={(plans) =>
           plans.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
         }
-        apply={(plans) => runCommand(rekeyMember, { plans }, { satisfies, ctx })}
+        apply={async (confirmed) => {
+          // Others only an earlier key gave access, kept where the owner ticked them.
+          const plans = await withTicks(confirmed, chosen(confirmed), (tick) =>
+            rotatedShareOperations.planRekey(ctx, { spaceId, person: entry, tick }),
+          );
+          await runCommand(rekeyMember, { plans: [...plans] }, { satisfies, ctx });
+        }}
+        ticks={ticks}
+        onTick={onTick}
         ownerIds={new Set(keys?.listed.map((o) => o.identity.id))}
         review={review}
         onCancel={() => setRekeying(null)}
@@ -213,6 +223,7 @@ export function GiveAccessDialog({
                             size="sm"
                             onClick={() => {
                               setDone(null);
+                              reset();
                               setRekeying(who);
                             }}
                           >

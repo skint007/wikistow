@@ -5,7 +5,15 @@
 // a co-owner adds a rotated owner again, or removes them instead.
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
-import { newFolder, newSpace, openShared, publishedPageIn, shareFolder } from './sharing';
+import {
+  folderMenu,
+  newFolder,
+  newSpace,
+  openShared,
+  publishedPageIn,
+  shareDialog,
+  shareFolder,
+} from './sharing';
 import { adminTab, choosePassphrase, memberWithVault } from './vault';
 
 const NEW_PASSPHRASE = 'a brand new vault passphrase for tests';
@@ -127,6 +135,16 @@ test('an owner gives a member who replaced their keys the share again with Rotat
   await replaceKeys(member);
   // Mark's own space has nothing shared: nothing to finish.
 
+  await test.step('the folder’s access list offers the rotation, not a plain Give access', async () => {
+    await owner.reload();
+    await folderMenu(owner, 'Garden', 'Share…');
+    const people = shareDialog(owner, 'Garden').getByRole('region', { name: 'People with access' });
+    await expect(people.getByRole('button', { name: 'Rotate keys and give access' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await owner.keyboard.press('Escape');
+  });
+
   await test.step('the owner sees them waiting as having replaced their keys', async () => {
     await owner.goto('/');
     const note = owner.getByRole('complementary', { name: 'Waiting for you' });
@@ -161,7 +179,16 @@ async function coOwnersThenRotate(
   alice: Page,
   olive: Page,
   adminPage: Page,
-  { aliceName, oliveName }: { aliceName: string; oliveName: string },
+  {
+    aliceName,
+    oliveName,
+    beforeRotate,
+  }: {
+    aliceName: string;
+    oliveName: string;
+    /** Anything Alice does in the space before replacing their keys. */
+    beforeRotate?: (space: string) => Promise<void>;
+  },
 ) {
   await memberWithVault(alice, adminPage, aliceName);
   const { email: oliveEmail } = await memberWithVault(olive, adminPage, oliveName);
@@ -182,6 +209,7 @@ async function coOwnersThenRotate(
     await confirm.getByRole('button', { name: 'Confirm' }).click();
     await expect(confirm).toBeHidden({ timeout: 30_000 });
   });
+  await beforeRotate?.(space);
 
   await test.step('Alice replaces their keys; the dialog names the space owned with others', async () => {
     await replaceKeys(alice, async () => {
@@ -245,18 +273,36 @@ test('a co-owner removes a rotated owner instead of adding them again', async ({
   test.slow();
   const adminPage = await adminTab(freshPage, admin.email);
   const olive = await freshPage();
+  const mia = await freshPage();
+  const { email: miaEmail } = await memberWithVault(mia, adminPage, 'Mia Member');
   const { space } = await coOwnersThenRotate(alice, olive, adminPage, {
     aliceName: 'Rita Rotated',
     oliveName: 'Rory Remover',
+    beforeRotate: (at) =>
+      test.step('Alice shares a folder with Mia, who opens it', async () => {
+        await alice.goto(at);
+        await newFolder(alice, 'Garden');
+        await publishedPageIn(alice, 'Garden', 'Planting plan', PLAN);
+        await shareFolder(alice, 'Garden', miaEmail, 'reader');
+        await alice.keyboard.press('Escape');
+        await openShared(mia, 'Garden', 'Planting plan');
+        await expect(mia.getByText(PLAN)).toBeVisible({ timeout: 30_000 });
+      }),
   });
 
-  await test.step('Olive removes Alice as an owner', async () => {
+  await test.step('Olive removes Alice as an owner, keeping Mia', async () => {
     const offer = olive.getByRole('dialog', { name: 'Add Rita Rotated again as an owner?' });
     await offer.getByRole('button', { name: 'Remove them instead' }).click();
     const dialog = olive.getByRole('dialog', { name: 'Remove an owner' });
     await expect(dialog.getByRole('button', { name: 'Remove owner' })).toBeEnabled({
       timeout: 30_000,
     });
+    // Only Alice's earlier key gave Mia access: listed unticked, as a reader once ticked.
+    await expect(
+      dialog.getByText('Waits: only earlier keys of an owner gave them access', { exact: true }),
+    ).toBeVisible();
+    await dialog.getByLabel('Keep their access').check();
+    await expect(dialog.getByText('Keeps access, as a reader', { exact: true })).toBeVisible();
     await shot(olive, 'remove-instead');
     await dialog.getByRole('button', { name: 'Remove owner' }).click();
     await expect(dialog).toBeHidden({ timeout: 30_000 });
@@ -269,5 +315,13 @@ test('a co-owner removes a rotated owner instead of adding them again', async ({
   await test.step('Alice is no longer an owner there', async () => {
     await olive.goto(`${space}/members`);
     await expect(olive.getByText('Rita Rotated')).toBeHidden({ timeout: 30_000 });
+  });
+
+  await test.step('Mia opens what Olive publishes there next', async () => {
+    await olive.goto(space);
+    await publishedPageIn(olive, 'Garden', 'Harvest plan', 'Pick the beans in August.');
+    await mia.goto('/');
+    await openShared(mia, 'Garden', 'Harvest plan');
+    await expect(mia.getByText('Pick the beans in August.')).toBeVisible({ timeout: 30_000 });
   });
 });

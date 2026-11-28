@@ -55,7 +55,7 @@ export const ownedQuery = (ctx: ClientContext | null) =>
             sharing = !space.alone || shares.some((share) => share.members.length > 0);
             // Past key version 1, other apps accept this person as an owner
             // only once another owner's statement names their current key.
-            if (!space.alone && self.keyVersion > 1) {
+            if (!space.alone && space.earlierKey && self.keyVersion > 1) {
               const { statements } = await spaceKeys(ctx, space.spaceId);
               const hash = keyHash(self);
               waitsForReAdd = !statements.some(
@@ -72,7 +72,7 @@ export const ownedQuery = (ctx: ClientContext | null) =>
   });
 
 function useOwned(ctx: ClientContext) {
-  const { data: owned, isPending } = useQuery(ownedQuery(ctx));
+  const { data: owned, isPending, isError } = useQuery(ownedQuery(ctx));
   const { data: spaces } = useQuery(spacesQuery(ctx));
   const named = (owned ?? []).map((space) => ({
     ...space,
@@ -80,6 +80,7 @@ function useOwned(ctx: ClientContext) {
   }));
   return {
     isPending,
+    isError,
     // A space owned alone that nobody else is in changes for nobody.
     alone: named.filter((space) => space.alone && space.sharing),
     shared: named.filter((space) => !space.alone),
@@ -101,8 +102,17 @@ const list = (spaces: readonly { spaceId: string; name: string }[]) =>
  * had but open nothing new.
  */
 export function SpacesBeforeRotation({ ctx }: { ctx: ClientContext }) {
-  const { isPending, alone, shared } = useOwned(ctx);
+  const { isPending, isError, alone, shared } = useOwned(ctx);
   if (isPending) return <p className="text-muted-foreground">Checking the spaces you own…</p>;
+  if (isError) {
+    return (
+      <p className="text-destructive">
+        This app couldn’t check which spaces you own. Your new keys don’t make you an owner by
+        themselves: in a space you own with others, another owner adds you again, and a space you
+        own alone shares nothing new until you copy it into a new space.
+      </p>
+    );
+  }
   if (alone.length === 0 && shared.length === 0) return null;
   return (
     <div className="grid gap-2" data-testid="rotation-spaces">
@@ -133,7 +143,10 @@ export function SpacesBeforeRotation({ ctx }: { ctx: ClientContext }) {
  * space owned alone with Copy into a new space.
  */
 export function SpacesAfterRotation({ ctx }: { ctx: ClientContext }) {
-  const { alone, shared } = useOwned(ctx);
+  const owned = useOwned(ctx);
+  // A space made since the rotation, at the new key, needs no copy.
+  const alone = owned.alone.filter((space) => space.earlierKey);
+  const { shared } = owned;
   const { data: finishing } = useQuery(finishingQuery(ctx));
   const toFinish = leftToFinish(finishing);
   const failed = (finishing ?? []).some((space) => space.failed.length > 0);

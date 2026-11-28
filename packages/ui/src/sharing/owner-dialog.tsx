@@ -28,6 +28,7 @@ import { describePerson, peopleQuery, type Person } from './people';
 import { PersonFinder, type Found } from './person-finder';
 import { NewMark } from './new-mark';
 import { RotationConfirm } from './rotation-confirm';
+import { useTicks, withTicks } from './ticks';
 import { ErrorLine, useAction, HoldOpen, useHoldOpen } from './use-action';
 import { UnreadableCommentFix } from '../comments/unreadable';
 
@@ -283,6 +284,8 @@ function RemoveOwner({
   const { data: people } = useQuery(peopleQuery(ctx, [ownerId]));
   const leaving = ownerId === ctx.identity.public.id;
   const who = people?.get(ownerId) ?? describePerson(ctx, ownerId, null);
+  // Members only a rotated owner's earlier key gave access, kept where ticked (section 4.6).
+  const { ticks, onTick, chosen } = useTicks();
   return (
     <RotationConfirm
       title={
@@ -321,7 +324,22 @@ function RemoveOwner({
       plansOf={(removal) =>
         removal.rotations.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
       }
-      apply={(removal) => runCommand(removeOwner, { removal }, { satisfies, ctx })}
+      apply={async (confirmed) => {
+        const tick = chosen(confirmed.rotations);
+        const rotations = await withTicks(confirmed.rotations, tick, async (again) => {
+          const removal = await ownerOperations.planOwnerRemoval(ctx, {
+            spaceId,
+            ownerId,
+            tick: again,
+          });
+          return removal.rotations;
+        });
+        const removal =
+          tick.size === 0 ? confirmed : { ...confirmed, rotations: [...rotations], tick };
+        await runCommand(removeOwner, { removal }, { satisfies, ctx });
+      }}
+      ticks={ticks}
+      onTick={onTick}
       ownerIds={new Set(keys?.listed.map((o) => o.identity.id).filter((id) => id !== ownerId))}
       review={review}
       onCancel={onClose}

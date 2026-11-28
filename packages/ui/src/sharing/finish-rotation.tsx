@@ -2,11 +2,10 @@ import {
   rotatedShareOperations,
   spaceKeys,
   type ClientContext,
-  type RotationOffer,
   type SpaceId,
 } from '@wikistow/client';
 import { queryOptions, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Name } from '@/components/name';
 import {
   Dialog,
@@ -23,7 +22,8 @@ import { PLAIN, useClient } from '../vault/store';
 import { useKeyReview } from './key-change';
 import { nameOf, shareNameById } from './names';
 import { RotationConfirm } from './rotation-confirm';
-import type { LabelledPlan, Ticks } from './rotation-review';
+import type { LabelledPlan } from './rotation-review';
+import { useTicks } from './ticks';
 import { HoldOpen, useHoldOpen } from './use-action';
 
 /**
@@ -94,18 +94,13 @@ export function FinishRotationDialog({ open, onClose }: { open: boolean; onClose
   const queryClient = useQueryClient();
   const { panel, review, labels } = useKeyReview(open);
   const { locked, hold } = useHoldOpen();
-  const [ticks, setTicks] = useState<Ticks>(new Map());
+  const { ticks, onTick, chosen, reset } = useTicks();
   // The owners the server lists in each space, shown as owners in the review.
   const [ownerIds, setOwnerIds] = useState<ReadonlySet<string>>(new Set());
-  const tick = (shareId: string, offer: RotationOffer, role: 'reader' | 'editor' | null) =>
-    setTicks((current) => {
-      const next = new Map(current);
-      const share = new Map(next.get(shareId));
-      if (role) share.set(offer.identityId, role);
-      else share.delete(offer.identityId);
-      next.set(shareId, share);
-      return next;
-    });
+  // Each time it is shown, everyone offered starts unticked.
+  useEffect(() => {
+    if (open) reset();
+  }, [open]);
   type Made = {
     finishing: rotatedShareOperations.Finishing[];
     plans: Labelled[];
@@ -115,8 +110,14 @@ export function FinishRotationDialog({ open, onClose }: { open: boolean; onClose
   const make = async (): Promise<Made> => {
     const finishing = await rotatedShareOperations.planFinishing(ctx);
     const owners = new Set<string>([ctx.identity.public.id]);
-    for (const { spaceId } of finishing) {
-      for (const { identity } of (await spaceKeys(ctx, spaceId)).listed) owners.add(identity.id);
+    // Only to mark owners in the list: a space that can't be read is named among the failures.
+    for (const { spaceId, rotations } of finishing) {
+      if (rotations.length === 0) continue;
+      try {
+        for (const { identity } of (await spaceKeys(ctx, spaceId)).listed) owners.add(identity.id);
+      } catch {
+        // Its rotations show without its other owners marked.
+      }
     }
     setOwnerIds(owners);
     return {
@@ -126,19 +127,14 @@ export function FinishRotationDialog({ open, onClose }: { open: boolean; onClose
     };
   };
   const apply = async ({ finishing }: Made) => {
-    for (const { rotations } of finishing) {
-      for (const planned of rotations) {
-        const chosen = ticks.get(planned.plan.shareId) ?? new Map<string, 'reader' | 'editor'>();
-        const ticked = planned.plan.offers.flatMap((offer) => {
-          const role = chosen.get(offer.identityId);
-          return role ? [{ identityId: offer.identityId, role }] : [];
-        });
-        await runCommand(
-          finishShareRotation,
-          { planned, tick: ticked },
-          { satisfies: requirementsHere(), ctx },
-        );
-      }
+    const all = finishing.flatMap(({ rotations }) => rotations);
+    const tick = chosen(all);
+    for (const planned of all) {
+      await runCommand(
+        finishShareRotation,
+        { planned, tick: tick.get(planned.plan.shareId) ?? [] },
+        { satisfies: requirementsHere(), ctx },
+      );
     }
   };
   return (
@@ -160,9 +156,11 @@ export function FinishRotationDialog({ open, onClose }: { open: boolean; onClose
                 intro={
                   <p className="text-sm">
                     Some people got access only from your old key. Tick the ones you gave it to:
-                    they keep reading. Anyone left unticked waits, keeping what they could already
-                    read, until you give them access. In a space you share with other owners, nobody
-                    else opens the new keys until one of them adds you again.
+                    they get the new keys. Anyone left unticked waits, keeping what they could
+                    already read, until you give them access. In a space you own with others, nobody
+                    else opens the new keys, or saves there, until another owner adds you again. In
+                    a space you own alone, nobody else ever does: copy it into a new space to share
+                    it again.
                   </p>
                 }
                 confirmLabel="Rotate keys"
@@ -187,7 +185,7 @@ export function FinishRotationDialog({ open, onClose }: { open: boolean; onClose
                 ownerIds={ownerIds}
                 review={review}
                 ticks={ticks}
-                onTick={tick}
+                onTick={onTick}
                 onCancel={onClose}
                 onDone={async () => {
                   await queryClient.invalidateQueries({ queryKey: finishingQuery(ctx).queryKey });

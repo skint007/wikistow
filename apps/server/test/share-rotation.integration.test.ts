@@ -513,7 +513,11 @@ describe('the person’s own shares', () => {
     expect(await draftOf(dave.ctx, lib.page)).toMatchObject({
       payload: { markdown: 'draft words' },
     });
-    expect(await rotated.ownedSpaces(ctx)).toContainEqual({ spaceId: lib.spaceId, alone: true });
+    // A space made since, at the new key, isn't one the rotation changed.
+    const later = await spaceOperations.createSpace(ctx, { name: 'Made since' });
+    const owned = await rotated.ownedSpaces(ctx);
+    expect(owned).toContainEqual({ spaceId: lib.spaceId, alone: true, earlierKey: true });
+    expect(owned).toContainEqual({ spaceId: later, alone: true, earlierKey: false });
     // Give access seals to him again, at his current key.
     const [entry] = await lookupPeople(ctx, [daveId]);
     if (!entry) throw new Error('expected Dave in the directory');
@@ -604,6 +608,49 @@ describe('a rotated co-owner', () => {
     const keys = await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
     expect(keys.listed.map((o) => o.identity.id)).not.toContain(id);
     await pages.editDraft(olive.ctx, lib.page, { markdown: 'Olive, alone' });
+  });
+
+  it('can be removed keeping a member they gave access, ticked as a reader', async () => {
+    const { alice, olive, lib } = await coOwned();
+    const { person: carol } = await personWithLibrary();
+    const share = await shareOf(alice.ctx, lib.spaceId);
+    await sharing.addMember(alice.ctx, {
+      spaceId: lib.spaceId,
+      shareId: share.shareId,
+      person: await find(alice, carol),
+      role: 'editor',
+    });
+    await rotate(alice);
+    await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    const ownerId = alice.vault.identity.public.id;
+    const carolId = carol.vault.identity.public.id;
+    const confirmed = await ownerOperations.planOwnerRemoval(olive.ctx, {
+      spaceId: lib.spaceId,
+      ownerId,
+    });
+    const tick = new Map([[share.shareId, [{ identityId: carolId, role: 'reader' as const }]]]);
+    const ticked = await ownerOperations.planOwnerRemoval(olive.ctx, {
+      spaceId: lib.spaceId,
+      ownerId,
+      tick,
+    });
+    // Only the tick changed who keeps the share.
+    expect(
+      rotated.changedBeyondTicks(
+        confirmed.rotations[0]!,
+        ticked.rotations[0]!,
+        tick.get(share.shareId),
+      ),
+    ).toBe(false);
+    await ownerOperations.applyOwnerRemoval(olive.ctx, ticked);
+    const after = await shareOf(olive.ctx, lib.spaceId);
+    expect(after.currentKeyVersion).toBe(share.currentKeyVersion + 1);
+    const { envelopes } = await olive.ctx.api.call(sharingRoutes.versionEnvelopes, {
+      params: { shareId: share.shareId, keyVersion: after.currentKeyVersion },
+    });
+    const hers = envelopes.filter((e) => e.recipientId === carolId);
+    expect(hers).toHaveLength(1);
+    expect(hers[0]?.draftKey).toBeNull();
   });
 
   it('is offered to add again while the re-add’s statement isn’t served', async () => {

@@ -1,6 +1,7 @@
 import {
   groupOperations,
   IdentityId,
+  rotatedShareOperations,
   sharingOperations,
   type ShareId,
   type SpaceId,
@@ -23,6 +24,7 @@ import {
 import { runCommand } from '../commands/command';
 import {
   addMember,
+  rekeyMember,
   sendGroupChange,
   rotateShare,
   setPublishRights,
@@ -313,10 +315,36 @@ export function AccessPanel({
     }
   };
 
+  // Someone listed above the key version of their row here replaced their keys.
+  const replacedKeys = (who: Person) => {
+    const row = share.members.find((m) => m.identityId === who.id);
+    return !!row && !!who.entry && who.entry.identity.keyVersion > row.keyVersion;
+  };
+
   // Give access to someone waiting: every share in the space they lack keys for.
   const giveAccess = (who: Person) => {
     const { entry } = who;
     if (!entry) return;
+    // Only a rotation gives keys to someone who replaced theirs (section 4.6).
+    if (replacedKeys(who)) {
+      ask({
+        kind: 'rotation',
+        title: (
+          <>
+            Rotate keys and give <Name>{who.name}</Name> access?
+          </>
+        ),
+        confirmLabel: 'Rotate keys and give access',
+        none: 'They wait for no folder here now.',
+        make: async () =>
+          (await rotatedShareOperations.planRekey(ctx, { spaceId, person: entry })).map(
+            (planned) => ({ label: shareNameById(tree, planned.plan.shareId), planned }),
+          ),
+        apply: (plans) =>
+          runCommand(rekeyMember, { plans: plans.map((p) => p.planned) }, env).then(() => {}),
+      });
+      return;
+    }
     ask({
       kind: 'give',
       title: (
@@ -683,7 +711,7 @@ export function AccessPanel({
                       disabled={busy}
                       onClick={() => giveAccess(who)}
                     >
-                      Give access
+                      {replacedKeys(who) ? 'Rotate keys and give access' : 'Give access'}
                     </Button>
                   )}
                   {direct ? (

@@ -306,7 +306,8 @@ export function planRotation({
             identityId: member.identityId,
             reason: 'old-key',
             identity,
-            role: held ?? 'reader',
+            // No more than their row's role: the server seals by the row.
+            role: most === 'editor' ? (held ?? 'reader') : 'reader',
             vouched: false,
           };
     let role: 'reader' | 'editor' = counted ?? 'reader';
