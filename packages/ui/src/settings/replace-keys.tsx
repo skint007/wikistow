@@ -317,6 +317,10 @@ function Choose({
         earlier keys stay in it, only to open what was shared with them. Your other devices are
         signed out, and live editing in your spaces stops, to start again with the new keys.
       </p>
+      <p>
+        In folders other people share with you, you keep reading what you could, and edit again once
+        an owner gives you access at your new keys. Their apps offer it.
+      </p>
       <SpacesBeforeRotation ctx={ctx} />
       <fieldset className="grid gap-2">
         <legend className="mb-1 font-bold">Agents to keep</legend>

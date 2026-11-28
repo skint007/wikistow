@@ -26,7 +26,7 @@ import { spacesQuery } from '../data/queries';
 import { ConfirmCopy } from '../page/confirm-copy';
 import { finishingQuery, FinishRotationDialog, leftToFinish } from '../sharing/finish-rotation';
 import { nameOf } from '../sharing/names';
-import { ErrorLine, useAction } from '../sharing/use-action';
+import { ErrorLine, HoldOpen, useAction, useHoldOpen } from '../sharing/use-action';
 import { PLAIN, useClient } from '../vault/store';
 
 /**
@@ -181,16 +181,27 @@ export function SpacesAfterRotation({ ctx }: { ctx: ClientContext }) {
   // A space made since the rotation, at the new key, needs no copy.
   const alone = owned.alone.filter((space) => space.earlierKey);
   const { shared } = owned;
-  const { data: finishing } = useQuery(finishingQuery(ctx));
+  const { data: finishing, isError: finishingFailed, refetch } = useQuery(finishingQuery(ctx));
   const toFinish = leftToFinish(finishing);
   const failed = (finishing ?? []).some((space) => space.failed.length > 0);
   const waiting = shared.filter((space) => space.waitsForReAdd);
   const confirming = [...owned.alone, ...shared].filter((space) => space.confirmFirst);
   const [finishOpen, setFinishOpen] = useState(false);
   const [copying, setCopying] = useState<{ spaceId: SpaceId; name: string } | null>(null);
+  // The new space made for each, so trying again copies into it rather than making another.
+  const [made, setMade] = useState<ReadonlyMap<SpaceId, { spaceId: SpaceId; name: string }>>(
+    new Map(),
+  );
   return (
     <div className="grid gap-3" data-testid="rotation-after">
-      {toFinish === null ? (
+      {finishingFailed ? (
+        <p className="flex flex-wrap items-center gap-2 text-destructive">
+          This app couldn’t check your shared folders.
+          <Button size="xs" variant="outline" onClick={() => void refetch()}>
+            Try again
+          </Button>
+        </p>
+      ) : toFinish === null ? (
         <p className="text-muted-foreground">Checking your shared folders…</p>
       ) : toFinish > 0 ? (
         <div className="grid gap-2">
@@ -250,6 +261,8 @@ export function SpacesAfterRotation({ ctx }: { ctx: ClientContext }) {
         <CopyAloneDialog
           spaceId={copying.spaceId}
           name={copying.name}
+          made={made.get(copying.spaceId) ?? null}
+          onMade={(into) => setMade((all) => new Map(all).set(copying.spaceId, into))}
           onClose={() => setCopying(null)}
         />
       )}
@@ -265,75 +278,83 @@ export function SpacesAfterRotation({ ctx }: { ctx: ClientContext }) {
 function CopyAloneDialog({
   spaceId,
   name,
+  made,
+  onMade,
   onClose,
 }: {
   spaceId: SpaceId;
   name: string;
+  /** The new space made on an earlier try, if any. */
+  made: { spaceId: SpaceId; name: string } | null;
+  onMade: (into: { spaceId: SpaceId; name: string }) => void;
   onClose: () => void;
 }) {
   const ctx = useClient();
   const queryClient = useQueryClient();
-  const [made, setMade] = useState<{ spaceId: SpaceId; name: string } | null>(null);
   const [newName, setNewName] = useState(`${name} (copy)`);
   const { busy, error, run } = useAction();
+  // Held open while the copy runs, so it is seen through.
+  const { locked, hold } = useHoldOpen();
   const make = () =>
     run(async () => {
       const trimmed = newName.trim() || `${name} (copy)`;
       const created = await spaceOperations.createSpace(ctx, { name: trimmed });
       await queryClient.invalidateQueries({ queryKey: spacesQuery(ctx).queryKey });
-      setMade({ spaceId: created, name: trimmed });
+      onMade({ spaceId: created, name: trimmed });
     });
   return (
-    <Dialog open onOpenChange={(next) => !next && !busy && onClose()}>
-      <DialogContent dialogClassName="sm:max-w-xl" locked={busy}>
-        <DialogHeader>
-          <DialogTitle>
-            Copy <Name>{name}</Name> into a new space
-          </DialogTitle>
-          <DialogDescription>
-            The copy carries everything the space holds, whoever wrote it, signed again as yours.
-            It’s shared with nobody until you share it.
-          </DialogDescription>
-        </DialogHeader>
-        {made ? (
-          <ConfirmCopy
-            sourceSpaceId={spaceId}
-            node={null}
-            copy
-            chosen={{
-              spaceId: made.spaceId,
-              spaceName: made.name,
-              place: { parentId: null, path: [] },
-            }}
-            onDone={onClose}
-          />
-        ) : (
-          <form
-            className="grid gap-3 text-sm"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void make();
-            }}
-          >
-            <label className="grid gap-1">
-              <span className="font-bold">Name of the new space</span>
-              <input
-                className="rounded-control border border-input bg-background px-3 py-2"
-                value={newName}
-                onChange={(event) => setNewName(event.target.value)}
-              />
-            </label>
-            <ErrorLine error={error} />
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={busy}>
-                Make the new space
-              </Button>
-            </div>
-          </form>
-        )}
+    <Dialog open onOpenChange={(next) => !next && !busy && !locked && onClose()}>
+      <DialogContent dialogClassName="sm:max-w-xl" locked={busy || locked}>
+        <HoldOpen value={hold}>
+          <DialogHeader>
+            <DialogTitle>
+              Copy <Name>{name}</Name> into a new space
+            </DialogTitle>
+            <DialogDescription>
+              The copy carries everything the space holds, whoever wrote it, signed again as yours.
+              It’s shared with nobody until you share it.
+            </DialogDescription>
+          </DialogHeader>
+          {made ? (
+            <ConfirmCopy
+              sourceSpaceId={spaceId}
+              node={null}
+              copy
+              chosen={{
+                spaceId: made.spaceId,
+                spaceName: made.name,
+                place: { parentId: null, path: [] },
+              }}
+              onDone={onClose}
+            />
+          ) : (
+            <form
+              className="grid gap-3 text-sm"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void make();
+              }}
+            >
+              <label className="grid gap-1">
+                <span className="font-bold">Name of the new space</span>
+                <input
+                  className="rounded-control border border-input bg-background px-3 py-2"
+                  value={newName}
+                  onChange={(event) => setNewName(event.target.value)}
+                />
+              </label>
+              <ErrorLine error={error} />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={busy}>
+                  Make the new space
+                </Button>
+              </div>
+            </form>
+          )}
+        </HoldOpen>
       </DialogContent>
     </Dialog>
   );
