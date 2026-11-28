@@ -36,7 +36,7 @@ _Avoid_: Team, role.
 A person's access in a share: the highest of their direct role there and the roles of their groups that have the share. Any one of these keeps them in.
 
 **Waiting for keys**
-A person a group brings into a share before an owner's app has sealed its keys to them, as after a key change. They have no access there until an owner gives it.
+A member of a share who holds no keys of its current version at their current key: one a group brings in before an owner's app has sealed to them, one left unticked in a rotation, or one who replaced their keys. They read what their keys open, but change nothing there until an owner gives them access.
 
 **Grant**
 Permission for a person or agent to access a space or a folder, never a single page. It applies to the folder's current and future descendants. A person's grant is their membership of a share, directly or through a group; an agent's grant is a folder its person picked for it, or a group it follows.
@@ -78,8 +78,29 @@ The first public key your app saw for a person, kept in your contacts. If the se
 _Avoid_: Verified key, safety code.
 
 **Identity key rotation**
-A person replacing their own identity keys with new ones, as when the old ones may have leaked, with a statement both keys sign. The people they share with follow it to the new key without the key-change warning, what the person signed before stays theirs, and the shares they're in get new folder keys. An owner who replaces their keys is added again as an owner by a co-owner; in a space they own alone nobody can, so they share again from a new space. Accepted in ADR 0018, not built yet. Not recovery, which opens the same keys with the recovery key.
+A person replacing their own identity keys with new ones, as when the old ones may have leaked: **Replace my keys**, in Settings → Security. They get a new vault, passphrase and recovery key under the same identity ID, and a rotation statement both keys sign. The people they share with follow it to the new key without the key-change warning, what the person signed before stays theirs, and the shares they're in get new folder keys. Not recovery, which opens the same keys with the recovery key.
 _Avoid_: Key reset, re-keying, key change (a key the app can't follow).
+
+**Rotation statement**
+What a person's old and new keys both sign when they replace their keys: the old key by its hash, the new keys, and the last contacts version the old key signed. A person's **rotation chain** is their statements in order, from one key to a later one; an app that checks the chain moves its pin along it.
+
+**Earlier key**
+A key of a person's that a rotation chain has moved past. It counts for opening only: what it signed before still checks, but nothing is sealed to it, and what it seals or signs counts for no writing and accepts no owner. The person's own vault keeps theirs as **retired** keys.
+
+**Following**
+Your app moving a contact's pin to their new key along a checked rotation chain, with a one-time notice showing both fingerprints. **Declining** it (**Not them?**) moves the pin back, and no device of yours follows that chain again. A decline closes nothing where an owner accepted the key, but the app says where, and who.
+
+**Rotated owner**
+An owner who replaced their keys. A rotation doesn't carry ownership, so other owners' and members' apps keep them at their earlier key, for opening only, until a co-owner adds them again. In a space they own alone nobody can: its members keep what they had and open nothing new, and the person can copy it into a new space.
+
+**Add again**
+A co-owner making a rotated owner an owner again at their new key, after checking its fingerprint, as after any key change. The other choice is removing them as an owner.
+
+**Finishing**
+After replacing their keys, the person giving each share of the spaces they own new keys, so nothing more is saved under keys the old one opens. It is one confirm, **Finish replacing your keys**, offered at each unlock until it's done, with the members only the old key gave access listed unticked.
+
+**Rekeyed**
+A member who replaced their keys, given every key version of a share at their new key by a rotation (**Rotate keys and give access**). Only a rotation gives them keys again.
 
 **Shared with me**
 The list of shares you are a member of. Each shows the shared folder's name and who shared it, never the names of the folders above it.
