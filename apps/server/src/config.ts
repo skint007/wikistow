@@ -64,12 +64,10 @@ const Env = z.object({
     .max(36500)
     .default(DEFAULT_DRAFT_RETENTION_MS / (24 * 60 * 60 * 1000)),
   /**
-   * Whether people may replace their identity keys (protocol section 4.6).
-   * Off until it is fully built (#327): before that, someone who replaces
-   * theirs can't open what was shared with their earlier keys, and the
-   * people they share with see a plain key change.
+   * Whether people may replace their identity keys (protocol section 4.6,
+   * #327), on unless turned off.
    */
-  IDENTITY_ROTATION: z.enum(['on', 'off']).default('off'),
+  IDENTITY_ROTATION: z.enum(['on', 'off']).default('on'),
   /** Rate limiting can be turned off for browser tests only. */
   RATE_LIMIT: z.enum(['on', 'off']).default('on'),
   /**
@@ -120,7 +118,7 @@ export type Config = {
   smtp: { url: string | undefined; from: string | undefined };
   trustProxy: boolean;
   rateLimit: boolean;
-  /** Whether `POST /api/me/identity/rotate` is taken; off unless set. */
+  /** Whether `POST /api/me/identity/rotate` is taken; on unless turned off. */
   identityRotation?: boolean;
   /** Optional for embedded callers, which use the environment default. */
   passwordGuessesPerHour?: number;

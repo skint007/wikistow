@@ -607,6 +607,10 @@ export async function refreshAccess(queryClient: QueryClient, ctx: ClientContext
       'agent-groups',
       // Seals new key versions to this person's agents, as at unlock.
       'agent-work',
+      // After a rotation of this person's keys: what is left to move, and
+      // the spaces whose co-owners haven't added them again yet.
+      'rotation-finishing',
+      'owned-spaces',
     ].map((kind) => queryClient.invalidateQueries({ queryKey: [PLAIN, kind] })),
   );
 }

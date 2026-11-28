@@ -993,9 +993,11 @@ export async function planShareRotation(
     .versions(spaceId, shareId)
     .some((held) => held.keyVersion === v && held.sealer.id === self);
   // When this person removes another owner, that owner's envelopes count for
-  // the rotation (section 7.6), but not for a version this app sealed.
+  // the rotation (section 7.6), but not for a version this app sealed. A
+  // rotated owner's are kept: sealed with an earlier key, they add nobody,
+  // and only offer their members unticked (section 4.6).
   const counted =
-    removing && removing.id !== self && sealedV
+    removing && removing.id !== self && sealedV && !ctx.trust.isEarlier(removing)
       ? envelopes.filter((e) => e.sealerId !== removing.id)
       : envelopes;
   const directory = await lookupPeople(ctx, [

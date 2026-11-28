@@ -4,19 +4,32 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Upgrade notes
+
+- Replacing keys is on by default. A server administrator can turn it off with `IDENTITY_ROTATION=off`. Before you replace your keys, update WikiStow on your other devices and the `wikistow` CLI your agents use: older versions can’t open your new vault. Owners using the desktop app or the CLI should update too: an older one can’t change keys in a shared folder whose member replaced theirs, and shows a key-change warning where an updated one says that someone replaced their keys.
+
+#### Features
+
+- Replace my keys, in Settings → Security, is for when someone else may have your keys, such as when someone used a device of yours while it was unlocked, or saw your recovery key. It makes you new keys, a new passphrase and a new recovery key, and signs out your other devices. People you share with move to your new keys, with a notice. Then your app gives your shared folders new keys, and asks who keeps access. In a space you own with others, another owner adds you again; a space you own alone can be copied into a new one to share again.
+
 ### Changes
 
 #### App
+
+- Replace my keys, in Settings → Security, now that the server lets people use it by default (#327). Before you confirm, it names the spaces you own alone, where nobody can add you again, and those you own with others. Once your keys are replaced, **Finish replacing your keys** gives each of your shared folders new keys, with the people your old key gave access to listed unticked, and is offered again at each unlock until it is done. An owner sees someone who replaced their keys under **Give access** with **Rotate keys and give access**; a co-owner is offered to add again an owner who replaced theirs, or to remove them instead; and a space you own alone can be copied into a new one, shared with nobody. (#767)
 
 - What's new goes to a release from one field, in place of a pill for each: it lists every release with its date and Prerelease and This version marks, narrows as a version or a date is typed, and opens the one chosen by mouse, by the arrows or by Enter. The app's comboboxes, Add property among them, keep the list open for a press on its scrollbar, leave keys an input method composes alone, stay under the sticky bars and scroll only their list. (#760)
 - A plugin's **Settings** on the Plugins page opens a dialog, titled with its name, in place of opening its settings under its row: the fields its manifest declares, then its own sections, scrolling on their own. A field still being typed in when the dialog closes is saved, and a save that fails after it closed is said in the row. `?plugin=` opens the dialog. Dialogs now show themselves before what they hold is drawn, so a plugin's section measures the dialog it is in. (#762)
 
 #### Server
 
-- A setting, `IDENTITY_ROTATION`, off unless set to `on`, for the route that replaces a person's identity keys. Leave it off: until replacing keys is fully built, someone who replaced theirs can't write in what was shared with their earlier keys, their own shares included. (#755)
+- A setting, `IDENTITY_ROTATION`, for the route that replaces a person's identity keys: on unless set to `off` (docs/operations.md, Replacing keys). (#755, #767)
 
 #### Development
 
+- The app's screens for shares after someone replaced their keys (#327), on `planFinishing`, `planRekey`, `ownersToAddAgain` and `ownedSpaces`, and e2e tests with `IDENTITY_ROTATION` at its new default. `planOwnerRemoval` and `planRekey` take the offers an owner ticked, checked with `changedBeyondTicks`, and `ownedSpaces` says which spaces the rotation changed (`earlierKey`). (#767)
 - Shares after someone replaced their keys (#327), where the server's `IDENTITY_ROTATION` is on: the server refuses a share rotation sealed to a key a member replaced, and takes `rekeyed` and `waiting` in rotations, so an owner gives them the share again at their new key, and only by a rotation. In the client library, a person's own shares rotate from versions their earlier key sealed (`planFinishing`), the members only that key gave access are offered unticked and otherwise wait, and a co-owner adds a rotated owner again (`ownersToAddAgain`). A member with no envelope an owner sealed now waits through a rotation, where they were removed. A tab that reloads in the middle of **Replace my keys** knows the rotation as its own, and no longer asks **Did you replace your keys?** (#764). (#766)
 - The app says when a contact replaced their keys (#327), where the server's `IDENTITY_ROTATION` is on: a notice with the key you had and the new one, **Not them?** to decline it, and, where an owner accepted the key you declined, which spaces and who added it. Settings → Security lists the people followed, to see both keys again. (#765)
 - Following a rotation (#327), for where the server's `IDENTITY_ROTATION` is on: apps and the CLI move a contact's pin along a checked chain of statements to their new key, a decline puts it back and stops following them on every device, and a chain that doesn't check out stays a key change. Someone who replaced their keys opens what was sealed to their earlier ones, the server serves envelopes at every key version, and devices seal what they kept again under the new key. (#763)

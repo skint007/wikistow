@@ -3,6 +3,7 @@ import {
   groupOperations,
   IdentityId,
   ownerOperations,
+  rotatedShareOperations,
   saveContacts,
   ShareId,
   sharingOperations,
@@ -110,6 +111,35 @@ export const rotateShare = command(
   async ({ planned }, { ctx }) => {
     await sharingOperations.applyShareRotation(ctx, planned);
   },
+);
+
+/**
+ * Finish replacing this person's keys in one share (protocol section 4.6):
+ * its rotation as they confirmed it, with the members they ticked. Every
+ * space's owner check runs in the client's own operations.
+ */
+export const finishShareRotation = command(
+  'share.finish-rotation',
+  z.object({
+    planned: made<sharingOperations.PlannedRotation>(),
+    tick: z.array(z.object({ identityId: IdentityId, role: Role })).default([]),
+  }),
+  ['unlocked-vault'],
+  async ({ planned, tick }, { ctx }) => {
+    await rotatedShareOperations.applyWithTicks(ctx, planned, tick);
+  },
+);
+
+/**
+ * **Rotate keys and give access** for someone who replaced their keys: a
+ * rotation of each share they wait in, giving them every version at their
+ * new key (protocol section 4.6).
+ */
+export const rekeyMember = command(
+  'share.rekey',
+  z.object({ plans: z.array(made<sharingOperations.PlannedRotation>()) }),
+  owner,
+  async ({ plans }, { ctx }) => rotatedShareOperations.applyRekey(ctx, plans),
 );
 
 // A change to who has access that the owner confirmed (protocol sections

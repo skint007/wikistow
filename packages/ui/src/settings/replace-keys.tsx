@@ -1,8 +1,8 @@
 // Settings → Security → Replace my keys (protocol section 4.6, #327): new
 // identity keys at the next key version, a new vault, passphrase and
-// recovery key, and the agents the person ticks kept at the new key. Shown
-// only where the server takes it (`IDENTITY_ROTATION`), which stays off
-// until replacing keys is fully built.
+// recovery key, and the agents the person ticks kept at the new key; then
+// their shared folders moved to the new keys. Shown only where the server
+// takes it (`IDENTITY_ROTATION`).
 import {
   agentOperations,
   closeSession,
@@ -29,6 +29,8 @@ import { keepAnchor, keepChangedWrapper, keepSentRotation, startSession } from '
 import { forgetKeptUnlock, PLAIN, useVault, vaultStore, zeroVault } from '../vault/store';
 import { workerVaultCrypto } from '../vault/worker-crypto';
 import { FormRow, useOpenedRow } from './rows';
+import { ownedQuery, SpacesAfterRotation, SpacesBeforeRotation } from './rotated-spaces';
+import { finishingQuery, leftToFinish } from '../sharing/finish-rotation';
 
 /**
  * A rotation made here and not yet answered, kept in memory, not in the
@@ -88,11 +90,24 @@ export function ReplaceKeys() {
   const { data: installation } = useQuery(installationQuery);
   const vault = useVault();
   const { data: me } = useQuery(meQuery);
-  if (!installation?.identityRotation) return null;
   // Past key version 1, the person replaced their keys: from the server's
   // answer, so it shows while locked too.
   const retired = (me?.identity?.keyVersion ?? 1) > 1;
+  // Whether shared folders are left at keys the old key opens: unknown while locked.
+  const unlockedCtx = vault.status === 'unlocked' ? vault.ctx : null;
+  const checking = vault.status === 'unlocked' && retired;
+  const { data: finishing } = useQuery({ ...finishingQuery(unlockedCtx), enabled: checking });
+  // Spaces owned with others wait for another owner to add the person again.
+  const { data: owned } = useQuery({ ...ownedQuery(unlockedCtx), enabled: checking });
+  // Off on the server, someone who replaced their keys still finishes and
+  // copies what the rotation left; nobody can start a new one.
+  const canRotate = !!installation?.identityRotation;
+  if (!canRotate && !retired) return null;
   const landed = landedFor !== null && landedFor === me?.account.id;
+  const finishedSharing =
+    leftToFinish(finishing) === 0 &&
+    owned !== undefined &&
+    !owned.some((s) => s.waitsForReAdd || s.confirmFirst);
   return (
     <FormRow
       id="replace-keys"
@@ -102,13 +117,15 @@ export function ReplaceKeys() {
       state={
         landed && !retired
           ? 'Your keys are replaced. Lock your vault, and unlock it with your new passphrase.'
-          : retired
-            ? 'Your keys were replaced. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
-            : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
+          : retired && finishedSharing
+            ? 'Your keys were replaced, and your shared folders use the new ones.'
+            : retired
+              ? 'Your keys were replaced. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
+              : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
       }
     >
       {vault.status === 'unlocked' ? (
-        <ReplaceKeysFlow ctx={vault.ctx} vault={vault.vault} />
+        <ReplaceKeysFlow ctx={vault.ctx} vault={vault.vault} canRotate={canRotate} />
       ) : (
         <p className="text-sm">
           Unlock your vault first. If you lost your passphrase, use your recovery key.
@@ -118,7 +135,15 @@ export function ReplaceKeys() {
   );
 }
 
-function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVault }) {
+function ReplaceKeysFlow({
+  ctx,
+  vault,
+  canRotate,
+}: {
+  ctx: ClientContext;
+  vault: UnlockedVault;
+  canRotate: boolean;
+}) {
   const [step, setStep] = useState<'choose' | 'save' | 'done'>(() =>
     finishedNow()?.kind === 'done' ? 'done' : current() ? 'save' : 'choose',
   );
@@ -126,7 +151,14 @@ function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVa
     const now = finishedNow();
     return now?.kind === 'done' && now.password;
   });
-  if (step === 'done') return <Replaced password={password} />;
+  if (step === 'done') {
+    return (
+      <div className="grid gap-4">
+        <Replaced password={password} />
+        {vault.identity.public.keyVersion > 1 && <SpacesAfterRotation ctx={ctx} />}
+      </div>
+    );
+  }
   if (step === 'save') {
     return (
       <SaveAndSend
@@ -138,7 +170,18 @@ function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVa
       />
     );
   }
-  return <Choose ctx={ctx} vault={vault} onPrepared={() => setStep('save')} />;
+  return (
+    <div className="grid gap-6">
+      {vault.identity.public.keyVersion > 1 && <SpacesAfterRotation ctx={ctx} />}
+      {canRotate ? (
+        <Choose ctx={ctx} vault={vault} onPrepared={() => setStep('save')} />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          This server doesn’t let anyone replace their keys now.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function Choose({
@@ -150,6 +193,8 @@ function Choose({
   vault: UnlockedVault;
   onPrepared: () => void;
 }) {
+  // The spaces the person owns, named before they confirm (`SpacesBeforeRotation`).
+  const owned = useQuery(ownedQuery(ctx));
   // Names from the contacts record: under PLAIN, so a lock drops them.
   const agents = useQuery({
     queryKey: [PLAIN, 'rotation-agents', vault.identity.public.keyVersion],
@@ -272,6 +317,15 @@ function Choose({
         earlier keys stay in it, only to open what was shared with them. Your other devices are
         signed out, and live editing in your spaces stops, to start again with the new keys.
       </p>
+      <p>
+        In folders other people share with you, you keep reading what you could, and edit again once
+        an owner gives you access at your new keys. Their apps offer it.
+      </p>
+      <p>
+        Update WikiStow on your other devices, and the <code>wikistow</code> command your agents
+        use, before you go on: older versions can’t open your new vault.
+      </p>
+      <SpacesBeforeRotation ctx={ctx} />
       <fieldset className="grid gap-2">
         <legend className="mb-1 font-bold">Agents to keep</legend>
         {agents.isPending ? (
@@ -343,7 +397,8 @@ function Choose({
       {error && <FormMessage>{error}</FormMessage>}
       <Button
         type="submit"
-        disabled={busy || agents.isPending || Boolean(agents.error)}
+        // Not before the spaces the person owns are named (#327, item 7).
+        disabled={busy || agents.isPending || Boolean(agents.error) || !owned.isSuccess}
         className="justify-self-start"
       >
         {busy ? 'Making new keys…' : 'Make new keys'}

@@ -44,8 +44,8 @@ export const installation = {
      */
     importBatches: z.boolean().optional(),
     /**
-     * True when the server takes `identityRoutes.rotate`, which stays off
-     * until replacing keys is fully built (`IDENTITY_ROTATION`, #327).
+     * True when the server takes `identityRoutes.rotate`: on unless the
+     * server sets `IDENTITY_ROTATION=off` (#327).
      * Missing from servers older than it, which never take it.
      */
     identityRotation: z.boolean().optional(),

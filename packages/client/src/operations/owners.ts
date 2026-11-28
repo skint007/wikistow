@@ -6,6 +6,7 @@ import {
   type IdentityId,
   type KeyEnvelopeV2,
   type MetadataEnvelopeV2,
+  type ShareId,
   type SpaceId,
 } from '@wikistow/contracts';
 import { sendShareChange } from './share-changes.ts';
@@ -172,6 +173,8 @@ export type PlannedOwnerRemoval = {
   rotations: PlannedRotation[];
   /** The space's permission version, which the request carries. */
   permissionVersion: number;
+  /** The offers the owner ticked, by share, which a retry works out again with. */
+  tick?: ReadonlyMap<ShareId, readonly { identityId: IdentityId; role: 'reader' | 'editor' }[]>;
 };
 
 /**
@@ -184,7 +187,19 @@ export type PlannedOwnerRemoval = {
  */
 export async function planOwnerRemoval(
   ctx: ClientContext,
-  { spaceId, ownerId }: { spaceId: SpaceId; ownerId: IdentityId },
+  {
+    spaceId,
+    ownerId,
+    tick = new Map(),
+  }: {
+    spaceId: SpaceId;
+    ownerId: IdentityId;
+    /**
+     * Offers the owner ticked, by share (`RotationPlan.offers`), as when
+     * keeping members a rotated owner's earlier key gave access (section 4.6).
+     */
+    tick?: ReadonlyMap<ShareId, readonly { identityId: IdentityId; role: 'reader' | 'editor' }[]>;
+  },
 ): Promise<PlannedOwnerRemoval> {
   const keys = await ownerKeys(ctx, spaceId);
   const listed = keys.listed.find((owner) => owner.identity.id === ownerId);
@@ -201,10 +216,16 @@ export async function planOwnerRemoval(
   const rotations: PlannedRotation[] = [];
   for (const share of await listShares(ctx, spaceId)) {
     rotations.push(
-      await planShareRotation(ctx, { spaceId, shareId: share.shareId, removing: owner, keys }),
+      await planShareRotation(ctx, {
+        spaceId,
+        shareId: share.shareId,
+        removing: owner,
+        keys,
+        tick: tick.get(share.shareId) ?? [],
+      }),
     );
   }
-  return { spaceId, owner, rotations, permissionVersion: keys.permissionVersion };
+  return { spaceId, owner, rotations, permissionVersion: keys.permissionVersion, tick };
 }
 
 /**
@@ -228,7 +249,11 @@ export async function applyOwnerRemoval(
     await saveContacts(ctx, [{ kind: 'remove-owner', spaceId, ownerId: owner.id }], {
       confirm: true,
     });
-    removal = await planOwnerRemoval(ctx, { spaceId, ownerId: owner.id });
+    removal = await planOwnerRemoval(ctx, {
+      spaceId,
+      ownerId: owner.id,
+      ...(confirmed.tick ? { tick: confirmed.tick } : {}),
+    });
     if (!sameRemoval(confirmed, removal)) {
       throw new ApiError(409, 'stale-head', 'The removal changed; confirm it again');
     }

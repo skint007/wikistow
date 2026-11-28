@@ -18,9 +18,9 @@ describe('loadConfig', () => {
     expect(loadConfig(valid).minKdf).toEqual(DEFAULT_KDF);
   });
 
-  it('keeps replacing identity keys off unless it is turned on', () => {
-    expect(loadConfig(valid).identityRotation).toBe(false);
-    expect(loadConfig({ ...valid, IDENTITY_ROTATION: 'on' }).identityRotation).toBe(true);
+  it('lets people replace their identity keys unless it is turned off', () => {
+    expect(loadConfig(valid).identityRotation).toBe(true);
+    expect(loadConfig({ ...valid, IDENTITY_ROTATION: 'off' }).identityRotation).toBe(false);
     expect(() => loadConfig({ ...valid, IDENTITY_ROTATION: 'yes' })).toThrow(/IDENTITY_ROTATION/);
   });
 });

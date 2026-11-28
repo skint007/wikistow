@@ -1,6 +1,7 @@
 import {
   groupOperations,
   IdentityId,
+  rotatedShareOperations,
   sharingOperations,
   type ShareId,
   type SpaceId,
@@ -23,6 +24,7 @@ import {
 import { runCommand } from '../commands/command';
 import {
   addMember,
+  rekeyMember,
   sendGroupChange,
   rotateShare,
   setPublishRights,
@@ -56,6 +58,7 @@ import { AccessSelect, PersonFinder, type Found } from './person-finder';
 import { NewMark } from './new-mark';
 import { NotInAnyShare, RotationConfirm } from './rotation-confirm';
 import { StopSharing } from './stop-sharing';
+import { useTicks, withTicks } from './ticks';
 import { ErrorLine, useAction } from './use-action';
 
 export type ListedShare = Awaited<ReturnType<typeof sharingOperations.listShares>>[number];
@@ -75,7 +78,13 @@ type Pending =
       /** What to say when the server lists nothing to rotate. */
       none: ReactNode;
       make: () => Promise<ShareRotation[]>;
-      apply: (plans: ShareRotation[]) => Promise<void>;
+      /** `tick`: the offers the owner ticked, by share, where `ticking` lets them. */
+      apply: (
+        plans: ShareRotation[],
+        tick: ReadonlyMap<ShareId, readonly rotatedShareOperations.Tick[]>,
+      ) => Promise<void>;
+      /** Members only an earlier key gave access can be ticked in (section 4.6). */
+      ticking?: true;
     }
   | {
       /** A group change that takes access away: rotations, maybe none. */
@@ -159,10 +168,14 @@ export function AccessPanel({
     setDone(message);
   };
 
+  // Offers the owner ticks in a rotation that lets them (section 4.6).
+  const { ticks, onTick, chosen, reset: resetTicks } = useTicks();
+
   // Show a change to confirm; nothing is sealed or rotated until the owner does.
   const ask = (next: Pending) => {
     setDone(null);
     setError(null);
+    resetTicks();
     setPending(next);
   };
 
@@ -313,10 +326,44 @@ export function AccessPanel({
     }
   };
 
+  // Someone listed above the key version of their row here replaced their keys.
+  const replacedKeys = (who: Person) => {
+    const row = share.members.find((m) => m.identityId === who.id);
+    return !!row && !!who.entry && who.entry.identity.keyVersion > row.keyVersion;
+  };
+
   // Give access to someone waiting: every share in the space they lack keys for.
   const giveAccess = (who: Person) => {
     const { entry } = who;
     if (!entry) return;
+    // Only a rotation gives keys to someone who replaced theirs (section 4.6).
+    if (replacedKeys(who)) {
+      ask({
+        kind: 'rotation',
+        title: (
+          <>
+            Rotate keys and give <Name>{who.name}</Name> access?
+          </>
+        ),
+        confirmLabel: 'Rotate keys and give access',
+        none: 'They wait for no folder here now.',
+        make: async () =>
+          (await rotatedShareOperations.planRekey(ctx, { spaceId, person: entry })).map(
+            (planned) => ({ label: shareNameById(tree, planned.plan.shareId), planned }),
+          ),
+        apply: async (confirmed, tick) => {
+          const plans = await withTicks(
+            confirmed.map((p) => p.planned),
+            tick,
+            (again) =>
+              rotatedShareOperations.planRekey(ctx, { spaceId, person: entry, tick: again }),
+          );
+          await runCommand(rekeyMember, { plans: [...plans] }, env);
+        },
+        ticking: true,
+      });
+      return;
+    }
     ask({
       kind: 'give',
       title: (
@@ -482,7 +529,8 @@ export function AccessPanel({
         plansOf={(plans) =>
           plans.map(({ label: l, planned }) => ({ label: l, plan: planned.plan }))
         }
-        apply={pending.apply}
+        apply={(plans) => pending.apply(plans, chosen(plans.map((p) => p.planned)))}
+        {...(pending.ticking ? { ticks, onTick } : {})}
         ownerIds={ownerIds}
         review={reviewKey}
         onCancel={() => setPending(null)}
@@ -683,7 +731,7 @@ export function AccessPanel({
                       disabled={busy}
                       onClick={() => giveAccess(who)}
                     >
-                      Give access
+                      {replacedKeys(who) ? 'Rotate keys and give access' : 'Give access'}
                     </Button>
                   )}
                   {direct ? (
