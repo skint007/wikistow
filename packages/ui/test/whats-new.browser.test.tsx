@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vite-plus
 import { userEvent } from 'vite-plus/test/browser/context';
 import changelog from '../../../CHANGELOG.md?raw';
 import { parseChangelog } from '../src/whats-new/changelog.ts';
-import { highlightParts, matchingHighlights } from '../src/whats-new/search.ts';
+import { highlightParts, matchingHighlights, searchWords } from '../src/whats-new/search.ts';
 
 // What's new goes to any release from one field (#757), however many
 // releases there are: by mouse, by the arrows, or by Enter on what's typed;
@@ -261,4 +261,9 @@ it('finds a term typed with the backticks its Markdown has', async () => {
   await act(() => userEvent.click(field()));
   await act(() => userEvent.keyboard(`\`${term}\``));
   expect(options().some((o) => o.firstElementChild?.textContent === withCode.version)).toBe(true);
+});
+
+it('takes straight quotes as typed for the curly ones of the changelog, and marks them', () => {
+  const parts = highlightParts('What’s new opens a release', searchWords("what's"));
+  expect(parts[0]!.pieces[0]).toEqual({ text: 'What’s', marked: true });
 });

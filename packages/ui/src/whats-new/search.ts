@@ -2,15 +2,25 @@
 import type { Release } from './changelog';
 
 /**
+ * Text as searches compare it: lowercased, with curly quotes straight, as
+ * people type them and the changelog doesn't. Each character stays one.
+ */
+const fold = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"');
+
+/**
  * The words of what was typed, lowercased, in order, without backticks, as
  * highlights are matched without theirs; none for blank text.
  */
 export const searchWords = (text: string) =>
-  text.replaceAll('`', '').toLowerCase().split(/\s+/).filter(Boolean);
+  fold(text.replaceAll('`', '')).split(/\s+/).filter(Boolean);
 
 /** Whether a highlight holds every word, ignoring case and the backticks around code. */
 export const highlightMatches = (item: string, words: readonly string[]) => {
-  const plain = item.replaceAll('`', '').toLowerCase();
+  const plain = fold(item.replaceAll('`', ''));
   return words.length > 0 && words.every((word) => plain.includes(word));
 };
 
@@ -28,7 +38,7 @@ export const matchingHighlights = (release: Release, words: readonly string[]) =
 export function highlightParts(item: string, words: readonly string[]) {
   const parts = item.split('`');
   const plain = parts.join('');
-  const lower = plain.toLowerCase();
+  const lower = fold(plain);
   // Marks by position, unless lowercasing changed the length (as for "İ").
   const marked = new Array<boolean>(plain.length).fill(false);
   if (lower.length === plain.length) {
