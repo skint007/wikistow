@@ -173,7 +173,7 @@ export async function publicationOf(
 export async function publicationsOf(db: Database, actor: Actor, sourcePageId: string) {
   const caller = await requireCaller(db, actor);
   return readSnapshot(db, async (tx) => {
-    const source = await requireSourcePublisher(tx, caller, sourcePageId);
+    const source = await requireSourcePublisher(tx, caller, sourcePageId, { writing: false });
     const rows = await tx
       .select()
       .from(publications)

@@ -6,6 +6,7 @@
 import {
   groupOperations,
   moveOperations as moves,
+  publicationOperations as publications,
   publicLinkOperations as links,
   spaceOperations,
   inlineVaultCrypto,
@@ -258,8 +259,9 @@ describe('a publishing editor who replaced their keys', () => {
     if (!heads.publishedHead) throw new Error('expected the page published');
     const seen = { publishedHead: heads.publishedHead, permissionVersion };
     expect(await rejection(pages.unpublishPage(ctx, lib.page, seen))).toBe('not-found');
-    // She still reads what she had.
+    // She still reads what she had, and where the page is published.
     expect(await draftOf(ctx, lib.page)).toMatchObject({ payload: { markdown: 'draft words' } });
+    expect(await publications.publishedCopies(ctx, lib.page)).toEqual([]);
   });
 });
 
