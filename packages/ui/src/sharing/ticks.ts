@@ -4,6 +4,7 @@
 import {
   rotatedShareOperations,
   type RotationOffer,
+  type RotationPlan,
   type ShareId,
   type sharingOperations,
 } from '@wikistow/client';
@@ -13,6 +14,20 @@ import type { Ticks } from './rotation-review';
 
 type Tick = rotatedShareOperations.Tick;
 type PlannedRotation = sharingOperations.PlannedRotation;
+
+/**
+ * Whether an offer may be ticked as an editor: never where the change makes
+ * them a reader, or the send would be refused as changed every time.
+ */
+export const raisable = (plan: RotationPlan, offer: RotationOffer) =>
+  offer.role === 'editor' && !plan.demoted.includes(offer.identityId);
+
+/** The role a tick gives now, as the current plan allows: a stored editor's may no longer be. */
+export const tickedRole = (
+  plan: RotationPlan,
+  offer: RotationOffer,
+  role: 'reader' | 'editor' | null | undefined,
+) => (!role ? null : role === 'editor' && !raisable(plan, offer) ? 'reader' : role);
 
 /** The ticks of one review, cleared with `reset` when it is shown again. */
 export function useTicks() {
@@ -32,7 +47,7 @@ export function useTicks() {
     for (const { plan } of plans) {
       const picked = ticks.get(plan.shareId);
       const ticked = plan.offers.flatMap((offer) => {
-        const role = picked?.get(offer.identityId);
+        const role = tickedRole(plan, offer, picked?.get(offer.identityId));
         return role ? [{ identityId: offer.identityId, role }] : [];
       });
       if (ticked.length > 0) out.set(plan.shareId, ticked);
@@ -44,15 +59,16 @@ export function useTicks() {
 
 /**
  * The rotations to send for what the owner confirmed: as confirmed with no
- * ticks, or else worked out again with them (`again`), and refused as
+ * ticks (unless `always`), or else worked out again with them (`again`), and refused as
  * `stale-head`, to be shown again, if that changes more than the ticks.
  */
 export async function withTicks(
   confirmed: readonly PlannedRotation[],
   tick: ReadonlyMap<ShareId, readonly Tick[]>,
   again: (tick: ReadonlyMap<ShareId, readonly Tick[]>) => Promise<readonly PlannedRotation[]>,
+  { always = false }: { always?: boolean } = {},
 ): Promise<readonly PlannedRotation[]> {
-  if (tick.size === 0) return confirmed;
+  if (tick.size === 0 && !always) return confirmed;
   const planned = await again(tick);
   const changed =
     planned.length !== confirmed.length ||

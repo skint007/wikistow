@@ -7,6 +7,7 @@ import { useClient } from '../vault/store';
 import { ACCESS_LABELS, accessOf } from './model';
 import { describePerson, peopleQuery, type Person } from './people';
 import { NewMark } from './new-mark';
+import { raisable, tickedRole } from './ticks';
 
 const LEFT_OUT: Record<RotationPlan['leftOut'][number]['reason'], string> = {
   'left-out': 'Loses access',
@@ -168,14 +169,12 @@ function ShareReview({
           {plan.leftOut.map(({ identityId, reason }) => {
             const left = person(identityId);
             const offer = plan.offers.find((o) => o.identityId === identityId);
-            const tickedRole = ticked?.get(identityId) ?? null;
             if (offer && onTick) {
-              // Never offered as an editor where the change makes them a
-              // reader: the send would be refused as changed, every time.
-              const raisable = offer.role === 'editor' && !plan.demoted.includes(identityId);
+              const raises = raisable(plan, offer);
+              const tickedAs = tickedRole(plan, offer, ticked?.get(identityId));
               // Ticked as the offer's role where an owner this app accepts
               // vouched for them, and as a reader where only an earlier key did.
-              const ticksAs = offer.vouched && raisable ? 'editor' : 'reader';
+              const ticksAs = offer.vouched && raises ? 'editor' : 'reader';
               return (
                 <li key={identityId} className="grid gap-1">
                   <span className="flex flex-wrap items-center justify-between gap-2">
@@ -188,9 +187,9 @@ function ShareReview({
                         </span>
                       )}
                     </span>
-                    <span className={tickedRole ? 'text-muted-foreground' : 'text-destructive'}>
-                      {tickedRole
-                        ? tickedRole === 'editor'
+                    <span className={tickedAs ? 'text-muted-foreground' : 'text-destructive'}>
+                      {tickedAs
+                        ? tickedAs === 'editor'
                           ? 'Keeps access, as an editor'
                           : 'Keeps access, as a reader'
                         : LEFT_OUT[reason]}
@@ -199,20 +198,22 @@ function ShareReview({
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
-                      checked={tickedRole !== null}
+                      checked={tickedAs !== null}
                       disabled={busy}
+                      aria-label={`${TICK[offer.reason]}: ${plainText(left.name)}`}
                       onChange={(event) =>
                         onTick(plan.shareId, offer, event.target.checked ? ticksAs : null)
                       }
                     />
                     {TICK[offer.reason]}
                   </label>
-                  {tickedRole && raisable && (
+                  {tickedAs && raises && (
                     <label className="flex items-center gap-2 pl-6">
                       <input
                         type="checkbox"
-                        checked={tickedRole === 'editor'}
+                        checked={tickedAs === 'editor'}
                         disabled={busy}
+                        aria-label={`As an editor: ${plainText(left.name)}`}
                         onChange={(event) =>
                           onTick(plan.shareId, offer, event.target.checked ? 'editor' : 'reader')
                         }

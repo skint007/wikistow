@@ -326,16 +326,22 @@ function RemoveOwner({
       }
       apply={async (confirmed) => {
         const tick = chosen(confirmed.rotations);
-        const rotations = await withTicks(confirmed.rotations, tick, async (again) => {
-          const removal = await ownerOperations.planOwnerRemoval(ctx, {
-            spaceId,
-            ownerId,
-            tick: again,
-          });
-          return removal.rotations;
-        });
-        const removal =
-          tick.size === 0 ? confirmed : { ...confirmed, rotations: [...rotations], tick };
+        // Worked out again first, so a share that changed since stops here,
+        // before the removal's contacts write.
+        const rotations = await withTicks(
+          confirmed.rotations,
+          tick,
+          async (again) => {
+            const removal = await ownerOperations.planOwnerRemoval(ctx, {
+              spaceId,
+              ownerId,
+              tick: again,
+            });
+            return removal.rotations;
+          },
+          { always: true },
+        );
+        const removal = { ...confirmed, rotations: [...rotations], tick };
         await runCommand(removeOwner, { removal }, { satisfies, ctx });
       }}
       ticks={ticks}

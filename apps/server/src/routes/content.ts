@@ -310,9 +310,7 @@ export function mountContentRoutes(
     identities: await lookupIdentities(db, query.ids, { hold: false }),
   }));
 
-  // Replacing keys stays off until it is fully built (#327): until then a
-  // rotated person can't open what was sealed to their earlier keys, and
-  // their contacts' apps take the new key as a plain key change.
+  // Replacing keys, unless the server turned it off (`IDENTITY_ROTATION`, #327).
   routes.account(
     identityRoutes.rotate,
     async ({ body }, { principal }) =>

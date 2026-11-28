@@ -65,7 +65,14 @@ export const ownedQuery = (ctx: ClientContext | null) =>
             try {
               await sharingOperations.ownerKeys(ctx, space.spaceId);
             } catch (error) {
-              confirmFirst = error instanceof CryptoError && error.code === 'unaccepted-owner';
+              // Only where an adder waits to be confirmed, which opening the space asks.
+              if (error instanceof CryptoError && error.code === 'unaccepted-owner') {
+                const { owners } = await spaceKeys(ctx, space.spaceId).catch(() => ({
+                  owners: null,
+                }));
+                confirmFirst =
+                  !!owners && (owners.adderToConfirm !== null || owners.adder !== null);
+              }
             }
           }
           try {

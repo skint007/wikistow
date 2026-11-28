@@ -653,6 +653,36 @@ describe('a rotated co-owner', () => {
     expect(hers[0]?.draftKey).toBeNull();
   });
 
+  it('when removed, offers a member they gave a version a co-owner sealed', async () => {
+    const { alice, olive, lib } = await coOwned();
+    const { person: carol } = await personWithLibrary();
+    // Olive seals the current version; Alice then gives Carol access to it.
+    const share = await shareOf(olive.ctx, lib.spaceId);
+    await sharing.applyShareRotation(
+      olive.ctx,
+      await sharing.planShareRotation(olive.ctx, { spaceId: lib.spaceId, shareId: share.shareId }),
+    );
+    await spaceKeys(alice.ctx, lib.spaceId, { refresh: true });
+    await sharing.addMember(alice.ctx, {
+      spaceId: lib.spaceId,
+      shareId: share.shareId,
+      person: await find(alice, carol),
+      role: 'editor',
+    });
+    await rotate(alice);
+    await spaceKeys(olive.ctx, lib.spaceId, { refresh: true });
+    const removal = await ownerOperations.planOwnerRemoval(olive.ctx, {
+      spaceId: lib.spaceId,
+      ownerId: alice.vault.identity.public.id,
+    });
+    // Only Alice's earlier key gave Carol access: offered unticked, never kept unasked.
+    const carolId = carol.vault.identity.public.id;
+    expect(removal.rotations[0]?.plan.offers).toMatchObject([
+      { identityId: carolId, reason: 'old-key' },
+    ]);
+    expect(removal.rotations[0]?.plan.remaining.map((r) => r.identity.id)).not.toContain(carolId);
+  });
+
   it('is offered to add again while the re-add’s statement isn’t served', async () => {
     const { alice, olive, lib } = await coOwned();
     await sharing.rotateKeys(olive.ctx, {
