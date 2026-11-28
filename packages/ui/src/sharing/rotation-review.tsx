@@ -1,4 +1,4 @@
-import type { RotationPlan } from '@wikistow/client';
+import type { RotationOffer, RotationPlan } from '@wikistow/client';
 import { useQuery } from '@tanstack/react-query';
 import { Name, plainText } from '@/components/name';
 import { Button } from '@/components/ui/button';
@@ -17,8 +17,20 @@ const LEFT_OUT: Record<RotationPlan['leftOut'][number]['reason'], string> = {
   'replaced-keys': 'Waits: they replaced their keys',
 };
 
+// What ticking an offer does, by why it is offered.
+const TICK: Record<RotationOffer['reason'], string> = {
+  'old-key': 'Keep their access',
+  'replaced-keys': 'Give them access at their new key',
+};
+
 /** One share's rotation, with the name the owner knows the share by. */
 export type LabelledPlan = { label: string; plan: RotationPlan };
+
+/**
+ * The offers the owner ticked (`RotationPlan.offers`), by share and then
+ * by person, with the role to give.
+ */
+export type Ticks = ReadonlyMap<string, ReadonlyMap<string, 'reader' | 'editor'>>;
 
 /**
  * Who keeps each share after a key rotation, and who doesn't, by name
@@ -30,6 +42,8 @@ export function RotationReview({
   ownerIds,
   busy = false,
   onReviewKey,
+  ticks,
+  onTick,
 }: {
   plans: readonly LabelledPlan[];
   ownerIds: ReadonlySet<string>;
@@ -37,6 +51,9 @@ export function RotationReview({
   busy?: boolean;
   /** Show the key-change warning for someone left out over an unconfirmed key. */
   onReviewKey?: (person: Person) => void;
+  /** The offers ticked, with `onTick`: without it, offers are only listed as waiting. */
+  ticks?: Ticks;
+  onTick?: (shareId: string, offer: RotationOffer, role: 'reader' | 'editor' | null) => void;
 }) {
   const ctx = useClient();
   const ids = plans.flatMap(({ plan }) => [
@@ -57,6 +74,7 @@ export function RotationReview({
           person={person}
           busy={busy}
           {...(onReviewKey ? { onReviewKey } : {})}
+          {...(onTick ? { onTick, ticked: ticks?.get(plan.shareId) ?? new Map() } : {})}
         />
       ))}
       <p className="text-sm text-muted-foreground">
@@ -84,12 +102,16 @@ function ShareReview({
   person,
   busy,
   onReviewKey,
+  ticked,
+  onTick,
 }: LabelledPlan & {
   titled: boolean;
   ownerIds: ReadonlySet<string>;
   person: (id: string) => Person;
   busy: boolean;
   onReviewKey?: (person: Person) => void;
+  ticked?: ReadonlyMap<string, 'reader' | 'editor'>;
+  onTick?: (shareId: string, offer: RotationOffer, role: 'reader' | 'editor' | null) => void;
 }) {
   const ctx = useClient();
   // Publish rights don't change in a rotation; the share's list says who has them.
@@ -145,6 +167,62 @@ function ShareReview({
         <ul className="grid gap-1 text-sm">
           {plan.leftOut.map(({ identityId, reason }) => {
             const left = person(identityId);
+            const offer = plan.offers.find((o) => o.identityId === identityId);
+            const tickedRole = ticked?.get(identityId) ?? null;
+            if (offer && onTick) {
+              // Never offered as an editor where the change makes them a
+              // reader: the send would be refused as changed, every time.
+              const raisable = offer.role === 'editor' && !plan.demoted.includes(identityId);
+              // Ticked as the offer's role where an owner this app accepts
+              // vouched for them, and as a reader where only an earlier key did.
+              const ticksAs = offer.vouched && raisable ? 'editor' : 'reader';
+              return (
+                <li key={identityId} className="grid gap-1">
+                  <span className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="truncate font-bold">
+                      <Name>{left.name}</Name>
+                      {left.email && (
+                        <span className="font-normal text-muted-foreground">
+                          {' '}
+                          · <Name>{left.email}</Name>
+                        </span>
+                      )}
+                    </span>
+                    <span className={tickedRole ? 'text-muted-foreground' : 'text-destructive'}>
+                      {tickedRole
+                        ? tickedRole === 'editor'
+                          ? 'Keeps access, as an editor'
+                          : 'Keeps access, as a reader'
+                        : LEFT_OUT[reason]}
+                    </span>
+                  </span>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={tickedRole !== null}
+                      disabled={busy}
+                      onChange={(event) =>
+                        onTick(plan.shareId, offer, event.target.checked ? ticksAs : null)
+                      }
+                    />
+                    {TICK[offer.reason]}
+                  </label>
+                  {tickedRole && raisable && (
+                    <label className="flex items-center gap-2 pl-6">
+                      <input
+                        type="checkbox"
+                        checked={tickedRole === 'editor'}
+                        disabled={busy}
+                        onChange={(event) =>
+                          onTick(plan.shareId, offer, event.target.checked ? 'editor' : 'reader')
+                        }
+                      />
+                      As an editor
+                    </label>
+                  )}
+                </li>
+              );
+            }
             return (
               <li key={identityId} className="flex flex-wrap items-center justify-between gap-2">
                 <span className="flex min-w-0 items-center gap-1.5">

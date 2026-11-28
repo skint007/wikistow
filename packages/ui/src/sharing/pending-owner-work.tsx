@@ -2,9 +2,12 @@ import {
   agentOperations,
   groupOperations,
   ownerOperations,
+  rotatedShareOperations,
   sharingOperations,
   spaceKeys,
   type ClientContext,
+  type DirectoryEntry,
+  type IdentityId,
   type SpaceId,
 } from '@wikistow/client';
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
@@ -23,11 +26,21 @@ import { useOffline } from '../data/connection';
 import { spacesQuery } from '../data/queries';
 import { useSessionConfirmed } from '../vault/confirm';
 import { PLAIN, useClient } from '../vault/store';
+import { AddAgainDialog } from './add-again-dialog';
+import { finishingQuery, FinishRotationDialog, leftToFinish } from './finish-rotation';
 import { GiveAccessDialog } from './give-access-dialog';
+import { OwnerDialog } from './owner-dialog';
 import { nameOf } from './names';
 import { askAgain } from './owner-standing';
+import { peopleQuery } from './people';
 
-type Work = 'confirm-owner' | 'finish-removal' | 'renew-keys' | 'rotate-for-agents' | 'give-access';
+type Work =
+  | 'confirm-owner'
+  | 'finish-removal'
+  | 'renew-keys'
+  | 'rotate-for-agents'
+  | 'give-access'
+  | 'add-again';
 
 const WORK: Record<Work, string> = {
   'confirm-owner': 'confirm who made you an owner',
@@ -35,6 +48,7 @@ const WORK: Record<Work, string> = {
   'renew-keys': 'renew the keys you were handed',
   'rotate-for-agents': 'give new keys to a folder an agent kept the keys of',
   'give-access': 'people wait for their keys',
+  'add-again': 'an owner replaced their keys and waits to be added again',
 };
 
 /**
@@ -73,7 +87,16 @@ const pendingOwnerWorkQuery = (ctx: ClientContext, queryClient: QueryClient) =>
               }
               const waits = waiting?.filter((w) => w.spaceId === space.id) ?? [];
               if (waits.length > 0) work.push('give-access');
-              return { spaceId: space.id, name: nameOf(space.metadata), work, waiting: waits };
+              // A co-owner who replaced their keys is an owner again once added again.
+              const addAgain = adder ? [] : rotatedShareOperations.ownersToAddAgain(ctx, keys);
+              if (addAgain.length > 0) work.push('add-again');
+              return {
+                spaceId: space.id,
+                name: nameOf(space.metadata),
+                work,
+                waiting: waits,
+                addAgain,
+              };
             } catch {
               return null;
             }
@@ -135,6 +158,26 @@ export function PendingOwnerWork() {
   const { data } = useQuery({ ...pendingOwnerWorkQuery(ctx, queryClient), enabled: ready });
   // After the owner work, so the two don't write the contacts record at once.
   const { data: agents } = useQuery({ ...agentWorkQuery(ctx), enabled: data !== undefined });
+  // Shares still at keys the person's old key opens, after they replaced theirs.
+  const { data: finishing } = useQuery({
+    ...finishingQuery(ctx),
+    enabled: data !== undefined && ctx.identity.public.keyVersion > 1,
+  });
+  const toFinish = leftToFinish(finishing) ?? 0;
+  const [finishOpen, setFinishOpen] = useState(false);
+  // The owner to add again, with where.
+  const [adding, setAdding] = useState<{
+    spaceId: SpaceId;
+    name: string | null;
+    owner: DirectoryEntry;
+  } | null>(null);
+  // An owner who replaced their keys, removed rather than added again.
+  const [removing, setRemoving] = useState<{ spaceId: SpaceId; ownerId: IdentityId } | null>(null);
+  const addIds = (data?.spaces ?? []).flatMap((s) => s.addAgain.map((o) => o.identity.id));
+  const { data: people } = useQuery({
+    ...peopleQuery(ctx, addIds),
+    enabled: addIds.length > 0,
+  });
   const [dismissed, setDismissed] = useState(false);
   const [unfolded, setUnfolded] = useState(false);
   // The space whose waiting people are shown, named as it was when opened.
@@ -148,7 +191,8 @@ export function PendingOwnerWork() {
       : agents && agents.toConfirm > 0
         ? 'An owner put one of your agents in a group. Confirm or decline it on the Agents page.'
         : null;
-  const shown = !dismissed && (spaces.length > 0 || unchecked > 0 || agentNote !== null);
+  const shown =
+    !dismissed && (spaces.length > 0 || unchecked > 0 || agentNote !== null || toFinish > 0);
   const givingIn = spaces.find((space) => space.spaceId === giving?.spaceId);
   return (
     // Always there, so what appears in it is announced.
@@ -178,8 +222,26 @@ export function PendingOwnerWork() {
             </button>
           </div>
           <div className={cn('grid gap-1', !unfolded && 'max-[899px]:hidden')}>
+            {toFinish > 0 && (
+              <p className="flex flex-wrap items-baseline gap-x-1">
+                <span>
+                  Your new keys:{' '}
+                  {toFinish === 1
+                    ? 'a shared folder still uses keys your old key opens.'
+                    : `${toFinish} shared folders still use keys your old key opens.`}
+                </span>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={() => setFinishOpen(true)}
+                >
+                  Finish
+                </Button>
+              </p>
+            )}
             <ul className="grid gap-1">
-              {spaces.map(({ spaceId, name, work }) => (
+              {spaces.map(({ spaceId, name, work, addAgain }) => (
                 <li key={spaceId} className="flex flex-wrap items-baseline gap-x-1">
                   <Link
                     to={work.includes('confirm-owner') ? '/s/$spaceId' : '/s/$spaceId/members'}
@@ -191,6 +253,17 @@ export function PendingOwnerWork() {
                     <Name>{name ?? 'A space'}</Name>
                   </Link>
                   <span>: {work.map((w) => WORK[w]).join(', ')}.</span>
+                  {addAgain.map((owner) => (
+                    <Button
+                      key={owner.identity.id}
+                      size="xs"
+                      variant="outline"
+                      className="ml-auto"
+                      onClick={() => setAdding({ spaceId, name, owner })}
+                    >
+                      Add <Name>{people?.get(owner.identity.id)?.name ?? owner.name}</Name> again
+                    </Button>
+                  ))}
                   {work.includes('give-access') && (
                     <Button
                       size="xs"
@@ -224,6 +297,35 @@ export function PendingOwnerWork() {
         </aside>
       )}
       {/* Kept outside the note, so dismissing it doesn't end the dialog. */}
+      <FinishRotationDialog open={finishOpen} onClose={() => setFinishOpen(false)} />
+      {adding && (
+        <AddAgainDialog
+          spaceId={adding.spaceId}
+          spaceName={adding.name ?? 'This space'}
+          owner={adding.owner}
+          name={people?.get(adding.owner.identity.id)?.name ?? adding.owner.name}
+          onRemove={() => {
+            setRemoving({ spaceId: adding.spaceId, ownerId: adding.owner.identity.id });
+            setAdding(null);
+          }}
+          onClose={() => setAdding(null)}
+          onDone={() => {
+            setAdding(null);
+            void queryClient.invalidateQueries({ queryKey: [PLAIN, 'pending-owner-work'] });
+          }}
+        />
+      )}
+      {removing && (
+        <OwnerDialog
+          spaceId={removing.spaceId}
+          action={{ kind: 'remove', ownerId: removing.ownerId, retry: false }}
+          onAction={() => {}}
+          onClose={() => {
+            setRemoving(null);
+            void queryClient.invalidateQueries({ queryKey: [PLAIN, 'pending-owner-work'] });
+          }}
+        />
+      )}
       {giving && (
         <GiveAccessDialog
           spaceId={giving.spaceId}

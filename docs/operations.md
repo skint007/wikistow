@@ -1,6 +1,6 @@
 # Operations
 
-How to run a WikiStow server so it stays up, set up its first administrator and mail, connect an AI provider, back up the installation, restore it, and prove the restore works.
+How to run a WikiStow server so it stays up, set up its first administrator and mail, connect an AI provider, choose whether people may replace their keys, back up the installation, restore it, and prove the restore works.
 
 ## Choose an image
 
@@ -71,6 +71,14 @@ The model must support tool calls. For the OpenAI style the server limits replie
 Anyone can also check the connection under **Settings → AI assistant → Check connection**, with the settings the server uses.
 
 The server keeps no prompt or reply. It doesn't store them, and its log has one `ai-provider-failed` line for each failed provider request, with only the failure's code and HTTP status. A conversation lives in the person's app and is gone when they close it, lock their vault or sign out. Each request has a 1 MiB body limit, and a provider request that runs over 10 minutes is cut off. While the provider is quiet, as a reasoning model can be for minutes before it answers, the server sends a blank line every 15 seconds to keep the reply open. When a person stops a reply, the server cancels the provider's request too.
+
+## Replacing keys
+
+People can replace their identity keys in **Settings → Security → Replace my keys**, as when theirs may have leaked ([protocol section 4.6](../wikistow/protocol.md#46-identity-key-rotation)). It is on by default. To turn it off, set `IDENTITY_ROTATION=off` in the server's environment and restart. The app then hides **Replace my keys**, and the server refuses new rotations. People who already replaced theirs keep their new keys, and the people they share with keep following them.
+
+| Variable | Meaning |
+| --- | --- |
+| `IDENTITY_ROTATION` | `on` (the default) or `off`. |
 
 ## What to back up
 

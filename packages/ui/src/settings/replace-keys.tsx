@@ -1,8 +1,8 @@
 // Settings → Security → Replace my keys (protocol section 4.6, #327): new
 // identity keys at the next key version, a new vault, passphrase and
-// recovery key, and the agents the person ticks kept at the new key. Shown
-// only where the server takes it (`IDENTITY_ROTATION`), which stays off
-// until replacing keys is fully built.
+// recovery key, and the agents the person ticks kept at the new key; then
+// their shared folders moved to the new keys. Shown only where the server
+// takes it (`IDENTITY_ROTATION`).
 import {
   agentOperations,
   closeSession,
@@ -29,6 +29,8 @@ import { keepAnchor, keepChangedWrapper, keepSentRotation, startSession } from '
 import { forgetKeptUnlock, PLAIN, useVault, vaultStore, zeroVault } from '../vault/store';
 import { workerVaultCrypto } from '../vault/worker-crypto';
 import { FormRow, useOpenedRow } from './rows';
+import { ownedQuery, SpacesAfterRotation, SpacesBeforeRotation } from './rotated-spaces';
+import { finishingQuery, leftToFinish } from '../sharing/finish-rotation';
 
 /**
  * A rotation made here and not yet answered, kept in memory, not in the
@@ -88,11 +90,19 @@ export function ReplaceKeys() {
   const { data: installation } = useQuery(installationQuery);
   const vault = useVault();
   const { data: me } = useQuery(meQuery);
-  if (!installation?.identityRotation) return null;
   // Past key version 1, the person replaced their keys: from the server's
   // answer, so it shows while locked too.
   const retired = (me?.identity?.keyVersion ?? 1) > 1;
+  // Whether shared folders are left at keys the old key opens: unknown while locked.
+  const unlockedCtx = vault.status === 'unlocked' ? vault.ctx : null;
+  const checking = vault.status === 'unlocked' && retired && !!installation?.identityRotation;
+  const { data: finishing } = useQuery({ ...finishingQuery(unlockedCtx), enabled: checking });
+  // Spaces owned with others wait for another owner to add the person again.
+  const { data: owned } = useQuery({ ...ownedQuery(unlockedCtx), enabled: checking });
+  if (!installation?.identityRotation) return null;
   const landed = landedFor !== null && landedFor === me?.account.id;
+  const finishedSharing =
+    leftToFinish(finishing) === 0 && owned !== undefined && !owned.some((s) => s.waitsForReAdd);
   return (
     <FormRow
       id="replace-keys"
@@ -102,9 +112,11 @@ export function ReplaceKeys() {
       state={
         landed && !retired
           ? 'Your keys are replaced. Lock your vault, and unlock it with your new passphrase.'
-          : retired
-            ? 'Your keys were replaced. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
-            : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
+          : retired && finishedSharing
+            ? 'Your keys were replaced, and your shared folders use the new ones.'
+            : retired
+              ? 'Your keys were replaced. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
+              : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
       }
     >
       {vault.status === 'unlocked' ? (
@@ -126,7 +138,14 @@ function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVa
     const now = finishedNow();
     return now?.kind === 'done' && now.password;
   });
-  if (step === 'done') return <Replaced password={password} />;
+  if (step === 'done') {
+    return (
+      <div className="grid gap-4">
+        <Replaced password={password} />
+        {vault.identity.public.keyVersion > 1 && <SpacesAfterRotation ctx={ctx} />}
+      </div>
+    );
+  }
   if (step === 'save') {
     return (
       <SaveAndSend
@@ -138,7 +157,12 @@ function ReplaceKeysFlow({ ctx, vault }: { ctx: ClientContext; vault: UnlockedVa
       />
     );
   }
-  return <Choose ctx={ctx} vault={vault} onPrepared={() => setStep('save')} />;
+  return (
+    <div className="grid gap-6">
+      {vault.identity.public.keyVersion > 1 && <SpacesAfterRotation ctx={ctx} />}
+      <Choose ctx={ctx} vault={vault} onPrepared={() => setStep('save')} />
+    </div>
+  );
 }
 
 function Choose({
@@ -272,6 +296,7 @@ function Choose({
         earlier keys stay in it, only to open what was shared with them. Your other devices are
         signed out, and live editing in your spaces stops, to start again with the new keys.
       </p>
+      <SpacesBeforeRotation ctx={ctx} />
       <fieldset className="grid gap-2">
         <legend className="mb-1 font-bold">Agents to keep</legend>
         {agents.isPending ? (

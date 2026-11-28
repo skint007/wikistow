@@ -63,7 +63,12 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
     await page.getByRole('button', { name: 'Replace my keys' }).click();
     // Exactly: "once your keys are replaced" is in the panel before it lands.
     await expect(page.getByText(REPLACED, { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/Your keys were replaced\. Moving what you share/)).toBeVisible();
+    // Nothing shared here, so nothing is left to move to the new keys.
+    await expect(
+      page.getByText('Your keys were replaced, and your shared folders use the new ones.', {
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 30_000 });
     await shot(page, 'keys-replaced');
     // The other tab held the old keys: it locked.
     await expect(sameBrowser.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();

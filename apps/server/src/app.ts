@@ -178,7 +178,7 @@ export function createApp({
   mountSystemRoutes(routes, {
     db,
     publicOrigin: config.publicOrigin,
-    identityRotation: config.identityRotation ?? false,
+    identityRotation: config.identityRotation ?? true,
   });
   mountAccountRoutes(routes, {
     db,
@@ -196,7 +196,7 @@ export function createApp({
     contentLimits: config.contentLimits,
     minKdf: config.minKdf,
     bulkLarge: config.bulkLarge,
-    identityRotation: config.identityRotation ?? false,
+    identityRotation: config.identityRotation ?? true,
     log,
   });
   // The database names each space whose tree changes (`listenForTreeChanges`).

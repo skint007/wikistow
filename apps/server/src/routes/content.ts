@@ -216,7 +216,7 @@ export function mountContentRoutes(
     contentLimits = DEFAULT_CONTENT_LIMITS,
     minKdf,
     bulkLarge = BULK_LARGE,
-    identityRotation = false,
+    identityRotation = true,
     log,
   }: {
     db: Database;

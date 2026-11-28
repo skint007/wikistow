@@ -1,4 +1,4 @@
-import { groupOperations, type SpaceId } from '@wikistow/client';
+import { groupOperations, rotatedShareOperations, type SpaceId } from '@wikistow/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShieldAlert } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
@@ -11,8 +11,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { sendGroupChange } from '../commands/sharing-commands';
-import { refreshAccess, treeQuery } from '../data/queries';
+import { runCommand } from '../commands/command';
+import { rekeyMember, sendGroupChange } from '../commands/sharing-commands';
+import { refreshAccess, spaceKeysQuery, treeQuery } from '../data/queries';
 import { useClient } from '../vault/store';
 import { PersonRow } from './access-panel';
 import { ChangeReview, GrantConfirm } from './groups';
@@ -20,6 +21,7 @@ import { needsKeyReview, useKeyReview } from './key-change';
 import { ACCESS_LABELS, accessOf } from './model';
 import { shareNameById } from './names';
 import { useOwnerRequirements } from './owner-standing';
+import { RotationConfirm } from './rotation-confirm';
 import { describePerson, peopleQuery, type Person } from './people';
 import { HoldOpen, useHoldOpen } from './use-action';
 
@@ -57,6 +59,9 @@ export function GiveAccessDialog({
   const { panel, review, labels } = useKeyReview(open);
   const { locked, hold } = useHoldOpen();
   const [giving, setGiving] = useState<Person | null>(null);
+  // Someone who replaced their keys, given access by a rotation (section 4.6).
+  const [rekeying, setRekeying] = useState<Person | null>(null);
+  const { data: keys } = useQuery({ ...spaceKeysQuery(ctx, spaceId), enabled: open });
   const [done, setDone] = useState<ReactNode>(null);
   const person = (w: groupOperations.Waiting) =>
     people?.get(w.person.identity.id) ?? describePerson(ctx, w.person.identity.id, w.person);
@@ -96,6 +101,46 @@ export function GiveAccessDialog({
     );
   };
 
+  const rekey = (who: Person) => {
+    const { entry } = who;
+    if (!entry) return null;
+    return (
+      <RotationConfirm
+        title={
+          <>
+            Rotate keys and give <Name>{who.name}</Name> access?
+          </>
+        }
+        intro={
+          <p className="text-sm">
+            <Name>{who.name}</Name> replaced their keys. Each folder they wait for gets new keys,
+            and they get it all again at their new key, so whoever holds their old key can’t read
+            what’s saved from now on. Check their new key with them first if you haven’t.
+          </p>
+        }
+        confirmLabel="Rotate keys and give access"
+        none="They wait for no folder here now."
+        make={() => rotatedShareOperations.planRekey(ctx, { spaceId, person: entry })}
+        plansOf={(plans) =>
+          plans.map(({ plan }) => ({ label: shareNameById(tree, plan.shareId), plan }))
+        }
+        apply={(plans) => runCommand(rekeyMember, { plans }, { satisfies, ctx })}
+        ownerIds={new Set(keys?.listed.map((o) => o.identity.id))}
+        review={review}
+        onCancel={() => setRekeying(null)}
+        onDone={async () => {
+          setRekeying(null);
+          setDone(
+            <>
+              <Name>{who.name}</Name> has their keys now, at their new key.
+            </>,
+          );
+          await refreshAccess(queryClient, ctx);
+        }}
+      />
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent dialogClassName="sm:max-w-xl" {...labels} locked={locked}>
@@ -110,7 +155,9 @@ export function GiveAccessDialog({
                 folders.
               </DialogDescription>
             </DialogHeader>
-            {giving ? (
+            {rekeying ? (
+              rekey(rekeying)
+            ) : giving ? (
               give(giving)
             ) : (
               <>
@@ -126,19 +173,29 @@ export function GiveAccessDialog({
                   {waiting.map((w) => {
                     const who = person(w);
                     const keyChanged = w.keyChanged || needsKeyReview(who);
+                    const replaced = rotatedShareOperations.replacedKeys(w);
                     return (
                       <PersonRow
                         key={who.id}
                         person={who}
-                        detail={w.shares.map((share) => (
-                          <span key={share.shareId} className="block">
-                            <Name>{shareNameById(tree, share.shareId)}</Name>:{' '}
-                            {ACCESS_LABELS[accessOf(share)]}
-                            {share.holds?.role === 'reader' && share.role === 'editor'
-                              ? ', has the reader’s keys'
-                              : ''}
-                          </span>
-                        ))}
+                        detail={[
+                          ...(replaced && !keyChanged
+                            ? [
+                                <span key="replaced" className="block font-bold">
+                                  Replaced their keys
+                                </span>,
+                              ]
+                            : []),
+                          ...w.shares.map((share) => (
+                            <span key={share.shareId} className="block">
+                              <Name>{shareNameById(tree, share.shareId)}</Name>:{' '}
+                              {ACCESS_LABELS[accessOf(share)]}
+                              {share.holds?.role === 'reader' && share.role === 'editor'
+                                ? ', has the reader’s keys'
+                                : ''}
+                            </span>
+                          )),
+                        ]}
                       >
                         {keyChanged ? (
                           <Button
@@ -150,6 +207,16 @@ export function GiveAccessDialog({
                             }
                           >
                             <ShieldAlert strokeWidth={1.75} /> Key changed
+                          </Button>
+                        ) : replaced ? (
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setDone(null);
+                              setRekeying(who);
+                            }}
+                          >
+                            Rotate keys and give access
                           </Button>
                         ) : (
                           <Button

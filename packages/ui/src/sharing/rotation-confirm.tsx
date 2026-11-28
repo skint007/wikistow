@@ -5,7 +5,8 @@ import { DialogFooter } from '@/components/ui/dialog';
 import type { KeyOutcome } from './key-change';
 import { isStale } from './messages';
 import type { Person } from './people';
-import { RotationReview, type LabelledPlan } from './rotation-review';
+import { RotationReview, type LabelledPlan, type Ticks } from './rotation-review';
+import type { RotationOffer } from '@wikistow/client';
 import { ErrorLine, useAction } from './use-action';
 
 /**
@@ -31,6 +32,8 @@ export function RotationConfirm<T>({
   apply,
   ownerIds,
   review,
+  ticks,
+  onTick,
   onCancel,
   onDone,
 }: {
@@ -46,6 +49,9 @@ export function RotationConfirm<T>({
   apply: (made: T) => Promise<void>;
   ownerIds: ReadonlySet<string>;
   review: (person: Person) => Promise<KeyOutcome>;
+  /** Offers the owner ticked, and how a tick changes: without `onTick`, offers wait. */
+  ticks?: Ticks;
+  onTick?: (shareId: string, offer: RotationOffer, role: 'reader' | 'editor' | null) => void;
   onCancel: () => void;
   onDone: () => Promise<void> | void;
 }) {
@@ -99,6 +105,7 @@ export function RotationConfirm<T>({
           plans={plans}
           ownerIds={ownerIds}
           busy={busy}
+          {...(onTick ? { onTick, ...(ticks ? { ticks } : {}) } : {})}
           onReviewKey={(person) =>
             void review(person).then(
               (outcome) =>
