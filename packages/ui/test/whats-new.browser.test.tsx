@@ -249,3 +249,16 @@ it('marks a word that runs into code on both sides, as it matches', () => {
     },
   ]);
 });
+
+it('finds a term typed with the backticks its Markdown has', async () => {
+  const withCode = releases.find((r) =>
+    r.highlights.some(({ items }) => items.some((item) => /`[A-Za-z_]{6,}`/.test(item))),
+  )!;
+  const term = withCode.highlights
+    .flatMap(({ items }) => items)
+    .map((item) => /`([A-Za-z_]{6,})`/.exec(item)?.[1])
+    .find(Boolean)!;
+  await act(() => userEvent.click(field()));
+  await act(() => userEvent.keyboard(`\`${term}\``));
+  expect(options().some((o) => o.firstElementChild?.textContent === withCode.version)).toBe(true);
+});

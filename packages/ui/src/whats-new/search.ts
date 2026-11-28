@@ -1,8 +1,12 @@
 // Finding a change in What's new by the words in its highlights (#771).
 import type { Release } from './changelog';
 
-/** The words of what was typed, lowercased, in order; none for blank text. */
-export const searchWords = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean);
+/**
+ * The words of what was typed, lowercased, in order, without backticks, as
+ * highlights are matched without theirs; none for blank text.
+ */
+export const searchWords = (text: string) =>
+  text.replaceAll('`', '').toLowerCase().split(/\s+/).filter(Boolean);
 
 /** Whether a highlight holds every word, ignoring case and the backticks around code. */
 export const highlightMatches = (item: string, words: readonly string[]) => {

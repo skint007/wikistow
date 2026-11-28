@@ -134,25 +134,26 @@ function FollowDialog({
     }, ARMING_MS);
     return () => clearTimeout(timer);
   }, []);
-  // Whether the last press on a button, by pointer or key, started once
-  // armed: one started before, as on a button still dimmed, doesn't count
-  // when it ends, nor does a click with no press at all.
-  const pressedArmed = useRef(false);
+  // Whether the last press on a button, by pointer or key, started before
+  // it was armed, as on a button still dimmed: its click, when the press
+  // ends, doesn't count. A click with no press, as a screen reader sends,
+  // counts once armed.
+  const pressedEarly = useRef(false);
   const onceArmed = (act: () => void) => ({
     'aria-disabled': armed ? undefined : true,
     onPointerDown: () => {
-      pressedArmed.current = armedNow.current;
+      pressedEarly.current = !armedNow.current;
     },
     onKeyDown: (event: KeyboardEvent) => {
-      // Not a key held down since before: its repeats don't start a press.
-      if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) {
-        pressedArmed.current = armedNow.current;
+      if (event.key === 'Enter' || event.key === ' ') {
+        // A key held down since before: its repeats are the same press.
+        if (!event.repeat) pressedEarly.current = !armedNow.current;
       }
     },
     onClick: () => {
-      const pressed = pressedArmed.current;
-      pressedArmed.current = false;
-      if (armedNow.current && pressed) act();
+      const early = pressedEarly.current;
+      pressedEarly.current = false;
+      if (armedNow.current && !early) act();
     },
   });
   const title = useRef<HTMLHeadingElement>(null);
