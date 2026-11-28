@@ -4,9 +4,11 @@ import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vite-plus
 import { userEvent } from 'vite-plus/test/browser/context';
 import changelog from '../../../CHANGELOG.md?raw';
 import { parseChangelog } from '../src/whats-new/changelog.ts';
+import { highlightParts, matchingHighlights, searchWords } from '../src/whats-new/search.ts';
 
 // What's new goes to any release from one field (#757), however many
-// releases there are: by mouse, by the arrows, or by Enter on what's typed.
+// releases there are: by mouse, by the arrows, or by Enter on what's typed;
+// and finds a change by the words in its highlights (#771).
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const { releases } = parseChangelog(changelog);
@@ -48,7 +50,7 @@ it('shows one field in place of a pill for each release', () => {
   expect(releases.length).toBeGreaterThan(20);
   const nav = document.querySelector('nav[aria-label=Releases]')!;
   expect(nav.querySelectorAll('button')).toHaveLength(0);
-  expect(field().labels?.[0]?.textContent).toBe('Go to a release');
+  expect(field().labels?.[0]?.textContent).toBe('Find a release or a change');
   expect(field().getAttribute('role')).toBe('combobox');
   // Only the newest is open to begin with.
   expect(release(older.version).open).toBe(false);
@@ -162,4 +164,106 @@ it('scrolls only the list to the option the arrows reach, not the page', async (
   // And back up to the first.
   await act(() => userEvent.keyboard('{ArrowUp}'.repeat(9)));
   expect(list.scrollTop).toBe(0);
+});
+
+// The longest word of a highlight in an older release, and that release.
+function wordIn() {
+  for (const release of releases.slice(1)) {
+    for (const { items } of release.highlights) {
+      for (const item of items) {
+        const word = item
+          .replaceAll('`', '')
+          .split(/[^\p{L}]+/u)
+          .filter((w) => w.length >= 7)
+          .sort((a, b) => b.length - a.length)[0];
+        if (word) return { release, item, word: word.toLowerCase() };
+      }
+    }
+  }
+  throw new Error('no highlight with a long word');
+}
+
+it('finds releases by a word in their highlights, showing the change that matched', async () => {
+  const { release: target, word } = wordIn();
+  const holding = releases.filter((r) => matchingHighlights(r, [word]).length > 0);
+  await act(() => userEvent.click(field()));
+  await act(() => userEvent.keyboard(word.toUpperCase()));
+  expect(options().map((item) => item.firstElementChild?.textContent)).toEqual(
+    holding.slice(0, 100).map((r) => r.version),
+  );
+  // The change itself, its matching word marked, so it can be told apart.
+  const shown = option(target.version);
+  const first = matchingHighlights(target, [word])[0]!;
+  expect(shown.textContent).toContain(first.replaceAll('`', ''));
+  expect(shown.querySelector('mark')?.textContent?.toLowerCase()).toBe(word);
+  await act(() => userEvent.click(shown));
+  expect(release(target.version).open).toBe(true);
+  expect(field().value).toBe('');
+  // The focus goes to the first highlight holding the word, in view.
+  const focused = document.activeElement as HTMLElement;
+  expect(focused.tagName).toBe('LI');
+  expect(release(target.version).contains(focused)).toBe(true);
+  expect(focused.querySelector('mark')).not.toBeNull();
+  // Opened, the matches are marked there, and nowhere else.
+  const marks = [...document.querySelectorAll('mark')];
+  expect(marks.length).toBeGreaterThan(0);
+  for (const mark of marks) {
+    expect(release(target.version).contains(mark)).toBe(true);
+    expect(mark.textContent?.toLowerCase()).toBe(word);
+  }
+  // Picked by its version, nothing is marked.
+  await act(() => userEvent.click(field()));
+  await act(() => userEvent.keyboard(`${older.version}{Enter}`));
+  expect(document.querySelectorAll('mark')).toHaveLength(0);
+});
+
+it('matches every word typed, in any order, and Enter opens the first', async () => {
+  const { release: target, item, word } = wordIn();
+  const other = item
+    .replaceAll('`', '')
+    .split(/[^\p{L}]+/u)
+    .find((w) => w.length >= 4 && w.toLowerCase() !== word)!;
+  const first = releases.find((r) => matchingHighlights(r, [other.toLowerCase(), word]).length);
+  expect(first).toBeDefined();
+  await act(() => userEvent.click(field()));
+  await act(() => userEvent.keyboard(`${word} ${other}`));
+  expect(options().some((o) => o.firstElementChild?.textContent === target.version)).toBe(true);
+  await act(() => userEvent.keyboard('{Enter}'));
+  expect(release(first!.version).open).toBe(true);
+  expect(release(first!.version).contains(document.activeElement)).toBe(true);
+  expect(release(first!.version).querySelectorAll('mark').length).toBeGreaterThanOrEqual(2);
+});
+
+it('marks a word that runs into code on both sides, as it matches', () => {
+  // As `IDENTITY_ROTATION=off`. reads, pasted from the page without its backticks.
+  const parts = highlightParts('Set `IDENTITY_ROTATION=off`. Then', ['identity_rotation=off.']);
+  expect(parts).toEqual([
+    { code: false, pieces: [{ text: 'Set ', marked: false }] },
+    { code: true, pieces: [{ text: 'IDENTITY_ROTATION=off', marked: true }] },
+    {
+      code: false,
+      pieces: [
+        { text: '.', marked: true },
+        { text: ' Then', marked: false },
+      ],
+    },
+  ]);
+});
+
+it('finds a term typed with the backticks its Markdown has', async () => {
+  const withCode = releases.find((r) =>
+    r.highlights.some(({ items }) => items.some((item) => /`[A-Za-z_]{6,}`/.test(item))),
+  )!;
+  const term = withCode.highlights
+    .flatMap(({ items }) => items)
+    .map((item) => /`([A-Za-z_]{6,})`/.exec(item)?.[1])
+    .find(Boolean)!;
+  await act(() => userEvent.click(field()));
+  await act(() => userEvent.keyboard(`\`${term}\``));
+  expect(options().some((o) => o.firstElementChild?.textContent === withCode.version)).toBe(true);
+});
+
+it('takes straight quotes as typed for the curly ones of the changelog, and marks them', () => {
+  const parts = highlightParts('What’s new opens a release', searchWords("what's"));
+  expect(parts[0]!.pieces[0]).toEqual({ text: 'What’s', marked: true });
 });

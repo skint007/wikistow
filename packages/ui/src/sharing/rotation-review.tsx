@@ -45,6 +45,7 @@ export function RotationReview({
   onReviewKey,
   ticks,
   onTick,
+  plain = false,
 }: {
   plans: readonly LabelledPlan[];
   ownerIds: ReadonlySet<string>;
@@ -55,6 +56,8 @@ export function RotationReview({
   /** The offers ticked, with `onTick`: without it, offers are only listed as waiting. */
   ticks?: Ticks;
   onTick?: (shareId: string, offer: RotationOffer, role: 'reader' | 'editor' | null) => void;
+  /** Only who keeps access, without saying what new keys do, for a change asked in plain words. */
+  plain?: boolean;
 }) {
   const ctx = useClient();
   const ids = plans.flatMap(({ plan }) => [
@@ -70,7 +73,8 @@ export function RotationReview({
           key={plan.shareId}
           label={label}
           plan={plan}
-          titled={plans.length > 1}
+          // Plain, with no footnote to name it, even one folder is named.
+          titled={plain || plans.length > 1}
           ownerIds={ownerIds}
           person={person}
           busy={busy}
@@ -78,18 +82,20 @@ export function RotationReview({
           {...(onTick ? { onTick, ticked: ticks?.get(plan.shareId) ?? new Map() } : {})}
         />
       ))}
-      <p className="text-sm text-muted-foreground">
-        {plans.length > 1 ? (
-          'Each folder above gets new keys.'
-        ) : (
-          <>
-            “<Name>{plans[0]?.label ?? ''}</Name>” gets new keys.
-          </>
-        )}{' '}
-        Anyone who loses access keeps what they could already read, but nothing saved from now on.
-        Agents reach a folder only through their person, so the agents of anyone who loses access
-        lose it too; the others get the new keys from their own people’s apps.
-      </p>
+      {!plain && (
+        <p className="text-sm text-muted-foreground">
+          {plans.length > 1 ? (
+            'Each folder above gets new keys.'
+          ) : (
+            <>
+              “<Name>{plans[0]?.label ?? ''}</Name>” gets new keys.
+            </>
+          )}{' '}
+          Anyone who loses access keeps what they could already read, but nothing saved from now on.
+          Agents reach a folder only through their person, so the agents of anyone who loses access
+          lose it too; the others get the new keys from their own people’s apps.
+        </p>
+      )}
     </div>
   );
 }

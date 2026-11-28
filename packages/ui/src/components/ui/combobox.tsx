@@ -6,6 +6,10 @@ import { Input } from './input';
 /** `marks` show after the label, such as pills; typing doesn't match them. */
 export type ComboboxOption = { value: string; label: string | null; marks?: ReactNode };
 
+/** The default `match`: the value or the label holds the query. */
+export const matchesText = (option: ComboboxOption, query: string) =>
+  option.value.toLowerCase().includes(query) || !!option.label?.toLowerCase().includes(query);
+
 /** The most options drawn at once; typing narrows the rest. */
 const SHOWN = 100;
 
@@ -14,7 +18,8 @@ const SHOWN = 100;
  * (not Radix's, whose scroll lock injects a `<style>` the CSP refuses).
  * It is always a plain text field too: any text can be typed, listed or
  * not. Typing filters the list by value and label, ignoring case and
- * matching anywhere, and it draws only the first 100 matches. Up and down
+ * matching anywhere, or by `match` when given, and it draws only the first
+ * 100 matches. Up and down
  * move through it, and Enter picks the option they reach; otherwise Enter
  * is the form's, with the text as typed. Escape closes it, keeping the text.
  * `status` shows under the field, such as why the list couldn't be had.
@@ -31,6 +36,7 @@ export function Combobox({
   placeholder,
   noun = 'options',
   onPick,
+  match,
   field,
 }: {
   id: string;
@@ -44,6 +50,8 @@ export function Combobox({
   /** What the options are, for the count: "12 of 340 models". */
   noun?: string;
   onPick?: (value: string) => void;
+  /** Whether `option` is listed for `query`, typed text trimmed and lowercased, never empty. */
+  match?: (option: ComboboxOption, query: string) => boolean;
   field?: Omit<
     ComponentProps<'input'>,
     'id' | 'value' | 'onChange' | 'onFocus' | 'placeholder' | 'role'
@@ -58,11 +66,8 @@ export function Combobox({
   const matches = useMemo(() => {
     const query = filter.trim().toLowerCase();
     if (!options || !query) return options ?? [];
-    return options.filter(
-      (option) =>
-        option.value.toLowerCase().includes(query) || option.label?.toLowerCase().includes(query),
-    );
-  }, [options, filter]);
+    return options.filter((option) => (match ?? matchesText)(option, query));
+  }, [options, filter, match]);
   const shown = matches.slice(0, SHOWN);
   const listed = open && shown.length > 0;
   useEffect(() => setActive(-1), [matches]);

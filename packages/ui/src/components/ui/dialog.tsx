@@ -51,6 +51,7 @@ function DialogContent({
   describedBy,
   locked = false,
   closesOnBackdrop = true,
+  closesOnEscape = true,
   onDismiss,
 }: {
   className?: string;
@@ -66,6 +67,8 @@ function DialogContent({
   locked?: boolean;
   /** False when a click outside it, easily made by mistake, shouldn't close it. */
   closesOnBackdrop?: boolean;
+  /** False when only the close button closes it, as a flow with many steps. */
+  closesOnEscape?: boolean;
   /**
    * Set while closing needs asking first: Escape, the close button and the
    * backdrop call this instead of closing it.
@@ -74,6 +77,9 @@ function DialogContent({
 }) {
   const { open, onOpenChange, titleId, descriptionId } = useDialog();
   const [dialog, setDialog] = React.useState<HTMLDialogElement | null>(null);
+  // Where the focus was inside it, given back if a browser closes it past
+  // a refused Escape and it opens again: opening would focus its first control.
+  const lastFocus = React.useRef<HTMLElement | null>(null);
   const dismiss = () => {
     if (locked) return;
     if (onDismiss) onDismiss();
@@ -97,6 +103,7 @@ function DialogContent({
       onCancel={(event) => {
         // React passes up the cancel of a file picker or a dialog inside it.
         if (event.target !== event.currentTarget) return;
+        if (!closesOnEscape) return event.preventDefault();
         // Escape closes it natively at once, but its close event comes a
         // task later, after any key pressed meanwhile: one that opens it
         // again would find it open still, and then be undone. So React
@@ -117,10 +124,16 @@ function DialogContent({
       // opened again since, as when New page follows Create folder at once.
       onClose={(event) => {
         if (event.currentTarget.open) return;
-        if ((locked || onDismiss) && open) {
+        if ((locked || onDismiss || !closesOnEscape) && open) {
+          // Read first: opening focuses its first control, which updates it.
+          const was = lastFocus.current;
           event.currentTarget.showModal();
-          if (!locked) onDismiss?.();
+          if (was?.isConnected && event.currentTarget.contains(was)) was.focus();
+          if (!locked && closesOnEscape) onDismiss?.();
         } else onOpenChange(false);
+      }}
+      onFocus={(event) => {
+        lastFocus.current = event.target;
       }}
       // A click on the backdrop lands on the <dialog> itself.
       onClick={(event) => {

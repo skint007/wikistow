@@ -39,7 +39,7 @@ async function replaceKeys(page: Page, check?: () => Promise<void>) {
     const index = Number((await field.getAttribute('id'))?.replace('rotation-group-', ''));
     await field.fill(groups[index] ?? '');
   }
-  await page.getByRole('button', { name: 'Replace my keys' }).click();
+  await page.getByRole('button', { name: 'Replace my keys', exact: true }).click();
   // Exactly: "once your keys are replaced" is in the panel before it lands.
   await expect(page.getByText('Your keys are replaced.', { exact: true })).toBeVisible({
     timeout: 30_000,
@@ -161,22 +161,31 @@ test('an owner gives a member who replaced their keys the share again with Rotat
     await owner.goto('/');
     const note = owner.getByRole('complementary', { name: 'Waiting for you' });
     await expect(note).toContainText('people wait for their keys', { timeout: 30_000 });
+    // The app says once that they replaced their keys: closing the share
+    // dialog with Escape isn't seeing it (#771).
+    const notice = owner.getByRole('dialog', { name: 'Mark Member replaced their keys' });
+    await notice.getByRole('button', { name: 'OK' }).click({ timeout: 30_000 });
+    await expect(notice).toBeHidden();
     await note.getByRole('button', { name: 'Give access' }).click();
     const dialog = owner.getByRole('dialog', { name: 'Give access' });
     await expect(dialog.getByText('Replaced their keys')).toBeVisible();
     await shot(owner, 'waiting-replaced');
     await dialog.getByRole('button', { name: 'Rotate keys and give access' }).click();
+    // Asked in plain words (#771), the dialog titled with the question.
+    const rekey = owner.getByRole('dialog', { name: 'Rotate keys and give Mark Member access?' });
+    await expect(rekey).toContainText(
+      'Mark Member replaced their keys and needs to be given access',
+    );
+    const give = rekey.getByRole('button', { name: 'Give access', exact: true });
     // Enabled once the review is worked out ("Working out who keeps access…" shows first).
-    await expect(dialog.getByRole('button', { name: 'Rotate keys and give access' })).toBeEnabled({
+    await expect(give).toBeEnabled({ timeout: 30_000 });
+    await expect(rekey.getByText('Keeps access (', { exact: false })).toBeVisible();
+    await shot(owner, 'rotate-and-give');
+    await give.click();
+    const after = owner.getByRole('dialog', { name: 'Give access' });
+    await expect(after.getByText('Mark Member has their keys now, at their new key.')).toBeVisible({
       timeout: 30_000,
     });
-    await shot(owner, 'rotate-and-give');
-    await dialog.getByRole('button', { name: 'Rotate keys and give access' }).click();
-    await expect(dialog.getByText('Mark Member has their keys now, at their new key.')).toBeVisible(
-      {
-        timeout: 30_000,
-      },
-    );
   });
 
   await test.step('the member opens the share at the new key', async () => {
@@ -237,11 +246,13 @@ async function coOwnersThenRotate(
 
   await test.step('Olive’s app names Alice and offers to add them again', async () => {
     await olive.goto('/');
+    // The app says once that they replaced their keys, first: while that
+    // dialog is open, the page under it, the note included, is out of reach.
+    const notice = olive.getByRole('dialog', { name: `${aliceName} replaced their keys` });
+    await notice.getByRole('button', { name: 'OK' }).click({ timeout: 30_000 });
+    await expect(notice).toBeHidden();
     const note = olive.getByRole('complementary', { name: 'Waiting for you' });
     await expect(note).toContainText('an owner replaced their keys', { timeout: 30_000 });
-    // The app says once that they replaced their keys.
-    const notice = olive.getByRole('dialog', { name: `${aliceName} replaced their keys` });
-    await notice.getByRole('button', { name: 'OK' }).click();
     await note.getByRole('button', { name: new RegExp(`^Add .*${aliceName}.* again$`) }).click();
   });
   return { space };

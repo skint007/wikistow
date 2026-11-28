@@ -8,7 +8,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { KeyRound, ShieldAlert } from 'lucide-react';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { Name } from '@/components/name';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,6 +34,9 @@ const setAsked = (id: IdentityId | null) => {
   for (const listener of listeners) listener();
 };
 
+/** How long the notice is on screen before its buttons take a click. */
+const ARMING_MS = 600;
+
 const followKey = (entry: FollowedEntry) => `${entry.from.identity.id} ${entry.to.keyHash}`;
 
 /** Show again the details of a follow of `id`: both keys, and **Not them?** */
@@ -52,7 +55,8 @@ export const followsQuery = (ctx: ClientContext) => ({
  * 8.4): the app followed a chain of statements, signed with the key it had,
  * to their new key, unchecked. It shows the key they had and the new one,
  * once on every device, until the person says OK, or **Not them?**, which
- * declines the new key. Shown again from where the person appears
+ * declines the new key. A click outside it doesn't close it, and closing it
+ * otherwise puts it away until the app next starts (#771). Shown again from where the person appears
  * (`showFollow`).
  */
 export function FollowNotice({ ctx }: { ctx: ClientContext }) {
@@ -68,7 +72,8 @@ export function FollowNotice({ ctx }: { ctx: ClientContext }) {
   // The follow on screen stays there, through a decline that takes it out
   // of the record, until the person closes it.
   const [open, setOpen] = useState<FollowedEntry | null>(null);
-  // Notices closed in this session, until the record says they were seen.
+  // Notices closed in this session, until the record says they were seen;
+  // one closed without OK comes back in the next.
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
   const next =
     follows?.find((entry) => entry.from.identity.id === again) ??
@@ -81,7 +86,7 @@ export function FollowNotice({ ctx }: { ctx: ClientContext }) {
     if (open) setClosed((before) => new Set(before).add(followKey(open)));
     setOpen(null);
     setAsked(null);
-    // Closing the notice is seeing it.
+    // OK is seeing it.
     if (seen && !seen.seen) {
       void followOperations
         .seeFollow(ctx, seen)
@@ -99,13 +104,77 @@ function FollowDialog({
 }: {
   ctx: ClientContext;
   follow: FollowedEntry;
-  /** With the follow when the person saw it, or null after a decline. */
+  /**
+   * With the follow when the person said OK, or null after a decline or
+   * when they only closed it, which isn't seeing it: a stray click or key
+   * mustn't take the notice away for good.
+   */
   onDone: (seen: FollowedEntry | null) => void;
 }) {
   const queryClient = useQueryClient();
   const { busy, error, run } = useAction();
   const [step, setStep] = useState<'notice' | 'decline'>('notice');
   const [warnings, setWarnings] = useState<followOperations.DeclinedOwnerSpace[] | null>(null);
+  // It opens on its own, maybe under a click or a key already on its way:
+  // its buttons take a press only once it has been on screen a moment, and
+  // the focus starts on its title, where Enter does nothing.
+  const [armed, setArmed] = useState(false);
+  const armedNow = useRef(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      armedNow.current = true;
+      setArmed(true);
+    }, ARMING_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  // A press under way that began before it was armed, by pointer or by
+  // Enter or Space (held down, its repeats included), until it ends: a click
+  // it makes, as on a button still dimmed, doesn't count. Heard anywhere, so
+  // a press dragged off and released elsewhere ends too. A click with no
+  // press, as a screen reader sends, counts once armed.
+  const early = useRef({ pointer: false, key: false });
+  useEffect(() => {
+    const activates = (event: globalThis.KeyboardEvent) =>
+      event.key === 'Enter' || event.key === ' ';
+    // A press's click comes as it ends, so the press is over a task later.
+    const later = (end: () => void) => setTimeout(end);
+    const pointerDown = () => {
+      early.current.pointer = !armedNow.current;
+    };
+    const pointerUp = () =>
+      later(() => {
+        early.current.pointer = false;
+      });
+    const keyDown = (event: globalThis.KeyboardEvent) => {
+      if (activates(event) && !event.repeat) early.current.key = !armedNow.current;
+    };
+    const keyUp = (event: globalThis.KeyboardEvent) => {
+      if (activates(event))
+        later(() => {
+          early.current.key = false;
+        });
+    };
+    const listeners = [
+      ['pointerdown', pointerDown],
+      ['pointerup', pointerUp],
+      ['pointercancel', pointerUp],
+      ['keydown', keyDown],
+      ['keyup', keyUp],
+    ] as const;
+    for (const [type, listener] of listeners)
+      document.addEventListener(type, listener as EventListener, true);
+    return () => {
+      for (const [type, listener] of listeners)
+        document.removeEventListener(type, listener as EventListener, true);
+    };
+  }, []);
+  const onceArmed = (act: () => void) => ({
+    'aria-disabled': armed ? undefined : true,
+    onClick: () => {
+      if (armedNow.current && !early.current.pointer && !early.current.key) act();
+    },
+  });
+  const title = useRef<HTMLHeadingElement>(null);
   const id = follow.from.identity.id;
   const person = describePerson(ctx, id, null);
   const name = person.name;
@@ -114,9 +183,10 @@ function FollowDialog({
     await queryClient.invalidateQueries({ queryKey: [PLAIN, 'follows'] });
     await refreshAccess(queryClient, ctx);
   };
-  const close = () => {
+  // OK sees it; the close button and Escape only put it away for now.
+  const close = (seen: boolean) => {
     if (busy) return;
-    onDone(warnings === null ? follow : null);
+    onDone(seen && warnings === null ? follow : null);
   };
   const decline = () =>
     run(async () => {
@@ -126,14 +196,20 @@ function FollowDialog({
     });
 
   return (
-    <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent dialogClassName="sm:max-w-lg" locked={busy}>
+    <Dialog open onOpenChange={(open) => !open && close(false)}>
+      {/* Nor does a click outside it close it. */}
+      <DialogContent dialogClassName="sm:max-w-lg" locked={busy} closesOnBackdrop={false}>
         {warnings !== null ? (
           <DeclinedWarnings name={name} spaces={warnings} ctx={ctx} onDone={() => onDone(null)} />
         ) : step === 'notice' ? (
           <>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+              <FocusOnOpen target={title} />
+              <DialogTitle
+                ref={title}
+                tabIndex={-1}
+                className="flex items-center gap-2 outline-none"
+              >
                 <KeyRound className="size-5" strokeWidth={1.75} />
                 <span>
                   <Name>{name}</Name> replaced their keys
@@ -163,10 +239,10 @@ function FollowDialog({
             </dl>
             <ErrorLine error={error} />
             <DialogFooter>
-              <Button variant="outline" disabled={busy} onClick={() => setStep('decline')}>
+              <Button variant="outline" disabled={busy} {...onceArmed(() => setStep('decline'))}>
                 Not them?
               </Button>
-              <Button disabled={busy} onClick={close}>
+              <Button disabled={busy} {...onceArmed(() => close(true))}>
                 OK
               </Button>
             </DialogFooter>
@@ -202,6 +278,17 @@ function FollowDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * Moves the focus to `target` once the dialog it is in has opened: an
+ * effect runs after the dialog's own, which focuses its first control.
+ */
+function FocusOnOpen({ target }: { target: RefObject<HTMLElement | null> }) {
+  useEffect(() => {
+    target.current?.focus();
+  }, []);
+  return null;
 }
 
 // Where an owner accepted the declined key (protocol section 8.4, **An
