@@ -85,6 +85,8 @@ type Pending =
       ) => Promise<void>;
       /** Members only an earlier key gave access can be ticked in (section 4.6). */
       ticking?: true;
+      /** Said under the title; with it, the review leaves out what new keys do. */
+      plainIntro?: ReactNode;
     }
   | {
       /** A group change that takes access away: rotations, maybe none. */
@@ -345,7 +347,13 @@ export function AccessPanel({
             Rotate keys and give <Name>{who.name}</Name> access?
           </>
         ),
-        confirmLabel: 'Rotate keys and give access',
+        // In plain words, as Give access asks it (#771).
+        plainIntro: (
+          <p className="text-sm">
+            <Name>{who.name}</Name> replaced their keys and needs to be given access again.
+          </p>
+        ),
+        confirmLabel: 'Give access',
         none: 'They wait for no folder here now.',
         make: async () =>
           (await rotatedShareOperations.planRekey(ctx, { spaceId, person: entry })).map(
@@ -523,6 +531,7 @@ export function AccessPanel({
     return (
       <RotationConfirm
         title={pending.title}
+        {...(pending.plainIntro ? { intro: pending.plainIntro, plain: true } : {})}
         confirmLabel={pending.confirmLabel}
         none={pending.none}
         make={pending.make}

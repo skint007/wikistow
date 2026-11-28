@@ -4,6 +4,25 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 ## Unreleased
 
+### Highlights
+
+#### Fixes
+
+- The notice that a contact replaced their keys no longer closes, as if seen, when a click lands on it just as it opens. Closed without OK, it shows again the next time you open WikiStow.
+
+#### UI polish
+
+- Replace my keys opens in a dialog of its own, which only its close button closes.
+- Giving access to someone who replaced their keys asks in plain words: who replaced their keys, who keeps access, and Give access.
+- What’s new finds a change by the words in its highlights, as well as a release by its version or date.
+- A beta server’s browser tab shows WikiStow’s mark in violet, as the beta desktop app does.
+
+### Changes
+
+#### App
+
+- **Replace my keys** in Settings → Security opens a dialog in place of a form under its row; Escape and a click outside don't close it (`closesOnEscape` on `DialogContent`). The notice that a contact replaced their keys isn't closed by a click outside it, takes a click on its buttons only after 600 ms, and counts as seen only on **OK** or a decline. **Rotate keys and give access** asks "Rotate keys and give *Name* access?", says they replaced their keys and need access again, lists who keeps access, and confirms with **Give access**, leaving out what new keys do (`plain` on `RotationConfirm`). What's new's field, now **Find a release or a change**, lists releases whose highlights hold every word typed, with the first such highlight, and marks the words in the release it opens (`match` on `Combobox`). A web build of a prerelease shows `favicon-beta.svg`. (#771)
+
 ## 0.32.0-beta.1 - 2026-11-28
 
 ### Highlights

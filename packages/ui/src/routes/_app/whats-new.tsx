@@ -1,12 +1,18 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { ChevronRight, ExternalLink } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
+import { Combobox, matchesText, type ComboboxOption } from '@/components/ui/combobox';
 import { composing } from '@/lib/composing';
 import changelog from '../../../../../CHANGELOG.md?raw';
 import { linkHint } from '../../desktop';
 import { parseChangelog, REPOSITORY, type Release } from '../../whats-new/changelog';
+import {
+  highlightMatches,
+  markWords,
+  matchingHighlights,
+  searchWords,
+} from '../../whats-new/search';
 
 export const Route = createFileRoute('/_app/whats-new')({ component: WhatsNew });
 
@@ -24,12 +30,47 @@ const day = (date: string) =>
     timeZone: 'UTC',
   });
 
-// Each release with its date and marks, found by its version or its date.
-const choices: readonly ComboboxOption[] = releases.map((release) => ({
-  value: release.version,
-  label: day(release.date),
-  marks: <ReleaseMarks release={release} />,
-}));
+const byVersion = new Map(releases.map((release) => [release.version, release]));
+
+/**
+ * Whether a release is listed for `query`: by its version or its date, or
+ * by a highlight holding every word typed.
+ */
+const releaseMatches = (option: ComboboxOption, query: string) => {
+  if (matchesText(option, query)) return true;
+  const release = byVersion.get(option.value);
+  return !!release && matchingHighlights(release, searchWords(query)).length > 0;
+};
+
+/**
+ * Each release with its date and marks; one found by its highlights shows
+ * the first that matches, so the change can be told apart before it opens.
+ */
+function choicesFor(query: string): readonly ComboboxOption[] {
+  const words = searchWords(query);
+  return releases.map((release) => {
+    const option = { value: release.version, label: day(release.date) };
+    const found =
+      words.length > 0 && !matchesText(option, query) ? matchingHighlights(release, words) : [];
+    return {
+      ...option,
+      marks: (
+        <>
+          <ReleaseMarks release={release} />
+          {found[0] && (
+            <span className="line-clamp-2 basis-full text-xs text-muted-foreground">
+              <Highlight text={found[0]} words={words} />
+              {found.length > 1 && ` (and ${found.length - 1} more)`}
+            </span>
+          )}
+        </>
+      ),
+    };
+  });
+}
+
+/** A release opened from a search of its highlights, with the words found there. */
+type Found = { version: string; words: string[] };
 
 /**
  * Every release's highlights from CHANGELOG.md, newest first: the newest
@@ -48,13 +89,21 @@ function WhatsNew() {
       else next.delete(version);
       return next;
     });
+  // Its highlights' matches stay marked until the next search.
+  const [found, setFound] = useState<Found | null>(null);
   // Opens the release and moves to it, so the keyboard carries on from there.
-  // Open first, so there is room to bring it to the top.
-  const jump = (version: string) => {
-    flushSync(() => toggle(version, true));
-    const summary = document.getElementById(`v${version}`)?.querySelector('summary');
+  // Open first, so there is room to bring it to the top; with the words
+  // found, they are marked, and the first in view.
+  const jump = (version: string, words: string[]) => {
+    flushSync(() => {
+      toggle(version, true);
+      setFound(words.length > 0 ? { version, words } : null);
+    });
+    const details = document.getElementById(`v${version}`);
+    const summary = details?.querySelector('summary');
     summary?.scrollIntoView({ block: 'start' });
     summary?.focus({ preventScroll: true });
+    details?.querySelector('mark')?.scrollIntoView({ block: 'nearest' });
   };
 
   return (
@@ -78,6 +127,7 @@ function WhatsNew() {
               <ReleaseNotes
                 release={release}
                 open={open.has(release.version)}
+                words={found?.version === release.version ? found.words : []}
                 onToggle={(shown) => toggle(release.version, shown)}
               />
             </li>
@@ -89,16 +139,22 @@ function WhatsNew() {
 }
 
 /**
- * One field to go to any release, however many there are: typing a version
- * or a date narrows the list. Choosing one, or Enter for the version typed
- * or else the first listed, calls `onPick` with its version, and the field
- * empties again, as it does when left.
+ * One field to go to any release, however many there are: typing a version,
+ * a date, or words in a release's highlights narrows the list. Choosing one,
+ * or Enter for the version typed or else the first listed, calls `onPick`
+ * with its version and, when the words were found only in its highlights,
+ * those words; and the field empties again, as it does when left.
  */
-function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
+function ReleaseFinder({ onPick }: { onPick: (version: string, words: string[]) => void }) {
   const [text, setText] = useState('');
+  const query = text.trim().toLowerCase();
+  const choices = useMemo(() => choicesFor(query), [query]);
   const pick = (version: string) => {
     setText('');
-    onPick(version);
+    const release = byVersion.get(version);
+    const option = release && { value: version, label: day(release.date) };
+    const byText = !query || (option && matchesText(option, query));
+    onPick(version, byText ? [] : searchWords(query));
   };
   return (
     <div className="grid gap-2">
@@ -106,7 +162,7 @@ function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
         htmlFor="release-finder"
         className="text-xs font-bold tracking-wide text-muted-foreground uppercase"
       >
-        Go to a release
+        Find a release or a change
       </label>
       <Combobox
         id="release-finder"
@@ -114,8 +170,9 @@ function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
         onChange={setText}
         options={choices}
         noun="releases"
-        placeholder="Type a version or a date"
+        placeholder="Type a version, a date or a word"
         onPick={pick}
+        match={releaseMatches}
         field={{
           autoComplete: 'off',
           // A search, not a choice: coming back, it lists every release again.
@@ -124,16 +181,11 @@ function ReleaseFinder({ onPick }: { onPick: (version: string) => void }) {
             // Not an option reached by the arrows, which the list takes, nor
             // Enter taking text being composed.
             if (event.key !== 'Enter' || composing(event)) return;
-            const query = text.trim().toLowerCase();
             if (!query) return;
             // The version typed in full, else the first listed, as the list matches.
             const first =
               choices.find((choice) => choice.value.toLowerCase() === query) ??
-              choices.find(
-                (choice) =>
-                  choice.value.toLowerCase().includes(query) ||
-                  choice.label?.toLowerCase().includes(query),
-              );
+              choices.find((choice) => releaseMatches(choice, query));
             if (!first) return;
             event.preventDefault();
             pick(first.value);
@@ -166,10 +218,13 @@ function ReleaseMarks({ release: { version, prerelease } }: { release: Release }
 function ReleaseNotes({
   release,
   open,
+  words,
   onToggle,
 }: {
   release: Release;
   open: boolean;
+  /** Words searched for, marked in the highlights holding them all. */
+  words: readonly string[];
   onToggle: (open: boolean) => void;
 }) {
   const { version, date, highlights } = release;
@@ -201,7 +256,7 @@ function ReleaseNotes({
             <ul className="grid list-disc gap-1.5 pl-5 text-sm leading-relaxed">
               {items.map((item) => (
                 <li key={item}>
-                  <Highlight text={item} />
+                  <Highlight text={item} words={highlightMatches(item, words) ? words : []} />
                 </li>
               ))}
             </ul>
@@ -222,15 +277,27 @@ function ReleaseNotes({
   );
 }
 
-/** A highlight's text, with what's between backticks shown as code. */
-function Highlight({ text }: { text: string }) {
-  return text.split('`').map((part, index) =>
-    index % 2 === 1 ? (
+/** A highlight's text, with what's between backticks shown as code, and `words` marked. */
+function Highlight({ text, words = [] }: { text: string; words?: readonly string[] }) {
+  return text.split('`').map((part, index) => {
+    const marked = markWords(part, words).map((piece, at) =>
+      piece.marked ? (
+        <mark
+          key={at}
+          className="rounded-[3px] bg-(--highlight) text-inherit [box-decoration-break:clone]"
+        >
+          {piece.text}
+        </mark>
+      ) : (
+        piece.text
+      ),
+    );
+    return index % 2 === 1 ? (
       <code key={index} className="rounded-row bg-muted px-1.5 py-0.5 font-mono text-[0.9em]">
-        {part}
+        {marked}
       </code>
     ) : (
-      part
-    ),
-  );
+      <span key={index}>{marked}</span>
+    );
+  });
 }

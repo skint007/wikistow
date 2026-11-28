@@ -17,7 +17,9 @@ import { ErrorLine, useAction } from './use-action';
  * works them out again too. With nothing to rotate, `none` says why, and
  * the owner can confirm only if `confirmNone` (an owner's removal still
  * has to be sent, for one). `summary` shows more of what was worked out,
- * such as what someone keeps through a group.
+ * such as what someone keeps through a group. Without `title`, the dialog's
+ * own title asks; `plain` leaves out what new keys do, for a change put in
+ * plain words, such as giving someone who replaced their keys access again.
  */
 export function RotationConfirm<T>({
   title,
@@ -36,8 +38,9 @@ export function RotationConfirm<T>({
   onTick,
   onCancel,
   onDone,
+  plain = false,
 }: {
-  title: ReactNode;
+  title?: ReactNode;
   intro?: ReactNode;
   confirmLabel: string;
   cancelLabel?: string;
@@ -54,6 +57,7 @@ export function RotationConfirm<T>({
   onTick?: (shareId: string, offer: RotationOffer, role: 'reader' | 'editor' | null) => void;
   onCancel: () => void;
   onDone: () => Promise<void> | void;
+  plain?: boolean;
 }) {
   const [made, setMade] = useState<{ value: T } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -88,7 +92,7 @@ export function RotationConfirm<T>({
   const plans = made ? plansOf(made.value) : [];
   return (
     <div className="grid gap-4">
-      <h3 className="font-extrabold">{title}</h3>
+      {title && <h3 className="font-extrabold">{title}</h3>}
       {intro}
       {notice && (
         <p role="status" className="text-sm font-bold">
@@ -105,6 +109,7 @@ export function RotationConfirm<T>({
           plans={plans}
           ownerIds={ownerIds}
           busy={busy}
+          plain={plain}
           {...(onTick ? { onTick, ...(ticks ? { ticks } : {}) } : {})}
           onReviewKey={(person) =>
             void review(person).then(

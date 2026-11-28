@@ -106,21 +106,11 @@ export function GiveAccessDialog({
   const rekey = (who: Person) => {
     const { entry } = who;
     if (!entry) return null;
+    // Asked in plain words, in the dialog's own title and description (#771).
     return (
       <RotationConfirm
-        title={
-          <>
-            Rotate keys and give <Name>{who.name}</Name> access?
-          </>
-        }
-        intro={
-          <p className="text-sm">
-            <Name>{who.name}</Name> replaced their keys. Each folder they wait for gets new keys,
-            and they get it all again at their new key, so whoever holds their old key can’t read
-            what’s saved from now on. Check their new key with them first if you haven’t.
-          </p>
-        }
-        confirmLabel="Rotate keys and give access"
+        plain
+        confirmLabel="Give access"
         none="They wait for no folder here now."
         make={() => rotatedShareOperations.planRekey(ctx, { spaceId, person: entry })}
         plansOf={(plans) =>
@@ -157,14 +147,18 @@ export function GiveAccessDialog({
         <HoldOpen value={hold}>
           {panel}
           <div className="grid gap-4" hidden={panel !== null}>
-            <DialogHeader>
-              <DialogTitle>Give access</DialogTitle>
-              <DialogDescription>
-                In <Name>{spaceName}</Name>, these people have access through a group or a share,
-                but no owner’s app has sealed the keys to them yet. Until then they can’t open those
-                folders.
-              </DialogDescription>
-            </DialogHeader>
+            {rekeying ? (
+              <RekeyHeader name={rekeying.name} />
+            ) : (
+              <DialogHeader>
+                <DialogTitle>Give access</DialogTitle>
+                <DialogDescription>
+                  In <Name>{spaceName}</Name>, these people have access through a group or a share,
+                  but no owner’s app has sealed the keys to them yet. Until then they can’t open
+                  those folders.
+                </DialogDescription>
+              </DialogHeader>
+            )}
             {rekeying ? (
               rekey(rekeying)
             ) : giving ? (
@@ -250,5 +244,22 @@ export function GiveAccessDialog({
         </HoldOpen>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * What **Rotate keys and give access** asks, in plain words: the folders'
+ * new keys are what the review below them shows.
+ */
+export function RekeyHeader({ name }: { name: string }) {
+  return (
+    <DialogHeader>
+      <DialogTitle>
+        Rotate keys and give <Name>{name}</Name> access?
+      </DialogTitle>
+      <DialogDescription>
+        <Name>{name}</Name> replaced their keys and needs to be given access again.
+      </DialogDescription>
+    </DialogHeader>
   );
 }

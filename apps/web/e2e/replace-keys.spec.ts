@@ -40,7 +40,11 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
   await test.step('Settings replaces the keys, with a recovery key to save', async () => {
     await page.goto('/settings#security');
     await page.getByRole('button', { name: 'Start replace my keys' }).click();
-    await expect(page.getByText('You have no agents to keep.')).toBeVisible();
+    const dialog = page.getByRole('dialog', { name: 'Replace my keys' });
+    await expect(dialog.getByText('You have no agents to keep.')).toBeVisible();
+    // Only its close button closes it (#771).
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeVisible();
     // The old passphrase would open the new vault to whoever knows it.
     await choosePassphrase(page, PASSPHRASE);
     await page.getByRole('button', { name: 'Make new keys' }).click();
@@ -60,7 +64,7 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
       const index = Number((await field.getAttribute('id'))?.replace('rotation-group-', ''));
       await field.fill(groups[index] ?? '');
     }
-    await page.getByRole('button', { name: 'Replace my keys' }).click();
+    await page.getByRole('button', { name: 'Replace my keys', exact: true }).click();
     // Exactly: "once your keys are replaced" is in the panel before it lands.
     await expect(page.getByText(REPLACED, { exact: true })).toBeVisible({ timeout: 30_000 });
     // Nothing shared here, so nothing is left to move to the new keys.
@@ -70,6 +74,8 @@ test('Replace my keys makes a new vault, and the other device asks whether it wa
       }),
     ).toBeVisible({ timeout: 30_000 });
     await shot(page, 'keys-replaced');
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
     // The other tab held the old keys: it locked.
     await expect(sameBrowser.getByRole('heading', { name: 'Unlock your vault' })).toBeVisible();
     await sameBrowser.close();
@@ -162,7 +168,7 @@ async function replaceKeys(page: Page, { wait = true }: { wait?: boolean } = {})
     const index = Number((await field.getAttribute('id'))?.replace('rotation-group-', ''));
     await field.fill(groups[index] ?? '');
   }
-  await page.getByRole('button', { name: 'Replace my keys' }).click();
+  await page.getByRole('button', { name: 'Replace my keys', exact: true }).click();
   if (wait)
     await expect(page.getByText(REPLACED, { exact: true })).toBeVisible({ timeout: 30_000 });
 }

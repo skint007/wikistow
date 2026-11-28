@@ -1,4 +1,5 @@
-// Settings → Security → Replace my keys (protocol section 4.6, #327): new
+// Settings → Security → Replace my keys (protocol section 4.6, #327), in a
+// dialog of its own that only its close button closes (#771): new
 // identity keys at the next key version, a new vault, passphrase and
 // recovery key, and the agents the person ticks kept at the new key; then
 // their shared folders moved to the new keys. Shown only where the server
@@ -28,7 +29,15 @@ import { tellKeysReplaced } from '../data/kept-store';
 import { keepAnchor, keepChangedWrapper, keepSentRotation, startSession } from '../vault/open';
 import { forgetKeptUnlock, PLAIN, useVault, vaultStore, zeroVault } from '../vault/store';
 import { workerVaultCrypto } from '../vault/worker-crypto';
-import { FormRow, useOpenedRow } from './rows';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { useNeedsConnection } from '../shell/availability';
+import { SettingRow, useOpenedRow } from './rows';
 import { ownedQuery, SpacesAfterRotation, SpacesBeforeRotation } from './rotated-spaces';
 import { finishingQuery, leftToFinish } from '../sharing/finish-rotation';
 
@@ -102,36 +111,68 @@ export function ReplaceKeys() {
   // Off on the server, someone who replaced their keys still finishes and
   // copies what the rotation left; nobody can start a new one.
   const canRotate = !!installation?.identityRotation;
+  const needs = useNeedsConnection();
+  const [shown, setShown] = useState(false);
   if (!canRotate && !retired) return null;
   const landed = landedFor !== null && landedFor === me?.account.id;
   const finishedSharing =
     leftToFinish(finishing) === 0 &&
     owned !== undefined &&
     !owned.some((s) => s.waitsForReAdd || s.confirmFirst);
+  const state =
+    landed && !retired
+      ? 'Your keys are replaced. Lock your vault, and unlock it with your new passphrase.'
+      : retired && finishedSharing
+        ? 'Your keys were replaced, and your shared folders use the new ones.'
+        : retired
+          ? 'Your keys were replaced. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
+          : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.';
   return (
-    <FormRow
-      id="replace-keys"
+    <SettingRow
       name="Replace my keys"
-      label="Start"
-      close="Close"
-      state={
-        landed && !retired
-          ? 'Your keys are replaced. Lock your vault, and unlock it with your new passphrase.'
-          : retired && finishedSharing
-            ? 'Your keys were replaced, and your shared folders use the new ones.'
-            : retired
-              ? 'Your keys were replaced. Moving what you share to the new keys isn’t finished: until it is, people you share with use your earlier keys.'
-              : 'If your keys may have leaked, make new ones. You choose a new passphrase and get a new recovery key.'
+      state={state}
+      action={
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label="Start replace my keys"
+          aria-haspopup="dialog"
+          // What it changes is the server's: offline it waits (ADR 0009, decision 8).
+          {...needs.click(() => setShown(true))}
+        >
+          Start
+        </Button>
       }
     >
-      {vault.status === 'unlocked' ? (
-        <ReplaceKeysFlow ctx={vault.ctx} vault={vault.vault} canRotate={canRotate} />
-      ) : (
-        <p className="text-sm">
-          Unlock your vault first. If you lost your passphrase, use your recovery key.
-        </p>
-      )}
-    </FormRow>
+      <Dialog open={shown} onOpenChange={setShown}>
+        {/* Many steps, and a recovery key to save: only its close button closes it. */}
+        <DialogContent
+          dialogClassName="sm:max-w-2xl"
+          className="grid gap-4"
+          closesOnBackdrop={false}
+          closesOnEscape={false}
+        >
+          <DialogHeader>
+            <DialogTitle>Replace my keys</DialogTitle>
+            <DialogDescription>
+              For when your keys may have leaked: new keys, a new passphrase and a new recovery key.
+            </DialogDescription>
+          </DialogHeader>
+          {vault.status === 'unlocked' ? (
+            <ReplaceKeysFlow
+              ctx={vault.ctx}
+              vault={vault.vault}
+              canRotate={canRotate}
+              onClose={() => setShown(false)}
+            />
+          ) : (
+            <p className="text-sm">
+              Unlock your vault first. If you lost your passphrase, use your recovery key.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+    </SettingRow>
   );
 }
 
@@ -139,10 +180,13 @@ function ReplaceKeysFlow({
   ctx,
   vault,
   canRotate,
+  onClose,
 }: {
   ctx: ClientContext;
   vault: UnlockedVault;
   canRotate: boolean;
+  /** Closes the dialog, as to go on to another setting. */
+  onClose: () => void;
 }) {
   const [step, setStep] = useState<'choose' | 'save' | 'done'>(() =>
     finishedNow()?.kind === 'done' ? 'done' : current() ? 'save' : 'choose',
@@ -153,8 +197,8 @@ function ReplaceKeysFlow({
   });
   if (step === 'done') {
     return (
-      <div className="grid gap-4">
-        <Replaced password={password} />
+      <div className="grid gap-4 text-sm">
+        <Replaced password={password} onClose={onClose} />
         {vault.identity.public.keyVersion > 1 && <SpacesAfterRotation ctx={ctx} />}
       </div>
     );
@@ -171,7 +215,7 @@ function ReplaceKeysFlow({
     );
   }
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-6 text-sm">
       {vault.identity.public.keyVersion > 1 && <SpacesAfterRotation ctx={ctx} />}
       {canRotate ? (
         <Choose ctx={ctx} vault={vault} onPrepared={() => setStep('save')} />
@@ -669,7 +713,7 @@ function SaveAndSend({
 const NOT_OPENED =
   'Your keys are replaced, and your new recovery key works, but this tab couldn’t open the new vault. Lock your vault, and unlock it with your new passphrase.';
 
-function Replaced({ password }: { password: boolean }) {
+function Replaced({ password, onClose }: { password: boolean; onClose: () => void }) {
   const { setOpen } = useOpenedRow();
   return (
     <div className="grid gap-3 text-sm" role="status">
@@ -679,7 +723,14 @@ function Replaced({ password }: { password: boolean }) {
         passphrase.
       </p>
       {password && (
-        <Button size="sm" className="justify-self-start" onClick={() => setOpen('password')}>
+        <Button
+          size="sm"
+          className="justify-self-start"
+          onClick={() => {
+            onClose();
+            setOpen('password');
+          }}
+        >
           Change your password now
         </Button>
       )}

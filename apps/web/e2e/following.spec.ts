@@ -32,7 +32,7 @@ async function replaceKeys(page: Page) {
     const index = Number((await field.getAttribute('id'))?.replace('rotation-group-', ''));
     await field.fill(groups[index] ?? '');
   }
-  await page.getByRole('button', { name: 'Replace my keys' }).click();
+  await page.getByRole('button', { name: 'Replace my keys', exact: true }).click();
   // Exactly: "once your keys are replaced" is in the panel before it lands.
   await expect(page.getByText('Your keys are replaced.', { exact: true })).toBeVisible({
     timeout: 30_000,
@@ -91,6 +91,11 @@ test('a contact follows replaced keys with a notice, and the person still opens 
       (await notice.getByTestId('new-fingerprint').textContent()) ?? '',
     );
     await shot(reader, 'follow-notice');
+    // Closed without OK, it isn't seen: the next page load shows it again (#771).
+    await reader.keyboard.press('Escape');
+    await expect(notice).toBeHidden();
+    await reader.reload();
+    await expect(notice).toBeVisible({ timeout: 30_000 });
     // Not them? says what declining does, and Back changes nothing.
     await notice.getByRole('button', { name: 'Not them?' }).click();
     await expect(

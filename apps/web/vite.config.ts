@@ -251,6 +251,17 @@ const appShell = () => {
   };
 };
 
+/**
+ * A prerelease's tab shows the beta mark, purple, as the beta desktop app's
+ * icon is, so a beta server's tab stands apart from a stable one's (#771).
+ * By package.json, so a build between a beta and its release shows it too.
+ */
+const betaIcon = {
+  name: 'wikistow-beta-icon',
+  transformIndexHtml: (html: string) =>
+    version.includes('-') ? html.replace('href="/favicon.svg"', 'href="/favicon-beta.svg"') : html,
+};
+
 // A plain object: the router plugin's Vite types differ from Vite+'s, so
 // defineConfig's checking can't compare them.
 export default {
@@ -271,6 +282,7 @@ export default {
     publicPageFonts,
     diagramFrame,
     appShell(),
+    betaIcon,
   ],
   define: {
     __APP_VERSION__: JSON.stringify(release ?? `${version}+${commit().slice(0, 8)}`),

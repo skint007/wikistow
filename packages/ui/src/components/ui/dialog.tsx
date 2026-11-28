@@ -51,6 +51,7 @@ function DialogContent({
   describedBy,
   locked = false,
   closesOnBackdrop = true,
+  closesOnEscape = true,
   onDismiss,
 }: {
   className?: string;
@@ -66,6 +67,8 @@ function DialogContent({
   locked?: boolean;
   /** False when a click outside it, easily made by mistake, shouldn't close it. */
   closesOnBackdrop?: boolean;
+  /** False when only the close button closes it, as a flow with many steps. */
+  closesOnEscape?: boolean;
   /**
    * Set while closing needs asking first: Escape, the close button and the
    * backdrop call this instead of closing it.
@@ -97,6 +100,7 @@ function DialogContent({
       onCancel={(event) => {
         // React passes up the cancel of a file picker or a dialog inside it.
         if (event.target !== event.currentTarget) return;
+        if (!closesOnEscape) return event.preventDefault();
         // Escape closes it natively at once, but its close event comes a
         // task later, after any key pressed meanwhile: one that opens it
         // again would find it open still, and then be undone. So React
@@ -117,9 +121,9 @@ function DialogContent({
       // opened again since, as when New page follows Create folder at once.
       onClose={(event) => {
         if (event.currentTarget.open) return;
-        if ((locked || onDismiss) && open) {
+        if ((locked || onDismiss || !closesOnEscape) && open) {
           event.currentTarget.showModal();
-          if (!locked) onDismiss?.();
+          if (!locked && closesOnEscape) onDismiss?.();
         } else onOpenChange(false);
       }}
       // A click on the backdrop lands on the <dialog> itself.

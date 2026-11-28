@@ -34,6 +34,9 @@ const setAsked = (id: IdentityId | null) => {
   for (const listener of listeners) listener();
 };
 
+/** How long the notice is on screen before its buttons take a click. */
+const ARMING_MS = 600;
+
 const followKey = (entry: FollowedEntry) => `${entry.from.identity.id} ${entry.to.keyHash}`;
 
 /** Show again the details of a follow of `id`: both keys, and **Not them?** */
@@ -52,7 +55,8 @@ export const followsQuery = (ctx: ClientContext) => ({
  * 8.4): the app followed a chain of statements, signed with the key it had,
  * to their new key, unchecked. It shows the key they had and the new one,
  * once on every device, until the person says OK, or **Not them?**, which
- * declines the new key. Shown again from where the person appears
+ * declines the new key. A click outside it doesn't close it, and closing it
+ * otherwise puts it away until the app next starts (#771). Shown again from where the person appears
  * (`showFollow`).
  */
 export function FollowNotice({ ctx }: { ctx: ClientContext }) {
@@ -68,7 +72,8 @@ export function FollowNotice({ ctx }: { ctx: ClientContext }) {
   // The follow on screen stays there, through a decline that takes it out
   // of the record, until the person closes it.
   const [open, setOpen] = useState<FollowedEntry | null>(null);
-  // Notices closed in this session, until the record says they were seen.
+  // Notices closed in this session, until the record says they were seen;
+  // one closed without OK comes back in the next.
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
   const next =
     follows?.find((entry) => entry.from.identity.id === again) ??
@@ -81,7 +86,7 @@ export function FollowNotice({ ctx }: { ctx: ClientContext }) {
     if (open) setClosed((before) => new Set(before).add(followKey(open)));
     setOpen(null);
     setAsked(null);
-    // Closing the notice is seeing it.
+    // OK is seeing it.
     if (seen && !seen.seen) {
       void followOperations
         .seeFollow(ctx, seen)
@@ -99,13 +104,24 @@ function FollowDialog({
 }: {
   ctx: ClientContext;
   follow: FollowedEntry;
-  /** With the follow when the person saw it, or null after a decline. */
+  /**
+   * With the follow when the person said OK, or null after a decline or
+   * when they only closed it, which isn't seeing it: a stray click or key
+   * mustn't take the notice away for good.
+   */
   onDone: (seen: FollowedEntry | null) => void;
 }) {
   const queryClient = useQueryClient();
   const { busy, error, run } = useAction();
   const [step, setStep] = useState<'notice' | 'decline'>('notice');
   const [warnings, setWarnings] = useState<followOperations.DeclinedOwnerSpace[] | null>(null);
+  // It opens on its own, maybe under a click already on its way: its buttons
+  // take none until it has been on screen a moment.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setArmed(true), ARMING_MS);
+    return () => clearTimeout(timer);
+  }, []);
   const id = follow.from.identity.id;
   const person = describePerson(ctx, id, null);
   const name = person.name;
@@ -114,9 +130,10 @@ function FollowDialog({
     await queryClient.invalidateQueries({ queryKey: [PLAIN, 'follows'] });
     await refreshAccess(queryClient, ctx);
   };
-  const close = () => {
+  // OK sees it; the close button and Escape only put it away for now.
+  const close = (seen: boolean) => {
     if (busy) return;
-    onDone(warnings === null ? follow : null);
+    onDone(seen && warnings === null ? follow : null);
   };
   const decline = () =>
     run(async () => {
@@ -126,8 +143,9 @@ function FollowDialog({
     });
 
   return (
-    <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent dialogClassName="sm:max-w-lg" locked={busy}>
+    <Dialog open onOpenChange={(open) => !open && close(false)}>
+      {/* Nor does a click outside it close it. */}
+      <DialogContent dialogClassName="sm:max-w-lg" locked={busy} closesOnBackdrop={false}>
         {warnings !== null ? (
           <DeclinedWarnings name={name} spaces={warnings} ctx={ctx} onDone={() => onDone(null)} />
         ) : step === 'notice' ? (
@@ -163,10 +181,14 @@ function FollowDialog({
             </dl>
             <ErrorLine error={error} />
             <DialogFooter>
-              <Button variant="outline" disabled={busy} onClick={() => setStep('decline')}>
+              <Button
+                variant="outline"
+                disabled={busy || !armed}
+                onClick={() => setStep('decline')}
+              >
                 Not them?
               </Button>
-              <Button disabled={busy} onClick={close}>
+              <Button disabled={busy || !armed} onClick={() => close(true)}>
                 OK
               </Button>
             </DialogFooter>
