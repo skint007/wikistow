@@ -73,11 +73,12 @@ The desktop app's two AUR packages install side by side: the beta goes under nam
 ## Cut a release
 
 1. Open the version pull request, from a branch of `main`:
-   1. Run `node scripts/version.ts <version>`. If Electron has a newer patch of the major in `apps/desktop/package.json`, raise it too ([below](#the-deb-and-rpm)).
-   2. In `CHANGELOG.md`, rename `## Unreleased` to `## <version> - <day>`, with the day you will tag it in UTC (`date -u +%F`). Put a new, empty `## Unreleased` above it.
-   3. Finish the entry ([below](#the-changelog)). Check that its Changes list every pull request merged since the release before, or for a stable release, since the stable release before: `git log --merges --first-parent --oneline v<previous>..origin/main`. Write or edit its highlights.
-   4. Run `node scripts/changelog.ts --tags`, then read the notes the release will publish: `node scripts/changelog.ts notes v<version>`.
-   5. Commit, and merge once CI passes. A pull request that changes only the version and `CHANGELOG.md` can merge as soon as `.claude/version-check.sh` passes, if CI passed on `main`. Raising Electron changes more, so it waits for CI.
+   1. Check what is left in the version's release: `node scripts/board.ts list --release <version>` without the suffix. Ask Scott about any issue still open that the release needs; anything that can wait moves to the next version with `board plan`, once he says so.
+   2. Run `node scripts/version.ts <version>`. If Electron has a newer patch of the major in `apps/desktop/package.json`, raise it too ([below](#the-deb-and-rpm)).
+   3. In `CHANGELOG.md`, rename `## Unreleased` to `## <version> - <day>`, with the day you will tag it in UTC (`date -u +%F`). Put a new, empty `## Unreleased` above it.
+   4. Finish the entry ([below](#the-changelog)). Check that its Changes list every pull request merged since the release before, or for a stable release, since the stable release before: `git log --merges --first-parent --oneline v<previous>..origin/main`. Write or edit its highlights.
+   5. Run `node scripts/changelog.ts --tags`, then read the notes the release will publish: `node scripts/changelog.ts notes v<version>`.
+   6. Commit, and merge once CI passes. A pull request that changes only the version and `CHANGELOG.md` can merge as soon as `.claude/version-check.sh` passes, if CI passed on `main`. Raising Electron changes more, so it waits for CI.
 2. Wait for CI on the merged commit of `main`, which also builds and checks the desktop packages. Then, on the day the entry names in UTC, tag that commit and push the tag:
 
    ```sh
@@ -91,6 +92,8 @@ The desktop app's two AUR packages install side by side: the beta goes under nam
    3. `github-release` publishes a GitHub Release named after the version, with the notes made from its changelog entry. It holds the [desktop downloads](#the-desktop-downloads), the [CLI downloads](#the-cli-downloads) and their `SHA256SUMS`.
    4. For a stable release from `main`, `aur` publishes `wikistow-desktop-bin` and `wikistow-cli-bin` to the AUR ([below](#the-aur-packages)), `homebrew` the cask to the Homebrew tap ([below](#the-homebrew-cask)), and `packages` the `.deb` and `.rpm` to the apt and dnf repositories ([below](#the-apt-and-dnf-repositories)). For any release from `main`, `aur-beta` publishes `wikistow-desktop-beta-bin` and `wikistow-cli-beta-bin`.
    5. For a stable release from `main` that changes the browser extension's version, `chrome-web-store` and `mozilla-add-ons` send it to the stores ([below](#to-the-stores)).
+
+4. For a stable release, close its release on the board once the tag is pushed: `node scripts/board.ts ship <version>` ([project board](project-board.md#releases)).
 
 If `verify` fails, or a CI job before `image` does, nothing was published. Delete the tag, fix the cause, and tag again. If the tag's day isn't the entry's, change the date through a pull request and tag its merge. If a job fails by chance, or a later job fails, use **Re-run failed jobs** on the same run, which keeps the build it made. Never move a tag that published anything: release a new version instead.
 

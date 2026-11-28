@@ -21,7 +21,11 @@ What changed in each WikiStow release, newest first. The app's **What's new** pa
 
 #### App
 
-- **Replace my keys** in Settings → Security opens a dialog in place of a form under its row; Escape and a click outside don't close it (`closesOnEscape` on `DialogContent`). The notice that a contact replaced their keys isn't closed by a click outside it, takes a click on its buttons only after 600 ms, and counts as seen only on **OK** or a decline. **Rotate keys and give access** asks "Rotate keys and give *Name* access?", says they replaced their keys and need access again, lists who keeps access, and confirms with **Give access**, leaving out what new keys do (`plain` on `RotationConfirm`). What's new's field, now **Find a release or a change**, lists releases whose highlights hold every word typed, with the first such highlight, and marks the words in the release it opens (`match` on `Combobox`). A web build of a prerelease shows `favicon-beta.svg` (#771). (#773)
+- **Replace my keys** in Settings → Security opens a dialog in place of a form under its row; Escape and a click outside don't close it (`closesOnEscape` on `DialogContent`). The notice that a contact replaced their keys isn't closed by a click outside it, starts with the focus on its title, takes a press on its buttons only once it has been on screen 600 ms, and counts as seen only on **OK** or a decline. **Rotate keys and give access** asks "Rotate keys and give *Name* access?", says they replaced their keys and need access again, lists who keeps access, and confirms with **Give access**, leaving out what new keys do (`plain` on `RotationConfirm`). What's new's field, now **Find a release or a change**, lists releases whose highlights hold every word typed, with the first such highlight, and marks the words in the release it opens (`match` on `Combobox`). A web build of a prerelease shows `favicon-beta.svg` (#771). (#773)
+
+#### Development
+
+- Board work is planned by release: each issue's milestone is the version it ships in, or Later. `board add` files into the next minor version by default, `board plan` moves an issue, `board ship` closes a released version, and `board check` finds issues with no release. (#772)
 
 ## 0.32.0-beta.1 - 2026-11-28
 

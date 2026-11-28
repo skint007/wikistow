@@ -13,7 +13,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type MouseEvent,
+  type KeyboardEvent,
   type RefObject,
 } from 'react';
 import { Name } from '@/components/name';
@@ -134,18 +134,25 @@ function FollowDialog({
     }, ARMING_MS);
     return () => clearTimeout(timer);
   }, []);
-  // Whether the pointer's last press on a button started once armed: one
-  // started before, as on a button still dimmed, doesn't count when it ends.
+  // Whether the last press on a button, by pointer or key, started once
+  // armed: one started before, as on a button still dimmed, doesn't count
+  // when it ends, nor does a click with no press at all.
   const pressedArmed = useRef(false);
   const onceArmed = (act: () => void) => ({
     'aria-disabled': armed ? undefined : true,
     onPointerDown: () => {
       pressedArmed.current = armedNow.current;
     },
-    onClick: (event: MouseEvent) => {
-      // A click from the keyboard has no press (`detail` 0).
-      if (!armedNow.current || (event.detail > 0 && !pressedArmed.current)) return;
-      act();
+    onKeyDown: (event: KeyboardEvent) => {
+      // Not a key held down since before: its repeats don't start a press.
+      if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) {
+        pressedArmed.current = armedNow.current;
+      }
+    },
+    onClick: () => {
+      const pressed = pressedArmed.current;
+      pressedArmed.current = false;
+      if (armedNow.current && pressed) act();
     },
   });
   const title = useRef<HTMLHeadingElement>(null);
