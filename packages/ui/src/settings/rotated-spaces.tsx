@@ -97,7 +97,7 @@ export const ownedQuery = (ctx: ClientContext | null) =>
   });
 
 function useOwned(ctx: ClientContext) {
-  const { data: owned, isPending, isError } = useQuery(ownedQuery(ctx));
+  const { data: owned, isPending, isError, refetch } = useQuery(ownedQuery(ctx));
   const { data: spaces } = useQuery(spacesQuery(ctx));
   const named = (owned ?? []).map((space) => ({
     ...space,
@@ -106,6 +106,7 @@ function useOwned(ctx: ClientContext) {
   return {
     isPending,
     isError,
+    refetch,
     // A space owned alone that nobody else is in changes for nobody.
     alone: named.filter((space) => space.checked && space.alone && space.sharing),
     shared: named.filter((space) => space.checked && !space.alone),
@@ -129,14 +130,16 @@ const list = (spaces: readonly { spaceId: string; name: string }[]) =>
  * had but open nothing new.
  */
 export function SpacesBeforeRotation({ ctx }: { ctx: ClientContext }) {
-  const { isPending, isError, alone, shared, unchecked } = useOwned(ctx);
+  const { isPending, isError, refetch, alone, shared, unchecked } = useOwned(ctx);
   if (isPending) return <p className="text-muted-foreground">Checking the spaces you own…</p>;
   if (isError) {
     return (
-      <p className="text-destructive">
-        This app couldn’t check which spaces you own. Your new keys don’t make you an owner by
-        themselves: in a space you own with others, another owner adds you again, and a space you
-        own alone shares nothing new until you copy it into a new space.
+      <p className="flex flex-wrap items-center gap-2 text-destructive">
+        This app couldn’t check which spaces you own, so it can’t say what your new keys change
+        there yet.
+        <Button size="xs" variant="outline" onClick={() => void refetch()}>
+          Try again
+        </Button>
       </p>
     );
   }

@@ -52,7 +52,7 @@ export function AddAgainDialog({
   // their new key: their own app moves it when they finish (section 4.6).
   const { busy, error, run } = useAction((caught) =>
     caught instanceof CryptoError && caught.code === 'key-version'
-      ? `A shared folder here still uses keys ${plainText(name)}’s old key made. Ask them to finish replacing their keys in Settings, then add them again.`
+      ? `A shared folder here still uses keys ${plainText(name)}’s old key made. Ask them to finish replacing their keys in Settings, restoring it first if it’s in the trash, then add them again.`
       : sharingMessage(caught),
   );
   const { locked, hold } = useHoldOpen();

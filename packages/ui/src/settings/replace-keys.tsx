@@ -321,6 +321,10 @@ function Choose({
         In folders other people share with you, you keep reading what you could, and edit again once
         an owner gives you access at your new keys. Their apps offer it.
       </p>
+      <p>
+        Update WikiStow on your other devices, and the <code>wikistow</code> command your agents
+        use, before you go on: older versions can’t open your new vault.
+      </p>
       <SpacesBeforeRotation ctx={ctx} />
       <fieldset className="grid gap-2">
         <legend className="mb-1 font-bold">Agents to keep</legend>
@@ -394,7 +398,7 @@ function Choose({
       <Button
         type="submit"
         // Not before the spaces the person owns are named (#327, item 7).
-        disabled={busy || agents.isPending || Boolean(agents.error) || owned.isPending}
+        disabled={busy || agents.isPending || Boolean(agents.error) || !owned.isSuccess}
         className="justify-self-start"
       >
         {busy ? 'Making new keys…' : 'Make new keys'}
